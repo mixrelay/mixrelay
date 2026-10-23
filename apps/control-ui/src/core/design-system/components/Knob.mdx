@@ -30,7 +30,6 @@ API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이
 
 <Canvas of={Example.Gain} story={{ inline: false, height: 560 }} />
 
-
 ## 개별 상태 예제
 
 ### Disabled
@@ -40,6 +39,10 @@ API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이
 ### Logarithmic
 
 <Canvas of={Api.Logarithmic} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### 값 경계와 양방향·disabled
+
+<Canvas of={Api.States} story={{ inline: false, height: 400 }} sourceState="hidden" />
 
 <a href="/?path=/docs/design-system-components--docs" target="_top">전체 컴포넌트와 사용 구분</a>
 

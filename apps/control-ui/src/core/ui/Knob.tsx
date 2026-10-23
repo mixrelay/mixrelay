@@ -72,13 +72,21 @@ function useKnobInteraction({
     event.stopPropagation();
     onChange(normalize(next));
   };
-  return { input, fraction: parameterPosition(value, range), pointer, key, normalize };
+  return {
+    input,
+    fraction: parameterPosition(value, range),
+    origin: min < 0 && max > 0 ? parameterPosition(0, range) : 0,
+    pointer,
+    key,
+    normalize,
+  };
 }
 
 /** A vector dial over a native range input. Drag up to increase; Shift makes fine adjustments. */
 export function Knob(props: KnobProps) {
   const { label, value, min, max, disabled, valueText, endpoints, onChange } = props;
-  const { input, fraction, pointer, key, normalize } = useKnobInteraction(props);
+  const { input, fraction, origin, pointer, key, normalize } = useKnobInteraction(props);
+  const bipolar = min < 0 && max > 0;
   const angle = -135 + fraction * 270;
   return (
     <div
@@ -87,11 +95,7 @@ export function Knob(props: KnobProps) {
       {...pointer}
     >
       <svg className={styles.dial} viewBox="0 0 48 48" aria-hidden="true">
-        <path
-          className={styles.focusArc}
-          d="M7.737 40.263 A23 23 0 1 1 40.263 40.263"
-          vectorEffect="non-scaling-stroke"
-        />
+        <path className={styles.focusArc} d="M7.737 40.263 A23 23 0 1 1 40.263 40.263" />
         <path
           className={styles.track}
           d="M 9.858 38.142 A 20 20 0 1 1 38.142 38.142"
@@ -101,20 +105,28 @@ export function Knob(props: KnobProps) {
           className={styles.value}
           d="M 9.858 38.142 A 20 20 0 1 1 38.142 38.142"
           pathLength="1"
-          strokeDasharray={`${fraction} 1`}
+          strokeDasharray={`${Math.abs(fraction - origin)} 1`}
+          strokeDashoffset={-Math.min(fraction, origin)}
+          visibility={fraction === origin ? 'hidden' : undefined}
         />
-        <circle className={styles.body} cx="24" cy="24" r="14" />
+        {bipolar ? (
+          <line
+            className={styles.center}
+            x1="24"
+            y1="8"
+            x2="24"
+            y2="10"
+            transform={`rotate(${-135 + origin * 270} 24 24)`}
+          />
+        ) : null}
         <line
           className={styles.indicator}
           x1="24"
-          y1="13"
+          y1="5"
           x2="24"
           y2="21"
           transform={`rotate(${angle} 24 24)`}
         />
-        {min < 0 && max > 0 ? (
-          <line className={styles.center} x1="24" y1="0" x2="24" y2="3" />
-        ) : null}
       </svg>
       {endpoints ? (
         <span className={styles.endpoints} aria-hidden="true">

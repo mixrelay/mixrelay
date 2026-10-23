@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useState } from 'react';
 import { fn } from 'storybook/test';
-import { Knob } from '../../ui/Knob';
+import { Knob, type KnobProps } from '../../ui/Knob';
 import { usePlaygroundState } from './usePlaygroundState';
 
 const meta = {
@@ -77,4 +78,49 @@ export const Playground: Story = {};
 export const Disabled: Story = { args: { disabled: true } };
 export const Logarithmic: Story = {
   args: { label: '주파수', value: 1000, min: 20, max: 20000, scale: 'logarithmic' },
+};
+
+export const Minimum: Story = { args: { min: 0, max: 100, value: 0 } };
+export const Maximum: Story = { args: { min: 0, max: 100, value: 100 } };
+export const BipolarNegative: Story = { args: { value: -30 } };
+export const BipolarPositive: Story = { args: { value: 6 } };
+
+function StateDial(props: KnobProps) {
+  const [value, setValue] = useState(props.value);
+  return (
+    <div style={{ display: 'grid', justifyItems: 'center', gap: 'var(--space-1)' }}>
+      <span>{props.label}</span>
+      <Knob
+        {...props}
+        value={value}
+        onChange={(value) => {
+          props.onChange(value);
+          setValue(value);
+        }}
+      />
+    </div>
+  );
+}
+export const States: Story = {
+  render: (args) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-6)' }}>
+      {[
+        { label: 'Minimum', min: 0, max: 100, value: 0 },
+        { label: 'Half', min: 0, max: 100, value: 50 },
+        { label: 'Maximum', min: 0, max: 100, value: 100 },
+        { label: 'Negative', min: -60, max: 12, value: -30 },
+        { label: 'Zero', min: -60, max: 12, value: 0 },
+        { label: 'Positive', min: -60, max: 12, value: 6 },
+        { label: 'Disabled min', min: 0, max: 100, value: 0, disabled: true },
+        { label: 'Disabled max', min: 0, max: 100, value: 100, disabled: true },
+        { label: 'Small', min: 0, max: 100, value: 1 },
+        { label: 'Ratio', min: 1, max: 20, value: 4 },
+        { label: 'Symmetric −', min: -24, max: 24, value: -6 },
+        { label: 'Symmetric 0', min: -24, max: 24, value: 0 },
+        { label: 'Symmetric +', min: -24, max: 24, value: 6 },
+      ].map((state) => (
+        <StateDial key={state.label} {...args} {...state} />
+      ))}
+    </div>
+  ),
 };

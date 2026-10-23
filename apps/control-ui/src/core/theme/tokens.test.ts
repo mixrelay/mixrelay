@@ -120,6 +120,13 @@ describe.each(['light', 'dark'] as const)('%s theme contrast', (scheme) => {
       }
     }
   });
+  it('separates the neutral dial value from its dim track and every consumer surface', () => {
+    expect(mixrelayVariables['--knob-indicator']).toBe('var(--text-primary)');
+    const indicator = roles['--text-primary'];
+    expect(contrast(indicator, roles['--knob-track'])).toBeGreaterThanOrEqual(3);
+    for (const surface of [...surfaces, '--surface-node', '--node-background-off'] as const)
+      expect(contrast(indicator, roles[surface]), surface).toBeGreaterThanOrEqual(3);
+  });
   it('raises content above the canvas in a visible hierarchy', () => {
     // Canvas < header/sidebar < node; hover is distinct from its node.
     expect(contrast(roles['--surface-node'], roles['--background'])).toBeGreaterThanOrEqual(1.3);
