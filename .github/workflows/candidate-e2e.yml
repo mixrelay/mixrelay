@@ -88,6 +88,9 @@ jobs:
         env:
           TARGET_ARCH: ${{ matrix.arch }}
         run: bash scripts/e2e/github-vm-tools.sh "$TARGET_ARCH"
+      - name: Prepare native macOS UI test tools
+        if: matrix.os == 'macos'
+        run: brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
       - name: Install and exercise final PKG on macOS
         if: matrix.os == 'macos'
         env:
@@ -109,6 +112,7 @@ jobs:
           path: |
             evidence/*
             !evidence/payload
+            !evidence/ui-tools
           retention-days: 90
           if-no-files-found: error
 

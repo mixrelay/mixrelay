@@ -307,11 +307,8 @@ impl TapSession {
             }
         }
         let inventory_epoch = self.inventory_epoch.load(Ordering::Acquire);
-        let candidate = native
-            .processes(
-                &selection.bundle,
-                selection.target_device.map(|lease| lease.object),
-            )
+        let candidate = selection
+            .processes(native)
             .inspect_err(|_| self.lifecycle.changed())?;
         if inventory_epoch != self.inventory_epoch.load(Ordering::Acquire) {
             return Err(TapError::code(9));
@@ -356,7 +353,7 @@ impl TapSession {
         let mut selection = self.selection.borrow_mut();
         let selection = selection.as_mut().ok_or(TapError::code(1))?;
         selection.selected = candidate;
-        if selection.fallback && selection.selected.is_empty() {
+        if selection.fallback && selection.exclusions.is_none() && selection.selected.is_empty() {
             // No tap with an empty process list is ever created: the native
             // initializer is not assumed to mean silence for that case.
             return Err(TapError::code(9));

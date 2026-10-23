@@ -1,0 +1,25 @@
+name: MixRelayInstalledUI
+options:
+  deploymentTarget:
+    macOS: '14.2'
+settings:
+  base:
+    CODE_SIGNING_ALLOWED: NO
+    GENERATE_INFOPLIST_FILE: YES
+    SWIFT_VERSION: '5.0'
+targets:
+  InstalledUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [InstalledUITests.swift]
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: io.mixrelay.qualification.ui
+schemes:
+  InstalledUI:
+    build:
+      targets:
+        InstalledUITests: [test]
+    test:
+      targets: [InstalledUITests]
+      environmentVariables:
+        MIXRELAY_UI_EVIDENCE: ${MIXRELAY_UI_EVIDENCE}

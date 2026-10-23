@@ -138,6 +138,12 @@ pub struct TapConfig {
     pub ring_capacity_frames: usize,
     /// Exact NUL-terminated owned device UID for mute; null for preserved playback.
     pub target_device_uid: *const std::ffi::c_char,
+    /// Whole-system selection; `bundle_id` must be null and playback is preserved.
+    pub system_audio: bool,
+    /// Borrowed UTF-8 bundle IDs excluded from whole-system capture.
+    pub excluded_bundle_ids: *const *const std::ffi::c_char,
+    /// Number of entries in `excluded_bundle_ids`, at most 64.
+    pub excluded_bundle_count: usize,
 }
 
 /// Identity expected by one pump read; both fences belong to the PCM producer.
@@ -181,7 +187,7 @@ pub struct TapStats {
     pub clock_valid: bool,
 }
 
-const _: () = assert!(size_of::<TapConfig>() == 32 && align_of::<TapConfig>() == 8);
+const _: () = assert!(size_of::<TapConfig>() == 56 && align_of::<TapConfig>() == 8);
 const _: () = assert!(size_of::<TapError>() == 8 && align_of::<TapError>() == 4);
 const _: () = assert!(size_of::<TapStats>() == 96 && align_of::<TapStats>() == 8);
 

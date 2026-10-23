@@ -55,6 +55,7 @@ fn fallback_fixture() -> TapSession {
     let session = fixture();
     let _previous = session.selection.replace(Some(native::Selection {
         bundle: c"io.mixrelay.target".to_owned(),
+        exclusions: None,
         fallback: true,
         selected: vec![native::ProcessIdentity { object: 7, pid: 71 }],
         target_device_uid: None,
@@ -81,6 +82,36 @@ fn muted_fixture() -> TapSession {
         selected.mute = true;
     }
     session
+}
+
+#[test]
+fn whole_system_capture_rebuilds_when_the_excluded_app_exits() {
+    let session = fallback_fixture();
+    session.selection.borrow_mut().as_mut().unwrap().exclusions =
+        Some(vec![c"io.mixrelay.target".into()]);
+    let native = Fake::default();
+    assert_eq!(session.refresh(&native), Ok(()));
+    assert!(session.allowed());
+    assert_eq!(native.rebuild_calls.get(), 1);
+    assert!(
+        session
+            .selection
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .selected
+            .is_empty()
+    );
+    native
+        .selected
+        .replace(vec![native::ProcessIdentity { object: 8, pid: 72 }]);
+    assert_eq!(session.refresh(&native), Ok(()));
+    assert!(session.allowed());
+    assert_eq!(native.rebuild_calls.get(), 2);
+    assert_eq!(
+        session.selection.borrow().as_ref().unwrap().selected[0].pid,
+        72
+    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -372,6 +403,9 @@ fn public_capture_boundary_rejects_null_and_invalid_startup_without_native_objec
                 mute_while_captured: false,
                 ring_capacity_frames: capacity,
                 target_device_uid: ptr::null(),
+                system_audio: false,
+                excluded_bundle_ids: ptr::null(),
+                excluded_bundle_count: 0,
             };
             assert!(mr_process_tap_create(&raw const config, &raw mut error).is_null());
             assert_eq!(error.code, 1);
@@ -398,6 +432,9 @@ fn mute_requires_one_exact_owned_endpoint_uid_before_native_admission() {
         mute_while_captured: true,
         ring_capacity_frames: 256,
         target_device_uid: ptr::null(),
+        system_audio: false,
+        excluded_bundle_ids: ptr::null(),
+        excluded_bundle_count: 0,
     };
     // SAFETY: invalid config and exclusive error output remain live for the call.
     assert!(unsafe { mr_process_tap_create(&raw const config, &raw mut error) }.is_null());

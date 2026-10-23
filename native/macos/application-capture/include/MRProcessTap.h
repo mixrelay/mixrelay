@@ -31,6 +31,9 @@ typedef struct MRProcessTapConfig {
     size_t ring_capacity_frames;
     /* Required only for mute: exact MixRelay-owned output device UID. */
     const char *target_device_uid;
+    bool system_audio;
+    const char *const *excluded_bundle_ids;
+    size_t excluded_bundle_count;
 } MRProcessTapConfig;
 
 typedef struct MRProcessTapStats {
@@ -50,7 +53,7 @@ typedef struct MRProcessTapStats {
     bool clock_valid;
 } MRProcessTapStats;
 
-_Static_assert(sizeof(MRProcessTapConfig) == 32, "tap config ABI");
+_Static_assert(sizeof(MRProcessTapConfig) == 56, "tap config ABI");
 _Static_assert(sizeof(MRProcessTapError) == 8, "tap error ABI");
 _Static_assert(sizeof(MRProcessTapStats) == 96, "tap stats ABI");
 

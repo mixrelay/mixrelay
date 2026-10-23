@@ -9,6 +9,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef MR_TONE_FREQUENCY
+#define MR_TONE_FREQUENCY 440.0
+#endif
+#ifndef MR_TONE_CHANNEL
+#define MR_TONE_CHANNEL -1
+#endif
+
 static AudioDeviceID MRVirtualDevice(const char *device_uid) {
     static const char prefix[] = "io.mixrelay.audio.endpoint.";
     const size_t prefix_size = sizeof(prefix) - 1;
@@ -60,10 +67,11 @@ int main(int argc, const char *argv[]) {
                 (void)time; *silent = NO;
                 for (AVAudioFrameCount frame = 0; frame < frames; ++frame) {
                     const float sample = (float)(sin(phase * 2.0 * M_PI) * 0.05);
-                    phase += 440.0 / 48000.0;
+                    phase += MR_TONE_FREQUENCY / 48000.0;
                     if (phase >= 1.0) phase -= 1.0;
                     for (UInt32 channel = 0; channel < output->mNumberBuffers; ++channel)
-                        ((float *)output->mBuffers[channel].mData)[frame] = sample;
+                        ((float *)output->mBuffers[channel].mData)[frame] =
+                            MR_TONE_CHANNEL < 0 || channel == (UInt32)MR_TONE_CHANNEL ? sample : 0;
                 }
                 return noErr;
             }];

@@ -125,6 +125,17 @@ it('free menus count source nodes and distinct outputs without restricting built
     i18n.getFixedT('en')('licensing.limits.inputs'),
   );
 });
+
+it('whole-system capture is available on macOS within the free input quota', () => {
+  const value = options(false);
+  expect(item(createNodeMenuItems(value), 'system-audio').disabled).toBe(true);
+  value.model.nodes = [];
+  expect(item(createNodeMenuItems(value), 'system-audio').disabled).toBe(false);
+  value.session.capabilities.applicationCapture = false;
+  expect(item(createNodeMenuItems(value), 'system-audio').disabled).toBe(true);
+  value.session.capabilities.backend = 'pipe_wire';
+  expect(() => item(createNodeMenuItems(value), 'system-audio')).toThrow(/Missing menu item/);
+});
 it('describes the output quota when an already used virtual device would add a third output', () => {
   const base = options(false);
   base.model.nodes = [

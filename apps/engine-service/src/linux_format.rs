@@ -106,10 +106,8 @@ fn observe_driver(
     status: &super::AdapterRuntimeStatus,
     observed: Option<mixrelay_driver_control::DriverState>,
 ) {
-    use mixrelay_driver_control::DriverState;
     match observed {
-        Some(DriverState::Ready) => status.observe_endpoint(true),
-        Some(DriverState::NotInstalled) => status.observe_endpoint(false),
+        Some(state) => status.observe_driver_state(state),
         _ => status.forget_endpoint_observation(),
     }
 }

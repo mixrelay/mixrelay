@@ -141,6 +141,7 @@ unsafe extern "C" {
         target_device_uid: *const c_char,
         select_bundle: bool,
         mute: bool,
+        system_audio: bool,
     ) -> *mut c_void;
     fn mr_tap_description_release(description: *mut c_void);
     fn mr_tap_aggregate_create(description: *mut c_void, device: *mut u32) -> i32;
@@ -327,10 +328,7 @@ impl Native for CoreAudio {
         _observed_at: std::time::Instant,
     ) -> Result<super::watchdog::Diagnostic, TapError> {
         let preparation_started = std::time::Instant::now();
-        let current = self.processes(
-            &selection.bundle,
-            selection.target_device.map(|lease| lease.object),
-        )?;
+        let current = selection.processes(self)?;
         if selection.fallback && current != selection.selected {
             return Err(TapError::code(9));
         }
@@ -339,9 +337,11 @@ impl Native for CoreAudio {
         {
             return Err(TapError::code(9));
         }
-        if !current.iter().any(|process| {
-            property::<u32>(process.object, *b"piro").is_ok_and(|running| running != 0)
-        }) {
+        if selection.exclusions.is_none()
+            && !current.iter().any(|process| {
+                property::<u32>(process.object, *b"piro").is_ok_and(|running| running != 0)
+            })
+        {
             return Err(TapError::code(3));
         }
         super::ffi::create_diagnostic(selection).map(|session| super::watchdog::Diagnostic {
@@ -396,6 +396,7 @@ pub(super) struct DeviceLease {
 #[derive(Debug, Clone)]
 pub(super) struct Selection {
     pub bundle: CString,
+    pub exclusions: Option<Vec<CString>>,
     pub fallback: bool,
     pub selected: Vec<ProcessIdentity>,
     pub target_device_uid: Option<CString>,
@@ -406,7 +407,26 @@ pub(super) struct Selection {
 impl Selection {
     pub(super) fn new(config: &super::TapConfig, native: &impl Native) -> Result<Self, TapError> {
         // SAFETY: the public create boundary validated and retains this C string.
-        let bundle = unsafe { CStr::from_ptr(config.bundle_id) }.to_owned();
+        let bundle = if config.system_audio {
+            c"".to_owned()
+        } else {
+            // SAFETY: create validated this borrowed NUL-terminated string.
+            unsafe { CStr::from_ptr(config.bundle_id) }.to_owned()
+        };
+        let exclusions = if config.system_audio {
+            let mut ids = Vec::with_capacity(config.excluded_bundle_count);
+            for index in 0..config.excluded_bundle_count {
+                // SAFETY: create validated the array and each retained C string.
+                ids.push(
+                    unsafe { CStr::from_ptr(*config.excluded_bundle_ids.add(index)) }.to_owned(),
+                );
+            }
+            ids.sort_unstable();
+            ids.dedup();
+            Some(ids)
+        } else {
+            None
+        };
         let target_device_uid = if config.target_device_uid.is_null() {
             None
         } else {
@@ -419,8 +439,9 @@ impl Selection {
             .transpose()?;
         // A mutable bundle selector can acquire other output routes. Muted taps
         // must bind exact process objects and revalidate their device lease.
-        let fallback =
-            target_device.is_some() || !unsafe { mr_tap_description_supports_bundle_selection() };
+        let fallback = config.system_audio
+            || target_device.is_some()
+            || !unsafe { mr_tap_description_supports_bundle_selection() };
         if target_device.is_some()
             && !unsafe { mr_tap_description_supports_device_stream_selection() }
         {
@@ -428,12 +449,27 @@ impl Selection {
         }
         Ok(Self {
             bundle,
+            exclusions,
             fallback,
             selected: Vec::new(),
             target_device_uid,
             target_device,
             mute: config.mute_while_captured,
         })
+    }
+
+    pub(super) fn processes(&self, native: &impl Native) -> Result<Vec<ProcessIdentity>, TapError> {
+        if let Some(exclusions) = &self.exclusions {
+            let mut result = Vec::new();
+            for bundle in exclusions {
+                result.extend(native.processes(bundle, None)?);
+            }
+            result.sort_unstable();
+            result.dedup();
+            Ok(result)
+        } else {
+            native.processes(&self.bundle, self.target_device.map(|lease| lease.object))
+        }
     }
 }
 
@@ -452,6 +488,7 @@ impl Description {
                     .map_or(ptr::null(), |uid| uid.as_ptr()),
                 !selection.fallback,
                 selection.mute,
+                selection.exclusions.is_some(),
             )
         };
         if pointer.is_null() {

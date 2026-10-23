@@ -234,6 +234,20 @@ impl AdapterRuntimeStatus {
             .store(if present { 1 } else { 2 }, Ordering::Release);
     }
 
+    /// Publishes independent Driver service health from a non-audio observer.
+    pub fn observe_driver_state(&self, state: mixrelay_driver_control::DriverState) {
+        use mixrelay_driver_control::DriverState;
+        self.endpoint_observation.store(
+            match state {
+                DriverState::Ready => 1,
+                DriverState::NotInstalled => 2,
+                DriverState::InstalledNotLoaded => 0,
+                DriverState::Unavailable => 3,
+            },
+            Ordering::Release,
+        );
+    }
+
     /// An attachment no longer supplies current device evidence. Unknown is not
     /// absent: dropping a graph must not claim the installed driver was removed.
     pub fn forget_endpoint_observation(&self) {
@@ -897,6 +911,7 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
                 self.endpoint_observation.load(Ordering::Acquire),
             ) {
                 (true, 1) => DriverState::Ready,
+                (true, 3) => DriverState::Unavailable,
                 (true, 0) => DriverState::InstalledNotLoaded,
                 _ => DriverState::NotInstalled,
             },

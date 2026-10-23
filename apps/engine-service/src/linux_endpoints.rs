@@ -182,6 +182,7 @@ impl EndpointSet {
         Ok(Self { nodes })
     }
 
+    #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }

@@ -104,12 +104,14 @@ bool mr_tap_description_supports_device_stream_selection(void) {
 }
 
 void *mr_tap_description_create(const char *bundle, const AudioObjectID *processes,
-    size_t count, const char *target_device_uid, bool select_bundle, bool mute) {
+    size_t count, const char *target_device_uid, bool select_bundle, bool mute, bool system_audio) {
     @autoreleasepool {
         NSMutableArray<NSNumber *> *ids = [NSMutableArray arrayWithCapacity:count];
         for (size_t index = 0; index < count; ++index) [ids addObject:@(processes[index])];
         CATapDescription *description;
-        if (target_device_uid != NULL) {
+        if (system_audio) {
+            description = [[CATapDescription alloc] initStereoGlobalTapButExcludeProcesses:ids];
+        } else if (target_device_uid != NULL) {
             if (count == 0 || !mr_tap_description_supports_device_stream_selection()) {
                 return NULL;
             }

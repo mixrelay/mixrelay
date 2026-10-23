@@ -183,6 +183,27 @@ export const VirtualIoPassThrough: Story = {};
 export const ApplicationToVirtualInput: Story = {
   parameters: { applicationGraph: true },
 };
+export const WholeSystemCapture: Story = {
+  args: { audioSession: deviceActivitySession },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const surface = within(canvasElement.ownerDocument.body);
+    await userEvent.click(await canvas.findByRole('button', { name: i18n.t('routing.addNode') }));
+    await userEvent.hover(
+      await surface.findByRole('menuitem', { name: i18n.t('routing.groups.source') }),
+    );
+    await userEvent.click(
+      await surface.findByRole('menuitem', { name: i18n.t('studioGraph.nodes.systemAudio.name') }),
+    );
+    await expect(
+      canvas.findByText(i18n.t('studioGraph.nodes.systemAudio.name')),
+    ).resolves.toBeVisible();
+  },
+};
+export const WholeSystemCaptureNarrow: Story = {
+  ...WholeSystemCapture,
+  globals: { viewport: { value: 'mobile' }, locale: 'pseudo' },
+};
 export const MobileNarrow: Story = {
   globals: { viewport: { value: 'mobile' } },
 };

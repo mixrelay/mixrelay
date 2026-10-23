@@ -11,6 +11,10 @@ import { engineOperations } from '../lab/engine-operations.mjs';
 import { observeEnvironment, validateEnvironment } from './environment.mjs';
 import { requireDisposableHost, installAndVerify, launchInstalled } from './package.mjs';
 import { nativeSignal, analyseRecording } from './native-signal.mjs';
+import { startInstalledUi } from './installed-ui.mjs';
+import { wholeSystemCapture } from './system-capture.mjs';
+import { invoke } from '../lab/macos-installed-capture-acceptance.mjs';
+import { collectLinux } from './collect-linux.mjs';
 
 async function eventually(read, predicate, description) {
   const deadline = Date.now() + 30000;
@@ -69,7 +73,7 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
   const driver = () => socketJson(driverSocket(), '/api/v1/driver', {
     headers: { host: 'mixrelay-driver' }, timeoutMs: 15000,
   });
-  let stop, original, applied, graphId, recorderPath, unconfirmedMutation = false;
+  let stop, ui, original, applied, graphId, recorderPath, unconfirmedMutation = false;
   const active = revision => eventually(() => api('graph/status'), status => status.activeRevision === revision, 'Graph did not activate');
   async function apply(document) {
     unconfirmedMutation = true;
@@ -115,6 +119,25 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
     original = catalog.document; graphId = catalog.activeId;
     assert.deepEqual(original.nodes, [], 'Reset QA workspace: existing graph is preserved');
     assert.deepEqual(original.edges, []);
+    ui = await startInstalledUi(target.os, output);
+    await scenario('GRAPH-01', async () => {
+      await ui.ready();
+      const current = await eventually(() => api('graphs'), value => value.document.nodes.length === 2
+        && value.document.edges.length > 0, 'Installed UI did not commit its connection');
+      const source = current.document.nodes.find(node => node.type === 'compressor');
+      const recorder = current.document.nodes.find(node => node.type === 'recorder');
+      assert.ok(source && recorder, 'Installed UI created different nodes');
+      assert.ok(current.document.edges.every(edge => edge.source.nodeId === source.id
+        && edge.destination.nodeId === recorder.id), 'Installed UI connected different nodes');
+      await active(current.document.revision);
+      const proof = evidence('installed-ui-graph.json', current);
+      const files = ['installed-ui.png', 'installed-ui-tree.txt'].map(file => ({ file, sha256: digest(readFileSync(join(output, file))) }));
+      return [proof, ...files];
+    });
+    const afterUi = await api('graphs');
+    assert.equal(afterUi.activeId, graphId);
+    assert.ok(afterUi.document.nodes.every(node => ['compressor', 'recorder'].includes(node.type)), 'Unexpected external graph change');
+    applied = await apply({ ...original, expectedGraphId: graphId, revision: afterUi.document.revision + 1 });
     const snapshot = await driver();
     // A fresh free installation already owns one stereo device. Creating another
     // requires paid access, so acceptance uses the actual default without a bypass.
@@ -170,6 +193,19 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
       const analysis = analyseRecording(recording);
       return [evidence('recording-analysis.json', { stopped, analysis }), { file: 'recording.wav', sha256: digest(readFileSync(recording)) }];
     });
+    if (target.os === 'macos') await scenario('AUDIO-11', async () => {
+      await wholeSystemCapture({ api, graphId, document: applied, device, output,
+        apply: async document => {
+          unconfirmedMutation = true;
+          const response = await invoke('control_apply_graph', { document });
+          assert.equal(response.status, 200, JSON.stringify(response));
+          await active(document.revision);
+          applied = await api('graph');
+          unconfirmedMutation = false;
+          return applied;
+        } });
+      return ['whole-system-analysis.json', 'whole-system.wav'].map(file => ({ file, sha256: digest(readFileSync(join(output, file))) }));
+    });
   } catch (error) { report.error = error.message; }
   finally {
     const cleanupFailed = error => {
@@ -190,11 +226,21 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
         await apply({ ...original, expectedGraphId: graphId, revision: applied.revision + 1 });
       }
     } catch (error) { cleanupFailed(error); }
+    if (target.os === 'linux' && report.scenarios.some(item => item.status === 'failed')) {
+      try { collectLinux(output); } catch (error) { cleanupFailed(error); }
+    }
+    try { await ui?.finish(); } catch (error) {
+      const result = report.scenarios.find(item => item.id === 'GRAPH-01');
+      if (result) {
+        result.status = 'failed'; result.error = error.message;
+        result.evidence.push(evidence('installed-ui-completion.failure.json', { message: error.message }));
+      }
+      cleanupFailed(error);
+    }
     try { await stop?.(); } catch (error) { cleanupFailed(error); }
     for (const expected of requiredScenarios(contract, target)) if (!report.scenarios.some(item => item.id === expected.id)) {
       report.scenarios.push({ id: expected.id, scope: expected.scope, status: 'blocked', evidence: [],
-        error: expected.id === 'GRAPH-01' ? 'Installed UI automation is not implemented' : expected.id === 'AUDIO-11'
-          ? 'Whole-system capture adapter and native acceptance are not implemented' : 'A prerequisite failed' });
+        error: 'A prerequisite failed' });
     }
     report.status = !report.error && report.cleanup === 'passed' && report.scenarios.every(item => item.status === 'passed') ? 'passed' : 'failed';
     report.endedAt = new Date().toISOString();

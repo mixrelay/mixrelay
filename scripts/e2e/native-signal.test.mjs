@@ -3,6 +3,7 @@ import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { analyseStereo, analyseRf64, stopSignalProcesses } from './native-signal.mjs';
+import { analyseSystemMix } from './system-capture.mjs';
 
 function recording() {
   const header = Buffer.alloc(80);
@@ -30,6 +31,19 @@ test('finalized RF64 evidence contains finite native stereo PCM and consistent 6
   const nonfinite = recording().subarray(80); nonfinite.writeFloatLE(NaN, 0);
   assert.throws(() => analyseStereo(nonfinite), /Non-finite/);
   assert.throws(() => analyseRf64(recording().subarray(0, -4)));
+});
+
+test('system capture requires both independent frequencies in the correct stereo lanes', () => {
+  assert.ok(analyseSystemMix(recording()).tones.left1000 > 0.12);
+  const missing = recording();
+  for (let offset = 84, frame = 0; offset < missing.length; offset += 8, frame++) missing.writeFloatLE(Math.sin(2 * Math.PI * 3000 * frame / 48000) * 0.1, offset);
+  assert.throws(() => analyseSystemMix(missing), /Missing independent/);
+  const swapped = recording();
+  for (let offset = 80; offset < swapped.length; offset += 8) {
+    const left = swapped.readFloatLE(offset), right = swapped.readFloatLE(offset + 4);
+    swapped.writeFloatLE(right, offset); swapped.writeFloatLE(left, offset + 4);
+  }
+  assert.throws(() => analyseSystemMix(swapped), /Missing independent/);
 });
 test('the recorder uses WAVE_FORMAT_EXTENSIBLE for stereo Float32, including its exact float GUID', () => {
   const original = recording();

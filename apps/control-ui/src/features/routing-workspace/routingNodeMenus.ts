@@ -14,6 +14,7 @@ import { createProcessorMenuItems } from './processorCatalogMenu';
 import { virtualDeviceMenuItem } from './virtualEndpointMenu';
 export const ADD_PROCESSOR_DIRECTORY_ITEM_ID = 'add-processor-directory';
 export const RESCAN_PROCESSORS_ITEM_ID = 'rescan-processors';
+export const SYSTEM_AUDIO_ITEM_ID = 'system-audio';
 export function audioInputItemId(device: AudioDeviceDescriptor): string {
   return `audio-input:${device.uid}`;
 }
@@ -114,7 +115,22 @@ function menuChoices({
   const processorItems = createProcessorMenuItems(processors, t, processorEmptyLabel).map((item) =>
     pluginLimit ? { ...item, disabled: true, description: t('licensing.limits.plugins') } : item,
   );
-  return { applicationItems, inputItems, outputItems, processorItems, recorderLimit };
+  const systemItems: AudioGraphNodeMenuItem[] =
+    session?.capabilities.backend === 'core_audio'
+      ? [
+          {
+            id: SYSTEM_AUDIO_ITEM_ID,
+            label: t('studioGraph.nodes.systemAudio.name'),
+            disabled: inputLimit || !session.capabilities.applicationCapture,
+            description: inputLimit
+              ? t('licensing.limits.inputs')
+              : session.capabilities.applicationCapture
+                ? t('studioGraph.nodes.systemAudio.description')
+                : t('audioSession.captureRateLocked'),
+          },
+        ]
+      : [];
+  return { applicationItems, systemItems, inputItems, outputItems, processorItems, recorderLimit };
 }
 function outputIdentities(model: AudioGraphModel | null): Set<string> {
   return new Set(
@@ -205,13 +221,14 @@ function limitedVirtualMenu(
 }
 export function createNodeMenuItems(options: MenuOptions): AudioGraphNodeMenuItem[] {
   const { t } = options;
-  const { applicationItems, inputItems, outputItems, processorItems, recorderLimit } =
+  const { applicationItems, systemItems, inputItems, outputItems, processorItems, recorderLimit } =
     menuChoices(options);
   return [
     {
       children: [
         limitedVirtualMenu('input', options),
         { id: 'virtual-input-divider', kind: 'divider', label: '' },
+        ...systemItems,
         {
           id: 'running-applications-label',
           kind: 'label',

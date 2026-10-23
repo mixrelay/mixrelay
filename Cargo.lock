@@ -2997,6 +2997,7 @@ dependencies = [
  "mixrelay-pcm-ring",
  "mixrelay-realtime",
  "mixrelay-test-support",
+ "sha2",
 ]
 
 [[package]]

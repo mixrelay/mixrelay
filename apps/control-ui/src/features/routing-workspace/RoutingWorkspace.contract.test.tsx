@@ -224,6 +224,34 @@ it('captures a discovered application using its exact native selection identity'
   expect(write.mock.calls[0]?.[0].nodes[0]).toMatchObject({ type: 'application_capture' });
 });
 
+it.each(['core_audio', 'pipe_wire'] as const)(
+  'creates whole-system capture only for %s',
+  async (backend) => {
+    const native = port();
+    const write = vi.spyOn(native, 'applyGraph');
+    render(
+      view(native, {
+        audioSession: { ...session, capabilities: { ...session.capabilities, backend } },
+      }),
+    );
+    await ready();
+    await act(async () => canvas().onAddNode?.('system-audio', { x: 0, y: 0 }));
+    if (backend === 'pipe_wire') {
+      expect(write).not.toHaveBeenCalled();
+      return;
+    }
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    expect(write.mock.calls[0]?.[0].nodes[0]).toMatchObject({
+      type: 'application_capture',
+      config: {
+        selector: { match: 'all_except', bundle_ids: ['io.mixrelay.desktop'] },
+        sourcePlayback: 'preserve',
+        stream: { channels: 2, channelLayout: 'stereo' },
+      },
+    });
+  },
+);
+
 it('ignores an obsolete menu identity and starts native rescan and directory actions without graph mutation', async () => {
   const native = port();
   const write = vi.spyOn(native, 'applyGraph');

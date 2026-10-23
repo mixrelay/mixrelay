@@ -13,15 +13,10 @@ pub(super) fn resolve(
     request
         .validate_contract(2)
         .map_err(|error| unsupported(&error.to_string()))?;
-    let ApplicationSelector::BundleId {
-        bundle_id,
-        include_descendants: false,
-    } = &request.selector
-    else {
-        return Err(unsupported(
-            "macOS capture requires exact bundle selection without descendants",
-        ));
-    };
+    let source_id = mixrelay_macos_transport::capture_selection::source_id(&request.selector)
+        .ok_or_else(|| {
+            unsupported("macOS capture requires an exact bundle or whole-system selection")
+        })?;
     if request.requires_reselection {
         return Err(unsupported(
             "application capture requires explicit reselection",
@@ -41,13 +36,17 @@ pub(super) fn resolve(
         ));
     }
     let mut canonical = request.clone();
+    if let ApplicationSelector::AllExcept { bundle_ids } = &mut canonical.selector {
+        bundle_ids.sort_unstable();
+        bundle_ids.dedup();
+    }
     canonical.gain_db = 0.0;
     canonical.stream = StreamSpec {
         channels: 2,
         channel_layout: ChannelLayout::Stereo,
     };
     Ok(SharedSource {
-        id: bundle_id.clone(),
+        id: source_id,
         config: NodeConfig::ApplicationCapture(canonical),
     })
 }
@@ -112,6 +111,25 @@ mod tests {
             gain_db: 0.0,
             requires_reselection: false,
         }
+    }
+
+    #[test]
+    fn system_capture_is_one_canonical_stereo_source_with_set_exclusions() {
+        let mut first = request();
+        first.selector = ApplicationSelector::AllExcept {
+            bundle_ids: vec!["b".into(), "a".into(), "a".into()],
+        };
+        let mut second = first.clone();
+        second.selector = ApplicationSelector::AllExcept {
+            bundle_ids: vec!["a".into(), "b".into()],
+        };
+        second.gain_db = -12.0;
+        second.stream.channels = 1;
+        second.stream.channel_layout = ChannelLayout::Mono;
+        assert_eq!(resolve(&first).unwrap(), resolve(&second).unwrap());
+        assert_ne!(resolve(&first).unwrap().id, resolve(&request()).unwrap().id);
+        second.source_playback = SourcePlaybackPolicy::MuteWhileCaptured;
+        assert!(resolve(&second).is_err());
     }
 
     #[test]
@@ -180,7 +198,6 @@ mod tests {
                 process_id: 42,
                 include_descendants: false,
             },
-            ApplicationSelector::AllExcept { bundle_ids: vec![] },
         ] {
             let mut unsupported = request();
             unsupported.selector = selector;

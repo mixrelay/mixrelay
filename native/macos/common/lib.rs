@@ -15,6 +15,7 @@ pub mod application_source_transport;
 pub mod audio_buffer;
 pub mod callback_clock;
 pub mod capture_ring;
+pub mod capture_selection;
 pub mod device_buffers;
 pub mod device_io;
 mod frame_times;

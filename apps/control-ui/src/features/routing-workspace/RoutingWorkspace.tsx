@@ -78,6 +78,7 @@ import {
   audioOutputItemId,
   createNodeMenuItems,
   RESCAN_PROCESSORS_ITEM_ID,
+  SYSTEM_AUDIO_ITEM_ID,
 } from './routingNodeMenus';
 import { useGraphLayout } from './useGraphLayout';
 import { useNodeControls } from './useNodeControls';
@@ -189,6 +190,7 @@ interface RoutingNodeCreationOptions {
 }
 
 function useRoutingNodeCreation(options: RoutingNodeCreationOptions) {
+  const { t } = useTranslation();
   const {
     audioSession,
     applications,
@@ -211,7 +213,17 @@ function useRoutingNodeCreation(options: RoutingNodeCreationOptions) {
         refreshProcessors(false);
         return;
       }
-      const request = routingNodeRequest(itemId, applications, audioDevices, processors);
+      const request: RoutingNodeRequest | null =
+        itemId === SYSTEM_AUDIO_ITEM_ID
+          ? audioSession?.capabilities.backend === 'core_audio'
+            ? {
+                kind: 'application',
+                bundleId: '',
+                title: t('studioGraph.nodes.systemAudio.name'),
+                selector: { match: 'all_except', bundle_ids: ['io.mixrelay.desktop'] },
+              }
+            : null
+          : routingNodeRequest(itemId, applications, audioDevices, processors);
       if (!model || !request) return;
       updateModel(
         addRoutingNode(
@@ -234,6 +246,7 @@ function useRoutingNodeCreation(options: RoutingNodeCreationOptions) {
       refreshProcessors,
       updateModel,
       tryVirtualAdd,
+      t,
     ],
   );
 }

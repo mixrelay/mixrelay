@@ -74,6 +74,9 @@ struct NativeConfig {
     mute_while_captured: bool,
     ring_capacity_frames: usize,
     target_device_uid: *const c_char,
+    system_audio: bool,
+    excluded_bundle_ids: *const *const c_char,
+    excluded_bundle_count: usize,
 }
 
 #[repr(C)]
@@ -266,19 +269,55 @@ impl CaptureProbeSession {
         bundle_id: &str,
         target_device_uid: Option<&str>,
     ) -> Result<Self, CaptureProbeError> {
-        let bundle_id = CString::new(bundle_id)
-            .map_err(|_| CaptureProbeError(NativeError::new(NATIVE_INVALID_ARGUMENT)))?;
+        Self::prepare_selector(
+            &ApplicationSelector::BundleId {
+                bundle_id: bundle_id.into(),
+                include_descendants: false,
+            },
+            target_device_uid,
+        )
+    }
+
+    fn prepare_selector(
+        selector: &ApplicationSelector,
+        target_device_uid: Option<&str>,
+    ) -> Result<Self, CaptureProbeError> {
+        let invalid = || CaptureProbeError(NativeError::new(NATIVE_INVALID_ARGUMENT));
+        let source_id =
+            mixrelay_macos_transport::capture_selection::source_id(selector).ok_or_else(invalid)?;
+        let (bundle, excluded) = match selector {
+            ApplicationSelector::BundleId {
+                bundle_id,
+                include_descendants: false,
+            } => (
+                Some(CString::new(bundle_id.as_str()).map_err(|_| invalid())?),
+                Vec::new(),
+            ),
+            ApplicationSelector::AllExcept { bundle_ids } => (
+                None,
+                bundle_ids
+                    .iter()
+                    .map(|id| CString::new(id.as_str()))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| invalid())?,
+            ),
+            _ => return Err(invalid()),
+        };
+        let excluded_pointers = excluded.iter().map(|id| id.as_ptr()).collect::<Vec<_>>();
         let target_device_uid = target_device_uid
             .map(CString::new)
             .transpose()
             .map_err(|_| CaptureProbeError(NativeError::new(NATIVE_INVALID_ARGUMENT)))?;
         let config = NativeConfig {
-            bundle_id: bundle_id.as_ptr(),
+            bundle_id: bundle.as_ref().map_or(std::ptr::null(), |id| id.as_ptr()),
             mute_while_captured: target_device_uid.is_some(),
             ring_capacity_frames: CAPTURE_RING_CAPACITY_FRAMES,
             target_device_uid: target_device_uid
                 .as_ref()
                 .map_or(std::ptr::null(), |uid| uid.as_ptr()),
+            system_audio: bundle.is_none(),
+            excluded_bundle_ids: excluded_pointers.as_ptr(),
+            excluded_bundle_count: excluded_pointers.len(),
         };
         let mut error = NativeError::new(NATIVE_OK);
         // SAFETY: `config` and its C string remain alive for the synchronous creation call.
@@ -299,7 +338,7 @@ impl CaptureProbeSession {
             native,
             reader_claim: AtomicBool::new(false),
             resolved: ResolvedApplicationCapture {
-                source_id: bundle_id.to_string_lossy().into_owned(),
+                source_id,
                 stream: StreamSpec {
                     channels,
                     channel_layout,
@@ -475,7 +514,10 @@ impl Default for MacApplicationCaptureBackend {
         Self {
             capabilities: ApplicationCaptureCapabilities {
                 max_channels: 2,
-                supported_selectors: BTreeSet::from([ApplicationSelectorKind::BundleId]),
+                supported_selectors: BTreeSet::from([
+                    ApplicationSelectorKind::BundleId,
+                    ApplicationSelectorKind::AllExcept,
+                ]),
                 supports_mute_while_captured: false,
             },
         }
@@ -498,16 +540,6 @@ impl ApplicationCaptureBackend for MacApplicationCaptureBackend {
                 capability: error.to_string(),
             }
         })?;
-        let ApplicationSelector::BundleId {
-            bundle_id,
-            include_descendants: false,
-        } = &request.selector
-        else {
-            return Err(HostAudioBackendError::CapabilityUnavailable {
-                capability: "macOS requires an exact bundle selector without descendant expansion"
-                    .to_owned(),
-            });
-        };
         let target_device_uid = match request.source_playback {
             SourcePlaybackPolicy::Preserve => None,
             SourcePlaybackPolicy::MuteWhileCaptured => {
@@ -522,11 +554,14 @@ impl ApplicationCaptureBackend for MacApplicationCaptureBackend {
                 Some(endpoint_uid(id))
             }
         };
-        CaptureProbeSession::start(bundle_id, target_device_uid.as_deref()).map_err(|error| {
-            HostAudioBackendError::BackendFailure {
+        CaptureProbeSession::prepare_selector(&request.selector, target_device_uid.as_deref())
+            .and_then(|session| {
+                session.start_native()?;
+                Ok(session)
+            })
+            .map_err(|error| HostAudioBackendError::BackendFailure {
                 message: error.to_string(),
-            }
-        })
+            })
     }
 }
 
@@ -1105,9 +1140,8 @@ fn prepare_application_audio(
         None
     };
     if let Some(previous) = previous.filter(|previous| {
-        matches!(&request.selector,
-        ApplicationSelector::BundleId { bundle_id, include_descendants: false }
-            if *bundle_id == previous.capture.resolved.source_id)
+        mixrelay_macos_transport::capture_selection::source_id(&request.selector)
+            .is_some_and(|id| id == previous.capture.resolved.source_id)
     }) {
         return Ok(Arc::new(ApplicationAudioSession {
             capture: Arc::clone(&previous.capture),

@@ -17,6 +17,7 @@ workspace = true
 test-observation = []
 
 [dependencies]
+sha2 = "0.10.9"
 mixrelay-audio-io = { path = "../../../crates/audio-io" }
 # Shared native PCM ownership; the device adapter does not reimplement its queue.
 mixrelay-pcm-ring = { path = "../../pcm-ring" }

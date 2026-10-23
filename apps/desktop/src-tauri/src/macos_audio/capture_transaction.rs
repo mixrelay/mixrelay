@@ -92,7 +92,7 @@ fn validate_manifest(manifest: &ApplicationCaptureManifest) -> Result<(), String
                 ApplicationSelector::BundleId {
                     include_descendants: false,
                     ..
-                }
+                } | ApplicationSelector::AllExcept { .. }
             )
         {
             return Err("invalid canonical application capture identity or policy".into());

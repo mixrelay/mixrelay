@@ -115,11 +115,8 @@ fn initialize(session: &TapSession, config: &TapConfig) -> Result<(), TapError> 
     if selection.fallback {
         native::add_inventory_listener(session)?;
         let inventory_epoch = session.inventory_epoch.load(Ordering::Acquire);
-        selection.selected = CoreAudio.processes(
-            &selection.bundle,
-            selection.target_device.map(|lease| lease.object),
-        )?;
-        if selection.selected.is_empty() {
+        selection.selected = selection.processes(&CoreAudio)?;
+        if selection.exclusions.is_none() && selection.selected.is_empty() {
             return Err(TapError::code(3));
         }
         if session.inventory_epoch.load(Ordering::Acquire) != inventory_epoch {
@@ -162,18 +159,14 @@ fn initialize_selected(
 
 // SAFETY: configuration and its C string have been retained by the create entry.
 unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
-    if config.bundle_id.is_null()
-        || !(256..=1 << 20).contains(&config.ring_capacity_frames)
+    if !(256..=1 << 20).contains(&config.ring_capacity_frames)
         || !config.ring_capacity_frames.is_power_of_two()
         || config.mute_while_captured == config.target_device_uid.is_null()
     {
         return Err(TapError::code(1));
     }
-    // SAFETY: caller retains the complete NUL-terminated identifier during startup.
-    let bundle = unsafe { CStr::from_ptr(config.bundle_id) };
-    if bundle.is_empty() || bundle.to_str().is_err() {
-        return Err(TapError::code(1));
-    }
+    // SAFETY: this entry retains the configuration and all borrowed strings.
+    unsafe { validate_selector(config) }?;
     if !config.target_device_uid.is_null() {
         // SAFETY: caller retains this NUL-terminated string through startup.
         let uid = unsafe { CStr::from_ptr(config.target_device_uid) };
@@ -190,6 +183,41 @@ unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
         return Err(error);
     }
     Ok(pointer)
+}
+
+unsafe fn validate_selector(config: &TapConfig) -> Result<(), TapError> {
+    if config.system_audio {
+        if !config.bundle_id.is_null()
+            || config.mute_while_captured
+            || !config.target_device_uid.is_null()
+            || config.excluded_bundle_count > 64
+            || (config.excluded_bundle_count != 0 && config.excluded_bundle_ids.is_null())
+        {
+            return Err(TapError::code(1));
+        }
+        for index in 0..config.excluded_bundle_count {
+            // SAFETY: caller retains the complete pointer array through this call.
+            let id = unsafe { *config.excluded_bundle_ids.add(index) };
+            if id.is_null() {
+                return Err(TapError::code(1));
+            }
+            // SAFETY: each non-null entry points to a retained C string.
+            let id = unsafe { CStr::from_ptr(id) };
+            if id.is_empty() || id.to_str().is_err() {
+                return Err(TapError::code(1));
+            }
+        }
+        return Ok(());
+    }
+    if config.bundle_id.is_null() || config.excluded_bundle_count != 0 {
+        return Err(TapError::code(1));
+    }
+    // SAFETY: caller retains the complete NUL-terminated identifier during startup.
+    let bundle = unsafe { CStr::from_ptr(config.bundle_id) };
+    if bundle.is_empty() || bundle.to_str().is_err() {
+        return Err(TapError::code(1));
+    }
+    Ok(())
 }
 
 fn allocate_session() -> Result<*mut TapSession, TapError> {
@@ -256,7 +284,8 @@ pub unsafe extern "C" fn mr_process_tap_wakeup(session: *const TapSession) -> *c
 /// Creates and owns a prepared tap. Failure returns null and its original error;
 /// partially created native resources remain owned by asynchronous cleanup.
 /// # Safety
-/// Config and its NUL-terminated UTF-8 bundle string remain readable during this call.
+/// Config, selector pointer arrays and their NUL-terminated UTF-8 strings remain
+/// readable during this call. Arrays are aligned and contain the declared count.
 /// Optional error points to exclusively writable `TapError` storage.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_process_tap_create(

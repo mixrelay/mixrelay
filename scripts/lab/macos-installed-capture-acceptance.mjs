@@ -136,7 +136,7 @@ export async function runCaptureAcceptance(endpointId, io, sink = 'virtual_endpo
   }
 }
 
-function invoke(name, arguments_) {
+export function invoke(name, arguments_) {
   const path = join(homedir(), 'Library/Application Support/io.mixrelay.desktop/control/control.sock');
   return new Promise((resolveReply, reject) => {
     const connection = createConnection(path);
