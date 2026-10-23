@@ -2,51 +2,64 @@ import XCTest
 import AppKit
 
 final class InstalledUITests: XCTestCase {
-    private let app = XCUIApplication(url: URL(fileURLWithPath: "/Applications/MixRelay/MixRelay.app"))
+    private var app = XCUIApplication(url: URL(fileURLWithPath: "/Applications/MixRelay/MixRelay.app"))
+    private struct MissingControl: Error { let label: String }
 
-    private func press(_ label: String) {
+    private func press(_ label: String) throws {
         let types = [XCUIElement.ElementType.button, .popUpButton, .menuItem, .cell].map(\.rawValue)
         let item = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ AND elementType IN %@", label, types)).firstMatch
-        XCTAssertTrue(item.waitForExistence(timeout: 30), "Missing installed UI action: \(label)\n\(app.debugDescription)")
+        guard item.waitForExistence(timeout: 30) else { throw MissingControl(label: label) }
         item.click()
     }
 
-    func testCreateConnectAndAuthorizeNativeAudio() throws {
-        continueAfterFailure = false
-        let folder = try XCTUnwrap(ProcessInfo.processInfo.environment["MIXRELAY_UI_EVIDENCE"])
-        let directory = URL(fileURLWithPath: folder)
+    private func createGraph(in directory: URL) throws {
         let editor = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: "io.mixrelay.desktop")
             .first(where: { $0.activationPolicy == .regular }))
-        XCTAssertTrue(editor.activate(options: [.activateAllWindows]))
-        XCTAssertTrue(app.windows["MixRelay"].waitForExistence(timeout: 20), "Installed editor PID \(editor.processIdentifier)\n\(app.debugDescription)")
-        press("Add node")
-        press("Processor")
-        press("Compressor")
-        press("Add node")
-        press("Output")
-        press("Recorder")
+        app = try XCTUnwrap(MRInstalledApplication(editor.processIdentifier), "XCTest cannot attach to the exact installed editor PID")
+        guard editor.activate(options: [.activateAllWindows]), app.windows["MixRelay"].waitForExistence(timeout: 20) else {
+            throw MissingControl(label: "Installed editor PID \(editor.processIdentifier)")
+        }
+        try press("Add node")
+        try press("Processor")
+        try press("Compressor")
+        try press("Add node")
+        try press("Output")
+        try press("Recorder")
         let compressor = app.staticTexts["Compressor"].firstMatch
-        XCTAssertTrue(compressor.waitForExistence(timeout: 30))
+        guard compressor.waitForExistence(timeout: 30) else { throw MissingControl(label: "Compressor node") }
         compressor.rightClick()
-        press("Connect channels…")
+        try press("Connect channels…")
         let destination = app.descendants(matching: .any).matching(NSPredicate(
             format: "(elementType == %d OR elementType == %d) AND label CONTAINS %@",
             XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.popUpButton.rawValue, "Destination"
         )).firstMatch
-        XCTAssertTrue(destination.waitForExistence(timeout: 10))
+        guard destination.waitForExistence(timeout: 10) else { throw MissingControl(label: "Destination") }
         destination.click()
-        press("Recorder")
-        press("Connect")
+        try press("Recorder")
+        try press("Connect")
         let shot = app.screenshot()
         try shot.pngRepresentation.write(to: directory.appendingPathComponent("installed-ui.png"))
         try app.debugDescription.write(to: directory.appendingPathComponent("installed-ui-tree.txt"), atomically: true, encoding: .utf8)
+    }
+
+    func testCreateConnectAndAuthorizeNativeAudio() throws {
+        continueAfterFailure = true
+        let folder = try XCTUnwrap(ProcessInfo.processInfo.environment["MIXRELAY_UI_EVIDENCE"])
+        let directory = URL(fileURLWithPath: folder)
+        do { try createGraph(in: directory) }
+        catch {
+            let detail = "\(error)\n\(app.debugDescription)"
+            XCTFail(detail)
+            try detail.write(to: directory.appendingPathComponent("installed-ui.error"), atomically: true, encoding: .utf8)
+        }
         try Data("ready\n".utf8).write(to: directory.appendingPathComponent("installed-ui.ready"))
 
         // The same disposable session handles the real first-use privacy dialogs.
         // No privacy database or application binary is changed by this observer.
         let deadline = Date().addingTimeInterval(300)
+        var grants: [[String: String]] = []
         while !FileManager.default.fileExists(atPath: directory.appendingPathComponent("installed-ui.finish").path) {
-            XCTAssertLessThan(Date(), deadline, "Native acceptance did not finish")
+            if Date() >= deadline { XCTFail("Native acceptance did not finish"); break }
             for bundle in ["com.apple.UserNotificationCenter", "com.apple.SecurityAgent", "com.apple.tccd"] {
                 let owner = XCUIApplication(bundleIdentifier: bundle)
                 let dialogs = owner.dialogs.allElementsBoundByIndex + owner.alerts.allElementsBoundByIndex
@@ -54,6 +67,9 @@ final class InstalledUITests: XCTestCase {
                     guard ["mixrelay", "mrroundtripprobe"].contains(where: dialog.debugDescription.localizedCaseInsensitiveContains) else { continue }
                     for label in ["Allow", "OK"] where dialog.buttons[label].exists {
                         dialog.buttons[label].click()
+                        grants.append(["owner": bundle, "action": label, "at": ISO8601DateFormatter().string(from: Date())])
+                        try JSONSerialization.data(withJSONObject: grants, options: [.prettyPrinted, .sortedKeys])
+                            .write(to: directory.appendingPathComponent("audio-permission-actions.json"), options: .atomic)
                     }
                 }
             }

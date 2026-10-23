@@ -26,6 +26,38 @@ fn context() -> CompileContext {
 }
 
 #[test]
+fn installed_stereo_acceptance_uses_a_real_source_reference_and_recording_route() {
+    let document: GraphDocument =
+        serde_json::from_str(include_str!("fixtures/qualification-stereo.json")).unwrap();
+    let plan = GraphCompiler::default()
+        .compile(
+            &document,
+            CompileContext {
+                format: RenderFormat {
+                    sample_rate: 48_000,
+                    block_frames: 128,
+                },
+                ..context()
+            },
+        )
+        .unwrap();
+    let source = plan
+        .nodes()
+        .iter()
+        .find(|node| node.id().as_str() == "qa-source")
+        .unwrap();
+    assert!(source.inputs().is_empty());
+    assert_eq!(source.outputs()[0].id().as_str(), FROM_OS_PORT_ID);
+    assert_eq!(source.outputs()[0].channels(), 2);
+    let recorder = plan
+        .nodes()
+        .iter()
+        .find(|node| node.id().as_str() == "qa-recorder")
+        .unwrap();
+    assert_eq!(recorder.inputs()[0].channels(), 2);
+}
+
+#[test]
 fn node_control_defaults_round_trip_and_survives_compilation() {
     let mut document: GraphDocument =
         serde_json::from_str(include_str!("fixtures/stereo-stream.json")).unwrap();

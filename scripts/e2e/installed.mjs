@@ -27,11 +27,10 @@ async function eventually(read, predicate, description) {
 }
 
 export function signalGraph(original, graphId, spec) {
+  const template = JSON.parse(readFileSync(new URL('../../crates/audio-graph/src/fixtures/qualification-stereo.json', import.meta.url)));
   return { ...original, revision: original.revision + 1, expectedGraphId: graphId,
-    nodes: [{ id: 'qa-source', type: 'virtual_endpoint', config: { ...spec, reference: { render: false, capture: true } } },
-      { id: 'qa-recorder', type: 'recorder', config: { channels: 2 } }],
-    edges: [{ id: 'qa-recording', source: { nodeId: 'qa-source', portId: 'from_os' },
-      destination: { nodeId: 'qa-recorder', portId: 'audio' }, channelMapping: { mode: 'auto' } }] };
+    nodes: template.nodes.map(node => node.type === 'virtual_endpoint'
+      ? { ...node, config: { ...spec, reference: node.config.reference } } : node), edges: template.edges };
 }
 
 // This is the same suite for every contract target. Platform code owns only installation
@@ -229,14 +228,17 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
     if (target.os === 'linux' && report.scenarios.some(item => item.status === 'failed')) {
       try { collectLinux(output); } catch (error) { cleanupFailed(error); }
     }
-    try { await ui?.finish(); } catch (error) {
+    const failedUi = error => {
       const result = report.scenarios.find(item => item.id === 'GRAPH-01');
       if (result) {
         result.status = 'failed'; result.error = error.message;
         result.evidence.push(evidence('installed-ui-completion.failure.json', { message: error.message }));
       }
-      cleanupFailed(error);
-    }
+    };
+    try {
+      const result = await ui?.finish();
+      if (result && !result.passed) failedUi(new Error(result.error));
+    } catch (error) { failedUi(error); cleanupFailed(error); }
     try { await stop?.(); } catch (error) { cleanupFailed(error); }
     for (const expected of requiredScenarios(contract, target)) if (!report.scenarios.some(item => item.id === expected.id)) {
       report.scenarios.push({ id: expected.id, scope: expected.scope, status: 'blocked', evidence: [],

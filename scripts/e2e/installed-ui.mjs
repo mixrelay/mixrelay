@@ -20,6 +20,8 @@ export async function startInstalledUi(os, output) {
       while (!existsSync(join(directory, 'installed-ui.ready')) && alive() && Date.now() < deadline) await delay(100);
       assert.ifError(spawnError);
       assert.ok(existsSync(join(directory, 'installed-ui.ready')), `Installed UI failed: ${readFileSync(log, 'utf8').slice(-5000)}`);
+      const failure = join(directory, 'installed-ui.error');
+      assert.ok(!existsSync(failure), existsSync(failure) ? readFileSync(failure, 'utf8') : '');
     },
     async finish() {
       writeFileSync(join(directory, 'installed-ui.finish'), 'finish\n', { flag: 'wx' });
@@ -34,7 +36,8 @@ export async function startInstalledUi(os, output) {
         await Promise.race([completed, delay(5000)]);
         assert.fail('Installed UI runner did not stop');
       }
-      assert.deepEqual(result, { code: 0, signal: null }, `Installed UI runner failed: ${readFileSync(log, 'utf8').slice(-5000)}`);
+      return { passed: result.code === 0 && result.signal === null,
+        error: `Installed UI runner failed: ${readFileSync(log, 'utf8').slice(-5000)}` };
     },
   };
 }
