@@ -24,9 +24,15 @@ def descendants(root):
 
 def application():
     for app in pyatspi.Registry.getDesktop(0):
-        if "mixrelay" in app.name.lower():
-            return app
-    raise LookupError("Installed MixRelay has no accessibility application")
+        if "mixrelay" not in (app.name or "").lower():
+            continue
+        # The editor and headless runtime have the same AT-SPI application name.
+        # Registration order depends on startup timing; select the visible editor.
+        for window in app:
+            if (window.getRoleName() == "frame" and window.name == "MixRelay"
+                    and window.getState().contains(pyatspi.STATE_SHOWING)):
+                return app
+    raise LookupError("Installed MixRelay has no visible accessibility editor")
 
 
 def find(label, contains=False, interactive=True):

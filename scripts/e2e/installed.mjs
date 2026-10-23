@@ -25,6 +25,7 @@ import {
   restoreUpgradeDriver,
   saveWorkspace,
   upgradeGraph,
+  verifyAuthoredGraph,
   verifyPreservedState,
 } from './upgrade-state.mjs';
 
@@ -204,16 +205,7 @@ export async function qualifyMode({
       const published = async (revision) =>
         assert.equal((await api('graphs')).document.revision, revision);
       const saved = await saveWorkspace(api, operation, published, 'save', path);
-      assert.deepEqual(
-        saved.document.nodes,
-        authored.nodes,
-        'Baseline did not save authored nodes',
-      );
-      assert.deepEqual(
-        saved.document.edges,
-        authored.edges,
-        'Baseline did not save authored routing',
-      );
+      verifyAuthoredGraph(authored, saved);
       unconfirmedMutation = false;
       upgradeState = preservedState(saved, await driver(), path, baselineDriver.defaults);
       evidence('upgrade-state-before.json', upgradeState);
@@ -272,11 +264,7 @@ export async function qualifyMode({
       const current = await api('graphs');
       verifyPreservedState(upgradeState, current, await driver());
       const reopened = await saveWorkspace(api, operation, active, 'open', upgradeState.path);
-      verifyPreservedState(
-        { ...upgradeState, activeId: reopened.activeId },
-        reopened,
-        await driver(),
-      );
+      verifyPreservedState(upgradeState, reopened, await driver());
       evidence(
         'upgrade-state-after.json',
         preservedState(reopened, await driver(), upgradeState.path, upgradeState.defaultDevices),

@@ -1,0 +1,5 @@
+{
+  local:
+    dbus_*;
+    _dbus_*;
+};

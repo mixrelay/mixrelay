@@ -24,6 +24,11 @@ its executables. Keep `release-input.json` with the build evidence. RPM remains 
 packaging capability; it has no qualified distribution target and cannot be included
 in a release candidate under this contract.
 
+Linux 링크는 keyring의 정적 `libdbus.a` 심볼을 외부에 노출하지 않는다. GTK/AT-SPI가
+시스템 libdbus로 만든 객체를 private libdbus가 처리하는 충돌을 방지한다.
+이 링크 설정을 바꾼 경우 Linux 패키지를 다시 빌드해야 하며, 기존 파일로 실행한
+suite 결과는 수정한 실행 파일의 검증이 아니다.
+
 Build the Universal macOS PKG from the same source commit with the existing signing
 workflow: first `pnpm signing:check`, then `pnpm release:macos --output EMPTY_DIRECTORY`.
 Use the notarized, stapled final PKG. Both CPUs and every macOS target install this
@@ -107,6 +112,13 @@ collects evidence and deletes the VM. KVM is used when available; otherwise the 
 guest CPU architecture runs with TCG. `vm-session.json` records the accelerator;
 ARM TCG uses the Cortex-A72 model. TCG results are functional evidence and do not
 establish hardware latency.
+
+폐기할 guest는 고정된 커널을 그대로 사용하므로 cloud-init에서 needrestart의
+커널 이미지 검사만 끈다(`kernelhints = 0`). Ubuntu ARM에서 제품 설정을 마친 뒤에도
+커널 검사에 머물러 전체 설치의 20분 제한을 넘긴 증거에 따른 설정이며, 라이브러리·서비스 검사와 패키지 설치·
+실행 파일 대조는 유지한다. 설치 제한 시간은 늘리지 않으며 이 설정은
+`vm-session.json`의 `provisioning.needrestartKernelHints`에 기록한다.
+
 The pinned Kali 2026.2 ARM image contains a stale EFI mount PARTUUID. Cloud-init
 preserves the original fstab and corrects that entry from the guest's EFI partition
 in its disposable overlay; `vm-session.json` records this provisioning repair.
@@ -190,7 +202,9 @@ scenario baseline does not establish the other product requirements as verified.
    그 레이트를 유지한다. 명령마다 revision을 확인하고 양방향 현재 형식의 readback과
    저장 오류 부재를 확인한다. 장치 추가·이름 변경에는 유료 인증이 필요하므로 사용하지 않는다.
    게인 -6dB·녹음기 연결 그래프를 실제 workspace API로 `.mix` 파일에 저장하고,
-   저장 결과의 노드·설정·연결이 작성한 내용과 같은지 확인한다. baseline 그래프의
+   저장 결과의 활성 그래프 ID·노드·설정·연결이 작성한 내용과 같은지 확인한다.
+   생략한 label과 control은 그래프 문서의 기본값(null, enabled=true, muted=false)으로
+   비교하며, 기본값과 다른 제어 상태나 설정·연결 손실은 실패한다. baseline 그래프의
    native 오디오 활성화·수락은 요구하지 않으며, 후보를 덮어 설치한 뒤 기존 검사로 확인한다.
 3. 앱을 정상 종료한 뒤 macOS는 `installer -pkg`, Linux는 `apt-get install --reinstall` 또는
    `pacman -U`로 후보를 덮어 설치한다. 이전 제품을 제거하는 명령은 이 두 설치 사이에 없다.

@@ -8,6 +8,18 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         build_macos_audio("Info.plist");
     }
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        // Keyring's private D-Bus must not interpose GTK/AT-SPI's system libdbus.
+        // Rust bundles the C objects into an rlib, so an archive-name filter is insufficient.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .expect("Cargo provides CARGO_MANIFEST_DIR to build scripts");
+        let symbols = std::path::Path::new(&manifest).join("dbus-symbols.map");
+        println!("cargo:rerun-if-changed={}", symbols.display());
+        println!(
+            "cargo:rustc-link-arg=-Wl,--version-script={}",
+            symbols.display()
+        );
+    }
     tauri_build::build();
 }
 

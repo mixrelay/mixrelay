@@ -24,6 +24,34 @@ export function upgradeGraph(document, graphId) {
   };
 }
 
+function authoredNodes(nodes) {
+  return nodes
+    .map(({ id, type, config, label = null, control = {} }) => {
+      assert.ok(
+        control && typeof control === 'object' && !Array.isArray(control),
+        'Invalid saved node control',
+      );
+      return { id, type, config, label, control: { enabled: true, muted: false, ...control } };
+    })
+    .sort(byId);
+}
+
+const byId = (left, right) => left.id.localeCompare(right.id);
+
+export function verifyAuthoredGraph(authored, saved) {
+  assert.equal(saved.activeId, authored.expectedGraphId, 'Baseline changed the active graph');
+  assert.deepEqual(
+    authoredNodes(saved.document.nodes),
+    authoredNodes(authored.nodes),
+    'Baseline did not save authored nodes',
+  );
+  assert.deepEqual(
+    [...saved.document.edges].sort(byId),
+    [...authored.edges].sort(byId),
+    'Baseline did not save authored routing',
+  );
+}
+
 function driverSettings(snapshot) {
   assert.equal(snapshot.state, 'ready', 'Upgrade needs a ready Driver');
   assert.ok(
@@ -128,6 +156,10 @@ export async function restoreUpgradeDriver(driver, defaults) {
 }
 
 export function preservedState(catalog, driver, path, defaultDevices) {
+  assert.ok(
+    typeof catalog.activeId === 'string' && catalog.activeId.length > 0,
+    'Upgrade needs an active graph',
+  );
   assert.ok(catalog.document.nodes.length > 0, 'Upgrade needs an authored graph');
   assert.ok(catalog.document.edges.length > 0, 'Upgrade needs authored routing');
   assert.ok(driver.settings.devices.length > 0, 'Upgrade needs saved Driver devices');
@@ -147,8 +179,16 @@ export function preservedState(catalog, driver, path, defaultDevices) {
 
 export function verifyPreservedState(before, catalog, driver) {
   assert.deepEqual(
-    { activeId: catalog.activeId, nodes: catalog.document.nodes, edges: catalog.document.edges },
-    { activeId: before.activeId, nodes: before.nodes, edges: before.edges },
+    {
+      activeId: catalog.activeId,
+      nodes: authoredNodes(catalog.document.nodes),
+      edges: [...catalog.document.edges].sort(byId),
+    },
+    {
+      activeId: before.activeId,
+      nodes: authoredNodes(before.nodes),
+      edges: [...before.edges].sort(byId),
+    },
     'Upgrade lost the saved graph',
   );
   assert.deepEqual(driverSettings(driver), before.devices, 'Upgrade lost Driver settings');

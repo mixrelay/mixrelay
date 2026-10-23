@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
 import { cloudConfig, cloudNetwork, guestDiskSize, qemuArguments } from './github-vm.mjs';
 
 test('cloud guest has a locked account and a job-specific SSH key', () => {
@@ -15,6 +16,24 @@ test('cloud overlays preserve large disks with trailing boot partitions and grow
   assert.equal(guestDiskSize({ 'virtual-size': 3 * 1024 ** 3 }), 20 * 1024 ** 3);
   assert.equal(guestDiskSize({ 'virtual-size': 32 * 1024 ** 3 }), 32 * 1024 ** 3);
   assert.throws(() => guestDiskSize({ 'virtual-size': -1 }));
+});
+
+test('disposable guests disable only needrestart kernel-image scanning before apt runs', () => {
+  const config = JSON.parse(cloudConfig('ssh-ed25519 AAAA test').split('\n').slice(1).join('\n'));
+  const file = config.write_files.find(
+    (entry) => entry.path === '/etc/needrestart/conf.d/99-mixrelay-qualification.conf',
+  );
+  assert.equal(file.permissions, '0644');
+  const settings = execFileSync(
+    'perl',
+    [
+      '-e',
+      'our %nrconf = (kernelhints => 1, restart => "i", interpscan => 1); eval $ARGV[0]; die $@ if $@; print join("\\t", map { "$_=$nrconf{$_}" } sort keys %nrconf);',
+      file.content,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.deepEqual(settings.split('\t'), ['interpscan=1', 'kernelhints=0', 'restart=i']);
 });
 test('QEMU uses the native guest CPU and binds SSH only to the hosted runner loopback', () => {
   const settings = {

@@ -9,8 +9,62 @@ import {
   restoreUpgradeDriver,
   saveWorkspace,
   upgradeGraph,
+  verifyAuthoredGraph,
   verifyPreservedState,
 } from './upgrade-state.mjs';
+
+// Extracted from run 40019418055, debian-13-x64/upgrade/upgrade-session.mix.
+const savedSession = JSON.parse(
+  readFileSync(new URL('./fixtures/upgrade-session.json', import.meta.url)),
+);
+
+function savedCatalog() {
+  const catalog = structuredClone(savedSession.catalog);
+  return {
+    ...catalog,
+    document: catalog.graphs.find((graph) => graph.id === catalog.activeId).document,
+  };
+}
+
+test('baseline save accepts serialized label and control defaults from the real session', () => {
+  const saved = savedCatalog();
+  const authored = upgradeGraph({ revision: 1 }, 'graph-1');
+  assert.notDeepEqual(saved.document.nodes, authored.nodes);
+  verifyAuthoredGraph(authored, saved);
+  saved.document.nodes.reverse();
+  verifyAuthoredGraph(authored, saved);
+});
+
+for (const [name, mutate] of [
+  ['missing node', (s) => s.document.nodes.pop()],
+  ['extra node', (s) => s.document.nodes.push({ ...s.document.nodes[0], id: 'extra' })],
+  ['changed node ID', (s) => { s.document.nodes[0].id = 'different'; }],
+  ['changed node type', (s) => { s.document.nodes[0].type = 'compressor'; }],
+  ['missing config value', (s) => { delete s.document.nodes[0].config.gainDb; }],
+  ['changed config value', (s) => { s.document.nodes[0].config.gainDb = 0; }],
+  ['changed channels', (s) => { s.document.nodes[1].config.channels = 1; }],
+  ['changed label', (s) => { s.document.nodes[0].label = 'different'; }],
+  ['disabled node', (s) => { s.document.nodes[0].control.enabled = false; }],
+  ['muted node', (s) => { s.document.nodes[0].control.muted = true; }],
+  ['invalid null control', (s) => { s.document.nodes[0].control = null; }],
+  ['invalid array control', (s) => { s.document.nodes[0].control = []; }],
+  ['missing edge', (s) => { s.document.edges = []; }],
+  ['extra edge', (s) => { s.document.edges.push({ ...s.document.edges[0], id: 'extra' }); }],
+  ['changed edge ID', (s) => { s.document.edges[0].id = 'different'; }],
+  ['changed edge destination', (s) => { s.document.edges[0].destination.nodeId = 'upgrade-gain'; }],
+  ['changed edge port', (s) => { s.document.edges[0].source.portId = 'different'; }],
+  ['changed channel mapping', (s) => { s.document.edges[0].channelMapping = { mode: 'manual', routes: [] }; }],
+  ['changed active graph', (s) => { s.activeId = 'other'; }],
+]) {
+  test(`baseline save and upgrade preservation reject ${name}`, (t) => {
+    const f = fixture(t);
+    const before = preservedState(f.catalog, f.driver, f.path, f.defaults);
+    const saved = savedCatalog();
+    mutate(saved);
+    assert.throws(() => verifyAuthoredGraph(upgradeGraph({ revision: 1 }, 'graph-1'), saved));
+    assert.throws(() => verifyPreservedState(before, saved, f.driver));
+  });
+}
 
 function defaultDriver() {
   const format = { sampleRate: 48000, channels: 2, sampleFormat: 'float32' };
@@ -64,11 +118,8 @@ function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'mixrelay-upgrade-state-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const path = join(directory, 'session.mix');
-  const catalog = {
-    activeId: 'graph-1',
-    document: upgradeGraph({ revision: 6, nodes: [], edges: [] }, 'graph-1'),
-  };
-  writeFileSync(path, JSON.stringify({ format: 'MixRelay', version: 1, catalog }));
+  const catalog = savedCatalog();
+  writeFileSync(path, JSON.stringify(savedSession));
   const driver = defaultDriver();
   for (const direction of ['render', 'capture']) {
     driver.settings.devices[0].nativeFormats[direction].current.sampleFormat = 'signed16';
@@ -80,6 +131,8 @@ test('preservation compares authored content and current formats while ignoring 
   const f = fixture(t);
   const before = preservedState(f.catalog, f.driver, f.path, f.defaults);
   f.catalog.document.revision = 22;
+  delete f.catalog.document.nodes[0].label;
+  delete f.catalog.document.nodes[0].control;
   f.driver.revision = 42;
   f.driver.settings.devices[0].nativeDeviceIds = ['new-native-id'];
   f.driver.settings.devices[0].nativeFormats.render.supported = [];

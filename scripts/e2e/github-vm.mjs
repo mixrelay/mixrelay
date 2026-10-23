@@ -48,6 +48,16 @@ systemctl --no-block start default.target
             }
           : {}),
         ssh_pwauth: false,
+        // The guest keeps its pinned kernel and is discarded after qualification.
+        // Ubuntu ARM needrestart can spend the entire install budget scanning vmlinuz.
+        // Keep its library/service checks, but do not scan unused kernel images.
+        write_files: [
+          {
+            path: '/etc/needrestart/conf.d/99-mixrelay-qualification.conf',
+            permissions: '0644',
+            content: '$nrconf{kernelhints} = 0;\n',
+          },
+        ],
         users: [
           {
             name: 'qa',
@@ -278,7 +288,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     // The pinned Kali ARM image has a stale EFI PARTUUID in fstab. Preserve the
     // image entry and repair only that mount in the disposable guest overlay.
     const repairEfiMount = targetId === 'kali-rolling-arm64';
-    session.provisioning = { repairEfiMount };
+    session.provisioning = { repairEfiMount, needrestartKernelHints: false };
     writeFileSync(
       join(state, 'user-data'),
       cloudConfig(readFileSync(`${key}.pub`, 'utf8').trim(), { repairEfiMount }),
