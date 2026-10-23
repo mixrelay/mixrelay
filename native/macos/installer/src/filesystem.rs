@@ -294,15 +294,18 @@ impl FilesystemAdapter {
         request: &TransactionRequest,
     ) -> Result<FilesystemSnapshot, FilesystemError> {
         self.validate_staging_location()?;
-        let product_directory = self.observe_product_directory()?;
-        let targets = self.observe_targets()?;
+        let snapshot = self.snapshot_targets()?;
         if let TransactionRequest::Install(sources) = request {
             self.validate_sources(sources)?;
         }
+        Ok(snapshot)
+    }
+
+    pub(crate) fn snapshot_targets(&self) -> Result<FilesystemSnapshot, FilesystemError> {
         Ok(FilesystemSnapshot {
             layout: self.layout.clone(),
-            targets,
-            product_directory,
+            targets: self.observe_targets()?,
+            product_directory: self.observe_product_directory()?,
         })
     }
 
@@ -565,7 +568,10 @@ impl FilesystemAdapter {
         }
     }
 
-    fn ensure_snapshot(&self, snapshot: &FilesystemSnapshot) -> Result<(), FilesystemError> {
+    pub(crate) fn ensure_snapshot(
+        &self,
+        snapshot: &FilesystemSnapshot,
+    ) -> Result<(), FilesystemError> {
         if snapshot.layout != self.layout {
             return Err(FilesystemError::ReceiptMismatch);
         }

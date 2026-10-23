@@ -3,10 +3,11 @@
 //! Existing targets inspected before install/update or removal use ownership:
 //! fixed bundle/executable identity, Developer ID team requirement, valid signature,
 //! Universal 2, Hardened Runtime and secure timestamp. Their entitlements are unrestricted.
-//! Sources, private staged payloads, installed results before reopening apps, and
-//! code about to run use launch policy with the exact role entitlement allowlist.
+//! Sources, private staged payloads and new installed code before registration or
+//! reopening apps use launch policy with the exact role entitlement allowlist.
 //! This includes the engine, HAL, Driver, uninstaller and embedded installer helper.
-//! Rollback may restore owned files, but relaunch still requires launch policy.
+//! Recovery reactivates previous code with ownership and equality to the captured
+//! installation snapshot. Previous versions may have different entitlements.
 
 use std::{
     fs::File,
@@ -24,6 +25,8 @@ use crate::{
 };
 
 mod policy;
+mod recovery;
+pub use recovery::OwnedInstallationSnapshot;
 #[cfg(target_os = "macos")]
 mod security_metadata;
 mod signature;
@@ -70,6 +73,15 @@ impl SigningTeam {
 /// Native release payload failure; no installed artifact is changed by verification.
 #[derive(Debug, Error)]
 pub enum ReleaseError {
+    /// Recovery targets differ from the captured filesystem state.
+    #[error(transparent)]
+    Filesystem(#[from] crate::FilesystemError),
+    /// A recovery snapshot was captured for a different publisher or account.
+    #[error("installation recovery snapshot belongs to another publisher or account")]
+    SnapshotIdentity,
+    /// A file inside an installed bundle changed since the snapshot.
+    #[error("restored installation entries differ from their preflight snapshot")]
+    SnapshotContents,
     /// Invalid publisher identifier.
     #[error("expected a ten-character uppercase Apple Developer Team identifier")]
     SigningTeam,
@@ -158,7 +170,7 @@ impl ReleasePayloadVerifier {
         self.verify_with(sources, true, verify_signature)
     }
 
-    /// Verifies an installation that closed apps can be reopened on.
+    /// Verifies new installed code before registration or reopening apps.
     ///
     /// Every `required` target must be present, and every present target passes
     /// launch policy, including exact entitlements. A missing target
@@ -179,14 +191,22 @@ impl ReleasePayloadVerifier {
         required: &[OwnedTarget],
         signature: impl FnMut(&Path, &str, ArtifactRole, VerificationPolicy) -> Result<(), ReleaseError>,
     ) -> Result<(), ReleaseError> {
+        Self::require_targets(layout, required)?;
+        self.verify_present_with(layout, VerificationPolicy::Launch, signature)
+            .map(|_| ())
+    }
+
+    fn require_targets(
+        layout: &FilesystemLayout,
+        required: &[OwnedTarget],
+    ) -> Result<(), ReleaseError> {
         for target in required {
             let path = layout.root().join(target.path().trim_start_matches('/'));
             if let Err(source) = std::fs::symlink_metadata(&path) {
                 return Err(ReleaseError::Io { path, source });
             }
         }
-        self.verify_present_with(layout, VerificationPolicy::Launch, signature)
-            .map(|_| ())
+        Ok(())
     }
 
     /// Verifies ownership of each present target before replacement or removal.

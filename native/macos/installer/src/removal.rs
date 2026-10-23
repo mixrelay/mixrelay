@@ -154,6 +154,30 @@ pub fn removal_launchd_template(team: &SigningTeam) -> String {
 pub fn register_helper(team: &SigningTeam) -> Result<()> {
     require_root()?;
     verify_installed_remover(team)?;
+    register_verified_helper()
+}
+
+/// Restores the previous remover after ownership and preflight identity verification.
+pub(crate) fn restore_helper(
+    verifier: &ReleasePayloadVerifier,
+    layout: &crate::FilesystemLayout,
+    snapshot: &crate::OwnedInstallationSnapshot,
+    team: &SigningTeam,
+) -> Result<()> {
+    require_root()?;
+    verifier.verify_restored(
+        layout,
+        &[
+            crate::OwnedTarget::Uninstaller,
+            crate::OwnedTarget::RemovalLaunchd,
+        ],
+        snapshot,
+    )?;
+    verify_remaining_remover(team)?;
+    register_verified_helper()
+}
+
+fn register_verified_helper() -> Result<()> {
     // SAFETY: no caller pointers; this installs only the fixed right in the native shim.
     let status = unsafe { MRRemovalRightRegister() };
     ensure!(

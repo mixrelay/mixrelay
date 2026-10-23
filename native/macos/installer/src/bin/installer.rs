@@ -134,6 +134,9 @@ fn run_transaction(
         // The transaction verifies its private copies again before commit.
         recovery_verifier.verify_sources(sources)?;
     }
+    // Capture before Quit so failures before transaction preflight can reopen only
+    // the previous owned code, including versions with different entitlements.
+    let previous = recovery_verifier.snapshot_owned(&installed_layout)?;
     let mut running = Vec::new();
     // The complete product owns the editor as well as the audio runtime.
     // Acknowledged Quit saves state before replacement; relaunch follows commit.
@@ -175,7 +178,7 @@ fn run_transaction(
         |closed| {
             may_relaunch_apps.get()
                 && recovery_verifier
-                    .verify_installed(&installed_layout, &dependencies(closed))
+                    .verify_restored(&installed_layout, &dependencies(closed), &previous)
                     .is_ok()
         },
     )?;

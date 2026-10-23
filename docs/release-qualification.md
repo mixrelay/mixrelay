@@ -38,10 +38,13 @@ not infer a binary's source commit from its bytes.
 macOS 설치·업데이트·제거 전에는 기존 코드의 번들 ID·실행 파일, 게시자 팀의 Developer ID
 요구사항, 유효한 서명, Universal 2, Hardened Runtime·보안 타임스탬프로 소유권을 확인한다.
 기존 코드의 entitlement 집합은 소유권 판단에 사용하지 않는다. 새 원본·비공개 payload와
-설치 완료 결과, 서비스 등록·앱 재실행·롤백 후 재실행에는 역할별 entitlement allowlist의
-정확한 일치를 요구한다. 앱·엔진·HAL·Driver·제거 앱·내장 설치 도우미가 모두 대상이다.
+설치 완료 결과, 새 코드의 서비스 등록·앱 재실행에는 역할별 entitlement allowlist의
+정확한 일치를 요구한다. 실패·롤백 후 이전 코드를 다시 활성화할 때는 소유권과 작업 전
+파일·launchd 스냅샷의 일치를 확인하며 현재 entitlement 집합을 요구하지 않는다.
+앱·엔진·HAL·Driver·제거 앱·내장 설치 도우미가 모두 대상이다.
 업데이트·제거 검증에는 entitlement가 없거나 현재 allowlist와 다른 기존 자사 설치본을
-포함한다. 다른 팀·미서명 코드의 거부와 새 payload·설치 완료 결과의 엄격한 검증도 확인한다.
+포함한다. 실패한 업그레이드에서 이전 코드의 복원·재활성화, 다른 팀·미서명 코드의 거부와
+새 payload·설치 완료 결과의 엄격한 검증도 확인한다.
 소스의 주입된 서명 메타데이터 테스트와 실제 서명 PKG의 설치 검증 결과는 구분해 기록한다.
 
 Collect the four final artifacts in a fresh directory. For example:

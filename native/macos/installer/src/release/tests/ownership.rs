@@ -5,7 +5,7 @@ use crate::release::policy::{
     Architecture, SignatureMetadata, expected_entitlements, verify_slices,
 };
 
-fn signed_metadata(role: ArtifactRole) -> Vec<(Architecture, SignatureMetadata)> {
+pub(super) fn signed_metadata(role: ArtifactRole) -> Vec<(Architecture, SignatureMetadata)> {
     Architecture::ALL
         .into_iter()
         .map(|architecture| {
@@ -52,7 +52,7 @@ fn installed_ownership_accepts_app_without_current_entitlements() {
     }
 }
 
-fn check_metadata(
+pub(super) fn check_metadata(
     path: &Path,
     role: ArtifactRole,
     policy: VerificationPolicy,
@@ -163,7 +163,7 @@ fn ownership_requires_hardened_runtime_timestamp_and_both_architectures_for_ever
     }
 }
 
-fn wrong_entitlements(
+pub(super) fn wrong_entitlements(
     rejected_role: ArtifactRole,
 ) -> impl FnMut(&Path, &str, ArtifactRole, VerificationPolicy) -> Result<(), ReleaseError> {
     move |path, _, role, policy| {

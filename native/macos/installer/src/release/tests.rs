@@ -446,3 +446,5 @@ fn stage_verification_checks_private_copies_even_when_sources_are_removed() {
 }
 
 mod ownership;
+
+mod recovery;

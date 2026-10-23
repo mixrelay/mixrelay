@@ -62,7 +62,7 @@ pub use native::{
     require_root, resolve_console_account, resolve_install_account, resolve_removal_account,
 };
 #[cfg(unix)]
-pub use release::{ReleaseError, ReleasePayloadVerifier, SigningTeam};
+pub use release::{OwnedInstallationSnapshot, ReleaseError, ReleasePayloadVerifier, SigningTeam};
 pub use request::{InstallSources, OperationKind, TransactionRequest};
 pub use transaction::{
     CleanupStatus, ExecutionResult, RecoveryPhase, RecoveryStatus, TransactionError,

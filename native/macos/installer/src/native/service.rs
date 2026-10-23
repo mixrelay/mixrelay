@@ -1,4 +1,8 @@
 //! Native `ServiceLifecycle` implementation composed with the fixed transaction core.
+//!
+//! New code passes Launch verification before registration. Rollback reactivates
+//! the previous Driver, engine, HAL and remover only after Ownership verification
+//! and equality to the preflight file and launchd snapshots.
 
 use std::{fs, path::PathBuf};
 
@@ -203,6 +207,7 @@ impl ServiceLifecycle for NativeServiceLifecycle {
             None
         };
         Ok(NativeServiceSnapshot {
+            owned_installation: self.verifier.snapshot_owned(layout)?,
             registration,
             launchd_configuration: installed,
             account: self.account.clone(),
@@ -428,10 +433,16 @@ impl ServiceLifecycle for NativeServiceLifecycle {
                 "registration changed after rollback drain",
             ));
         }
-        // Restored files must satisfy launch policy before reactivating any code.
-        self.verifier.verify_installed(&layout, &[])?;
+        self.verifier
+            .verify_restored(&layout, &[], &snapshot.owned_installation)?;
         if snapshot.remover_was_present {
-            crate::removal::register_helper(&self.team).map_err(NativeError::UserData)?;
+            crate::removal::restore_helper(
+                &self.verifier,
+                &layout,
+                &snapshot.owned_installation,
+                &self.team,
+            )
+            .map_err(NativeError::UserData)?;
         } else if self.operation == crate::OperationKind::Install {
             crate::removal::remove_right().map_err(NativeError::UserData)?;
         }
@@ -471,6 +482,7 @@ impl ServiceLifecycle for NativeServiceLifecycle {
 /// Immutable platform snapshot used to restore launchd registration after file rollback.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeServiceSnapshot {
+    owned_installation: crate::OwnedInstallationSnapshot,
     registration: RegistrationState,
     launchd_configuration: Option<LaunchdConfiguration>,
     account: ResolvedServiceAccount,
