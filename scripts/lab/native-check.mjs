@@ -245,7 +245,7 @@ function main() {
   const sourceRevision = process.env.MIXRELAY_SOURCE_REVISION
     ?? spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).stdout?.trim();
   const report = { startedAt, endedAt: new Date().toISOString(), mode,
-    sourceRevision, contractSha256: loadContract().sha256,
+    sourceRevision, contractSha256: loadContract().sha256, compilerCache: process.env.MIXRELAY_COMPILER_CACHE,
     environment,
     os: platform(), arch: arch(), kernel: release(), distro, ...result };
   const directory = resolve(root, ".lab/reports");

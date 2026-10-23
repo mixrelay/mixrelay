@@ -18,6 +18,8 @@
 
 Rust 컴파일 캐시는 sccache를 쓴다. 저장소는 sccache를 요구하지 않으므로, 개발 머신에서는 설치(`brew install sccache`) 후 사용자 cargo 설정 `~/.cargo/config.toml`에 `[build] rustc-wrapper = "sccache"`를 둔다. 그러면 pnpm 검사·릴리스 빌드·tauri를 포함한 모든 cargo 호출이 캐시를 쓴다. 증분 컴파일 중인 워크스페이스 크레이트는 캐시되지 않고 의존 크레이트·릴리스 빌드가 캐시된다. CI macOS 작업은 GitHub Actions 캐시와 `CARGO_INCREMENTAL=0`으로 sccache를 쓴다. 상태는 `sccache --show-stats`로 본다.
 
+CI는 `scripts/prepare-compiler-cache.mjs`로 실제 compiler/cache 준비를 확인한다. GitHub 원격 캐시가 시작되지 않으면 같은 sccache의 1GiB 로컬 저장소로 전환한다. 원격·로컬 준비가 모두 실패하면 CI도 실패하며, 빌드·테스트는 생략하지 않는다. 캐시의 서명 URL이 진단에 포함될 수 있어 preflight는 원시 오류를 공개 로그에 출력하지 않는다. 선택한 캐시 모드는 개발 검사 보고서에 남는다.
+
 임시 파일 생성은 가급적 피한다. 짧은 일회성 조회·수정은 기존 도구와 직접 실행하는 명령으로 처리한다.
 
 반복해서 사용할 긴 스크립트는 프로젝트 도구로 관리한다. 매번 임시 스크립트를 새로 만들지 않는다.

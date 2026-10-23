@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 24.19.0
       - run: node scripts/support-contract.mjs check
-      - run: node --test scripts/support-contract.test.mjs scripts/qualification.test.mjs scripts/e2e/*.test.mjs scripts/prepare-release-manifest.test.mjs
+      - run: node --test scripts/support-contract.test.mjs scripts/qualification.test.mjs scripts/e2e/*.test.mjs scripts/prepare-release-manifest.test.mjs scripts/prepare-compiler-cache.test.mjs
       - id: matrix
         run: node scripts/support-contract.mjs matrix >> "$GITHUB_OUTPUT"
 
@@ -60,6 +60,8 @@ jobs:
           # The HAL bundle is universal: check:native also builds the Intel slice.
           rustup toolchain install 1.96.0 --profile minimal --target aarch64-apple-darwin,x86_64-apple-darwin
           rustup default 1.96.0
+      - name: Select working remote or local compiler cache
+        run: node scripts/prepare-compiler-cache.mjs
       - name: Verify hosted OS and CPU
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
