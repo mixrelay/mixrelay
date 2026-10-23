@@ -13,7 +13,9 @@ else
     pipewire-pulse wireplumber gnome-keyring libsecret-tools libarchive-tools openbox sudo
 fi
 loginctl enable-linger qa
-install -d -o qa -g qa /home/qa/.config/systemd/user
+install -d -m 0700 -o qa -g qa /home/qa/.config /home/qa/.config/systemd /home/qa/.config/systemd/user
+sudo -u qa test -w /home/qa/.config
+stat -c '%U:%G %a %n' /home/qa/.config /home/qa/.config/systemd /home/qa/.config/systemd/user
 cat > /home/qa/.config/systemd/user/mixrelay-qa-display.service <<'UNIT'
 [Unit]
 Description=Disposable qualification X11 display
