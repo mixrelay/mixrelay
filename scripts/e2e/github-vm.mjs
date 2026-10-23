@@ -184,7 +184,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
       await command('scp', [...sshOptions, '-P', String(port), ...files, 'qa@127.0.0.1:/home/qa/candidate/'], { timeout: 300000 });
     }
     // Forward only public run identity. Workflow tokens and host environment stay outside the VM.
-    const identity = ['GITHUB_REPOSITORY', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'].map(name => {
+    const identity = ['GITHUB_REPOSITORY', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA'].map(name => {
       const value = process.env[name] ?? ''; assert.match(value, /^[A-Za-z0-9/._-]+$/); return `${name}=${value}`;
     });
     phase(smoke ? 'Checking the actual OS and desktop audio prerequisites' : 'Installing the exact candidate and running the shared suite');

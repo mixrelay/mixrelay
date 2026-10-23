@@ -2,9 +2,6 @@ name: Build Linux release candidates once per CPU
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .github/workflows/build-linux-release.yml
 
 permissions:
   contents: read

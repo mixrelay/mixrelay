@@ -45,7 +45,7 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
   const report = { schemaVersion: 1, targetId, sourceRevision: candidate.sourceRevision,
     contractSha256: sha256, candidateSha256: digest(JSON.stringify(candidate)), artifactSha256: artifact.sha256,
     provenance: { repository: process.env.GITHUB_REPOSITORY, runId: process.env.GITHUB_RUN_ID,
-      runAttempt: process.env.GITHUB_RUN_ATTEMPT },
+      runAttempt: process.env.GITHUB_RUN_ATTEMPT, suiteRevision: process.env.GITHUB_SHA },
     startedAt: new Date().toISOString(), status: 'failed', cleanup: 'passed', scenarios: [] };
   function evidence(name, value) {
     const bytes = Buffer.from(JSON.stringify(value, null, 2) + '\n');

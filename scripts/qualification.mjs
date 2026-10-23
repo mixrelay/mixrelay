@@ -99,13 +99,29 @@ export function readReports(directory) {
 }
 export function qualificationInventory(candidate, reports, loaded = loadContract()) {
   const result = evaluateQualification(candidate, reports, loaded);
+  const cell = value => String(value ?? 'not observed').replaceAll('|', '/').replaceAll('\n', ' ');
   const summary = `# Candidate qualification\n\nSource: ${candidate.sourceRevision}\n\nContract: ${loaded.sha256}\n\n`
     + '| Environment | Artifact SHA-256 | Result |\n| --- | --- | --- |\n'
     + loaded.contract.qualificationTargets.map(t => {
       const failure = result.failures.find(f => f.startsWith(`${t.id}:`));
       return `| ${t.id} | ${candidate.artifacts.find(a => a.id === t.artifact)?.sha256 ?? 'missing'} | ${failure ? failure.replaceAll('|', '/') : 'passed'} |`;
     }).join('\n') + '\n';
-  return summary + '\n## Scenario results\n\n'
+  const environments = '\n## Observed installed environments\n\n'
+    + '| Environment | OS version | CPU | Kernel | PipeWire | WirePlumber | glibc | Run |\n'
+    + '| --- | --- | --- | --- | --- | --- | --- | --- |\n'
+    + loaded.contract.qualificationTargets.map(target => {
+      const report = reports.find(r => r.targetId === target.id), observed = report?.environment;
+      return '| ' + [target.id, observed?.version, observed?.arch, observed?.kernel,
+        observed?.dependencies?.pipewire, observed?.dependencies?.wireplumber, observed?.dependencies?.glibc,
+        report?.provenance?.runId ? `https://github.com/mixrelay/mixrelay/actions/runs/${report.provenance.runId}` : undefined].map(cell).join(' | ') + ' |';
+    }).join('\n') + '\n';
+  const errors = reports.flatMap(report => {
+    const failures = (report.scenarios ?? []).filter(s => s.status !== 'passed');
+    return [report.error && `${report.targetId}: ${report.error}`,
+      report.cleanupError && `${report.targetId} cleanup: ${report.cleanupError}`,
+      ...failures.map(s => `${report.targetId} / ${s.id} (${s.status}): ${s.error ?? 'No diagnostic recorded'}`)].filter(Boolean);
+  });
+  return summary + environments + '\n## Scenario results\n\n'
     + '| Environment | ' + loaded.contract.scenarios.map(s => s.id).join(' | ') + ' |\n'
     + '| --- | ' + loaded.contract.scenarios.map(() => '---').join(' | ') + ' |\n'
     + loaded.contract.qualificationTargets.map(target => {
@@ -127,7 +143,8 @@ export function qualificationInventory(candidate, reports, loaded = loadContract
         return ['passed', 'failed', 'blocked', 'skipped'].includes(observed.status) ? observed.status : 'invalid result';
       });
       return `| ${target.id} | ${cells.join(' | ')} |`;
-    }).join('\n') + '\n';
+    }).join('\n') + '\n'
+    + (errors.length ? '\n## Failure and blocking diagnostics\n\n' + errors.map(error => `- ${cell(error)}`).join('\n') + '\n' : '');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
