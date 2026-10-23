@@ -1,0 +1,133 @@
+name: Test installed candidate on hosted environments
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/candidate-e2e.yml
+  workflow_dispatch:
+    inputs:
+      linux_build_run:
+        description: Successful Build Linux release candidates run ID
+        type: string
+        required: true
+      macos_candidate_tag:
+        description: Draft release with signed notarized PKG and source-revision.txt
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'mixrelay/mixrelay'
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.selection.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - name: Fetch final installers without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN: ${{ inputs.linux_build_run }}
+          MACOS_TAG: ${{ inputs.macos_candidate_tag }}
+        run: |
+          mkdir -p inputs/linux inputs/macos candidate
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN" > inputs/build-run.json
+          gh release view "$MACOS_TAG" --json isDraft,isPrerelease | jq -e '.isDraft or .isPrerelease'
+          gh release download "$MACOS_TAG" --dir inputs/macos --pattern '*.pkg' --pattern source-revision.txt
+          gh run download "$BUILD_RUN" --pattern 'candidate-*' --dir inputs/linux
+      - name: Pin source, contract and every installer byte
+        id: selection
+        run: node scripts/e2e/select-candidate.mjs --inputs inputs --output candidate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: installed-candidate
+          path: candidate/
+          retention-days: 90
+          if-no-files-found: error
+
+  installed:
+    needs: prepare
+    name: Installed E2E ${{ matrix.id }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: installed-candidate
+          path: candidate
+      - name: Prepare full Linux VM tools
+        if: matrix.os == 'linux'
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: bash scripts/e2e/github-vm-tools.sh "$TARGET_ARCH"
+      - name: Install and exercise final PKG on macOS
+        if: matrix.os == 'macos'
+        env:
+          TARGET: ${{ matrix.id }}
+        run: node scripts/e2e/installed.mjs --target "$TARGET" --directory candidate --candidate candidate/mix-relay.candidate.json --output evidence --disposable-environment
+      - name: Install and exercise final package in the distro VM
+        if: matrix.os == 'linux'
+        env:
+          TARGET: ${{ matrix.id }}
+        run: node scripts/e2e/github-vm.mjs --target "$TARGET" --directory candidate --output evidence
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: installed-target-${{ matrix.id }}
+          path: |
+            evidence/*
+            !evidence/payload
+          retention-days: 90
+          if-no-files-found: error
+
+  inventory:
+    if: always() && needs.prepare.result == 'success'
+    needs: [prepare, installed]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: installed-candidate
+          path: candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: installed-target-*
+          path: qualification
+      - name: Record passed, failed, blocked and unavailable environments
+        run: node scripts/qualification.mjs inventory --directory candidate --candidate candidate/mix-relay.candidate.json --reports qualification --output inventory.md
+      - name: Preserve exact candidate and raw results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: installed-e2e-evidence
+          path: |
+            candidate/
+            qualification/
+            inventory.md
+          retention-days: 90
+          if-no-files-found: error
+      - name: Apply the full support contract
+        run: node scripts/qualification.mjs gate --directory candidate --candidate candidate/mix-relay.candidate.json --reports qualification

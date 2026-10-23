@@ -10,9 +10,17 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadContract } from '../support-contract.mjs';
 
-export function cloudConfig(publicKey) {
+export function cloudConfig(publicKey, { repairEfiMount = false } = {}) {
   assert.match(publicKey, /^ssh-ed25519 [A-Za-z0-9+/=]+(?: [^\n]*)?$/);
   return '#cloud-config\n' + JSON.stringify({ hostname: 'mixrelay-qa', disable_root: true,
+    ...(repairEfiMount ? { bootcmd: [['bash', '-c', `set -euo pipefail
+partuuid=$(blkid -s PARTUUID -o value /dev/vda15)
+test -n "$partuuid"
+cp /etc/fstab /etc/fstab.image-original
+sed -i -E "s@^[^#[:space:]]+([[:space:]]+/boot/efi[[:space:]])@PARTUUID=$partuuid\\1@" /etc/fstab
+systemctl daemon-reload
+systemctl --no-block start default.target
+`]] } : {}),
     ssh_pwauth: false, users: [{ name: 'qa', shell: '/bin/bash', lock_passwd: true,
       sudo: 'ALL=(ALL) NOPASSWD:ALL', ssh_authorized_keys: [publicKey] }] }, null, 2) + '\n';
 }
@@ -126,7 +134,11 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     await command('qemu-img', ['create', '-f', 'qcow2', '-F', info.format, '-b', base, disk, String(session.guestVirtualSize)]);
     const key = join(state, 'ssh');
     await command('ssh-keygen', ['-t', 'ed25519', '-N', '', '-f', key, '-q']);
-    writeFileSync(join(state, 'user-data'), cloudConfig(readFileSync(`${key}.pub`, 'utf8').trim()));
+    // The pinned Kali ARM image has a stale EFI PARTUUID in fstab. Preserve the
+    // image entry and repair only that mount in the disposable guest overlay.
+    const repairEfiMount = targetId === 'kali-rolling-arm64';
+    session.provisioning = { repairEfiMount };
+    writeFileSync(join(state, 'user-data'), cloudConfig(readFileSync(`${key}.pub`, 'utf8').trim(), { repairEfiMount }));
     writeFileSync(join(state, 'meta-data'), `instance-id: mixrelay-${targetId}\nlocal-hostname: mixrelay-qa\n`);
     writeFileSync(join(state, 'network-config'), JSON.stringify(cloudNetwork(), null, 2) + '\n');
     const seed = join(state, 'seed.img');
