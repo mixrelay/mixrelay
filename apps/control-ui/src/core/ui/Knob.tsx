@@ -79,7 +79,11 @@ function useKnobInteraction({
 export function Knob(props: KnobProps) {
   const { label, value, min, max, disabled, valueText, endpoints, onChange } = props;
   const { input, fraction, pointer, key, normalize } = useKnobInteraction(props);
-  const angle = -135 + fraction * 270;
+  const bipolar = min < 0 && max > 0;
+  // Each bipolar half uses its own range so zero stays at twelve o'clock.
+  const position = bipolar ? 0.5 + (value / (value < 0 ? -min : max)) * 0.5 : fraction;
+  const origin = bipolar ? 0.5 : 0;
+  const angle = -135 + position * 270;
   return (
     <div
       className={`${styles.root} nodrag nopan nowheel nokey`}
@@ -96,25 +100,36 @@ export function Knob(props: KnobProps) {
           className={styles.track}
           d="M 9.858 38.142 A 20 20 0 1 1 38.142 38.142"
           pathLength="1"
+          vectorEffect="non-scaling-stroke"
         />
         <path
           className={styles.value}
           d="M 9.858 38.142 A 20 20 0 1 1 38.142 38.142"
           pathLength="1"
-          strokeDasharray={`${fraction} 1`}
+          strokeDasharray={`${Math.abs(position - origin)} 1`}
+          strokeDashoffset={-Math.min(position, origin)}
+          visibility={position === origin ? 'hidden' : undefined}
+          vectorEffect="non-scaling-stroke"
         />
-        <circle className={styles.body} cx="24" cy="24" r="14" />
+        {bipolar ? (
+          <line
+            className={styles.center}
+            x1="24"
+            y1="8"
+            x2="24"
+            y2="10"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
         <line
           className={styles.indicator}
           x1="24"
-          y1="13"
+          y1="5"
           x2="24"
           y2="21"
           transform={`rotate(${angle} 24 24)`}
+          vectorEffect="non-scaling-stroke"
         />
-        {min < 0 && max > 0 ? (
-          <line className={styles.center} x1="24" y1="0" x2="24" y2="3" />
-        ) : null}
       </svg>
       {endpoints ? (
         <span className={styles.endpoints} aria-hidden="true">

@@ -175,3 +175,29 @@ it('exposes channel endpoints without adding duplicate focus targets', () => {
   expect(screen.getByText('R')).toBeInTheDocument();
   expect(dial.querySelectorAll('input')).toHaveLength(1);
 });
+
+it.each([
+  { min: 0, max: 100, value: 0, length: 0, offset: 0, angle: -135 },
+  { min: 0, max: 100, value: 50, length: 0.5, offset: 0, angle: 0 },
+  { min: 0, max: 100, value: 100, length: 1, offset: 0, angle: 135 },
+  { min: -60, max: 12, value: -60, length: 0.5, offset: 0, angle: -135 },
+  { min: -60, max: 12, value: -30, length: 0.25, offset: -0.25, angle: -67.5 },
+  { min: -60, max: 12, value: 0, length: 0, offset: -0.5, angle: 0 },
+  { min: -60, max: 12, value: 6, length: 0.25, offset: -0.5, angle: 67.5 },
+  { min: -60, max: 12, value: 12, length: 0.5, offset: -0.5, angle: 135 },
+])('draws an open dial at $value in $min..$max', ({ length, offset, angle, ...range }) => {
+  const { dial } = renderKnob(range);
+  // Geometry is decorative, so inspect it through the slider's owning dial.
+  const valueArc = dial.querySelector('path[stroke-dasharray]');
+  expect(dial.querySelector('circle')).toBeNull();
+  expect(valueArc).toHaveAttribute('stroke-dasharray', `${length} 1`);
+  expect(valueArc).toHaveAttribute('stroke-dashoffset', String(offset));
+  if (length === 0) expect(valueArc).toHaveAttribute('visibility', 'hidden');
+  else expect(valueArc).not.toHaveAttribute('visibility');
+  const pointer = dial.querySelector('line[transform]');
+  expect(pointer).toHaveAttribute('transform', `rotate(${angle} 24 24)`);
+  expect(pointer).toHaveAttribute('y1', '5');
+  expect(pointer).toHaveAttribute('y2', '21');
+  expect(pointer).toHaveAttribute('vector-effect', 'non-scaling-stroke');
+  expect(valueArc).toHaveAttribute('vector-effect', 'non-scaling-stroke');
+});
