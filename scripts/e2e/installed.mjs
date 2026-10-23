@@ -28,7 +28,7 @@ async function eventually(read, predicate, description) {
 
 export function signalGraph(original, graphId, spec) {
   return { ...original, revision: original.revision + 1, expectedGraphId: graphId,
-    nodes: [{ id: 'qa-source', type: 'virtual_endpoint', config: { ...spec, reference: { render: true, capture: true } } },
+    nodes: [{ id: 'qa-source', type: 'virtual_endpoint', config: { ...spec, reference: { render: false, capture: true } } },
       { id: 'qa-recorder', type: 'recorder', config: { channels: 2 } }],
     edges: [{ id: 'qa-recording', source: { nodeId: 'qa-source', portId: 'from_os' },
       destination: { nodeId: 'qa-recorder', portId: 'audio' }, channelMapping: { mode: 'auto' } }] };

@@ -220,7 +220,10 @@ function useRoutingNodeCreation(options: RoutingNodeCreationOptions) {
                 kind: 'application',
                 bundleId: '',
                 title: t('studioGraph.nodes.systemAudio.name'),
-                selector: { match: 'all_except', bundle_ids: ['io.mixrelay.desktop'] },
+                selector: {
+                  match: 'all_except',
+                  bundle_ids: ['io.mixrelay.desktop', 'mixrelay-engine-service'],
+                },
               }
             : null
           : routingNodeRequest(itemId, applications, audioDevices, processors);

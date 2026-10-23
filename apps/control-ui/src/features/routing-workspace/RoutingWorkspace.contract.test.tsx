@@ -244,7 +244,10 @@ it.each(['core_audio', 'pipe_wire'] as const)(
     expect(write.mock.calls[0]?.[0].nodes[0]).toMatchObject({
       type: 'application_capture',
       config: {
-        selector: { match: 'all_except', bundle_ids: ['io.mixrelay.desktop'] },
+        selector: {
+          match: 'all_except',
+          bundle_ids: ['io.mixrelay.desktop', 'mixrelay-engine-service'],
+        },
         sourcePlayback: 'preserve',
         stream: { channels: 2, channelLayout: 'stereo' },
       },

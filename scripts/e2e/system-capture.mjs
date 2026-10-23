@@ -72,7 +72,7 @@ export async function wholeSystemCapture({ api, apply, graphId, document, device
     }
     applied = await apply({ ...document, revision: document.revision + 1, expectedGraphId: graphId,
       nodes: [{ id: 'qa-system', type: 'application_capture', config: {
-        selector: { match: 'all_except', bundle_ids: ['io.mixrelay.desktop'] },
+        selector: { match: 'all_except', bundle_ids: ['io.mixrelay.desktop', 'mixrelay-engine-service'] },
         stream: { channels: 2, channelLayout: 'stereo' }, sourcePlayback: 'preserve', gainDb: 0,
       } }, { id: 'qa-system-recorder', type: 'recorder', config: { channels: 2 } }],
       edges: [{ id: 'qa-system-record', source: { nodeId: 'qa-system', portId: 'audio' },

@@ -9,7 +9,7 @@ test('unity-level acceptance records the Driver mix without adding a feedback re
   const endpoint = graph.nodes.find(node => node.type === 'virtual_endpoint');
   const recorder = graph.nodes.find(node => node.type === 'recorder');
   assert.equal(endpoint.config.id, spec.id);
-  assert.deepEqual(endpoint.config.reference, { render: true, capture: true });
+  assert.deepEqual(endpoint.config.reference, { render: false, capture: true });
   assert.deepEqual(new Set(graph.edges.filter(edge => edge.source.nodeId === endpoint.id && edge.source.portId === 'from_os')
     .map(edge => `${edge.destination.nodeId}/${edge.destination.portId}`)), new Set([`${recorder.id}/audio`]));
   assert.equal(graph.expectedGraphId, 'selected-graph');
