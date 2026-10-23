@@ -23,6 +23,10 @@ Linux 배포판별 패키지 형식을 읽는다. Arch에서 DEB를 함께 제�
 전용 기기 대신 GitHub-hosted runner를 사용하도록 수정했고 관리자 runner 조회 토큰을 제거했다.
 Linux는 공식 이미지의 URL·체크섬을 고정해 QEMU에서 부팅하며, VM 준비 검사는 설치본 수락과 구별한다.
 서명 후보와 실제 설치본 수락 결과는 준비되지 않았다.
+GitHub-hosted 전환 뒤 로컬 스크립트 검사 410개와 workflow 정적 검사가 통과했다.
+VM 준비 실행 `39933536135`에서 Ubuntu 26.04 x64와 Arch rolling x64는 부팅·X11·PipeWire 사용자 세션과
+환경 식별 검사를 통과했다. ARM Ubuntu는 에뮬레이션 부팅 중 장치 대기로 SSH 준비 제한 시간을 넘겼고,
+TCG CPU 모델을 Cortex-A72로 조정했다. 이 수정과 나머지 VM 준비 결과는 후속 Actions 실행에서 확인한다.
 설치본 UI 조작과 macOS 무료 전체 시스템 캡처는 필수 blocked 항목으로 남아 출시 gate를 차단한다.
 기존 39개 시나리오의 과거 결과를 새 7개 필수 기준선이나 현재 후보의 통과로 승계하지 않는다.
 

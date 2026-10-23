@@ -11,6 +11,11 @@ import { prepareReleaseManifest, assertQualifiedRelease } from './prepare-releas
 const execute = (program, args, options = {}) => execFileSync(program, args, { encoding: 'utf8', timeout: 60000, maxBuffer: 16 * 1024 * 1024, ...options }).trim();
 const api = path => JSON.parse(execute('gh', ['api', path]));
 const read = path => JSON.parse(readFileSync(path));
+export function readWorkflowReports(directory) {
+  // The Actions bundle also contains publication/mix-relay.qualification.json,
+  // which is a receipt, not an environment's scenario report.
+  return readReports(join(directory, 'qualification'));
+}
 export function validateRun(run, receipt) {
   assert.match(String(receipt.runId), /^[1-9]\d*$/);
   assert.equal(String(run.id), receipt.runId);
@@ -88,7 +93,7 @@ async function main() {
     assert.equal(execute('git', ['rev-parse', 'FETCH_HEAD^{commit}']), candidate.sourceRevision, 'Published tag is not the qualified source');
     execute('git', ['merge-base', '--is-ancestor', candidate.sourceRevision, 'HEAD']);
     execute('gh', ['run', 'download', receipt.runId, '--repo', 'mixrelay/mixrelay', '--name', 'qualification-evidence', '--dir', values.output]);
-    const reports = readReports(values.output);
+    const reports = readWorkflowReports(values.output);
     assert.ok(reports.every(report => report.provenance.runId === receipt.runId && report.provenance.runAttempt === receipt.runAttempt), 'Evidence belongs to another workflow execution');
     assertQualifiedRelease(read(join(directory, 'mix-relay.release.json')), candidate, directory, reports, loaded);
     console.log('Published bytes match the candidate qualified by the successful native workflow');

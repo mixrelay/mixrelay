@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { createReadStream, createWriteStream, existsSync, copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, copyFileSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { arch, platform } from 'node:os';
 import { join, resolve } from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -23,7 +22,7 @@ export function qemuArguments({ cpuArch, accelerator, disk, seed, firmware, vari
   assert.ok(['kvm', 'tcg'].includes(accelerator));
   assert.ok(Number.isInteger(port) && port > 1024 && port < 65536);
   return ['-machine', `${cpuArch === 'x64' ? 'q35' : 'virt'},accel=${accelerator}`,
-    '-cpu', accelerator === 'kvm' ? 'host' : 'max', '-smp', '2', '-m', '4096',
+    '-cpu', accelerator === 'kvm' ? 'host' : cpuArch === 'arm64' ? 'cortex-a72' : 'max', '-smp', '2', '-m', '4096',
     '-drive', `if=pflash,format=raw,readonly=on,file=${firmware}`,
     '-drive', `if=pflash,format=raw,file=${variables}`,
     '-drive', `if=virtio,format=qcow2,file=${disk}`,
@@ -84,26 +83,28 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
   const image = contract.qualificationImages[target.execution.image];
   const state = resolve('.lab', `qa-vm-${targetId}`);
   assert.ok(!existsSync(state), 'VM state directory already exists');
+  assert.ok(!existsSync(output), 'Evidence directory already exists');
   mkdirSync(state, { recursive: true, mode: 0o700 }); mkdirSync(output, { recursive: false });
   let qemu, session = { targetId, scope: smoke ? 'host-readiness' : 'installed-qualification', image, arch: arch() };
   const serial = join(output, 'vm-serial.log');
   const stop = () => { if (qemu?.exitCode === null && qemu?.signalCode === null) qemu.kill('SIGTERM'); };
   const cancelled = () => { interrupted = true; stop(); for (const child of activeCommands) child.kill('SIGKILL'); process.exitCode = 1; };
   process.once('SIGTERM', cancelled); process.once('SIGINT', cancelled);
+  const phase = message => console.log(`${targetId}: ${message}`);
   try {
     const archive = join(state, 'image.download');
+    phase('Downloading and verifying the pinned cloud image');
     await downloadImage(image, archive);
     let base = archive;
     if (image.format === 'tar.xz') {
-      const { output: listing } = await command('tar', ['-tf', archive]);
+      const { output: listing } = await command('tar', ['-tf', archive], { timeout: 300000 });
       const disks = listing.split('\n').filter(path => /(?:^|\/)disk\.raw$/.test(path));
       assert.equal(disks.length, 1, 'Expected one disk.raw in the cloud image');
       assert.ok(!disks[0].split('/').includes('..') && !disks[0].startsWith('/'));
-      // Only the named disk is extracted, never archive paths or metadata.
-      const child = spawn('tar', ['-xOf', archive, disks[0]], { stdio: ['ignore', 'pipe', 'inherit'] });
-      base = join(state, 'base.raw');
-      const completed = new Promise((resolvePromise, reject) => { child.once('error', reject); child.once('close', code => code === 0 ? resolvePromise() : reject(new Error('Cloud disk extraction failed'))); });
-      await Promise.all([pipeline(child.stdout, createWriteStream(base)), completed]);
+      // Extract only the pinned disk and preserve sparse extents on the hosted SSD.
+      await command('tar', ['-xSf', archive, '--no-same-owner', '-C', state, '--', disks[0]], { timeout: 300000 });
+      base = join(state, disks[0]);
+      assert.ok(lstatSync(base).isFile(), 'Cloud disk must be a regular file');
     }
     const info = JSON.parse((await command('qemu-img', ['info', '--output=json', base])).output);
     assert.equal(info.format, image.format === 'tar.xz' ? 'raw' : 'qcow2');
@@ -125,6 +126,8 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     const kvm = await command('test', ['-r', '/dev/kvm'], { allowFailure: true });
     const writable = await command('test', ['-w', '/dev/kvm'], { allowFailure: true });
     session.accelerator = kvm.code === 0 && writable.code === 0 ? 'kvm' : 'tcg';
+    session.cpuModel = session.accelerator === 'kvm' ? 'host' : target.arch === 'arm64' ? 'cortex-a72' : 'max';
+    phase(`Booting ${target.arch} guest with ${session.accelerator}; waiting for SSH`);
     qemu = spawn(arch() === 'arm64' ? 'qemu-system-aarch64' : 'qemu-system-x86_64', qemuArguments({ cpuArch: arch(), accelerator: session.accelerator,
       disk, seed, firmware, variables, port, serial }), { stdio: ['ignore', 'ignore', 'pipe'] });
     qemu.stderr.pipe(createWriteStream(join(output, 'qemu.log')));
@@ -140,6 +143,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
       await delay(2000);
     }
     const bootstrapLog = join(output, 'guest-bootstrap.log');
+    phase('SSH is ready; waiting for cloud-init');
     await ssh(['sudo cloud-init status --wait'], { timeout: 180000, log: bootstrapLog });
     await ssh(['mkdir -p /home/qa/workspace /home/qa/tools /home/qa/candidate']);
     const source = join(state, 'source.tar');
@@ -147,6 +151,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     await command('scp', [...sshOptions, '-P', String(port), source, 'qa@127.0.0.1:/home/qa/source.tar']);
     await command('scp', [...sshOptions, '-P', String(port), process.execPath, 'qa@127.0.0.1:/home/qa/tools/node']);
     await ssh(['tar -xf /home/qa/source.tar -C /home/qa/workspace && chmod +x /home/qa/tools/node']);
+    phase('Preparing the guest desktop and PipeWire user session');
     await ssh(['sudo bash /home/qa/workspace/scripts/e2e/guest-bootstrap.sh'], { timeout: 1200000, log: bootstrapLog });
     if (!smoke) {
       const files = readdirSync(directory).map(file => join(directory, file));
@@ -156,6 +161,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     const identity = ['GITHUB_REPOSITORY', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'].map(name => {
       const value = process.env[name] ?? ''; assert.match(value, /^[A-Za-z0-9/._-]+$/); return `${name}=${value}`;
     });
+    phase(smoke ? 'Checking the actual OS and desktop audio prerequisites' : 'Installing the exact candidate and running the shared suite');
     const result = await ssh([`env ${identity.join(' ')} bash /home/qa/workspace/scripts/e2e/guest-session.sh ${smoke ? '--smoke ' : ''}${target.id}`],
       { timeout: 900000, allowFailure: true, log: join(output, 'guest-suite.log') });
     const collected = await command('scp', [...sshOptions, '-P', String(port), '-r', 'qa@127.0.0.1:/home/qa/workspace/evidence/.', output], { timeout: 180000, allowFailure: true });

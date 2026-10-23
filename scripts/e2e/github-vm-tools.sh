@@ -6,6 +6,7 @@ case "$1" in
   arm64) packages=(qemu-system-arm qemu-efi-aarch64) ;;
   *) exit 2 ;;
 esac
+sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends "${packages[@]}" qemu-utils cloud-image-utils acl
 # Some hosted images expose KVM without granting the runner user access.

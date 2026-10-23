@@ -92,7 +92,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           overwrite: true
-          name: qualification-${{ matrix.id }}
+          name: qualification-target-${{ matrix.id }}
           # Extracted package payload is reproducible from the pinned artifact.
           path: |
             evidence/*
@@ -113,8 +113,12 @@ jobs:
           node-version: 24.19.0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: qualification-*
+          pattern: qualification-target-*
           path: qualification
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: qualification-candidate
+          path: qualification/qualification-candidate
       - name: Produce inventory even when an environment failed
         run: node scripts/qualification.mjs inventory --directory qualification/qualification-candidate --candidate qualification/qualification-candidate/mix-relay.candidate.json --reports qualification --output inventory.md
       - name: Require every environment, scenario and exact artifact

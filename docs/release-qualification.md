@@ -73,7 +73,8 @@ Kali and Arch image URLs and checksums. The adapter checks the download before b
 uses a fresh disk overlay and SSH key, forwards only public workflow identity, then
 collects evidence and deletes the VM. KVM is used when available; otherwise the same
 guest CPU architecture runs with TCG. `vm-session.json` records the accelerator;
-TCG results are functional evidence and do not establish hardware latency.
+ARM TCG uses the Cortex-A72 model. TCG results are functional evidence and do not
+establish hardware latency.
 
 `Qualification VM readiness` boots all seven Linux combinations on pull requests
 that change the VM tooling. It checks OS/CPU/dependency identity and desktop audio
@@ -118,6 +119,8 @@ duplicate or mismatched reports, another source/contract, mixed workflow runs an
 failed cleanup. A rolling distribution records its actual OS release, kernel,
 dependency versions and package-list hash on every run. Version rules in the contract
 are qualification representatives: they do not mean every OS patch was executed.
+All reports must belong to one workflow attempt. Use **Re-run all jobs** when retrying
+qualification so successful jobs also produce evidence for the new attempt.
 
 ```sh
 pnpm validation:inventory --directory /absolute/candidate \

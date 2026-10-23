@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, symlinkSync } from 'node:fs';
+import { writeFileSync, readFileSync, symlinkSync, mkdirSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createCandidate, validateCandidate, evaluateQualification, readReports, qualificationInventory } from './qualification.mjs';
 import { assertQualifiedRelease } from './prepare-release-manifest.mjs';
-import { validateRun, successfulSourceRun } from './qualification-ci.mjs';
+import { validateRun, successfulSourceRun, readWorkflowReports } from './qualification-ci.mjs';
 import { qualificationMatrix } from './support-contract.mjs';
 import { qualificationFixture } from './e2e/qualification.fixture.mjs';
 
@@ -59,6 +59,19 @@ test('raw evidence is hashed again rather than trusting a report claim', t => {
   const path = join(f.reportsPath, f.reports[0].targetId, 'unit-evidence.txt');
   writeFileSync(path, 'Changed observation');
   assert.throws(() => readReports(f.reportsPath), /changed raw evidence/);
+});
+
+test('publication rechecks environment reports from the Actions bundle without parsing its receipt as a report', t => {
+  const f = qualificationFixture(t);
+  const bundle = join(f.directory, 'downloaded-actions-bundle'); mkdirSync(bundle);
+  cpSync(f.reportsPath, join(bundle, 'qualification'), { recursive: true });
+  mkdirSync(join(bundle, 'publication'));
+  writeFileSync(join(bundle, 'publication/mix-relay.qualification.json'), JSON.stringify({ schemaVersion: 1, runId: '42' }));
+  const reports = readWorkflowReports(bundle);
+  assert.equal(reports.length, f.loaded.contract.qualificationTargets.length);
+  assert.ok(evaluateQualification(f.candidate, reports).passed);
+  writeFileSync(join(bundle, 'qualification', reports[0].targetId, 'unit-evidence.txt'), 'tampered');
+  assert.throws(() => readWorkflowReports(bundle), /changed raw evidence/);
 });
 
 test('unqualified formats, missing candidate artifacts and symlink installers are rejected', t => {
