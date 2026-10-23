@@ -31,6 +31,13 @@ export function qemuArguments({ cpuArch, accelerator, disk, seed, firmware, vari
     '-display', 'none', '-serial', `file:${serial}`, '-monitor', 'none', '-no-reboot'];
 }
 
+export function guestDiskSize(imageInfo) {
+  const size = imageInfo['virtual-size'];
+  assert.ok(Number.isSafeInteger(size) && size > 0, 'Invalid cloud image virtual size');
+  // Boot/EFI partitions can be at the end of a large sparse cloud disk.
+  return Math.max(size, 20 * 1024 ** 3);
+}
+
 const activeCommands = new Set();
 let interrupted = false;
 function command(program, args, { timeout = 60000, log, allowFailure = false, cwd } = {}) {
@@ -110,7 +117,8 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     assert.equal(info.format, image.format === 'tar.xz' ? 'raw' : 'qcow2');
     assert.ok(!info['backing-filename'], 'Cloud base image must be self-contained');
     const disk = join(state, 'guest.qcow2');
-    await command('qemu-img', ['create', '-f', 'qcow2', '-F', info.format, '-b', base, disk, '20G']);
+    session.baseVirtualSize = info['virtual-size']; session.guestVirtualSize = guestDiskSize(info);
+    await command('qemu-img', ['create', '-f', 'qcow2', '-F', info.format, '-b', base, disk, String(session.guestVirtualSize)]);
     const key = join(state, 'ssh');
     await command('ssh-keygen', ['-t', 'ed25519', '-N', '', '-f', key, '-q']);
     writeFileSync(join(state, 'user-data'), cloudConfig(readFileSync(`${key}.pub`, 'utf8').trim()));
