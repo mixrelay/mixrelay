@@ -1,0 +1,17 @@
+[
+  {
+    "name": "mixrelay-desktop",
+    "sha256": "72d283c9e415b290aab572e59aff1138260cb32177549575b776ff8799e84d4a",
+    "sameBytes": true
+  },
+  {
+    "name": "mixrelay-engine-service",
+    "sha256": "7f84dab4e5b9db93ec70a5093002dff5cf383be67666f390e06f7c123a683b00",
+    "sameBytes": true
+  },
+  {
+    "name": "mixrelay-driver-service",
+    "sha256": "469af2b21af18899b2f55f011d4a89f7a8f72ee3f96f409050e0a69c78c19254",
+    "sameBytes": true
+  }
+]

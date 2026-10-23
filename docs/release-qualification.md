@@ -64,6 +64,14 @@ separately, so test-tool fixes can exercise existing installers without rebuildi
 The resulting `installed-e2e-evidence` artifact contains the exact candidate, raw
 per-environment evidence and `inventory.md`, including failed and unexecuted scenarios.
 This diagnostic workflow runs the full gate but cannot create a publication receipt.
+The optional `targets` input accepts comma-separated hosted target IDs for diagnosis.
+Unselected targets remain unexecuted in the full gate. Use all targets for release
+qualification.
+
+Only preparation jobs receive `contents: write`: GitHub exposes draft releases to
+callers with [push access](https://docs.github.com/en/rest/releases/releases#list-releases).
+Installation jobs keep read-only workflow permissions, and no workflow token enters
+the Linux guest.
 
 `Qualify exact release artifacts` is manually dispatched from `main` with the
 candidate release tag. It accepts source commits already in `main`, checks the
@@ -117,6 +125,11 @@ pnpm test:e2e:installed --target debian-13-x64 \
 ```
 
 Local diagnostic reports have no trusted CI provenance and cannot authorize publication.
+When the engine's readiness telemetry disagrees with the Driver, `APP-01` remains
+failed. Independent native checks proceed only if the installed Driver API reports
+ready at the candidate version and the engine reports the expected protocol, enabled
+power and native backend. `readiness-disagreement.json` preserves both responses.
+The gate still requires `APP-01` to pass.
 The API scenarios do not check rendered UI, launch-icon behaviour, Free-state display
 or permission-dialog recovery. `GRAPH-01` (installed UI) and macOS `AUDIO-11` (free
 whole-system capture) currently produce blocked results because their acceptance

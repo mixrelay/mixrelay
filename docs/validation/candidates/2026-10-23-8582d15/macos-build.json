@@ -1,0 +1,14 @@
+{
+  "sourceRevision": "8582d158455c56006e4288146dcc646100c34bb5",
+  "status": "notarized-artifacts-built",
+  "version": "0.1.0",
+  "teamId": "38UUAD7TUP",
+  "notarization": {
+    "status": "accepted",
+    "notarized": true,
+    "stapled": true,
+    "validated": true,
+    "submissionId": "acc11bf5-2746-4f88-a23d-5631c07a8dee"
+  },
+  "sha256": "926023b29a72a6b4e86386d32e1c7b21458cf41464eb01aa7f32c55dd40fea97"
+}

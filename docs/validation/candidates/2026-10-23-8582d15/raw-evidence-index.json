@@ -1,0 +1,1008 @@
+{
+  "artifact": "installed-e2e-evidence",
+  "runId": "39945522752",
+  "runAttempt": "1",
+  "retentionDays": 90,
+  "files": [
+    {
+      "file": "inventory.md",
+      "size": 30147,
+      "sha256": "699d43491cfbe3c37e3457d97524c47315dc244b3d0df4f6f992616faa9d5001"
+    },
+    {
+      "file": "candidate/MixRelay-Installer-0.1.0.pkg",
+      "size": 69259123,
+      "sha256": "926023b29a72a6b4e86386d32e1c7b21458cf41464eb01aa7f32c55dd40fea97"
+    },
+    {
+      "file": "candidate/MixRelay_0.1.0_amd64.deb",
+      "size": 31683186,
+      "sha256": "9b84bdaa85884576470fb87d94b2f6fc244819dd021d8cf0848822b329a20c4a"
+    },
+    {
+      "file": "candidate/MixRelay_0.1.0_arm64.deb",
+      "size": 30815318,
+      "sha256": "d46de76461f7f77677ef8ebf3baf84e3dce4ef836b6461865d0e484b1ccc1d12"
+    },
+    {
+      "file": "candidate/mix-relay-0.1.0-1-x86_64.pkg.tar.zst",
+      "size": 30405441,
+      "sha256": "03d02a54646802db21f6d4ea87444619a3533656cf9f3ba8cb5a11256386b02d"
+    },
+    {
+      "file": "candidate/mix-relay.candidate.json",
+      "size": 1035,
+      "sha256": "987a80de7566155a81882494f7ba71c298c9e9d716f2b1975c57637c9cba5db6"
+    },
+    {
+      "file": "candidate/selection.json",
+      "size": 557,
+      "sha256": "6fa75b890586eb78f2c4aaa57a109f8c4231ea6be234fb3cf28f69112bc5fb56"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/APP-01.failure.json",
+      "size": 6613,
+      "sha256": "724a6f7db766b1cb7dbc8bb70c2542802fb8a6f269b6b4a179ee90ea95c954ee"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/arch-rolling-x64.qualification.json",
+      "size": 7636,
+      "sha256": "a17b2b7e076436ce3ea6aada5c3f7bc146616e2d96607b3572ec7391a17604e4"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/desktop.log",
+      "size": 472,
+      "sha256": "dc3e0f669184c3627a08915e6deaab1454b9f7cac914a1db976e21bccc4fce46"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/graph-reopen.json",
+      "size": 3504,
+      "sha256": "a72118a64c0a5793100cee79741860023e8af7874d1d8c3ae4530e0abf0ef718"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/guest-bootstrap.log",
+      "size": 21946,
+      "sha256": "766388e3634869d266ac3ab6bc0cbe900f062affa1861241a57a264620d62f49"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/guest-suite.log",
+      "size": 891,
+      "sha256": "55278b4e3f01a7c0aa6416e574fd136802dfd8733274ca61045124619d22b8e8"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/installed-binaries.json",
+      "size": 658,
+      "sha256": "0c4f1e74cce5a8cc58d01cf7ea34798ba15b14cce31365fefed2fed3011ae879"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/native-signal.f32",
+      "size": 1261568,
+      "sha256": "e8c0e667acf64053fddc3e236f8302af9dd970bd0269ca4fff34a4ae04570bd0"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/native-signal.json",
+      "size": 80,
+      "sha256": "18abef21571dc64f7c93ff2b07eec9221b39de82e18fb474e2f5324358b074fa"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/package-install.log",
+      "size": 7111,
+      "sha256": "f428f3383a29b6557c9cb1ecef7bf8b9d10464a8d9900e10237f045ca2144fdc"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/qemu.log",
+      "size": 66,
+      "sha256": "6ec3dabf28742b7709b650212307d23635855493867a766e6c380bc54365d2a9"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/qualification.mix",
+      "size": 1122,
+      "sha256": "7a9a8dd5c5df3467b66ff31d406edc26628dcac72102c199972cb5fba1087d1c"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/readiness-disagreement.json",
+      "size": 11815,
+      "sha256": "407ca2224c3cfc5e0505f07401bd83801176be2b63f765a230e7c6e672b633b7"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/recording-analysis.json",
+      "size": 408,
+      "sha256": "42514be6389622ae4ee32c5dc033d17145504a8bc38b4dc7e9facf3179d2b4c7"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/recording.wav",
+      "size": 1302644,
+      "sha256": "8f7a4dc6b067f611a643de68f6bcdaa9da8149d86e5fbd61dd974250698c4933"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/vm-serial.log",
+      "size": 37593,
+      "sha256": "6355bcef90190d0e1ebb16c2f43b98c063d0aca7a506f3027cbbadda66e58612"
+    },
+    {
+      "file": "qualification/installed-target-arch-rolling-x64/vm-session.json",
+      "size": 666,
+      "sha256": "38ccd911172bbb9601e70bf30be6ceb326317b2a286c1f88bde0dcbe1a9330c2"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/APP-01.failure.json",
+      "size": 6613,
+      "sha256": "724a6f7db766b1cb7dbc8bb70c2542802fb8a6f269b6b4a179ee90ea95c954ee"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/debian-13-arm64.qualification.json",
+      "size": 7457,
+      "sha256": "a3dd20e6b3f772a45ee7fb08e21e443801084f8d98e6e9e000076e80dc5bb6a3"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/desktop.log",
+      "size": 4501,
+      "sha256": "01668df3a9fee9478e78216e615b4e96309930cf4548ec38276fde00f948de2b"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/graph-reopen.json",
+      "size": 3504,
+      "sha256": "a72118a64c0a5793100cee79741860023e8af7874d1d8c3ae4530e0abf0ef718"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/guest-bootstrap.log",
+      "size": 78850,
+      "sha256": "e692f49b0e0f16ebb901ce083c78a5ee92993a279aec6ec5abe259e35c0bf802"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/guest-suite.log",
+      "size": 880,
+      "sha256": "f5dba20c4ea35d63b9a740aa942776e1aa626b2394eb9a273d0295f9e820272c"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/installed-binaries.json",
+      "size": 647,
+      "sha256": "e9fcdb39bd88027ac1728e5d6ec10a53bcc106e0f20a940e68885a2b8aff30bd"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/native-signal.f32",
+      "size": 1277952,
+      "sha256": "cbc569fe80efd0f7c502a311c3ae3b010f6d2c68eeba394244337e2bd73a6f77"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/native-signal.json",
+      "size": 81,
+      "sha256": "21e683392aed8320b278dcfe352f2528999a9623e1ca646d09b3bef251cdaaa4"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/package-install.log",
+      "size": 109674,
+      "sha256": "0040af2f3688b9bf9857394c194ae9dd44a1cb40a9d41d8f555c4c9c581fe971"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/qemu.log",
+      "size": 67,
+      "sha256": "5942c6048e218bb1c4fb2bc3b5f791f2d9c273ec439755ff2c9f1de91ad09001"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/qualification.mix",
+      "size": 1122,
+      "sha256": "7a9a8dd5c5df3467b66ff31d406edc26628dcac72102c199972cb5fba1087d1c"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/readiness-disagreement.json",
+      "size": 11815,
+      "sha256": "90be549cbb0a1a504d3d28644632e13d23f0a68e276fb6bd63cd8a8c93510e26"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/recording-analysis.json",
+      "size": 437,
+      "sha256": "33ff36a1a509e2ae8a5acacabb853e51e96376553fa5669c0b4a80a78b50ff4b"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/recording.wav",
+      "size": 2603124,
+      "sha256": "01bd25e894becf99b1375cab9a6868763132b0e21489866d9a8594d542d3c47e"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/vm-serial.log",
+      "size": 61187,
+      "sha256": "23105788aecf3ee425eb13c1a14f605e04b3d60173e2351698ff42a5439db437"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-arm64/vm-session.json",
+      "size": 744,
+      "sha256": "980660202f3a0ccc6e84a412bdce7635e4db83d1f61358d7a0765d2833b601b9"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/APP-01.failure.json",
+      "size": 6613,
+      "sha256": "724a6f7db766b1cb7dbc8bb70c2542802fb8a6f269b6b4a179ee90ea95c954ee"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/GRAPH-02.failure.json",
+      "size": 1018,
+      "sha256": "c9251f4607fd407b9605c19d2205099bc3090d9b25b573b8cad0127ad72d1399"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/debian-13-x64.qualification.json",
+      "size": 7403,
+      "sha256": "2ecac27460ffbe7e0a34c98e9cd715b881d5ac1b6e8201a39e3e1e22785fdc1e"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/desktop.log",
+      "size": 762,
+      "sha256": "f2a6a95ec25149330d180ded2d1db8edc5d4ac7477fa0646a78fadc54550dcd4"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/guest-bootstrap.log",
+      "size": 79548,
+      "sha256": "f9d83938ed0d0a3734c409aa9856bc70a3bec0ea4bb7b7e14085d796da23f01c"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/guest-suite.log",
+      "size": 1058,
+      "sha256": "1648ee44695a2ad748141205da15e8069c8fa241d1b0c6d2a49b93fd15903ec2"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/installed-binaries.json",
+      "size": 645,
+      "sha256": "6522438271668392e2f616dc6146b4579963b245c0fc95e525cf57249797bf38"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/package-install.log",
+      "size": 111262,
+      "sha256": "6847f62d8df8b3e838a1beb355b60df33f1a9830fef785163c5158a5ea9ad4de"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/qemu.log",
+      "size": 66,
+      "sha256": "d84f71739cbb615037ba4b1cff71a1715182ac83524c8402c6465ab8887edbed"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/qualification.mix",
+      "size": 1122,
+      "sha256": "7a9a8dd5c5df3467b66ff31d406edc26628dcac72102c199972cb5fba1087d1c"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/readiness-disagreement.json",
+      "size": 11815,
+      "sha256": "1b01d3903eaca609281fbac031846f334b0c45be0fe0ac44ce0907f693ac858c"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/vm-serial.log",
+      "size": 73188,
+      "sha256": "bd1164c0f859fd0cec85654a8a88660fc156c6432e0b205a1196aad975a7e03a"
+    },
+    {
+      "file": "qualification/installed-target-debian-13-x64/vm-session.json",
+      "size": 734,
+      "sha256": "d748b4405457bb23bff4b0571e0877aa0fe58e5b90930bcc1233bc07faba8c44"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/APP-01.failure.json",
+      "size": 6613,
+      "sha256": "724a6f7db766b1cb7dbc8bb70c2542802fb8a6f269b6b4a179ee90ea95c954ee"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/AUDIO-01.failure.json",
+      "size": 562,
+      "sha256": "472a2db425a6b5dfe0dbc6d7abf01bf1ab89710be86fd71ea8c8750e78ad14c9"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/REC-02.failure.json",
+      "size": 847,
+      "sha256": "ba327debc39ea505a454bdcdee8008d2af133f2c07c606e688b3dcf19b9cd057"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/desktop.log",
+      "size": 8602,
+      "sha256": "7ef906831fbcf2eab09e2f1633c3e36dd9a27a7cfd4d99844e64d4dc3d4e7146"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/graph-reopen.json",
+      "size": 3504,
+      "sha256": "a72118a64c0a5793100cee79741860023e8af7874d1d8c3ae4530e0abf0ef718"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/guest-bootstrap.log",
+      "size": 99090,
+      "sha256": "5134e2ccf9e25c3b8319a988dcf87b091bfd7d9372982d5c7c1bacccde9e2e10"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/guest-suite.log",
+      "size": 1101,
+      "sha256": "c6f504aa98ef556d14ab8eac713ccb2b0534b7da95806ab223021c6e3e1b9da8"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/installed-binaries.json",
+      "size": 647,
+      "sha256": "e9fcdb39bd88027ac1728e5d6ec10a53bcc106e0f20a940e68885a2b8aff30bd"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/kali-rolling-arm64.qualification.json",
+      "size": 7712,
+      "sha256": "7561932d6ee78e7071eba1d760e5d125660d412a1945fe04cf8b1313c65939cd"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/native-signal.f32",
+      "size": 1261568,
+      "sha256": "e8e1bc6ec7cb5e142291ff295e5f623d2fc71ed64584df1dcc987e944da9da9b"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/package-install.log",
+      "size": 243175,
+      "sha256": "ebec787c35b36981f980bcafb0b9c1c6af134a61673de8c7a524c161e880af32"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/qemu.log",
+      "size": 67,
+      "sha256": "ca649975dfe1712f729fdc6b36e57e3d052d3b80fdf908b44928f9d77a4d7d0a"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/qualification.mix",
+      "size": 1122,
+      "sha256": "7a9a8dd5c5df3467b66ff31d406edc26628dcac72102c199972cb5fba1087d1c"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/readiness-disagreement.json",
+      "size": 11816,
+      "sha256": "b4fb8e8497ee1201efdf6c1de5a1853a4599ec3e0b0179f74e9f61b94892eec9"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/recording.wav",
+      "size": 3465332,
+      "sha256": "1f3f18f12ded522055fe101c3a9adcc927a593ffb5b5af71c37748b6765eb313"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/vm-serial.log",
+      "size": 75473,
+      "sha256": "af3adb64f8d97834e079e0e3068e2af65d58d82fb1e86604308feeb128c2c109"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-arm64/vm-session.json",
+      "size": 673,
+      "sha256": "ecbe1c5a7fce7e7c52619ae699481c188e5937ccf6bd578e4de03f46dc8f3421"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-x64/APP-01.failure.json",
+      "size": 2387,
+      "sha256": "7778b041668330f77e121c5d5368c0ec56f08e6403a29c174c3da63e3994f00f"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-x64/desktop.log",
+      "size": 467,
+      "sha256": "0304417c1601d5f1e558fab5a9946bf278b10b71f8635f78715fc3df83d39511"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-x64/guest-bootstrap.log",
+      "size": 100093,
+      "sha256": "fc8c545aed3ca529456f414af7d4da50a611b4b1ffb34ec49a3d049ea3183e0a"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-x64/guest-suite.log",
+      "size": 769,
+      "sha256": "b1c4725b6b89093a0de2f6f9744669098bed25421a2c70089d4009a9db0a193e"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-x64/installed-binaries.json",
+      "size": 645,
+      "sha256": "6522438271668392e2f616dc6146b4579963b245c0fc95e525cf57249797bf38"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-x64/kali-rolling-x64.qualification.json",
+      "size": 4649,
+      "sha256": "7d7b018a7c0d713e8bb96cc1e5f71f46ba3cfddb6bf74c4ce624a282e026494a"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-x64/package-install.log",
+      "size": 244180,
+      "sha256": "5fc6b91f0c88a15565c81efe5f42010697cebe838190c34144eb0df0b8799acc"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-x64/qemu.log",
+      "size": 66,
+      "sha256": "239dd7e1855a99d7f0263bbfa2d2e244ec0c52819942d9517cda691eb09df4f8"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-x64/vm-serial.log",
+      "size": 84160,
+      "sha256": "9bbb6108d7ff56102d1d6631257e3d09ab066abea6111681fd163d7e6460cd62"
+    },
+    {
+      "file": "qualification/installed-target-kali-rolling-x64/vm-session.json",
+      "size": 664,
+      "sha256": "72cac2823f3c76f32e039ae9378fc8917040f2afbd56ffd29073fd0d88f6c4be"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/app-log-desktop-1771.log",
+      "size": 377,
+      "sha256": "e0ffe278f5f711dc72e2d1e8446ed92af58b4e34f056fe371dbbe94bfccc8767"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/app-log-driver-runtime-1847.log",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/app-ready.json",
+      "size": 24339,
+      "sha256": "3360c2ee84e8fc290485b619f4ce85b527c7b0e74e5ecda73ce1f62a5f459f76"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/audio-graph-setup.failure.json",
+      "size": 235,
+      "sha256": "0db9873c30b151e82b58c4449f3ef1245212ef65abade61e5dc73bc08b66ff02"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/coreaudio-devices.txt",
+      "size": 1509,
+      "sha256": "a2fee1e09de3a1d572241213a50dd7b3af3927b12ca303eb9a384919ceaed166"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/coreaudio-probe.txt",
+      "size": 548,
+      "sha256": "a453c4c422f6c5fb441603904c371848843fbbd452f591524cb32a2241fe3cf4"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/coreaudio-system.log",
+      "size": 1481925,
+      "sha256": "4aa3c8d2a70eb7043e4987655e6d3840345ec2d83a4660471f4931920fed17c7"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/desktop-entitlements.txt",
+      "size": 193,
+      "sha256": "435e568f9f999befb3dbcb5d4bbe5e8ad55e254f126d23ab1f723a6016c485e9"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/desktop-windows.txt",
+      "size": 819,
+      "sha256": "8ca6c8b937b9f47d6cbad5433d8905c8f10560828ae21a3fea8a54f66a362af7"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/driver-entitlements.txt",
+      "size": 191,
+      "sha256": "6c334e64fb5dbe008f2fffc41c213f24323384e199cbef570608cb3298cf533f"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/engine-entitlements.txt",
+      "size": 496,
+      "sha256": "61a8a7a6fcec6b1ad2a89bfd285d3ba5f8e3d34a3ba6ce7c8042629d28e54720"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/installed-binaries.json",
+      "size": 950,
+      "sha256": "1af12dd2574492e4d648df267ba668ab2cea847f8ed3fed815a03b9a60342d32"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/macos-14-arm64.qualification.json",
+      "size": 3578,
+      "sha256": "093feffa416c69578a6ae0b702cafebdcce418b309e1d67d99aabe1335df7584"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/package-install.log",
+      "size": 112,
+      "sha256": "300a05e7f780211bd69f96b595584c8877e3c42d8a9ae0973369b9691a364af1"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/product-processes.txt",
+      "size": 97,
+      "sha256": "92c08efcfa25edf96057627c0d3e02f4b972afdd0fc26025d72e53013731a52e"
+    },
+    {
+      "file": "qualification/installed-target-macos-14-arm64/shutdown.log",
+      "size": 47,
+      "sha256": "d01d7642eacfa07b0948dbeeea776294c6877a851b5a71c4646d04bba5e693b7"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/app-log-desktop-2835.log",
+      "size": 377,
+      "sha256": "73ebc9ba5207b03087d99770d43e56e675cd7c2c556badde82bf87a904ebdb20"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/app-log-driver-runtime-2852.log",
+      "size": 133,
+      "sha256": "af875633e257e435ab5c3cfd6b34108d232895127fdf6b43f02902dba43afb05"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/app-ready.json",
+      "size": 24339,
+      "sha256": "9cbb59403c8ad0d98f355996b691b957e1a43522076e8b1661c4910835092684"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/audio-graph-setup.failure.json",
+      "size": 235,
+      "sha256": "0db9873c30b151e82b58c4449f3ef1245212ef65abade61e5dc73bc08b66ff02"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/coreaudio-devices.txt",
+      "size": 1509,
+      "sha256": "a2fee1e09de3a1d572241213a50dd7b3af3927b12ca303eb9a384919ceaed166"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/coreaudio-probe.txt",
+      "size": 548,
+      "sha256": "a453c4c422f6c5fb441603904c371848843fbbd452f591524cb32a2241fe3cf4"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/coreaudio-system.log",
+      "size": 1891009,
+      "sha256": "3c89fcf03cf9bc51e7bec3d9fc89b119351560b6ad051ea1d7a03dcb96f8fe82"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/desktop-entitlements.txt",
+      "size": 193,
+      "sha256": "435e568f9f999befb3dbcb5d4bbe5e8ad55e254f126d23ab1f723a6016c485e9"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/desktop-windows.txt",
+      "size": 815,
+      "sha256": "5978792e8ceee341c22eb5646b8ff7654d43443818c47a35b095c3979cf57b83"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/driver-entitlements.txt",
+      "size": 191,
+      "sha256": "6c334e64fb5dbe008f2fffc41c213f24323384e199cbef570608cb3298cf533f"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/engine-entitlements.txt",
+      "size": 496,
+      "sha256": "61a8a7a6fcec6b1ad2a89bfd285d3ba5f8e3d34a3ba6ce7c8042629d28e54720"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/installed-binaries.json",
+      "size": 950,
+      "sha256": "1af12dd2574492e4d648df267ba668ab2cea847f8ed3fed815a03b9a60342d32"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/macos-15-arm64.qualification.json",
+      "size": 3578,
+      "sha256": "30491fb0a6a2d92cd388d4bda928db2194a265be5ecfc7500353b83ae47c726d"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/package-install.log",
+      "size": 112,
+      "sha256": "300a05e7f780211bd69f96b595584c8877e3c42d8a9ae0973369b9691a364af1"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/product-processes.txt",
+      "size": 97,
+      "sha256": "fe39ccf056fabaab2f0efa8e1d699a2bec51a5cf0b187477e0c74aa1f8d26614"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-arm64/shutdown.log",
+      "size": 47,
+      "sha256": "d01d7642eacfa07b0948dbeeea776294c6877a851b5a71c4646d04bba5e693b7"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/app-log-desktop-3339.log",
+      "size": 377,
+      "sha256": "a15b88129fde8dd605ccd510f837e91c93dcee7fd0f8704b897fa8f00ac343e2"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/app-log-driver-runtime-3440.log",
+      "size": 133,
+      "sha256": "52d75fe58ed0d89190feec60ff647db9e3614eb9676696821f48f892e101b26d"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/app-ready.json",
+      "size": 24339,
+      "sha256": "e5df8fa2ff8fc3a2e8923f5ad69e94c87d557995067787c6b8d43e750ae30679"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/audio-graph-setup.failure.json",
+      "size": 235,
+      "sha256": "0db9873c30b151e82b58c4449f3ef1245212ef65abade61e5dc73bc08b66ff02"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/coreaudio-devices.txt",
+      "size": 835,
+      "sha256": "faaab7ee1e6c6e34cf5038d37a2cf4a24108fd6f0784849f72dbfb4188dd4331"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/coreaudio-probe.txt",
+      "size": 284,
+      "sha256": "7513fb90872521485e38f47e2ff080b75c6c9e1d7afeb4c4dab5e4fc416b8995"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/coreaudio-system.log",
+      "size": 847449,
+      "sha256": "6bda9e2fecad38713134b16f8dcf5113d044ea27c4efe976de4061fec3f7f7d7"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/desktop-entitlements.txt",
+      "size": 193,
+      "sha256": "435e568f9f999befb3dbcb5d4bbe5e8ad55e254f126d23ab1f723a6016c485e9"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/desktop-windows.txt",
+      "size": 842,
+      "sha256": "e593c3079032ec9a7f27638e5e631103ee35ad198a242668fb41800559832b28"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/driver-entitlements.txt",
+      "size": 191,
+      "sha256": "6c334e64fb5dbe008f2fffc41c213f24323384e199cbef570608cb3298cf533f"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/engine-entitlements.txt",
+      "size": 496,
+      "sha256": "61a8a7a6fcec6b1ad2a89bfd285d3ba5f8e3d34a3ba6ce7c8042629d28e54720"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/installed-binaries.json",
+      "size": 950,
+      "sha256": "1af12dd2574492e4d648df267ba668ab2cea847f8ed3fed815a03b9a60342d32"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/macos-15-x64.qualification.json",
+      "size": 3572,
+      "sha256": "ffa66f5b03dc08395b80f673b08787142c17790c2b6c259355a745ff61935a17"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/package-install.log",
+      "size": 112,
+      "sha256": "300a05e7f780211bd69f96b595584c8877e3c42d8a9ae0973369b9691a364af1"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/product-processes.txt",
+      "size": 97,
+      "sha256": "4329ba248637cc1aee9427de6deee0ec0eed99595cef3dcd426cd82af0b799d3"
+    },
+    {
+      "file": "qualification/installed-target-macos-15-x64/shutdown.log",
+      "size": 47,
+      "sha256": "d01d7642eacfa07b0948dbeeea776294c6877a851b5a71c4646d04bba5e693b7"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/app-log-desktop-2422.log",
+      "size": 377,
+      "sha256": "95f695036d09315c348a220228afd7f4b364c58f7f70db21c766d7fcd0379d5d"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/app-log-driver-runtime-2442.log",
+      "size": 133,
+      "sha256": "2fe12715abb4e0e62bd55ed7289d4239aa18f9d4a938ec9874f7d28b921d2486"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/app-ready.json",
+      "size": 24339,
+      "sha256": "155678fd4b177e1866a21e1736cd1c8e65882755a6d9bd89d930b753a2621aef"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/audio-graph-setup.failure.json",
+      "size": 235,
+      "sha256": "0db9873c30b151e82b58c4449f3ef1245212ef65abade61e5dc73bc08b66ff02"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/coreaudio-devices.txt",
+      "size": 1509,
+      "sha256": "a2fee1e09de3a1d572241213a50dd7b3af3927b12ca303eb9a384919ceaed166"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/coreaudio-probe.txt",
+      "size": 548,
+      "sha256": "a453c4c422f6c5fb441603904c371848843fbbd452f591524cb32a2241fe3cf4"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/coreaudio-system.log",
+      "size": 2371720,
+      "sha256": "67fe93e357ac7578c23d9c6979df9cbbfef346ee9f2a138f96dce1dfc3d87a01"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/desktop-entitlements.txt",
+      "size": 193,
+      "sha256": "435e568f9f999befb3dbcb5d4bbe5e8ad55e254f126d23ab1f723a6016c485e9"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/desktop-windows.txt",
+      "size": 895,
+      "sha256": "c18004d7e2e5e2405b41cf1e008bced373eea1cc6ae3b79e1b780cfe4b306b6c"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/driver-entitlements.txt",
+      "size": 191,
+      "sha256": "6c334e64fb5dbe008f2fffc41c213f24323384e199cbef570608cb3298cf533f"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/engine-entitlements.txt",
+      "size": 496,
+      "sha256": "61a8a7a6fcec6b1ad2a89bfd285d3ba5f8e3d34a3ba6ce7c8042629d28e54720"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/installed-binaries.json",
+      "size": 950,
+      "sha256": "1af12dd2574492e4d648df267ba668ab2cea847f8ed3fed815a03b9a60342d32"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/macos-26-arm64.qualification.json",
+      "size": 3576,
+      "sha256": "18bd48f5ca6f54fcd129c705cecf544c7ff1faa8d87ba890c098e764401b09ec"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/package-install.log",
+      "size": 112,
+      "sha256": "300a05e7f780211bd69f96b595584c8877e3c42d8a9ae0973369b9691a364af1"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/product-processes.txt",
+      "size": 97,
+      "sha256": "8a27cd1dd8c81f58b28ab07067563306c2711b317c9752092b19cdc3b03690d6"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-arm64/shutdown.log",
+      "size": 47,
+      "sha256": "d01d7642eacfa07b0948dbeeea776294c6877a851b5a71c4646d04bba5e693b7"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/app-log-desktop-7570.log",
+      "size": 377,
+      "sha256": "165dbb8b5b47287126ecae99e9191e8101c678b785e3be116cd39d71a9080207"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/app-log-driver-runtime-7608.log",
+      "size": 171,
+      "sha256": "648c9cb670b397b3a06a4450a79a4279f789ce388d0d38063ec73263db8cb168"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/app-ready.json",
+      "size": 24339,
+      "sha256": "f32182fc73fb4991604583e7fb36724758b500f7bc136602fc28b633f51a4cb1"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/audio-graph-setup.failure.json",
+      "size": 235,
+      "sha256": "0db9873c30b151e82b58c4449f3ef1245212ef65abade61e5dc73bc08b66ff02"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/coreaudio-devices.txt",
+      "size": 1258,
+      "sha256": "4b13204203487ea7bcff05396e60f927265d894ff7a5c59d2be9befd6e3b8d26"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/coreaudio-probe.txt",
+      "size": 610,
+      "sha256": "987159409b43b1615a6009ec8941b9d86be2fab586aa5de80e8305f5afa77c39"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/coreaudio-system.log",
+      "size": 1258295,
+      "sha256": "e15ba0c0d9e717738a8f5ac724fa641d12ac0a4daaf14fa702bec74249f419d6"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/desktop-entitlements.txt",
+      "size": 193,
+      "sha256": "435e568f9f999befb3dbcb5d4bbe5e8ad55e254f126d23ab1f723a6016c485e9"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/desktop-windows.txt",
+      "size": 893,
+      "sha256": "a302aa9e98377400d73da105d9107447e88ef9d467b5361d41e669a847c1a5c3"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/driver-entitlements.txt",
+      "size": 191,
+      "sha256": "6c334e64fb5dbe008f2fffc41c213f24323384e199cbef570608cb3298cf533f"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/engine-entitlements.txt",
+      "size": 496,
+      "sha256": "61a8a7a6fcec6b1ad2a89bfd285d3ba5f8e3d34a3ba6ce7c8042629d28e54720"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/engine-sample-command.log",
+      "size": 263,
+      "sha256": "bfb6ec33b2abf665719ca2e641295fe0ab422496bc262807151f923865d02e64"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/engine.sample.txt",
+      "size": 179385,
+      "sha256": "ab2b12b8dfd7ad7df027ac4bb06327d4c02fdd695172a778ac8c04443e678c4a"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/installed-binaries.json",
+      "size": 950,
+      "sha256": "1af12dd2574492e4d648df267ba668ab2cea847f8ed3fed815a03b9a60342d32"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/macos-26-x64.qualification.json",
+      "size": 3791,
+      "sha256": "b6c85e1d7f3e81d1fc103d746a7de4ae77e10d6331f225b8999dd38950cab6f7"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/package-install.log",
+      "size": 112,
+      "sha256": "300a05e7f780211bd69f96b595584c8877e3c42d8a9ae0973369b9691a364af1"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/product-processes.txt",
+      "size": 343,
+      "sha256": "461ae1e57ce142fdfdc3fbddf5166608ec6e39bfcf1721950dd21df5e5a8e25b"
+    },
+    {
+      "file": "qualification/installed-target-macos-26-x64/shutdown.log",
+      "size": 330,
+      "sha256": "aaef07612230393b6c7ceea0f23481a482794e659af2fa0891ab0d6a3b824481"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/app-log-desktop-11279.log",
+      "size": 377,
+      "sha256": "117045540e9a5f334f500d2231683e2a024f3d9c08aa65869aa3a37f30392232"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/app-log-driver-runtime-11293.log",
+      "size": 133,
+      "sha256": "29cbebb7c189aa82e52b2e0b8c3848be77b7f7c9f80bc195ed9303d69b1edd16"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/app-ready.json",
+      "size": 24340,
+      "sha256": "a0001d6b0ca2b3ceaa6fda9977899de46ab49f84ef0ef74f62e2195e9625bb01"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/audio-graph-setup.failure.json",
+      "size": 235,
+      "sha256": "0db9873c30b151e82b58c4449f3ef1245212ef65abade61e5dc73bc08b66ff02"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/coreaudio-devices.txt",
+      "size": 1509,
+      "sha256": "a2fee1e09de3a1d572241213a50dd7b3af3927b12ca303eb9a384919ceaed166"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/coreaudio-probe.txt",
+      "size": 548,
+      "sha256": "a453c4c422f6c5fb441603904c371848843fbbd452f591524cb32a2241fe3cf4"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/coreaudio-system.log",
+      "size": 2532513,
+      "sha256": "5904bdebd9a19d0496ae08996e5cb720d4d9f41b5b33c2a065aee0f4f2646348"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/desktop-entitlements.txt",
+      "size": 193,
+      "sha256": "435e568f9f999befb3dbcb5d4bbe5e8ad55e254f126d23ab1f723a6016c485e9"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/desktop-windows.txt",
+      "size": 131,
+      "sha256": "46ceef9ec0c3939a00345515058c3cbbcab2e0f4a28974adbfe51adc178b94b1"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/driver-entitlements.txt",
+      "size": 191,
+      "sha256": "6c334e64fb5dbe008f2fffc41c213f24323384e199cbef570608cb3298cf533f"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/engine-entitlements.txt",
+      "size": 496,
+      "sha256": "61a8a7a6fcec6b1ad2a89bfd285d3ba5f8e3d34a3ba6ce7c8042629d28e54720"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/installed-binaries.json",
+      "size": 950,
+      "sha256": "1af12dd2574492e4d648df267ba668ab2cea847f8ed3fed815a03b9a60342d32"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/macos-27-arm64.qualification.json",
+      "size": 3578,
+      "sha256": "4ae7eacd3d0caec9a810eb2e306e0018333817835b60d434d6bc03b507f134ef"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/package-install.log",
+      "size": 112,
+      "sha256": "300a05e7f780211bd69f96b595584c8877e3c42d8a9ae0973369b9691a364af1"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/product-processes.txt",
+      "size": 98,
+      "sha256": "133e2cb5bf256f69e5bede9ada0eabc3a9e74324a9fb89fe153c5190ec9193fe"
+    },
+    {
+      "file": "qualification/installed-target-macos-27-arm64/shutdown.log",
+      "size": 47,
+      "sha256": "d01d7642eacfa07b0948dbeeea776294c6877a851b5a71c4646d04bba5e693b7"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/guest-bootstrap.log",
+      "size": 78789,
+      "sha256": "7ef82f3622478487685df478350c8647f7cf99bd2f9fbdabbf389d6b65c92e2f"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/qemu.log",
+      "size": 67,
+      "sha256": "44a6c748e014ab9a41eb24c74d9cf6ec0b47266ba58d43a29057fdf811eccdc6"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/vm-serial.log",
+      "size": 115586,
+      "sha256": "8b2028712045e38f83ff352d7bf01e7506746b5043b1f259cb6f1a0f14c054d2"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/vm-session.json",
+      "size": 638,
+      "sha256": "5806f0cb33309f65f298206c6a709a7d169e253473da506c6cad621972ffcd9a"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/APP-01.failure.json",
+      "size": 6613,
+      "sha256": "724a6f7db766b1cb7dbc8bb70c2542802fb8a6f269b6b4a179ee90ea95c954ee"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/desktop.log",
+      "size": 467,
+      "sha256": "ba36625295fd55849bab7dae925e7a2d8e4500ddb53263036f7ad76c4274d618"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/graph-reopen.json",
+      "size": 3504,
+      "sha256": "a72118a64c0a5793100cee79741860023e8af7874d1d8c3ae4530e0abf0ef718"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/guest-bootstrap.log",
+      "size": 79518,
+      "sha256": "e40f382535a1306599f0f408ae83613304f222ac2f008e558d1a4a28f2138308"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/guest-suite.log",
+      "size": 1128,
+      "sha256": "37342d3b7e52fa82753a89a6baa14a51451b5b02f8e7eb5c479c6b3ef6f9e91b"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/installed-binaries.json",
+      "size": 645,
+      "sha256": "6522438271668392e2f616dc6146b4579963b245c0fc95e525cf57249797bf38"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/native-signal.f32",
+      "size": 1277952,
+      "sha256": "a6ec56e028e6901e5591f1122fcdcc343cdfc364276985a80ec252b019423f62"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/native-signal.json",
+      "size": 80,
+      "sha256": "ec086585e8b9c2defcb7ab2fb0f9904299c64064dcd641d39f9b645bc381d433"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/package-install.log",
+      "size": 206375,
+      "sha256": "73ece5f6c3c30669ced228feea411fc7b416b94e17dacd5eda93a6b1c800b295"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/qemu.log",
+      "size": 66,
+      "sha256": "8a389c4c121f673644cf3818716a7d271fcc6b1aa31c53ff828973f08ccc6291"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/qualification.mix",
+      "size": 1122,
+      "sha256": "7a9a8dd5c5df3467b66ff31d406edc26628dcac72102c199972cb5fba1087d1c"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/readiness-disagreement.json",
+      "size": 11816,
+      "sha256": "3852a06099a37aee57462e88f22a1059bcaad82ae0843f19095bea40af637e83"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/recording-analysis.json",
+      "size": 408,
+      "sha256": "42514be6389622ae4ee32c5dc033d17145504a8bc38b4dc7e9facf3179d2b4c7"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/recording.wav",
+      "size": 1302644,
+      "sha256": "8f7a4dc6b067f611a643de68f6bcdaa9da8149d86e5fbd61dd974250698c4933"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/ubuntu-26-04-x64.qualification.json",
+      "size": 7700,
+      "sha256": "75b43ef658830653d518f29d56f8f2bed08f8b81ef2a7a7e2a0eb6585c1222d7"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/vm-serial.log",
+      "size": 87574,
+      "sha256": "57bc2f0419bdc32fd11de81d6b4176d98cab448fe02c89abbfe15b363fc3d611"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-x64/vm-session.json",
+      "size": 671,
+      "sha256": "3d41a268839004f2b4a2e868ad135cc059596f08d2fd9f398c7c00a403effcde"
+    }
+  ]
+}

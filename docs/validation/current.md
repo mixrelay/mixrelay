@@ -1,38 +1,47 @@
 # 검증 현황
 
 제품 동작·범위·남은 작업은 [product.md](../product.md)가 기준이다. MixRelay는 아직 출시하지 않았다.
-이 문서는 현재 소스 검사와 로컬 개발 설치본의 검증 범위만 구분한다.
+이 문서는 소스 검사와 로컬·GitHub Actions 설치본의 검증 범위를 구분한다.
 OS·CPU별 지원 범위와 같은 사용자 시나리오의 확인·부분·미확인 결과는
 [OS별 지원·검증 인벤토리](platform-matrix.md)에서 비교한다. 각 결과의 실행 날짜·빌드는 아래 기록을 따른다.
 
-## 2026-10-23 지원 계약과 동일 후보 검증 연결
+## 2026-10-23 동일 배포 후보의 GitHub Actions 설치본 E2E
 
-`support/environments.json`에 환경·CPU·의존성 하한·이미지·배포 파일 대응·필수 시나리오를 모았다.
-소스 CI 행렬과 Compose·환경표가 이 계약을 사용한다. Linux 최종 후보는 CPU별로 한 번 빌드하고,
-macOS는 같은 Universal PKG를 사용한다. 설치본 runner·후보별 인벤토리·manifest·업데이트 카탈로그 게시
-단계에서 후보 파일과 소스·계약 해시·CI 실행을 대조한다. [운영 절차](../release-qualification.md)를 따른다.
-Apple 공식 호환 목록에 따라 macOS 27 Intel 조합을 제외했다. 필수 환경은 15개이며,
-GitHub-hosted macOS 6개와 Linux 전체 OS VM 7개를 실행하도록 구성했다.
-macOS 14.2 양쪽 CPU는 hosted runner에서 지정할 수 없는 버전이어서 필수 미검증 대상으로 남는다.
+환경·CPU·의존성 하한·이미지·배포 파일·필수 시나리오는 `support/environments.json`이 정의한다.
+소스 CI, GitHub-hosted 설치본 시험, 후보별 인벤토리와 업데이트 게시 gate가 이 계약을 소비한다.
+[운영 절차](../release-qualification.md)와 [후보별 환경·시나리오 결과](candidates/2026-10-23-8582d15/README.md)를 따른다.
+필수 대상 15개 중 macOS 6개와 Linux 전체 OS VM 7개를 GitHub Actions에서 실행한다.
+macOS 14.2 양쪽 CPU는 hosted runner로 정확한 버전을 지정할 수 없어 필수 미검증 대상으로 남는다.
+전용 기기·self-hosted runner·관리자 runner 토큰은 사용하지 않는다. GitHub 조회 시 저장소는 이미 PUBLIC이었다.
 
-계약·게이트와 기존 패키징 도구를 포함한 스크립트 테스트 401개와 workflow 정적 검사가 통과했다.
-그 뒤 정확한 main 커밋의 소스 CI 성공을 요구하는 회귀도 통과했다. 앱 업데이트는 같은 지원 계약에서
-Linux 배포판별 패키지 형식을 읽는다. Arch에서 DEB를 함께 제안하던 선택 로직을 재주입하면 새 회귀가
-실패했고, 수정 복원 후 업데이트 관련 14개 검사와 desktop clippy가 통과했다.
-이는 도구 검사이며 실제 설치본 E2E 통과가 아니다. GitHub 조회 시 저장소는 이미 PUBLIC이었다.
-전용 기기 대신 GitHub-hosted runner를 사용하도록 수정했고 관리자 runner 조회 토큰을 제거했다.
-Linux는 공식 이미지의 URL·체크섬을 고정해 QEMU에서 부팅하며, VM 준비 검사는 설치본 수락과 구별한다.
-서명 후보와 실제 설치본 수락 결과는 준비되지 않았다.
-GitHub-hosted 전환 뒤 로컬 스크립트 검사 410개와 workflow 정적 검사가 통과했다.
-VM 준비 실행 `39933536135`에서 Ubuntu 26.04 x64와 Arch rolling x64는 부팅·X11·PipeWire 사용자 세션과
-환경 식별 검사를 통과했다. ARM Ubuntu는 에뮬레이션 부팅 중 장치 대기로 SSH 준비 제한 시간을 넘겼고,
-TCG CPU 모델을 Cortex-A72로 조정했다. 후속 실행 `39935430023`에서 Debian 양쪽 CPU·Ubuntu x64·
-Kali x64·Arch x64가 VM 준비 검사를 통과했다. Kali arm64는 기본 이미지의 네트워크 설정으로
-주소를 받지 못해 NoCloud의 MAC 기반 DHCP 구성을 추가했다. Ubuntu arm64와 이 수정의 결과는 후속 실행에서 확인한다.
-오디오 수락 그래프는 같은 장치의 왕복 입력과 녹음기로 신호를 나눈다. 왕복 연결을 제거하면 새 회귀가
-실패하고 복원 후 통과했으며, 로컬 스크립트 검사 412개가 통과했다.
-설치본 UI 조작과 macOS 무료 전체 시스템 캡처는 필수 blocked 항목으로 남아 출시 gate를 차단한다.
-기존 39개 시나리오의 과거 결과를 새 7개 필수 기준선이나 현재 후보의 통과로 승계하지 않는다.
+후보는 `0.1.0`, 제품 소스는 `8582d158455c56006e4288146dcc646100c34bb5`다.
+[Linux 빌드 39939576577](https://github.com/mixrelay/mixrelay/actions/runs/39939576577)에서 각 CPU의 DEB를
+한 번씩 만들었고, Arch 패키지의 세 실행 파일이 x64 DEB와 바이트 단위로 일치하는지 확인했다.
+깨끗한 같은 소스에서 `pnpm signing:check` 뒤 Universal PKG를 빌드했다.
+공증 제출 `acc11bf5-2746-4f88-a23d-5631c07a8dee`는 Accepted이며 staple·validate가 통과했다.
+네 최종 파일의 SHA-256·크기와 계약 해시는 [후보 JSON](candidates/2026-10-23-8582d15/mix-relay.candidate.json)에 보존한다.
+PKG는 `qa-install-8582d15` draft release에 있으며 제품을 공개 배포하지 않았다.
+
+[설치본 실행 39945522752](https://github.com/mixrelay/mixrelay/actions/runs/39945522752)는 테스트 소스
+`96c1bc1840c46e214f20b668222394c44ec7d8eb`로 최종 파일을 다시 빌드하지 않고 설치했다.
+설치된 핵심 실행 파일의 해시, 실제 OS 패치·CPU·커널·오디오 의존성, 그래프 저장/재열기,
+native stereo PCM과 종료된 RF64 녹음을 검사한다. 모든 결과와 원시는 `installed-e2e-evidence` Actions
+artifact에 90일 보존한다. Linux는 공식 이미지의 URL·체크섬을 고정한 전체 systemd OS VM이며,
+x64 KVM과 ARM TCG의 차이를 기록한다. TCG 결과는 하드웨어 지연 수락이 아니다.
+
+macOS 여섯 환경은 설치·API 준비 검사를 통과했지만 CoreAudio 초기화 시간 초과로 오디오 수락에 실패했다.
+Linux 설치 환경은 엔진의 `not_installed`로 준비 검사가 실패했다. 일부 환경은 Driver API의 Ready와도 불일치했다.
+독립 native 검사는 Driver 버전·Ready와 엔진 protocol·power·backend가 맞을 때만 계속 실행하며,
+그 통과가 준비 검사 실패를 지우지 않는다. 환경별 부분 통과와 실패·blocked·미실행은 후보 인벤토리에서 구분한다.
+설치본 UI 자동화와 macOS 무료 전체 시스템 캡처 수락은 미구현 blocked 항목이다.
+이 후보는 출시 gate를 통과하지 못했다. 과거 설치본이나 VM 준비 검사 통과를 이 후보의 수락으로 승계하지 않는다.
+VM 준비 이력 `39933536135`·`39935430023`도 설치본 수락과 구분한다.
+
+로컬 스크립트 검사 419개, 지원 계약 검사와 workflow actionlint가 통과했다.
+백그라운드 실행부의 상속된 stderr 때문에 SSH가 끝나지 않던 문제는 파일 FD로 분리했고,
+수정 전 중단·수정 후 완료하는 실제 프로세스 회귀로 확인했다. native 프로브 하나의 종료 실패가
+다른 프로브 정리를 생략하던 경계도 두 프로세스 회귀와 결함 재주입으로 확인했다.
+이 마지막 정리 수정은 위 설치본 실행 이후 도구 변경이며 후보 파일과 기존 결과는 바꾸지 않는다.
 
 ## 2026-10-23 macOS 전체 시스템 캡처 무료 정책
 
