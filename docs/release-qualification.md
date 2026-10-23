@@ -123,9 +123,10 @@ below the contract floors and pre-existing installed MixRelay executables. It op
 the normal installed app and normal control sockets. It compares installed core
 executables against the candidate package, exercises graph save/reopen, emits native
 stereo PCM through the free installation's default device, and checks the recorder's
-finalized RF64 sizes and samples. It restores its graph and stops its app; disposal
-of the hosted job or guest removes the installation and remaining QA data. Cleanup failure also
-fails qualification.
+finalized RF64 sizes and samples. It restores its graph, stops its app and explicitly
+removes the installed product.
+The same session then runs baseline-to-candidate upgrade qualification and removal.
+Disposal removes the remaining QA data. Cleanup failure also fails qualification.
 
 For diagnosis on a disposable session:
 
@@ -147,7 +148,84 @@ or permission-dialog recovery. `GRAPH-01` (installed UI) and macOS `AUDIO-11` (f
 whole-system capture) currently produce blocked results because their acceptance
 implementations are absent. These required results prevent the workflow from passing.
 The larger scenario catalog in the historical inventory still needs coverage; this
-seven-scenario baseline does not establish the other product requirements as verified.
+scenario baseline does not establish the other product requirements as verified.
+
+## 이전 후보에서 업그레이드 검증
+
+`candidate-e2e.yml`과 `qualify-release.yml`은 기존 후보 입력 외에 다음 두 입력을 필수로 받는다.
+
+- `baseline_macos_candidate_tag`: 이전 PKG와 전체 소스 SHA를 담은 `source-revision.txt`가 있는 draft 또는 prerelease 태그.
+- `baseline_linux_build_run`: 같은 소스의 `Build Linux release candidates once per CPU` 성공 실행 ID.
+
+2026-10-24 조회 기준 `qa-install-8582d15`와 `qa-install-03652c5`에는 각각 macOS
+`MixRelay-Installer-0.1.0.pkg`와 소스 기록이 있다. Linux 파일은 이 draft에 없으므로 별도
+빌드 실행에서 가져온다. 서명 정책 변경 전 후보 `qa-install-8582d15`의 Linux 빌드 실행은
+`39939576577`, `qa-install-03652c5`의 실행은 `39979549280`이다.
+각 성공 실행의 `candidate-linux-x64-deb`, `candidate-linux-arm64-deb`,
+`candidate-linux-x64-arch` 아티팩트를 사용한다. Arch 파일은
+`mix-relay-0.1.0-1-x86_64.pkg.tar.zst` 형태다. 이 값들은 실행 예시이며 기본값으로 고정하지 않는다.
+
+진단 워크플로의 예시 입력은 후보 태그 `qa-install-03652c5`, 후보 Linux 실행
+`39979549280`, baseline 태그 `qa-install-8582d15`, baseline Linux 실행 `39939576577`이다.
+워크플로 화면에서 해당 입력을 지정하고 `targets`를 비우면 hosted 대상 전체를 실행한다.
+출시 검증에는 `main`에 포함된 후보와 성공한 소스 CI 등 기존 조건도 충족해야 한다.
+설치 파일은 선택한 후보의 원본이며, 실행 스크립트는 dispatch한 브랜치의 suite를 사용한다.
+후보 소스와 suite 소스는 리포트에 별도로 기록한다.
+
+선택기는 baseline의 저장소·빌드 워크플로·성공 여부·macOS/Linux 소스 일치와 후보의 선행
+커밋인지 확인한다. 파일별 크기·SHA-256·소스·버전·빌드 실행 ID를
+`candidate/baseline/baseline.json`에 보존한다. 같은 소스, 같은 설치 파일, 더 높은 제품 버전,
+분기된 커밋은 거부한다. 버전 번호가 같은 개발 후보는 소스와 파일이 다르면 시험할 수 있다.
+일부 baseline 패키지 형식이 없으면 준비 단계의 matrix와 Actions 요약에 해당 대상의
+`MISSING baseline artifact`를 표시한다. 대상 job은 생략하지 않으며 명시적으로 실패한다.
+
+대상마다 runner 또는 Linux VM 하나를 재사용해 다음 순서로 실행한다.
+
+1. 후보를 새로 설치하고 기존 PKG·앱·UI·그래프·오디오·녹음 검사를 실행한 뒤 제거한다.
+2. fresh 제거가 끝나면 QA 사용자 소유의 앱·엔진·Driver 상태를 `upgrade/fresh-state/`로 옮겨
+   baseline이 새 상태에서 시작하게 한다. 외부 프로젝트·녹음 파일은 그대로 둔다.
+   baseline을 정상 설치 경로로 설치하고 앱과 Driver를 실행한다. 무료 Driver의 실제
+   `/api/v1/driver` PUT 경로로 양방향 채널 수와 PCM 형식을 기본값과 다르게 저장한다.
+   대체 샘플레이트를 지원하면 그것도 변경한다. 현재 레이트만 지원하는 Linux에서는
+   그 레이트를 유지한다. 명령마다 revision을 확인하고 양방향 현재 형식의 readback과
+   저장 오류 부재를 확인한다. 장치 추가·이름 변경에는 유료 인증이 필요하므로 사용하지 않는다.
+   게인 -6dB·녹음기 연결 그래프를 실제 workspace API로 `.mix` 파일에 저장하고,
+   저장 결과의 노드·설정·연결이 작성한 내용과 같은지 확인한다. baseline 그래프의
+   native 오디오 활성화·수락은 요구하지 않으며, 후보를 덮어 설치한 뒤 기존 검사로 확인한다.
+3. 앱을 정상 종료한 뒤 macOS는 `installer -pkg`, Linux는 `apt-get install --reinstall` 또는
+   `pacman -U`로 후보를 덮어 설치한다. 이전 제품을 제거하는 명령은 이 두 설치 사이에 없다.
+4. 설치 실행 파일을 후보 패키지의 해시와 대조하고 후보 버전의 Driver·엔진 준비 상태,
+   복구된 그래프·장치 설정·저장 파일 해시를 확인한다. Driver는 장치 spec뿐 아니라
+   관측 샘플레이트와 양방향 현재 형식의 샘플레이트·채널 수·PCM 표현까지 비교한다.
+   저장 파일도 다시 열어 비교한 뒤 Driver의 원래 기본 설정과 현재 형식을 복원하고
+   그래프를 비워 기존 후보 검사를 모두 다시 실행한다. fresh 검사는 이 복원 경로를 거치지 않는다.
+5. 후보를 제거하고 설치 파일의 부재와 외부 `.mix`·녹음 파일 보존을 확인한다.
+   macOS는 설치된 서명 도우미의 private copy로 native 제거 트랜잭션을 실행하며,
+   Linux는 배포판 패키지 관리자로 제거한다. 제거 GUI의 인증 대화상자 검증은 포함하지 않는다.
+
+`fresh/`와 `upgrade/`에는 각 모드의 설치·종료·제거 로그와 원시 증거가 남는다.
+최상위 대상 리포트는 fresh 결과와 업그레이드 후 전체 검사 결과를 묶는다.
+필수 시나리오 `UPGRADE-01`은 baseline 설치·상태 보존·업그레이드 후 검사·제거 중 하나라도
+실패하면 실패하며, `PKG-02`는 fresh 제거 결과를 기록한다. 업그레이드 리포트와 원시 증거도
+gate의 해시 검사 대상이다. 기존 실패를 성공으로 바꾸거나 미실행 대상을 생략하지 않는다.
+
+이 검사는 기존 앱의 서명 정책을 새 설치기가 거부하는 회귀, 같은 버전의 오래된 실행 파일 잔류,
+저장 그래프·장치 설정 손실과 업그레이드 후 실행·오디오 회귀를 검출한다. 보존 검사의 범위는
+단일 그래프의 ID·노드·설정·연결, 외부 `.mix` 파일, 무료 Driver의 장치 구성과 현재 형식이다.
+앱 환경설정·레이아웃·여러 그래프 선택·유료 인증·장시간 녹음의 보존은 검증하지 않는다.
+실제 설치·업그레이드 성공은
+해당 후보로 hosted CI를 실행한 뒤에만 판단한다. macOS 14.2 양쪽 CPU의 기존 검증 공백은
+유지하며, Arch arm64와 macOS 27 x64는 지원 계약의 대상이 아니다.
+
+로컬 진단도 초기화 가능한 QA 세션에서만 실행한다.
+
+```sh
+pnpm test:e2e:installed --target debian-13-x64 \
+  --directory /absolute/candidate \
+  --candidate /absolute/candidate/mix-relay.candidate.json \
+  --baseline /absolute/candidate/baseline \
+  --output /absolute/new-evidence --disposable-environment
+```
 
 ## Inventory and publication
 
