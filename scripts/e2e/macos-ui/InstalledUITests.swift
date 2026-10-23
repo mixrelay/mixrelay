@@ -4,7 +4,8 @@ final class InstalledUITests: XCTestCase {
     private let app = XCUIApplication(url: URL(fileURLWithPath: "/Applications/MixRelay/MixRelay.app"))
 
     private func press(_ label: String) {
-        let item = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+        let types = [XCUIElement.ElementType.button, .popUpButton, .menuItem, .cell].map(\.rawValue)
+        let item = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ AND elementType IN %@", label, types)).firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 30), "Missing installed UI action: \(label)\n\(app.debugDescription)")
         item.click()
     }

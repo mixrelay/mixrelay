@@ -29,14 +29,14 @@ def application():
     raise LookupError("Installed MixRelay has no accessibility application")
 
 
-def find(label, contains=False, buttons=False):
+def find(label, contains=False, interactive=True):
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
             for node, _ in descendants(application()):
                 role = node.getRoleName()
                 matched = label in node.name if contains else node.name == label
-                if matched and (not buttons or role in ("push button", "menu item", "combo box")):
+                if matched and (not interactive or role in ("push button", "menu item", "combo box", "list item")):
                     if node.getState().contains(pyatspi.STATE_SHOWING):
                         return node
         except (LookupError, RuntimeError):
@@ -46,7 +46,7 @@ def find(label, contains=False, buttons=False):
 
 
 def click(label, contains=False, right=False):
-    node = find(label, contains=contains, buttons=contains)
+    node = find(label, contains=contains, interactive=not right)
     bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
     assert bounds.width > 0 and bounds.height > 0, f"Invisible UI control: {label}"
     pyatspi.Registry.generateMouseEvent(bounds.x + bounds.width // 2, bounds.y + bounds.height // 2,
