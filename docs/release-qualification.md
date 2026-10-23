@@ -143,10 +143,14 @@ failed. Independent native checks proceed only if the installed Driver API repor
 ready at the candidate version and the engine reports the expected protocol, enabled
 power and native backend. `readiness-disagreement.json` preserves both responses.
 The gate still requires `APP-01` to pass.
-The API scenarios do not check rendered UI, launch-icon behaviour, Free-state display
-or permission-dialog recovery. `GRAPH-01` (installed UI) and macOS `AUDIO-11` (free
-whole-system capture) currently produce blocked results because their acceptance
-implementations are absent. These required results prevent the workflow from passing.
+`GRAPH-01` uses the installed editor to create and connect nodes and checks the committed
+graph against the engine. The macOS UI observer handles first-use audio consent and
+remains active through Quit and removal. macOS `AUDIO-11` exercises free whole-system
+capture. Their failures and missing evidence prevent qualification. API results alone
+do not establish rendered UI, launch-icon behaviour, Free-state display or permission
+recovery. The [950ff3ac hosted failure investigation](validation/macos-hosted-950ff3ac.md)
+records the observed PID selection, first-consent and Quit failures and the remaining
+installed validation.
 The larger scenario catalog in the historical inventory still needs coverage; this
 scenario baseline does not establish the other product requirements as verified.
 

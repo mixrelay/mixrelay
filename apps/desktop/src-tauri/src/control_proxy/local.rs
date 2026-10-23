@@ -40,13 +40,31 @@ pub(super) enum RequestKind {
 
 impl Request {
     pub(super) fn kind(&self) -> RequestKind {
-        match self.command {
+        match &self.command {
             Command::Snapshot {} => RequestKind::Read,
             Command::SubscribeTelemetry {} => RequestKind::Subscribe,
-            Command::Cancel { subscription } => RequestKind::Cancel(subscription),
+            Command::Cancel { subscription } => RequestKind::Cancel(*subscription),
+            Command::Invoke { name, arguments } if cancellable_read(name, arguments) => {
+                RequestKind::Read
+            }
             _ => RequestKind::Mutation,
         }
     }
+}
+
+// Capture-aware reads may reconcile native owners and remain mutations. Only
+// observation commands without that work can be cancelled with their connection.
+fn cancellable_read(name: &str, arguments: &Value) -> bool {
+    matches!(
+        name,
+        "control_get_graph_layout"
+            | "control_get_graph_status"
+            | "control_get_meters"
+            | "control_get_node_controls"
+            | "control_get_recorder_status"
+            | "recording_settings"
+            | "workspace_path"
+    ) || (name == "engine_request" && arguments["method"] == "GET")
 }
 
 #[derive(Debug, Deserialize)]
@@ -356,6 +374,18 @@ mod tests {
             ),
             (
                 json!({"type":"invoke","name":"hello","arguments":null}),
+                RequestKind::Mutation,
+            ),
+            (
+                json!({"type":"invoke","name":"control_get_graph_status","arguments":null}),
+                RequestKind::Read,
+            ),
+            (
+                json!({"type":"invoke","name":"control_get_graph_catalog","arguments":null}),
+                RequestKind::Mutation,
+            ),
+            (
+                json!({"type":"invoke","name":"engine_request","arguments":{"method":"POST","path":"/api/v1/workspace"}}),
                 RequestKind::Mutation,
             ),
         ] {

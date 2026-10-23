@@ -12,7 +12,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
-use super::meters::TelemetryHub;
+use super::meters::{TelemetryHub, TelemetrySource};
 use super::outbound::Outbound;
 use super::{LocalControl, Request, RequestKind};
 
@@ -30,6 +30,22 @@ pub(crate) struct LocalSocket {
     operation_liveness: Arc<tokio::sync::Notify>,
 }
 
+/// Command execution and engine telemetry, injected together at the socket boundary.
+trait Dispatch: TelemetrySource {
+    fn dispatch(&self, request: Request) -> impl Future<Output = serde_json::Value> + Send;
+    fn operation_liveness(&self) -> Arc<tokio::sync::Notify>;
+}
+
+impl Dispatch for LocalControl {
+    async fn dispatch(&self, request: Request) -> serde_json::Value {
+        self.dispatch(request).await
+    }
+
+    fn operation_liveness(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.client.operation_liveness)
+    }
+}
+
 impl LocalSocket {
     /// Binds only within an owner-only directory. Existing live sockets are never replaced.
     pub(crate) async fn start(
@@ -37,9 +53,17 @@ impl LocalSocket {
         owner_uid: u32,
         control: LocalControl,
     ) -> io::Result<Self> {
+        Self::start_with_dispatch(directory, owner_uid, control).await
+    }
+
+    async fn start_with_dispatch(
+        directory: &Path,
+        owner_uid: u32,
+        control: impl Dispatch,
+    ) -> io::Result<Self> {
         let (listener, path) =
             mixrelay_local_socket::bind(directory, "control.sock", owner_uid).await?;
-        let operation_liveness = Arc::clone(&control.client.operation_liveness);
+        let operation_liveness = control.operation_liveness();
         let (stop, stopped) = watch::channel(false);
         let (finished, done) = watch::channel(false);
         tokio::spawn(async move {
@@ -77,9 +101,9 @@ impl Drop for LocalSocket {
     }
 }
 
-async fn serve(
+async fn serve<C: Dispatch>(
     listener: UnixListener,
-    control: Arc<LocalControl>,
+    control: Arc<C>,
     mut stop: watch::Receiver<bool>,
     uid: u32,
 ) {
@@ -111,10 +135,10 @@ const IN_FLIGHT_LIMIT: usize = 16;
 /// Serves one editor link: requests run concurrently, replies and telemetry share one
 /// writer. Reads end when the editor leaves or the runtime stops; mutations always run
 /// to completion, and the writer flushes what is queued before the connection closes.
-async fn connection(
+async fn connection<C: Dispatch>(
     stream: UnixStream,
-    control: Arc<LocalControl>,
-    meters: Arc<TelemetryHub<LocalControl>>,
+    control: Arc<C>,
+    meters: Arc<TelemetryHub<C>>,
     stop: watch::Receiver<bool>,
 ) -> io::Result<()> {
     let (read, mut write) = stream.into_split();
@@ -143,16 +167,16 @@ async fn connection(
     result
 }
 
-struct Requests {
-    control: Arc<LocalControl>,
-    meters: Arc<TelemetryHub<LocalControl>>,
+struct Requests<C: Dispatch> {
+    control: Arc<C>,
+    meters: Arc<TelemetryHub<C>>,
     outbound: Arc<Outbound>,
     reads: JoinSet<()>,
     mutations: JoinSet<()>,
     streams: HashMap<u64, tokio::task::AbortHandle>,
 }
 
-impl Requests {
+impl<C: Dispatch> Requests<C> {
     fn in_flight(&self) -> usize {
         self.reads.len() + self.mutations.len()
     }
@@ -280,6 +304,86 @@ mod tests {
     use std::os::unix::fs::MetadataExt as _;
     use tokio::io::AsyncWriteExt as _;
     use tokio::sync::oneshot;
+
+    #[derive(Default)]
+    struct HeldControl {
+        started: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+        completed: std::sync::atomic::AtomicBool,
+    }
+
+    struct NoTelemetry;
+
+    impl super::super::meters::TelemetryChunks for NoTelemetry {
+        async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, String> {
+            std::future::pending().await
+        }
+    }
+
+    impl TelemetrySource for Arc<HeldControl> {
+        type Chunks = NoTelemetry;
+
+        async fn open(&self) -> Result<NoTelemetry, String> {
+            Ok(NoTelemetry)
+        }
+    }
+
+    impl Dispatch for Arc<HeldControl> {
+        async fn dispatch(&self, request: Request) -> Value {
+            self.started.notify_one();
+            self.release.notified().await;
+            self.completed
+                .store(true, std::sync::atomic::Ordering::Release);
+            serde_json::json!({"id": request.id, "status": 200, "body": {}})
+        }
+
+        fn operation_liveness(&self) -> Arc<tokio::sync::Notify> {
+            Arc::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn quit_cancels_an_inflight_engine_read_but_waits_for_an_accepted_write() {
+        for method in ["GET", "PUT"] {
+            let fixture = mixrelay_test_support::FixtureDir::new("ipc-quit").unwrap();
+            let directory = fixture.join("control");
+            let uid = std::fs::metadata(fixture.path()).unwrap().uid();
+            let control = Arc::new(HeldControl::default());
+            let service = LocalSocket::start_with_dispatch(&directory, uid, Arc::clone(&control))
+                .await
+                .unwrap();
+            let mut stream = UnixStream::connect(directory.join("control.sock"))
+                .await
+                .unwrap();
+            let request = serde_json::json!({"id":1,"command":{
+                "type":"invoke","name":"engine_request",
+                "arguments":{"method":method,"path":"/api/v1/graph","body":null}
+            }});
+            stream
+                .write_all(format!("{request}\n").as_bytes())
+                .await
+                .unwrap();
+            control.started.notified().await;
+            let shutdown = tokio::spawn(async move { service.shutdown().await });
+            if method == "PUT" {
+                // The runtime cannot finish an accepted mutation by dropping its future.
+                tokio::task::yield_now().await;
+                assert!(!shutdown.is_finished());
+                assert!(!control.completed.load(std::sync::atomic::Ordering::Acquire));
+                control.release.notify_one();
+            }
+            tokio::time::timeout(Duration::from_secs(1), shutdown)
+                .await
+                .expect("Quit must not wait for observation reads")
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                control.completed.load(std::sync::atomic::Ordering::Acquire),
+                method == "PUT"
+            );
+            assert!(!directory.join("control.sock").exists());
+        }
+    }
 
     #[tokio::test]
     async fn shutdown_cancels_idle_readers_and_removes_only_owned_socket() {

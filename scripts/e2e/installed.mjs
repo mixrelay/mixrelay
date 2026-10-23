@@ -13,7 +13,7 @@ import { validateBaseline } from './baseline.mjs';
 import { collectLinux } from './collect-linux.mjs';
 import { collectMacos } from './collect-macos.mjs';
 import { observeEnvironment, validateEnvironment } from './environment.mjs';
-import { startInstalledUi } from './installed-ui.mjs';
+import { finishAfterCleanup, startInstalledUi } from './installed-ui.mjs';
 import { analyseRecording, nativeSignal } from './native-signal.mjs';
 import { installAndVerify, launchInstalled, requireDisposableHost } from './package.mjs';
 import { removeInstalled } from './removal.mjs';
@@ -516,32 +516,41 @@ export async function qualifyMode({
         );
       }
     };
+    const cleanup = async () => {
+      try {
+        await stop?.();
+      } catch (error) {
+        cleanupFailed(error);
+        if (target.os === 'macos') {
+          try {
+            collectMacos(output, 'shutdown-');
+          } catch (diagnosticError) {
+            cleanupFailed(diagnosticError);
+          }
+        }
+      }
+      if (packageInstalled)
+        await scenario('PKG-02', async () => {
+          const retained = ['qualification.mix', 'recording.wav', 'upgrade-session.mix']
+            .filter((file) => existsSync(join(output, file)))
+            .map((file) => ({ file, sha256: digest(readFileSync(join(output, file))) }));
+          removeInstalled(target.os, definition.format, output);
+          for (const item of retained)
+            assert.equal(
+              digest(readFileSync(join(output, item.file))),
+              item.sha256,
+              `Removal changed ${item.file}`,
+            );
+          return [{ file: 'removal.log', sha256: digest(readFileSync(join(output, 'removal.log'))) }];
+        });
+    };
     try {
-      const result = await ui?.finish();
+      const result = await finishAfterCleanup(ui, cleanup);
       if (result && !result.passed) failedUi(new Error(result.error));
     } catch (error) {
       failedUi(error);
       cleanupFailed(error);
     }
-    try {
-      await stop?.();
-    } catch (error) {
-      cleanupFailed(error);
-    }
-    if (packageInstalled)
-      await scenario('PKG-02', async () => {
-        const retained = ['qualification.mix', 'recording.wav', 'upgrade-session.mix']
-          .filter((file) => existsSync(join(output, file)))
-          .map((file) => ({ file, sha256: digest(readFileSync(join(output, file))) }));
-        removeInstalled(target.os, definition.format, output);
-        for (const item of retained)
-          assert.equal(
-            digest(readFileSync(join(output, item.file))),
-            item.sha256,
-            `Removal changed ${item.file}`,
-          );
-        return [{ file: 'removal.log', sha256: digest(readFileSync(join(output, 'removal.log'))) }];
-      });
     for (const expected of requiredScenarios(contract, target).filter(
       (item) => item.id !== 'UPGRADE-01',
     ))

@@ -239,9 +239,14 @@ impl Absence {
 }
 
 async fn finish_local_controls(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    tracing::info!(phase = "local_socket", "draining runtime controls for Quit");
     app.state::<crate::control_proxy::local::socket::LocalSocket>()
         .shutdown()
         .await?;
+    tracing::info!(
+        phase = "engine_requests",
+        "draining runtime controls for Quit"
+    );
     app.state::<crate::control_proxy::ControlProxyClient>()
         .drain()
         .await?;
@@ -251,12 +256,14 @@ async fn finish_local_controls(app: &tauri::AppHandle) -> Result<Option<String>,
     // outlives both the controller and the graph engine.
     let lifecycle = app.state::<EngineLifecycle>();
     let _transition = lifecycle.driver_transition.lock().await;
+    tracing::info!(phase = "driver", "stopping audio for Quit");
     crate::status_menu::stop_driver(app).await?;
     app.state::<EngineLifecycle>()
         .owner
         .lock()
         .map_err(|_| text(current_locale(), Text::DesktopLifecycleLockFailed).to_owned())?
         .take();
+    tracing::info!(phase = "engine_exit", "waiting for audio teardown for Quit");
     wait_for_engine_exit(app).await
 }
 

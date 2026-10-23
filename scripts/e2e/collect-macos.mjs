@@ -34,6 +34,10 @@ capture('desktop-windows.txt', 'osascript', ['-e',
 const processes = capture('product-processes.txt', 'pgrep', ['-u', String(process.getuid()), '-fl', 'mixrelay|MixRelay']);
 const engine = processes.stdout?.split('\n').find(line => line.includes('/bin/mixrelay-engine-service'))?.match(/^(\d+) /)?.[1];
 if (engine) capture('engine-sample-command.log', 'sample', [engine, '3', '-file', path('engine.sample.txt')]);
+for (const line of processes.stdout?.split('\n') ?? []) {
+  const pid = line.match(/^(\d+) .*\/Contents\/MacOS\/mixrelay-desktop(?:\s|$)/)?.[1];
+  if (pid) capture(`desktop-${pid}-sample-command.log`, 'sample', [pid, '1', '-file', path(`desktop-${pid}.sample.txt`)]);
+}
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

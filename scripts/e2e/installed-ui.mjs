@@ -4,6 +4,18 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawnLogged } from './package.mjs';
 
+// First-use audio consent can still be outstanding while Quit drains native work.
+// Keep the observer running until shutdown and removal have both been attempted.
+export async function finishAfterCleanup(ui, cleanup) {
+  let result;
+  try {
+    await cleanup();
+  } finally {
+    result = await ui?.finish();
+  }
+  return result;
+}
+
 export async function startInstalledUi(os, output) {
   const directory = resolve(output);
   const log = join(directory, 'installed-ui.log');
