@@ -189,7 +189,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     });
     phase(smoke ? 'Checking the actual OS and desktop audio prerequisites' : 'Installing the exact candidate and running the shared suite');
     const result = await ssh([`env ${identity.join(' ')} bash /home/qa/workspace/scripts/e2e/guest-session.sh ${smoke ? '--smoke ' : ''}${target.id}`],
-      { timeout: 900000, allowFailure: true, log: join(output, 'guest-suite.log') });
+      { timeout: 1800000, allowFailure: true, log: join(output, 'guest-suite.log') });
     const collected = await command('scp', [...sshOptions, '-P', String(port), '-r', 'qa@127.0.0.1:/home/qa/workspace/evidence/.', output], { timeout: 180000, allowFailure: true });
     session.guestExitCode = result.code; session.evidenceCollected = collected.code === 0;
     assert.equal(result.code, 0, 'Guest suite failed; see guest-suite.log and qualification report');

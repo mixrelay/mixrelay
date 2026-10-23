@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { digest } from '../support-contract.mjs';
 
-const run = (program, args) => execFileSync(program, args, { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
+const run = (program, args, timeout = 120000) => execFileSync(program, args, { encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 });
 export const installedPaths = os => os === 'macos' ? [
   '/Applications/MixRelay/MixRelay.app/Contents/MacOS/mixrelay-desktop',
   '/Library/Application Support/MixRelay/bin/mixrelay-engine-service',
@@ -28,20 +28,28 @@ export function requireDisposableHost(os, acknowledged) {
 export function installAndVerify(artifact, definition, directory, output, os) {
   const archive = join(directory, artifact.file);
   const extracted = join(output, 'payload');
+  const install = (program, args, timeout) => {
+    try { writeFileSync(join(output, 'package-install.log'), run(program, args, timeout), { flag: 'wx' }); }
+    catch (error) {
+      if (!existsSync(join(output, 'package-install.log'))) writeFileSync(join(output, 'package-install.log'),
+        `${error.stdout ?? ''}\n${error.stderr ?? ''}\n${error.message}`, { flag: 'wx' });
+      throw error;
+    }
+  };
   if (os === 'macos') {
     run('pkgutil', ['--check-signature', archive]);
     run('spctl', ['--assess', '--type', 'install', archive]);
     run('xcrun', ['stapler', 'validate', archive]);
     run('pkgutil', ['--expand-full', archive, extracted]);
-    run('sudo', ['-n', 'installer', '-pkg', archive, '-target', '/']);
+    install('sudo', ['-n', 'installer', '-pkg', archive, '-target', '/'], 300000);
   } else {
     mkdirSync(extracted);
     if (definition.format === 'deb') {
       run('dpkg-deb', ['--extract', archive, extracted]);
-      run('sudo', ['-n', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y', archive]);
+      install('sudo', ['-n', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y', archive], 1200000);
     } else {
       run('bsdtar', ['-xf', archive, '-C', extracted]);
-      run('sudo', ['-n', 'pacman', '-U', '--noconfirm', archive]);
+      install('sudo', ['-n', 'pacman', '-U', '--noconfirm', archive], 1200000);
     }
   }
   const entries = readdirSync(extracted, { recursive: true });

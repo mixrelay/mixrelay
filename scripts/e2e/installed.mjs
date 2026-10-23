@@ -59,7 +59,8 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
       report.scenarios.push({ id, scope, status: 'passed', evidence: files });
       return true;
     } catch (error) {
-      report.scenarios.push({ id, scope, status: 'failed', error: error.message, evidence: [] });
+      report.scenarios.push({ id, scope, status: 'failed', error: error.message,
+        evidence: [evidence(`${id}.failure.json`, { message: error.message, stack: error.stack })] });
       return false;
     }
   }

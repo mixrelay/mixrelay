@@ -82,7 +82,9 @@ async function linuxSignal(device, directory) {
     player.stdin.end(pcm);
     await delay(3000);
     assert.ifError(error);
-    const measured = analyseStereo(Buffer.concat(chunks));
+    const captured = Buffer.concat(chunks);
+    writeFileSync(join(directory, 'native-signal.f32'), captured, { flag: 'wx' });
+    const measured = analyseStereo(captured);
     assert.ok(Math.abs(measured.peaks[0] - 0.125) < 0.002 && Math.abs(measured.peaks[1] - 0.25) < 0.002,
       'Native loopback changed channel order or level');
     writeFileSync(join(directory, 'native-signal.json'), JSON.stringify(measured, null, 2) + '\n', { flag: 'wx' });
