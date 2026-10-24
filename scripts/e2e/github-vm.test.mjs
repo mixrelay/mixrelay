@@ -38,7 +38,10 @@ systemctl() {
   fi
 }
 udevadm() { printf 'udevadm %s\\n' "$*"; }
-blkid() { printf '/dev/%s\\n' "$2"; }
+blkid() {
+  if [[ "$2" == "$BOOT_MISSING_DEVICE" ]]; then return 2; fi
+  printf '/dev/%s\\n' "$2"
+}
 findmnt() { printf 'findmnt %s\\n' "$*"; }
 export -f systemctl udevadm blkid findmnt
 "$@"
@@ -46,7 +49,7 @@ export -f systemctl udevadm blkid findmnt
       '--',
       ...config.bootcmd[0],
     ],
-    { encoding: 'utf8', env: { ...process.env, ...environment } },
+    { encoding: 'utf8', env: { ...process.env, BOOT_MISSING_DEVICE: '', ...environment } },
   );
 }
 
@@ -72,6 +75,17 @@ test('healthy boot needs no mount recovery and a failed mount never starts defau
   );
   const ordinary = JSON.parse(cloudConfig('ssh-ed25519 AAAA test').split('\n').slice(1).join('\n'));
   assert.equal(ordinary.bootcmd, undefined);
+});
+
+test('missing boot devices remain failures before any mount or target restart', () => {
+  assert.throws(
+    () => bootRecovery({ BOOT_MISSING_DEVICE: 'UEFI' }),
+    (error) => {
+      assert.equal(error.status, 2);
+      assert.ok(!error.stdout.includes('systemctl start'));
+      return true;
+    },
+  );
 });
 
 test('disposable guests disable only needrestart kernel-image scanning before apt runs', () => {

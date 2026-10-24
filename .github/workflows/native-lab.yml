@@ -28,6 +28,8 @@ jobs:
           node-version: 24.19.0
       - run: node scripts/support-contract.mjs check
       - run: node --test scripts/support-contract.test.mjs scripts/qualification.test.mjs scripts/e2e/*.test.mjs scripts/prepare-release-manifest.test.mjs scripts/prepare-compiler-cache.test.mjs
+      - name: Verify Linux D-Bus symbol isolation with the native ELF loader
+        run: node --test scripts/linux-dbus-link.test.mjs
       - id: matrix
         run: node scripts/support-contract.mjs matrix >> "$GITHUB_OUTPUT"
 
