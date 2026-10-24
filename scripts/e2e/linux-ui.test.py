@@ -105,6 +105,23 @@ class InstalledEditorTest(unittest.TestCase):
                     with self.assertRaisesRegex(AssertionError, "Missing installed UI control"):
                         self.ui.find("Add node")
 
+    def test_activation_uses_the_native_accessible_action_and_rejects_failure(self):
+        self.desktop[:] = [self.editor]
+        self.add.queryComponent = lambda: types.SimpleNamespace(
+            getExtents=lambda coords: types.SimpleNamespace(x=10, y=20, width=30, height=40))
+        self.atspi.DESKTOP_COORDS = 0
+        accepted = []
+        self.add.queryAction = lambda: types.SimpleNamespace(
+            nActions=1, doAction=lambda index: accepted.append(index) or True)
+        self.ui.click("Add node")
+        self.assertEqual(accepted, [0])
+        self.add.queryAction = lambda: types.SimpleNamespace(nActions=1, doAction=lambda index: False)
+        with self.assertRaisesRegex(AssertionError, "rejected its accessible action"):
+            self.ui.click("Add node")
+        self.add.queryAction = lambda: types.SimpleNamespace(nActions=0)
+        with self.assertRaisesRegex(AssertionError, "no accessible action"):
+            self.ui.click("Add node")
+
 
 if __name__ == "__main__":
     unittest.main()

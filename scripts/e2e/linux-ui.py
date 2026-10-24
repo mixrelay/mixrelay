@@ -106,11 +106,18 @@ def find(label, contains=False, interactive=True):
 
 
 def click(label, contains=False, right=False):
+    started = time.monotonic()
+    print(f"Finding installed UI control: {label}", flush=True)
     node = find(label, contains=contains, interactive=not right)
     bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
     assert bounds.width > 0 and bounds.height > 0, f"Invisible UI control: {label}"
-    pyatspi.Registry.generateMouseEvent(bounds.x + bounds.width // 2, bounds.y + bounds.height // 2,
-                                       "b3c" if right else "b1c")
+    if right:
+        pyatspi.Registry.generateMouseEvent(bounds.x + bounds.width // 2, bounds.y + bounds.height // 2, "b3c")
+    else:
+        action = node.queryAction()
+        assert action.nActions > 0, f"Installed UI control has no accessible action: {label}"
+        assert action.doAction(0), f"Installed UI control rejected its accessible action: {label}"
+    print(f"Activated installed UI control: {label} ({time.monotonic() - started:.2f}s)", flush=True)
 
 
 def screenshot(path):
