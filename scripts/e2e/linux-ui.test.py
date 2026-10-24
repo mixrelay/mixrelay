@@ -26,7 +26,7 @@ class Node(list):
 
 class InstalledEditorTest(unittest.TestCase):
     def setUp(self):
-        self.desktop = []
+        self.desktop = Node("desktop", "desktop")
         registry = types.SimpleNamespace(getDesktop=lambda index: self.desktop)
         self.atspi = types.SimpleNamespace(Registry=registry, STATE_SHOWING=1)
         spec = importlib.util.spec_from_file_location(
@@ -53,6 +53,29 @@ class InstalledEditorTest(unittest.TestCase):
         self.desktop[:] = [other, hidden, self.runtime]
         with self.assertRaisesRegex(LookupError, "visible accessibility editor"):
             self.ui.application()
+
+    def test_null_and_defunct_children_do_not_hide_live_controls_or_diagnostics(self):
+        class Defunct(Node):
+            def getRoleName(self):
+                raise RuntimeError("AT-SPI object disappeared")
+
+        class Changing(Node):
+            def __getitem__(self, index):
+                if index == 1:
+                    raise RuntimeError("AT-SPI child disappeared")
+                return super().__getitem__(index)
+
+        self.editor.insert(0, None)
+        self.editor.append(Changing("panel", "panel", [None, None, Defunct("gone", "button")]))
+        self.editor[-1].append(Node("Compressor", "button"))
+        self.desktop[:] = [None, Defunct("gone", "application"), self.runtime, self.editor]
+        self.assertIs(self.ui.find("Add node"), self.add)
+        self.assertEqual(self.ui.find("Compressor").name, "Compressor")
+        tree = self.ui.tree_text(self.desktop)
+        self.assertIn("combo box Add node", tree)
+        self.assertIn("button Compressor", tree)
+        self.assertNotIn("gone", tree)
+        self.assertEqual(list(self.ui.descendants(None)), [])
 
     def test_missing_hidden_or_noninteractive_controls_still_fail(self):
         self.desktop[:] = [self.runtime, self.editor]

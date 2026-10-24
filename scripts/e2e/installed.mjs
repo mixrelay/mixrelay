@@ -201,10 +201,7 @@ export async function qualifyMode({
       const authored = upgradeGraph(catalog.document, graphId);
       await api('graph', authored);
       const path = join(output, 'upgrade-session.mix');
-      // Seeding checks the persisted catalog; native audio is qualified after upgrade.
-      const published = async (revision) =>
-        assert.equal((await api('graphs')).document.revision, revision);
-      const saved = await saveWorkspace(api, operation, published, 'save', path);
+      const saved = await saveWorkspace(api, operation, active, 'save', path);
       verifyAuthoredGraph(authored, saved);
       unconfirmedMutation = false;
       upgradeState = preservedState(saved, await driver(), path, baselineDriver.defaults);
