@@ -229,6 +229,37 @@ class InstalledEditorTest(unittest.TestCase):
                 self.ui.activate("Add node")
         self.assertEqual(events, [])
 
+    def test_lost_focus_acknowledgement_requires_observed_focus_without_replaying(self):
+        self.desktop[:] = [self.editor]
+        self.atspi.STATE_FOCUSED = 2
+        self.atspi.STATE_ENABLED = 4
+        self.atspi.KEY_SYM = 3
+        for applied in [True, False]:
+            with self.subTest(applied=applied):
+                events = []
+                elapsed = 0
+                observed = {"focused": False}
+                def grab():
+                    events.append("focus")
+                    raise TimeoutError("AT-SPI focus reply was lost")
+                def pause(seconds):
+                    nonlocal elapsed
+                    elapsed += 31
+                self.add.queryComponent = lambda: types.SimpleNamespace(grabFocus=grab)
+                self.add.clearCache = lambda: observed.update(focused=applied)
+                self.add.getState = lambda: types.SimpleNamespace(contains=lambda state:
+                    observed["focused"] if state == self.atspi.STATE_FOCUSED else True)
+                self.atspi.Registry.generateKeyboardEvent = lambda *args: events.append(args)
+                with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
+                        patch.object(self.ui.time, "sleep", side_effect=pause):
+                    if applied:
+                        self.ui.activate("Add node")
+                        self.assertEqual(events, ["focus", (0xff0d, None, 3)])
+                    else:
+                        with self.assertRaisesRegex(AssertionError, "did not receive focus"):
+                            self.ui.activate("Add node")
+                        self.assertEqual(events, ["focus"])
+
     def test_node_context_menu_uses_the_outer_canvas_panel(self):
         self.desktop[:] = [self.editor]
         panel = Node("Compressor", "panel")

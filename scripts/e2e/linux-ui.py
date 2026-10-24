@@ -148,7 +148,10 @@ def click(label, contains=False, right=False):
 
 
 def focus(node, label, deadline):
-    node.queryComponent().grabFocus()
+    try:
+        node.queryComponent().grabFocus()
+    except Exception as error:
+        print(f"Focus acknowledgement unavailable: {label}: {error}", flush=True)
     while True:
         node.clearCache()
         if node.getState().contains(pyatspi.STATE_FOCUSED):
