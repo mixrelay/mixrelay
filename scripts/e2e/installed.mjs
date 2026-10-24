@@ -29,7 +29,10 @@ import {
   verifyPreservedState,
 } from './upgrade-state.mjs';
 
-async function eventually(read, predicate, description, { timeoutMs = 30000, now = Date.now, wait = delay } = {}) {
+async function eventually(read, predicate, description, {
+  timeoutMs = process.env.MIXRELAY_E2E_VM_ACCELERATOR === 'tcg' ? 120000 : 30000,
+  now = Date.now, wait = delay,
+} = {}) {
   const deadline = now() + timeoutMs;
   let last;
   while (now() < deadline) {

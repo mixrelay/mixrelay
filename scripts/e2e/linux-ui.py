@@ -1,5 +1,7 @@
 """Exercise the installed WebKit UI through its native accessibility tree."""
 from pathlib import Path
+from functools import lru_cache
+import os
 import sys
 import time
 import traceback
@@ -68,7 +70,9 @@ def descendants(root, report=None):
             queue.extend((child, depth + 1) for child in reversed(list(children(node, report))))
 
 
+@lru_cache(maxsize=1)
 def application():
+    # Keep the selected editor's identity throughout this one-process UI run.
     for app in children(pyatspi.Registry.getDesktop(0)):
         description = describe(app)
         if description is None or "mixrelay" not in description[1].lower():
@@ -86,31 +90,52 @@ def application():
     raise LookupError("Installed MixRelay has no visible accessibility editor")
 
 
-def find(label, contains=False, interactive=True):
-    deadline = time.monotonic() + 30
+def observation_timeout():
+    return 120 if os.environ.get("MIXRELAY_E2E_VM_ACCELERATOR") == "tcg" else 30
+
+
+def find(label, contains=False, interactive=True, deadline=None):
+    if deadline is None:
+        deadline = time.monotonic() + observation_timeout()
     while time.monotonic() < deadline:
         try:
             for node, _ in descendants(application()):
-                description = describe(node)
-                if description is None:
-                    continue
-                role, name, showing = description
-                matched = label in name if contains else name == label
-                if matched and (not interactive or role in ("button", "push button", "menu item", "combo box", "list item")):
-                    if showing:
+                try:
+                    name = node.name or ""
+                    matched = label in name if contains else name == label
+                    if not matched:
+                        continue
+                    if interactive and node.getRoleName() not in ("button", "push button", "menu item", "combo box", "list item"):
+                        continue
+                    if node.getState().contains(pyatspi.STATE_SHOWING):
                         return node
+                except Exception:
+                    continue
         except (LookupError, RuntimeError):
             pass
         time.sleep(0.1)
     raise AssertionError(f"Missing installed UI control: {label}")
 
 
+def locate(label, contains=False, interactive=True):
+    deadline = time.monotonic() + observation_timeout()
+    last = None
+    while time.monotonic() < deadline:
+        node = find(label, contains=contains, interactive=interactive, deadline=deadline)
+        try:
+            bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+            if bounds.width > 0 and bounds.height > 0:
+                return node, bounds
+        except Exception as error:
+            last = error
+        time.sleep(0.1)
+    raise AssertionError(f"Installed control bounds unavailable: {label}: {last}")
+
+
 def click(label, contains=False, right=False):
     started = time.monotonic()
     print(f"Finding installed UI control: {label}", flush=True)
-    node = find(label, contains=contains, interactive=not right)
-    bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-    assert bounds.width > 0 and bounds.height > 0, f"Invisible UI control: {label}"
+    _, bounds = locate(label, contains=contains, interactive=not right)
     x, y = bounds.x + bounds.width // 2, bounds.y + bounds.height // 2
     pyatspi.Registry.generateMouseEvent(x, y, "abs")
     pyatspi.Registry.generateMouseEvent(x, y, "b3c" if right else "b1c")
@@ -118,10 +143,8 @@ def click(label, contains=False, right=False):
 
 
 def open_submenu(label):
-    node = find(label)
+    node, bounds = locate(label)
     component = node.queryComponent()
-    bounds = component.getExtents(pyatspi.DESKTOP_COORDS)
-    assert bounds.width > 0 and bounds.height > 0, f"Invisible UI control: {label}"
     # A submenu trigger has no leaf action. Move off the previous hovered item,
     # then use the menu's focus + Right Arrow keyboard contract.
     pyatspi.Registry.generateMouseEvent(bounds.x + bounds.width // 2, bounds.y + bounds.height // 2, "abs")
@@ -129,7 +152,7 @@ def open_submenu(label):
         component.grabFocus()
     except Exception as error:
         print(f"Submenu focus acknowledgement unavailable: {label}: {error}", flush=True)
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + observation_timeout()
     while True:
         try:
             if node.getState().contains(pyatspi.STATE_FOCUSED):
@@ -169,6 +192,7 @@ def main(output):
     # Keep native queries below the registry's three-second keyboard budget.
     # The default 800ms expires during otherwise successful TCG UI updates.
     Atspi.set_timeout(2000, 15000)
+    find("Untitled Graph")
     click("Add node")
     open_submenu("Processor")
     click("Compressor")

@@ -28,7 +28,7 @@ export async function startInstalledUi(os, output) {
   const alive = () => !spawnError && child.exitCode === null && child.signalCode === null;
   return {
     async ready() {
-      const deadline = Date.now() + 300000;
+      const deadline = Date.now() + (process.env.MIXRELAY_E2E_VM_ACCELERATOR === 'tcg' ? 900000 : 300000);
       while (!existsSync(join(directory, 'installed-ui.ready')) && alive() && Date.now() < deadline) await delay(100);
       assert.ifError(spawnError);
       assert.ok(existsSync(join(directory, 'installed-ui.ready')), `Installed UI failed: ${readFileSync(log, 'utf8').slice(-5000)}`);

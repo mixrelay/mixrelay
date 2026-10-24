@@ -42,6 +42,7 @@ class InstalledEditorTest(unittest.TestCase):
     def test_headless_runtime_does_not_hide_editor_in_either_registration_order(self):
         for apps in ([self.runtime, self.editor], [self.editor, self.runtime]):
             with self.subTest(runtime_first=apps[0] is self.runtime):
+                self.ui.application.cache_clear()
                 self.desktop[:] = apps
                 self.assertIs(self.ui.application(), self.editor)
                 self.assertIs(self.ui.find("Add node"), self.add)
@@ -121,6 +122,35 @@ class InstalledEditorTest(unittest.TestCase):
         self.ui.click("Add node", right=True)
         self.assertEqual(events, [(25, 40, "abs"), (25, 40, "b3c")])
 
+    def test_unrelated_controls_do_not_require_role_or_state_round_trips(self):
+        class Busy(Node):
+            def getRoleName(self):
+                raise AssertionError("Unrelated role query would block the native provider")
+
+            def getState(self):
+                raise AssertionError("Unrelated state query would block the native provider")
+
+        self.editor[0].insert(0, Busy("Unrelated", "panel"))
+        self.desktop[:] = [self.editor]
+        self.assertIs(self.ui.find("Add node"), self.add)
+
+    def test_bounds_queries_can_recover_before_the_single_pointer_action(self):
+        self.desktop[:] = [self.editor]
+        self.atspi.DESKTOP_COORDS = 0
+        reads = []
+        def bounds(coords):
+            reads.append(coords)
+            if len(reads) == 1:
+                raise RuntimeError("Read-only AT-SPI query timed out")
+            return types.SimpleNamespace(x=10, y=20, width=30, height=40)
+        self.add.queryComponent = lambda: types.SimpleNamespace(getExtents=bounds)
+        events = []
+        self.atspi.Registry.generateMouseEvent = lambda *args: events.append(args)
+        with patch.object(self.ui.time, "sleep"):
+            self.ui.click("Add node")
+        self.assertEqual(len(reads), 2)
+        self.assertEqual(events, [(25, 40, "abs"), (25, 40, "b1c")])
+
     def test_submenu_receives_focus_and_right_arrow_instead_of_a_leaf_action(self):
         self.desktop[:] = [self.editor]
         self.atspi.DESKTOP_COORDS = 0
@@ -138,7 +168,12 @@ class InstalledEditorTest(unittest.TestCase):
         events.clear()
         component.grabFocus = lambda: False
         self.add.getState = lambda: types.SimpleNamespace(contains=lambda state: state == self.atspi.STATE_SHOWING)
-        with patch.object(self.ui.time, "monotonic", side_effect=[0, 0, 0, 31]):
+        elapsed = 0
+        def pause(seconds):
+            nonlocal elapsed
+            elapsed += 31
+        with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
+                patch.object(self.ui.time, "sleep", side_effect=pause):
             with self.assertRaisesRegex(AssertionError, "never received focus"):
                 self.ui.open_submenu("Add node")
         self.assertEqual(events, [(25, 40, "abs")])
