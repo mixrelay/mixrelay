@@ -31,7 +31,7 @@ function fixture(t, overrides = {}) {
   return { output, options, state, calls };
 }
 
-test('Apple ticket validation uses TCP on affected hosted Intel and restores its own PF state', t => {
+test('Apple ticket validation uses TCP on affected hosted macOS and restores its own PF state', t => {
   const { output, options, state, calls } = fixture(t);
   const result = withAppleTicketHttps(output, () => {
     assert.ok(state.blocked && state.enabled, 'The affected HTTP/3 route must fall back before validation');
@@ -105,8 +105,8 @@ test('a missing platform anchor or an occupied private anchor prevents any netwo
   }
 });
 
-test('other OS, CPU, and non-hosted sessions never alter packet filtering', t => {
-  for (const override of [{ platform: 'linux' }, { arch: 'arm64' }, { env: {} }]) {
+test('other OS and non-hosted sessions never alter packet filtering', t => {
+  for (const override of [{ platform: 'linux' }, { env: {} }]) {
     const { output, options, calls } = fixture(t, override);
     assert.equal(withAppleTicketHttps(output, () => 'unchanged', options), 'unchanged');
     assert.deepEqual(calls, []);
@@ -117,4 +117,11 @@ test('other OS, CPU, and non-hosted sessions never alter packet filtering', t =>
   } });
   assert.equal(withAppleTicketHttps(output, () => 'unchanged', options), 'unchanged');
   assert.deepEqual(calls, ['sw_vers']);
+});
+
+test('the same observed CloudKit failure on macOS 15 ARM uses the scoped TCP path', t => {
+  const { output, options, state } = fixture(t, { arch: 'arm64' });
+  withAppleTicketHttps(output, () => assert.ok(state.blocked && state.enabled), options);
+  assert.equal(state.blocked, false);
+  assert.equal(state.enabled, false);
 });

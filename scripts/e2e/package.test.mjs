@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { installedPaths, requireDisposableHost, spawnLogged } from './package.mjs';
+import { installedPaths, requireDisposableHost, spawnLogged, waitForInstalledExit } from './package.mjs';
 
 const ticketTransport = (_output, verify) => verify();
 
@@ -210,4 +210,24 @@ test('a macOS postinstall rejection is fatal and preserves installer stderr', as
     readFileSync(join(output, 'package-install.log'), 'utf8'),
     /entitlement policy rejected/,
   );
+});
+
+
+test('installed shutdown observes asynchronous audio finalization and editor exit on one deadline', async () => {
+  let time = 0;
+  const result = await waitForInstalledExit(() => ({ runtimes: time < 6000 ? ['8821'] : [],
+    editorClosed: time >= 8000 }), { now: () => time, wait: async ms => { time += ms; } });
+  assert.equal(result.stopped, true);
+  assert.equal(result.elapsedMs, 8000);
+  assert.deepEqual(result.runtimes, []);
+  assert.equal(result.editorClosed, true);
+});
+
+test('a runtime that never finishes fails bounded shutdown observation without a force kill', async () => {
+  let time = 0;
+  const result = await waitForInstalledExit(() => ({ runtimes: ['8821'], editorClosed: true }),
+    { now: () => time, wait: async ms => { time += ms; } });
+  assert.equal(result.stopped, false);
+  assert.ok(result.elapsedMs <= 150000);
+  assert.deepEqual(result.runtimes, ['8821']);
 });

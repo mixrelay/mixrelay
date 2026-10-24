@@ -35,7 +35,7 @@ Use the notarized, stapled final PKG. Installed verification requires `stapler v
 to succeed. Only its observed exit 68 with `NSURLErrorDomain Code=-1005` permits a retry:
 three attempts with 30- and 60-second waits, recorded in `package-verification.json`.
 Invalid tickets and exhausted transport failures stop before extraction or installation.
-On hosted macOS 15 Intel, validation uses HTTPS over TCP to avoid the
+On hosted macOS 15, validation uses HTTPS over TCP to avoid the
 [confirmed HTTP/3 runner failure](https://github.com/actions/runner-images/issues/14924).
 The QA adapter adds a private rule below the existing platform packet-filter anchor,
 blocks outbound UDP 443 only while validating, then removes that rule and releases its
@@ -153,6 +153,11 @@ finalized RF64 sizes and samples. It restores its graph, stops its app and expli
 removes the installed product.
 The same session then runs baseline-to-candidate upgrade qualification and removal.
 Disposal removes the remaining QA data. Cleanup failure also fails qualification.
+Linux shutdown sends one SIGTERM to each owned editor/controller and observes actual
+exit for up to 150 seconds, the same budget as the macOS Quit command. The controller
+drains accepted work and waits for audio finalization before exiting; this is not a
+five-second contract. `shutdown-observation.json` records elapsed time and remaining
+processes. A remaining process fails cleanup; the observer does not force-kill it.
 
 For diagnosis on a disposable session:
 

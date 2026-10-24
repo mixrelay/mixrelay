@@ -179,6 +179,19 @@ export function installAndVerify(
   );
 }
 
+// Installed Quit drains controls and audio finalization before acknowledging exit.
+export async function waitForInstalledExit(observe, { wait = delay, now = () => performance.now(),
+  limitMs = 150000 } = {}) {
+  const started = now();
+  for (;;) {
+    const state = observe();
+    const elapsedMs = now() - started;
+    const stopped = state.runtimes.length === 0 && state.editorClosed;
+    if (stopped || elapsedMs >= limitMs) return { ...state, elapsedMs, stopped };
+    await wait(Math.min(100, limitMs - elapsedMs));
+  }
+}
+
 export async function launchInstalled(os, output) {
   if (os === 'macos') {
     run('open', ['-a', '/Applications/MixRelay/MixRelay.app']);
@@ -241,23 +254,13 @@ export async function launchInstalled(os, output) {
           throw error;
         }
       };
-      for (let attempt = 0; attempt < 50 && runtimes.some(runtimeAlive); attempt++)
-        await delay(100);
-      assert.ok(
-        runtimes.every((pid) => !runtimeAlive(pid)),
-        'Installed background runtime did not stop',
-      );
-      await Promise.race([
-        new Promise((resolve) => {
-          if (child.exitCode !== null || child.signalCode !== null || launchError) resolve();
-          else child.once('exit', resolve);
-        }),
-        delay(5000),
-      ]);
-      assert.ok(
-        launchError || child.exitCode !== null || child.signalCode !== null,
-        'Installed app did not stop',
-      );
+      const observation = await waitForInstalledExit(() => ({
+        runtimes: runtimes.filter(runtimeAlive),
+        editorClosed: Boolean(launchError || child.exitCode !== null || child.signalCode !== null),
+      }));
+      writeFileSync(join(output, 'shutdown-observation.json'), `${JSON.stringify(observation, null, 2)}\n`, { flag: 'wx' });
+      assert.equal(observation.runtimes.length, 0, 'Installed background runtime did not stop');
+      assert.ok(observation.editorClosed, 'Installed app did not stop');
       if (launchError) throw launchError;
     } finally {
       run('systemctl', ['--user', 'stop', 'mixrelay-driver.service']);

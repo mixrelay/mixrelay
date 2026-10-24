@@ -6,8 +6,8 @@ import { join } from 'node:path';
 // https://github.com/actions/runner-images/issues/14924
 export function withAppleTicketHttps(output, action, { platform = process.platform,
   arch = process.arch, env = process.env, command = spawnSync } = {}) {
-  if (platform !== 'darwin' || arch !== 'x64' || env.GITHUB_ACTIONS !== 'true') return action();
-  const report = { imageVersion: env.ImageVersion, commands: [], cleanup: 'not-required' };
+  if (platform !== 'darwin' || env.GITHUB_ACTIONS !== 'true') return action();
+  const report = { imageVersion: env.ImageVersion, arch, commands: [], cleanup: 'not-required' };
   function run(program, args) {
     const result = command(program, args, { encoding: 'utf8', timeout: 10000, killSignal: 'SIGKILL' });
     report.commands.push({ program, args, status: result.status, stdout: result.stdout,
