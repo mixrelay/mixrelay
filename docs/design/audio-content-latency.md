@@ -216,7 +216,8 @@ changes and loss of the OS engine lease clear effective latency.
 
 Each device has 256 preallocated atomic client slots. Registration records process
 identity on control. Start/Stop owns activity; the C bridge marks a client only
-when a WriteMix render operation is observed. Capture-only registration does not
+when a ProcessOutput render operation is observed. The fully mixed WriteMix buffer
+is copied to loopback once and does not identify an individual rendering client. Capture-only registration does not
 invalidate the value. A rendering client whose PID differs from the published
 engine PID makes the effective value zero; so does one whose known process start
 differs from the engine's known start (a reused PID). The driver sandbox denies

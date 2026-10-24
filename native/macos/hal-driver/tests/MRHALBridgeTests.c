@@ -128,6 +128,8 @@ static void transport_identity(void) {
     Boolean will = false, in_place = false;
     assert((*gDriver)->WillDoIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationWriteMix, &will, &in_place) == noErr);
     assert(will && in_place);
+    assert(will_io(gDriver, device, 7, kAudioServerPlugInIOOperationProcessOutput, &will, &in_place) == noErr);
+    assert(will && in_place);
     /* WillDo is a startup query, not an IO-thread scope. */
     assert(transport_value() == kAudioDeviceTransportTypeUSB);
     assert(will_io(NULL, device, 7, 0, &will, &in_place) == kAudioHardwareBadObjectError);
@@ -140,7 +142,11 @@ static void transport_identity(void) {
     /* Native IO reenters the property path; its nested scope cannot end the cycle. */
     assert(do_io(gDriver, device, device + 2, 7, kAudioServerPlugInIOOperationWriteMix, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
+    assert(rendered_client == 0 && rendered_device == 0);
+    samples[0] = 0.125F; samples[1] = -0.25F;
+    assert(do_io(gDriver, device, device + 2, 7, kAudioServerPlugInIOOperationProcessOutput, 1, &cycle, samples, NULL) == noErr);
     assert(rendered_client == 7 && rendered_device == device);
+    assert(samples[0] == 0.125F && samples[1] == -0.25F);
     assert(do_io(gDriver, device, device + 2, 7, 0, 1, NULL, samples, NULL) == kAudioHardwareBadObjectError);
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
     assert((*gDriver)->EndIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationWriteMix, 1, &cycle) == noErr);
@@ -177,8 +183,8 @@ static void transport_identity(void) {
     mr_hal_core_destroy(gCore); gCore = NULL;
 }
 
-/* The SDK GetPropertyData entry must forward every requester: an app reads the
- * measured input latency, while coreaudiod (PID 0) reads only the change marker. */
+/* The SDK GetPropertyData entry forwards requester identity: apps read measured
+ * content delay while coreaudiod keeps zero scheduling latency. */
 static void input_latency_requester(void) {
     const MRHALCoreNativeOps native = {inspect_fixture, create_fixture, destroy_fixture, replace_fixture,
         start_fixture, stop_fixture, stop_fixture, rate_fixture, timestamp_fixture, io_fixture,
@@ -217,9 +223,25 @@ static void input_latency_requester(void) {
     uint32_t value = 0, written = 0;
     assert(property_get(gDriver, device, getpid(), &property, 0, NULL, 4, &written, &value) == noErr);
     assert(forwarded_pid == getpid() && written == 4 && value == 321);
-    /* One published change so far: coreaudiod's marker reads 1, never the frames. */
+    /* Content-delay publication cannot move the host's input coordinates. */
     assert(property_get(gDriver, device, 0, &property, 0, NULL, 4, &written, &value) == noErr);
-    assert(forwarded_pid == 0 && written == 4 && value == 1);
+    assert(forwarded_pid == 0 && written == 4 && value == 0);
+    AudioServerPlugInClientInfo client = {.mClientID = 7, .mProcessID = getpid(), .mBundleID = CFSTR("com.test.Renderer")};
+    assert(add_client(gDriver, device, &client) == noErr);
+    assert(start_io(gDriver, device, 7) == noErr);
+    AudioServerPlugInIOCycleInfo cycle = {0};
+    float samples[2] = {0.125F, -0.25F};
+    transport_device = device;
+    assert(do_io(gDriver, device, device + 2, kAudioServerPlugInHostClientID,
+        kAudioServerPlugInIOOperationWriteMix, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
+    assert(property_get(gDriver, device, getpid(), &property, 0, NULL, 4, &written, &value) == noErr && value == 321);
+    assert(do_io(gDriver, device, device + 2, 7,
+        kAudioServerPlugInIOOperationProcessOutput, 1, &cycle, samples, NULL) == noErr);
+    assert(samples[0] == 0.125F && samples[1] == -0.25F);
+    assert(property_get(gDriver, device, getpid(), &property, 0, NULL, 4, &written, &value) == noErr && value == 0);
+    assert(stop_io(gDriver, device, 7) == noErr);
+    assert(property_get(gDriver, device, getpid(), &property, 0, NULL, 4, &written, &value) == noErr && value == 321);
+    assert(remove_client(gDriver, device, &client) == noErr);
     mr_hal_core_destroy(gCore); gCore = NULL;
 }
 

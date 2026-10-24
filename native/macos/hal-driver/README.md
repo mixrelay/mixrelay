@@ -11,7 +11,7 @@ graph's normal CoreAudio client adapter.
 
 Device `kAudioDevicePropertyLatency` on input scope consumes an optional runtime
 publication from the independent Driver service, in device-rate frames. Output
-latency, stream latency and safety offset remain zero. A non-engine WriteMix
+latency, stream latency and safety offset remain zero. A non-engine ProcessOutput
 client gates input latency to zero; capture-only client registration does not.
 Client marking and property reads use pinned atomics without IO-needed locks.
 The serial control path emits input `ltnc` notifications after releasing locks,
