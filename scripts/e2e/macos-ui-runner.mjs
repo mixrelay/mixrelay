@@ -12,6 +12,12 @@ function run(program, args) {
   return result;
 }
 
+export function designatedRequirement({ stdout = '', stderr = '' }) {
+  const matches = [...`${stdout}\n${stderr}`.matchAll(/^(?:#\s*)?designated => (.+)\r?$/gm)];
+  assert.equal(matches.length, 1, 'Signed XCTest runner must have one designated requirement');
+  return matches[0][1].trim();
+}
+
 export function runMacosUi(output, tools, { runCommand = run, read = readFileSync, write = writeFileSync } = {}) {
   const build = ['-project', join(tools, 'MixRelayInstalledUI.xcodeproj'), '-scheme', 'InstalledUI',
     '-destination', 'platform=macOS', '-derivedDataPath', join(tools, 'DerivedData'),
@@ -22,10 +28,10 @@ export function runMacosUi(output, tools, { runCommand = run, read = readFileSyn
   assert.equal(bundle, 'io.mixrelay.qualification.ui.xctrunner');
   runCommand('codesign', ['--force', '--deep', '--sign', '-', runner]);
   runCommand('codesign', ['--verify', '--deep', '--strict', runner]);
-  const requirement = runCommand('codesign', ['-d', '-r-', runner]).stderr.match(/^designated => (.+)$/m)?.[1];
-  assert.ok(requirement, 'Signed XCTest runner has no designated requirement');
+  const requirement = designatedRequirement(runCommand('codesign', ['-d', '-r-', runner]));
   const csreq = join(tools, 'runner.csreq');
-  runCommand('csreq', ['-r', requirement, '-b', csreq]);
+  runCommand('csreq', ['-r', `=${requirement}`, '-b', csreq]);
+  runCommand('codesign', ['--verify', '--strict', '-R', csreq, runner]);
   const bytes = read(csreq).toString('hex');
   assert.match(bytes, /^(?:[0-9a-f]{2})+$/);
   // This grant is confined to the disposable hosted session and to the exact

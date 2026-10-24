@@ -6,6 +6,16 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
+export function collectCoreaudioServers(capture, path) {
+  const servers = capture('coreaudio-server-processes.txt', 'pgrep', ['-fl', 'coreaudiod|Core-Audio-Driver-Service']);
+  const pids = new Set((servers.stdout ?? '').split('\n')
+    .map(line => line.match(/^(\d+)\s/)?.[1]).filter(Boolean));
+  for (const pid of pids) {
+    capture(`coreaudio-server-${pid}-sample-command.log`, 'sudo',
+      ['-n', 'sample', pid, '1', '-file', path(`coreaudio-server-${pid}.sample.txt`)]);
+  }
+}
+
 export function collectMacos(destination, prefix = '') {
 assert.equal(process.platform, 'darwin');
 assert.equal(process.env.GITHUB_ACTIONS, 'true');
@@ -20,6 +30,7 @@ const logs = join(homedir(), 'Library/Logs/MixRelay');
 if (existsSync(logs)) for (const file of readdirSync(logs).filter(name => /^[A-Za-z0-9_.-]+\.log$/.test(name))) {
   copyFileSync(join(logs, file), path(`app-log-${file}`));
 }
+collectCoreaudioServers(capture, path);
 capture('coreaudio-devices.txt', 'system_profiler', ['SPAudioDataType', '-json']);
 capture('coreaudio-probe.txt', 'zsh', ['scripts/probe-macos-roundtrip.sh', '--list']);
 for (const [role, path] of [
@@ -28,12 +39,14 @@ for (const [role, path] of [
   ['driver', '/Library/Application Support/MixRelay/bin/mixrelay-driver-service'],
 ]) capture(`${role}-entitlements.txt`, 'codesign', ['-d', '--entitlements', ':-', path]);
 capture('coreaudio-system.log', 'log', ['show', '--last', '5m', '--style', 'compact', '--predicate',
-  'process CONTAINS[c] "mixrelay" OR ((process == "coreaudiod" OR process == "tccd") AND eventMessage CONTAINS[c] "mixrelay")']);
+  'process CONTAINS[c] "mixrelay" OR process == "coreaudiod" OR process CONTAINS[c] "Core-Audio-Driver-Service" OR (process == "tccd" AND eventMessage CONTAINS[c] "mixrelay")']);
 capture('desktop-windows.txt', 'osascript', ['-e',
   'tell application "System Events" to get {name, name of windows} of every process whose background only is false'], 15000);
 const processes = capture('product-processes.txt', 'pgrep', ['-u', String(process.getuid()), '-fl', 'mixrelay|MixRelay']);
-const engine = processes.stdout?.split('\n').find(line => line.includes('/bin/mixrelay-engine-service'))?.match(/^(\d+) /)?.[1];
-if (engine) capture('engine-sample-command.log', 'sample', [engine, '3', '-file', path('engine.sample.txt')]);
+for (const role of ['engine', 'driver']) {
+  const pid = processes.stdout?.split('\n').find(line => line.includes(`/bin/mixrelay-${role}-service`))?.match(/^(\d+) /)?.[1];
+  if (pid) capture(`${role}-sample-command.log`, 'sample', [pid, '3', '-file', path(`${role}.sample.txt`)]);
+}
 for (const line of processes.stdout?.split('\n') ?? []) {
   const pid = line.match(/^(\d+) .*\/Contents\/MacOS\/mixrelay-desktop(?:\s|$)/)?.[1];
   if (pid) capture(`desktop-${pid}-sample-command.log`, 'sample', [pid, '1', '-file', path(`desktop-${pid}.sample.txt`)]);
