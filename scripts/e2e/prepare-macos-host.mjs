@@ -45,7 +45,7 @@ export function prepareHostedMacos(output, { command = spawnSync, env = process.
     assert.ifError(after.error);
     const disabled = run('icon-agent-disabled', 'launchctl', ['print-disabled', `gui/${uid}`]);
     success(disabled, 'Cannot verify the image repair');
-    assert.match(disabled.stdout, /"com\.apple\.iconservices\.iconservicesagent"\s*=>\s*true/);
+    assert.match(disabled.stdout, /"com\.apple\.iconservices\.iconservicesagent"\s*=>\s*(?:true|disabled)\s*(?:\n|$)/);
     success(run('icon-probe-after', probe, [], 15000), 'Native icon rendering must return after host repair');
     report.repaired = true;
     report.iconRendering = 'system fallback after confirmed hosted Metal crash loop';

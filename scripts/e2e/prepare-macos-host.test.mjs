@@ -8,7 +8,7 @@ import { prepareHostedMacos } from './prepare-macos-host.mjs';
 const crashed = 'state = spawn scheduled\nsuccessive crashes = 15\nlast terminating signal = Abort trap: 6\n';
 const timeout = { status: null, signal: 'SIGKILL', error: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }) };
 
-function fixture(t, { first = { status: 0, stdout: '4096' }, state = crashed, after = { status: 0, stdout: '4096' }, arch = 'x64' } = {}) {
+function fixture(t, { first = { status: 0, stdout: '4096' }, state = crashed, after = { status: 0, stdout: '4096' }, arch = 'x64', disabledState = 'true' } = {}) {
   const output = mkdtempSync(join(tmpdir(), 'mr-host-'));
   t.after(() => rmSync(output, { recursive: true, force: true }));
   const calls = []; let probes = 0, inspections = 0;
@@ -18,7 +18,7 @@ function fixture(t, { first = { status: 0, stdout: '4096' }, state = crashed, af
       if (program === 'sw_vers') return { status: 0, stdout: '26.6.1\n' };
       if (program.endsWith('icon-probe')) return ++probes === 1 ? first : after;
       if (args[0] === 'print') return ++inspections === 1 ? { status: 0, stdout: state } : { status: 113, stderr: 'Could not find service' };
-      if (args[0] === 'print-disabled') return { status: 0, stdout: '"com.apple.iconservices.iconservicesagent" => true' };
+      if (args[0] === 'print-disabled') return { status: 0, stdout: `"com.apple.iconservices.iconservicesagent" => ${disabledState}\n` };
       return { status: 0, stdout: '' };
     } };
   return { output, calls, run: () => prepareHostedMacos(output, options), options };
@@ -55,6 +55,16 @@ test('a failed after-repair native probe remains a preparation failure', t => {
   const f = fixture(t, { first: timeout, after: timeout });
   assert.throws(f.run, /timed out/);
   assert.equal(JSON.parse(readFileSync(join(f.output, 'host-preparation.json'))).repaired, false);
+});
+
+test('launchctl disabled-state words are accepted but an enabled agent remains a failure', t => {
+  const f = fixture(t, { first: timeout, disabledState: 'disabled' });
+  assert.equal(f.run().repaired, true);
+  for (const disabledState of ['false', 'enabled']) {
+    const unconfirmed = fixture(t, { first: timeout, disabledState });
+    assert.throws(unconfirmed.run);
+    assert.equal(unconfirmed.calls.filter(call => call.program.endsWith('icon-probe')).length, 1);
+  }
 });
 
 test('other CPUs and non-disposable sessions never change the hosted service', t => {
