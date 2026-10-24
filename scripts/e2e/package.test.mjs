@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { installedPaths, requireDisposableHost, spawnLogged } from './package.mjs';
 
+const ticketTransport = (_output, verify) => verify();
+
 test('stapler retries a lost Apple connection and requires validation before extraction', async (t) => {
   const { installAndVerify } = await import('./package.mjs');
   const output = mkdtempSync(join(tmpdir(), 'mr-stapler-network-'));
@@ -27,7 +29,7 @@ test('stapler retries a lost Apple connection and requires validation before ext
     return 'accepted';
   };
   installAndVerify({ file: 'candidate.pkg' }, {}, output, output, 'macos', {
-    runCommand, paths: [], wait: (milliseconds) => { waits.push(milliseconds); elapsed += milliseconds; },
+    runCommand, ticketTransport, paths: [], wait: (milliseconds) => { waits.push(milliseconds); elapsed += milliseconds; },
   });
   assert.equal(calls.at(-1)[0], 'sudo');
   assert.deepEqual(waits, [30000]);
@@ -54,7 +56,7 @@ test('persistent stapler transport failure is bounded and never installs', async
     return 'accepted';
   };
   assert.throws(() => installAndVerify({ file: 'candidate.pkg' }, {}, output, output, 'macos', {
-    runCommand, wait: (milliseconds) => waits.push(milliseconds),
+    runCommand, ticketTransport, wait: (milliseconds) => waits.push(milliseconds),
   }), /stapler exited 68/);
   assert.equal(attempts, 3);
   assert.deepEqual(waits, [30000, 60000]);
@@ -77,7 +79,7 @@ test('stapler failure preserves raw diagnostics and stops before extraction or i
     return 'accepted';
   };
   assert.throws(() => installAndVerify({ file: 'candidate.pkg' }, {}, output, output, 'macos', {
-    runCommand,
+    runCommand, ticketTransport,
   }), /stapler exited 65\nThe validate action failed!\nTicket signature is invalid/);
   assert.deepEqual(calls.map(([program]) => program), ['pkgutil', 'spctl', 'xcrun']);
   const report = JSON.parse(readFileSync(join(output, 'package-verification.json')));
@@ -144,7 +146,7 @@ test('same-version DEBs are reinstalled and installed executable bytes are check
     return 'installer succeeded';
   };
   installAndVerify({ file: 'candidate.deb' }, { format: 'deb' }, root, output, 'linux', {
-    runCommand,
+    runCommand, ticketTransport,
     paths: [executable],
   });
   assert.deepEqual(calls[1], [
@@ -169,7 +171,7 @@ test('same-version DEBs are reinstalled and installed executable bytes are check
   assert.throws(
     () =>
       installAndVerify({ file: 'candidate.deb' }, { format: 'deb' }, root, other, 'linux', {
-        runCommand,
+        runCommand, ticketTransport,
         paths: [executable],
       }),
     /differs from candidate/,
@@ -196,7 +198,7 @@ test('a macOS postinstall rejection is fatal and preserves installer stderr', as
   assert.throws(
     () =>
       installAndVerify({ file: 'signed.pkg' }, { format: 'pkg' }, root, output, 'macos', {
-        runCommand,
+        runCommand, ticketTransport,
       }),
     /installer exited 1/,
   );
