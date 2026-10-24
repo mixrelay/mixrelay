@@ -1916,6 +1916,18 @@ fn configuration_error(error: ProcessorConfigurationError<HostAudioBackendError>
         ProcessorConfigurationError::StaleRevision { current, proposed } => {
             exchange_error(ProcessorSubmitError::StaleRevision { current, proposed })
         }
+        ProcessorConfigurationError::Configuration(HostAudioBackendError::PermissionPending {
+            capability,
+        }) => ProtocolError {
+            code: ErrorCode::AudioPermissionPending,
+            parameters: serde_json::json!({ "capability": capability, "configurationOutcome": "not_applied" }),
+        },
+        ProcessorConfigurationError::Configuration(HostAudioBackendError::PermissionDenied {
+            capability,
+        }) => ProtocolError {
+            code: ErrorCode::AudioPermissionDenied,
+            parameters: serde_json::json!({ "capability": capability, "configurationOutcome": "not_applied" }),
+        },
         ProcessorConfigurationError::Configuration(error) => ProtocolError {
             code: ErrorCode::AudioDeviceDisconnected,
             parameters: serde_json::json!({ "reason": error.to_string() }),

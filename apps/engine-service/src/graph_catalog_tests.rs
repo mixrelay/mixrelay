@@ -734,6 +734,55 @@ fn native_resource_failure_cancels_only_this_transactions_prepared_endpoint() {
 }
 
 #[test]
+fn microphone_consent_failures_preserve_the_graph_and_allow_explicit_retry() {
+    struct Consent(HostAudioBackendError);
+    impl GraphResourceBackend for Consent {
+        fn reconcile(
+            &self,
+            _: &GraphDocument,
+            _: crate::PlaybackBindings<'_>,
+        ) -> Result<(), HostAudioBackendError> {
+            Err(self.0.clone())
+        }
+    }
+    for (failure, code) in [
+        (
+            HostAudioBackendError::PermissionPending {
+                capability: "microphone".into(),
+            },
+            ErrorCode::AudioPermissionPending,
+        ),
+        (
+            HostAudioBackendError::PermissionDenied {
+                capability: "microphone".into(),
+            },
+            ErrorCode::AudioPermissionDenied,
+        ),
+    ] {
+        let fixture = Fixture::new();
+        let mut engine =
+            controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
+        let before = engine.graph();
+        let disk = fs::read(fixture.path()).unwrap();
+        engine.graph_resources = Arc::new(Consent(failure));
+        let proposed = default_duplex_document(before.revision + 1, Some(-6.0));
+        let error = engine
+            .apply_graph_request(proposed.clone().into())
+            .unwrap_err();
+        assert_eq!(error.code, code);
+        assert_eq!(error.parameters["configurationOutcome"], "not_applied");
+        assert_eq!(error.parameters["capability"], "microphone");
+        assert_eq!(engine.graph(), before);
+        assert_eq!(engine.exchange.revisions().submitted, before.revision);
+        assert_eq!(fs::read(fixture.path()).unwrap(), disk);
+        engine.graph_resources = Arc::new(NoopGraphResourceBackend);
+        engine.apply_graph_request(proposed.clone().into()).unwrap();
+        settle(&engine);
+        assert_eq!(engine.graph(), proposed);
+    }
+}
+
+#[test]
 fn duplicate_identity_or_unsupported_schema_never_gets_reinitialized() {
     for version in [1, 9] {
         let fixture = Fixture::new();

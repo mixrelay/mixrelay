@@ -484,6 +484,9 @@ export const zhHant = {
     },
     errors: {
       feature_limit: '此變更超出免費方案的上限。請減少連線或節點，或啟用授權。',
+      audio_permission_pending: '正在等待麥克風權限確認。請在 macOS 中允許取用，然後再試一次。',
+      audio_permission_denied:
+        '麥克風取用遭到拒絕。請在 macOS 隱私權與安全性中允許取用，然後再試一次。',
       audio_device_disconnected: '無法套用虛擬音訊裝置設定。',
       audio_source_unavailable: '應用程式音訊擷取無法使用。請檢查應用程式及音訊擷取權限。',
       control_unavailable: '本地音訊引擎無法使用。',

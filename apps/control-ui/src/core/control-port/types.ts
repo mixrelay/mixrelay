@@ -396,6 +396,8 @@ export type ProtocolErrorCode =
   | 'audio_session_processor_state_unavailable'
   | 'audio_session_reconfigure_failed'
   | 'audio_device_disconnected'
+  | 'audio_permission_pending'
+  | 'audio_permission_denied'
   | 'audio_source_unavailable'
   | 'control_unavailable'
   | 'control_request_failed'

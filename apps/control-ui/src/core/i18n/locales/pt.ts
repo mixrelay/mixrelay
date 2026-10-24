@@ -516,6 +516,10 @@ export const pt = {
     errors: {
       feature_limit:
         'Esta alteração excede os limites da versão gratuita. Reduza as conexões ou os nós, ou ative uma licença.',
+      audio_permission_pending:
+        'A aguardar a permissão do microfone. Permita o acesso no macOS e tente novamente.',
+      audio_permission_denied:
+        'O acesso ao microfone foi negado. Permita-o em Privacidade e Segurança do macOS e tente novamente.',
       audio_device_disconnected:
         'Não foi possível aplicar a configuração do dispositivo de áudio virtual.',
       audio_source_unavailable:

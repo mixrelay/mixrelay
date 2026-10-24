@@ -513,6 +513,10 @@ export const ja = {
     errors: {
       feature_limit:
         '無料プランの上限を超えています。接続やノードを減らすか、ライセンスを有効にしてください。',
+      audio_permission_pending:
+        'マイクの権限の確認を待っています。macOSでアクセスを許可してから、もう一度お試しください。',
+      audio_permission_denied:
+        'マイクへのアクセスが拒否されています。macOSのプライバシーとセキュリティで許可してから、もう一度お試しください。',
       audio_device_disconnected: '仮想オーディオデバイスの設定を適用できませんでした。',
       audio_source_unavailable:
         'アプリケーションの音声をキャプチャできません。アプリケーションと音声キャプチャの権限を確認してください。',

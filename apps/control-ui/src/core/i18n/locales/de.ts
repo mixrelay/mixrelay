@@ -522,6 +522,10 @@ export const de = {
     errors: {
       feature_limit:
         'Diese Änderung überschreitet die Grenzen der kostenlosen Version. Reduzieren Sie Verbindungen oder Knoten oder aktivieren Sie eine Lizenz.',
+      audio_permission_pending:
+        'Warten auf die Mikrofonberechtigung. Erlaube den Zugriff in macOS und versuche es erneut.',
+      audio_permission_denied:
+        'Der Mikrofonzugriff wurde verweigert. Erlaube ihn unter Datenschutz & Sicherheit in macOS und versuche es erneut.',
       audio_device_disconnected:
         'Die Konfiguration des virtuellen Audiogeräts konnte nicht angewendet werden.',
       audio_source_unavailable:

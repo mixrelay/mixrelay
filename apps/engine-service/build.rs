@@ -53,6 +53,14 @@ fn build_macos_service() {
     println!("cargo:rerun-if-changed={hal_include}/MREndpointTransport.h");
     println!("cargo:rerun-if-changed={hal_include}/MRSharedAudioBuffer.h");
     println!("cargo:rustc-link-lib=framework=CoreAudio");
+    cc::Build::new()
+        .file(format!("{engine_root}/src/MRMicrophonePermission.m"))
+        .flag("-fobjc-arc")
+        .flag("-mmacosx-version-min=14.2")
+        .warnings_into_errors(true)
+        .compile("mixrelay_microphone_permission");
+    println!("cargo:rerun-if-changed={engine_root}/src/MRMicrophonePermission.m");
+    println!("cargo:rustc-link-lib=framework=AVFoundation");
 }
 
 fn embed_service_info_plist() {

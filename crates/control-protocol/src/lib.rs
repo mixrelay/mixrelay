@@ -704,6 +704,10 @@ pub enum ErrorCode {
     DriverPermissionInvalid,
     DriverVersionMismatch,
     AudioDeviceDisconnected,
+    /// Native input consent is outstanding; the proposed graph was not applied.
+    AudioPermissionPending,
+    /// Native input access was denied or restricted by the operating system.
+    AudioPermissionDenied,
     BufferUnderrun,
     BufferOverrun,
     AudioSourceUnavailable,

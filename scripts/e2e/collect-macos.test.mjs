@@ -1,6 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { collectCoreaudioServers } from './collect-macos.mjs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { collectCoreaudioLog, collectCoreaudioServers } from './collect-macos.mjs';
+
+test('large hosted logs retain events after the old 16 MiB buffer boundary', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-ca-log-'));
+  t.after(() => rmSync(directory, { recursive: true }));
+  const path = join(directory, 'system.log');
+  const log = collectCoreaudioLog(path, (program, args, options) => {
+    assert.equal(program, 'log');
+    assert.ok(args.includes('--predicate'));
+    return spawnSync(process.execPath, ['-e',
+      "process.stdout.write('x'.repeat(17 * 1024 * 1024) + '\\nlate permission granted\\n'); process.stderr.write('late diagnostic\\n');"], options);
+  });
+  assert.ok(log.length > 17 * 1024 * 1024);
+  assert.ok(log.endsWith('late permission granted\nlate diagnostic\n\nexit=0; signal=; error=\n'));
+  assert.equal(readFileSync(path, 'utf8'), log);
+});
 
 test('CoreAudio samples include the daemon and isolated HAL hosts across users', () => {
   const calls = [];
@@ -23,4 +42,23 @@ test('missing CoreAudio servers leave the command diagnostic without sampling in
   }, name => name);
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], 'coreaudio-server-processes.txt');
+});
+
+test('the hosted registrar PID discovers remote hosts whose executable name was missed by pgrep', () => {
+  const calls = [];
+  collectCoreaudioServers((...args) => {
+    calls.push(args);
+    if (args[1] === 'pgrep') return { stdout: '4415 /usr/sbin/coreaudiod\n' };
+    if (args[1] === 'ps') return { stdout: args[2][1] === '4420'
+      ? ' 4420 /System/Library/Frameworks/CoreAudio.framework/Versions/A/XPCServices/com.apple.audio.DriverHelper.xpc/Contents/MacOS/com.apple.audio.DriverHelper\n'
+      : ' 9999 /usr/bin/unrelated\n' };
+    return {};
+  }, name => name, [
+    'HALS_RemotePlugInRegistrar.mm:421 Creating remote driver service: <CFString>{contents = "MixRelayHAL.driver"}, pid: 4420',
+    'Creating remote driver service: MixRelayHAL.driver, pid: 4420',
+    'Creating remote driver service: MixRelayHAL.driver, pid: 9999',
+    'Creating remote driver service: NullAudio.driver, pid: 4421',
+  ].join('\n'));
+  assert.deepEqual(calls.filter(call => call[1] === 'ps').map(call => call[2][1]), ['4420', '9999']);
+  assert.deepEqual(calls.filter(call => call[1] === 'sudo').map(call => call[2][2]), ['4415', '4420']);
 });

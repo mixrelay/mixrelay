@@ -501,6 +501,10 @@ export const koKR = {
     errors: {
       feature_limit:
         '무료 사용 한도를 초과합니다. 연결이나 노드를 줄이거나 라이선스를 활성화하세요.',
+      audio_permission_pending:
+        '마이크 권한 확인을 기다리고 있습니다. macOS에서 접근을 허용한 뒤 다시 시도하세요.',
+      audio_permission_denied:
+        '마이크 접근이 거부되었습니다. macOS 개인정보 보호 및 보안에서 접근을 허용한 뒤 다시 시도하세요.',
       audio_device_disconnected: '가상 오디오 장치 구성을 적용할 수 없습니다.',
       audio_source_unavailable:
         '앱 오디오를 캡처할 수 없습니다. 실행 상태와 오디오 캡처 권한을 확인하세요.',

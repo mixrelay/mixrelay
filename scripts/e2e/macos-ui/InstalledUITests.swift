@@ -39,10 +39,11 @@ final class InstalledUITests: XCTestCase {
         try press("Add node")
         try press("Output")
         try press("Recorder")
-        try app.wait("Compressor", roles: [kAXStaticTextRole]).click(right: true)
+        _ = try app.wait("Recorder", roles: [kAXGroupRole])
+        try app.wait("Compressor", roles: [kAXGroupRole]).showContextMenu()
         try press("Connect channels…")
         try app.wait("Destination", roles: [kAXButtonRole, kAXPopUpButtonRole], contains: true, timeout: 10).click()
-        try press("Recorder")
+        try app.waitChoice("Recorder", in: "Destination").click()
         try press("Connect")
         _ = try app.wait("Compressor CH 1 → Recorder CH 1")
         let shot = XCUIScreen.main.screenshot()
@@ -56,6 +57,7 @@ final class InstalledUITests: XCTestCase {
         let directory = URL(fileURLWithPath: folder)
         do { try createGraph(in: directory) }
         catch {
+            try? XCUIScreen.main.screenshot().pngRepresentation.write(to: directory.appendingPathComponent("installed-ui-failure.png"))
             let detail = "\(error)\n\(app?.debugDescription ?? "Editor was not selected")"
             XCTFail(detail)
             try detail.write(to: directory.appendingPathComponent("installed-ui.error"), atomically: true, encoding: .utf8)
@@ -65,20 +67,23 @@ final class InstalledUITests: XCTestCase {
         // The same disposable session handles the real first-use privacy dialogs.
         // No privacy database or application binary is changed by this observer.
         let deadline = Date().addingTimeInterval(300)
-        var grants: [[String: String]] = []
+        var grants: [[String: Any]] = []
         while !FileManager.default.fileExists(atPath: directory.appendingPathComponent("installed-ui.finish").path) {
             if Date() >= deadline { XCTFail("Native acceptance did not finish"); break }
             // tccd is a daemon, not a launchable GUI application. Asking XCTest for
             // its state raises an Objective-C exception and kills this observer.
-            for owner in NSWorkspace.shared.runningApplications {
+            for owner in NSWorkspace.shared.runningApplications.sorted(by: {
+                PermissionPrompt.priority($0.bundleIdentifier ?? "") < PermissionPrompt.priority($1.bundleIdentifier ?? "")
+            }) {
                 guard let bundle = owner.bundleIdentifier, PermissionPrompt.isOwner(bundle) else { continue }
-                let gui = InstalledApplication(pid: owner.processIdentifier)
+                let gui = InstalledApplication(pid: owner.processIdentifier, messagingTimeout: 0.2)
                 let dialogs = gui.root.children.filter { [kAXWindowRole, kAXSheetRole].contains($0.role) }
                 for dialog in dialogs {
-                    let buttons = PermissionPrompt.buttons(in: dialog)
-                    for button in buttons {
+                    let approval = PermissionPrompt.approval(in: dialog)
+                    for button in approval.buttons {
+                        let action = button.labels.joined(separator: "/")
                         try button.click()
-                        grants.append(["owner": bundle, "action": button.labels.joined(separator: "/"), "at": ISO8601DateFormatter().string(from: Date())])
+                        grants.append(["owner": bundle, "action": action, "subject": approval.labels, "at": ISO8601DateFormatter().string(from: Date())])
                         try JSONSerialization.data(withJSONObject: grants, options: [.prettyPrinted, .sortedKeys])
                             .write(to: directory.appendingPathComponent("audio-permission-actions.json"), options: .atomic)
                     }

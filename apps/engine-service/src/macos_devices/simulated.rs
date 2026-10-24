@@ -238,6 +238,9 @@ impl Timeline {
 }
 
 impl Host for SimulatedHost {
+    fn input_permission(&self) -> super::permission::InputPermission {
+        super::permission::InputPermission::Authorized
+    }
     fn inventory(
         &self,
         selectors: &[&DeviceSelector],

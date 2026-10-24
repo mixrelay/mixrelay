@@ -515,6 +515,10 @@ export const fr = {
     errors: {
       feature_limit:
         'Cette modification dépasse les limites de la version gratuite. Réduisez les connexions ou les nœuds, ou activez une licence.',
+      audio_permission_pending:
+        'En attente de l’autorisation du microphone. Autorisez l’accès dans macOS, puis réessayez.',
+      audio_permission_denied:
+        'L’accès au microphone est refusé. Autorisez-le dans Confidentialité et sécurité de macOS, puis réessayez.',
       audio_device_disconnected:
         'Impossible d’appliquer la configuration du périphérique audio virtuel.',
       audio_source_unavailable:

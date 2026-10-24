@@ -15,6 +15,7 @@ use super::{
     spec::Spec,
     worker::WorkerContext,
 };
+use mixrelay_audio_io::HostAudioBackendError;
 use mixrelay_audio_io::process::{InputActivity, TransferOutcome};
 use std::{
     sync::{
@@ -54,7 +55,11 @@ pub(super) struct CallbackConfig {
 
 impl Device {
     #[cfg(test)]
-    pub(super) fn open(spec: &Spec, rate: u32, host: Arc<dyn Host>) -> Result<Self, String> {
+    pub(super) fn open(
+        spec: &Spec,
+        rate: u32,
+        host: Arc<dyn Host>,
+    ) -> Result<Self, HostAudioBackendError> {
         Self::open_with_group(
             spec,
             rate,
@@ -72,14 +77,15 @@ impl Device {
         group: Option<Arc<Aggregate>>,
         callback: CallbackConfig,
         host: Arc<dyn Host>,
-    ) -> Result<Self, String> {
-        let native = Arc::new(Native::create(
-            spec,
-            rate,
-            group,
-            callback.buffer_frames,
-            host,
-        )?);
+    ) -> Result<Self, HostAudioBackendError> {
+        let permission = spec.input.then(|| host.input_permission());
+        if let Some(permission) = permission {
+            tracing::info!(?permission, "CoreAudio input consent before initialization");
+        }
+        let native = Arc::new(
+            Native::create(spec, rate, group, callback.buffer_frames, host)
+                .map_err(super::backend_error)?,
+        );
         native
             .output_only
             .store(callback.output_only, Ordering::Release);
@@ -117,7 +123,7 @@ impl Device {
         let worker = thread::Builder::new()
             .name("mixrelay-coreaudio-device".into())
             .spawn(move || context.run(&tx))
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| super::backend_error(error.to_string()))?;
         let result = Self {
             input_continuity: InputContinuity::default(),
             activity,
@@ -138,13 +144,17 @@ impl Device {
             clock_aligned,
             worker: Some(worker),
         };
-        match rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(Ok(())) => Ok(result),
-            error => {
+        match super::permission::initialization(
+            rx.recv_timeout(Duration::from_secs(5)),
+            permission,
+            || result.native.host.input_permission(),
+        ) {
+            Ok(()) => Ok(result),
+            Err(error) => {
                 result.stop.store(true, Ordering::Release);
                 // Drop transfers the worker to tracked retirement; a timeout
                 // cannot cancel a native call or release its callback allocation.
-                Err(format!("CoreAudio device initialization failed: {error:?}"))
+                Err(error)
             }
         }
     }

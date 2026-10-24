@@ -27,6 +27,33 @@ struct InstalledElement {
         }
     }
 
+    func showContextMenu() throws {
+        try Self.openContextMenu(
+            show: { AXUIElementPerformAction(raw, kAXShowMenuAction as CFString) == .success },
+            focus: {
+                AXUIElementSetAttributeValue(raw, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success
+                    && (attribute(kAXFocusedAttribute) as? Bool == true)
+            },
+            keyboard: {
+                // kVK_F10 = 109. Use the product's documented Shift+F10 path on
+                // the node group, independent of overlapping title coordinates.
+                for down in [true, false] {
+                    guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 109, keyDown: down) else {
+                        throw InstalledApplication.Failure.control("Could not create context-menu key")
+                    }
+                    event.flags = .maskShift
+                    event.post(tap: .cghidEventTap)
+                }
+            }
+        )
+    }
+
+    static func openContextMenu(show: () -> Bool, focus: () -> Bool, keyboard: () throws -> Void) throws {
+        if show() { return }
+        guard focus() else { throw InstalledApplication.Failure.control("Could not focus context-menu owner") }
+        try keyboard()
+    }
+
     func click(right: Bool = false) throws {
         if !right && AXUIElementPerformAction(raw, kAXPressAction as CFString) == .success { return }
         guard let position = attribute(kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
@@ -56,10 +83,10 @@ final class InstalledApplication {
     let root: InstalledElement
     let pid: pid_t
 
-    init(pid: pid_t) {
+    init(pid: pid_t, messagingTimeout: Float = 2) {
         self.pid = pid
         root = InstalledElement(raw: AXUIElementCreateApplication(pid))
-        AXUIElementSetMessagingTimeout(root.raw, 2)
+        AXUIElementSetMessagingTimeout(root.raw, messagingTimeout)
     }
 
     // The traversal is shared with synthetic trees in the unit tests. A broken AX
@@ -77,6 +104,26 @@ final class InstalledApplication {
 
     func find(_ label: String, roles: [String] = [], contains: Bool = false) -> InstalledElement? {
         Self.first(root: root, children: { $0.children }) { $0.matches(label, roles: roles, contains: contains) }
+    }
+
+    static func choice<Node>(root: Node, label: String, listLabel: String, children: (Node) -> [Node], role: (Node) -> String, labels: (Node) -> [String]) -> Node? {
+        guard let list = first(root: root, children: children, matches: {
+            role($0) == kAXListRole && labels($0).contains(listLabel)
+        }) else { return nil }
+        // Older WebKit exposes an ARIA option as AXStaticText, rather than AXCell.
+        // Restrict that fallback to the named list, never the graph's node titles.
+        return first(root: list, children: children, matches: {
+            [kAXStaticTextRole, kAXCellRole, kAXRowRole].contains(role($0)) && labels($0).contains(label)
+        })
+    }
+
+    func waitChoice(_ label: String, in listLabel: String, timeout: TimeInterval = 30) throws -> InstalledElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let option = Self.choice(root: root, label: label, listLabel: listLabel, children: { $0.children }, role: { $0.role }, labels: { $0.labels }) { return option }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+        throw Failure.control("Missing choice \(label) in list \(listLabel) in editor PID \(pid)")
     }
 
     func wait(_ label: String, roles: [String] = [], contains: Bool = false, timeout: TimeInterval = 30) throws -> InstalledElement {

@@ -18,6 +18,7 @@ mod handoff;
 mod host;
 pub(super) mod latency;
 mod native;
+mod permission;
 mod recovery;
 mod retirement;
 #[cfg(test)]

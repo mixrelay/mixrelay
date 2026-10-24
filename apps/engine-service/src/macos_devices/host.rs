@@ -17,6 +17,8 @@ use std::{
 };
 
 pub(super) trait Host: Send + Sync {
+    /// Consent for this process, without presenting a new privacy prompt.
+    fn input_permission(&self) -> super::permission::InputPermission;
     /// Present devices for these selections; an absent selection is omitted, not an error.
     fn inventory(
         &self,
@@ -68,6 +70,9 @@ pub(super) trait Host: Send + Sync {
 pub(super) struct CoreAudio;
 
 impl Host for CoreAudio {
+    fn input_permission(&self) -> super::permission::InputPermission {
+        super::permission::current()
+    }
     fn inventory(
         &self,
         selectors: &[&DeviceSelector],
