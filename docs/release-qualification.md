@@ -96,6 +96,15 @@ The optional `targets` input accepts comma-separated hosted target IDs for diagn
 Unselected targets remain unexecuted in the full gate. Use all targets for release
 qualification.
 
+For host diagnosis, `independent_audio_control=true` builds unmodified BlackHole
+v0.7.1 at commit `e2b22aaaba4e507a097131704bf96dabc004d9cf` after candidate removal.
+It uses the same permission-authorized probe and saves its raw PCM and callback
+timeline separately. It neither changes the candidate verdict nor contributes
+qualification evidence. The control has its own default native buffer and no
+engine client, so a pass cannot establish that the host meets the candidate
+engine deadline. This comparison runs only in the disposable hosted session;
+an existing BlackHole installation blocks it.
+
 Only preparation jobs receive `contents: write`: GitHub exposes draft releases to
 callers with [push access](https://docs.github.com/en/rest/releases/releases#list-releases).
 Installation jobs keep read-only workflow permissions, and no workflow token enters
