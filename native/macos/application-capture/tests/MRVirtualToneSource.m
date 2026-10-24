@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <poll.h>
+#include <errno.h>
+#include <unistd.h>
 
 #ifndef MR_TONE_FREQUENCY
 #define MR_TONE_FREQUENCY 440.0
@@ -40,6 +43,23 @@ static AudioDeviceID MRVirtualDevice(const char *device_uid) {
         &address, sizeof(uid), &uid, &size, &device);
     CFRelease(uid);
     return status == noErr && size == sizeof(device) ? device : kAudioObjectUnknown;
+}
+
+static bool MRResumeConfiguredEngine(AVAudioEngine *engine, AudioUnit unit,
+        AudioDeviceID selected, uint64_t change, uint64_t *handled, uint64_t *restarts) {
+    if (change == *handled) return true;
+    *handled = change;
+    if (engine.isRunning) return true;
+    AudioDeviceID actual = kAudioObjectUnknown;
+    UInt32 bytes = sizeof(actual);
+    NSError *error = nil;
+    if (AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global, 0, &actual, &bytes) != noErr || actual != selected ||
+        *restarts >= 16 || ![engine startAndReturnError:&error]) return false;
+    *restarts += 1;
+    fprintf(stderr, "owned tone: resumed after configuration change %llu\n",
+        (unsigned long long)change);
+    return true;
 }
 
 int main(int argc, const char *argv[]) {
@@ -99,13 +119,30 @@ int main(int argc, const char *argv[]) {
         fflush(stdout);
         /* Only the owning fixture can move this source between exact owned UIDs. */
         char command[128];
-        while (fgets(command, sizeof(command), stdin) != NULL) {
+        uint64_t handled_change = 0;
+        uint64_t restarts = 0;
+        AudioDeviceID selected = device;
+        while (true) {
+            const uint64_t change = atomic_load_explicit(changes, memory_order_relaxed);
+            if (!MRResumeConfiguredEngine(engine, unit, selected, change, &handled_change, &restarts)) {
+                fprintf(stderr, "owned tone: configuration recovery failed on exact virtual device\n");
+                return EXIT_FAILURE;
+            }
+            struct pollfd input = { .fd = STDIN_FILENO, .events = POLLIN };
+            const int available = poll(&input, 1, 100);
+            if (available < 0) {
+                if (errno == EINTR) continue;
+                return EXIT_FAILURE;
+            }
+            if (available == 0) continue;
+            if (fgets(command, sizeof(command), stdin) == NULL) break;
             command[strcspn(command, "\r\n")] = '\0';
             if (strcmp(command, "quit") == 0) break;
             if (strcmp(command, "status") == 0) {
-                printf("{\"renderedFrames\":%llu,\"configurationChanges\":%llu,\"running\":%s}\n",
+                printf("{\"renderedFrames\":%llu,\"configurationChanges\":%llu,\"restarts\":%llu,\"running\":%s}\n",
                     (unsigned long long)atomic_load_explicit(rendered, memory_order_relaxed),
                     (unsigned long long)atomic_load_explicit(changes, memory_order_relaxed),
+                    (unsigned long long)restarts,
                     engine.isRunning ? "true" : "false");
                 fflush(stdout);
                 continue;
@@ -127,6 +164,7 @@ int main(int argc, const char *argv[]) {
             if (AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
                     kAudioUnitScope_Global, 0, &actual, &bytes) != noErr || actual != next ||
                 ![engine startAndReturnError:&error]) return EXIT_FAILURE;
+            selected = next;
             printf("ready %s\n", command + 6);
             fflush(stdout);
         }
