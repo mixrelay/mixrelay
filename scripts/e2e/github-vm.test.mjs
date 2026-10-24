@@ -58,8 +58,17 @@ test('emergency boot waits for coldplug and retries both original mount units be
   assert.ok(output.includes('BOOT: /dev/BOOT'));
   assert.ok(output.includes('UEFI: /dev/UEFI'));
   assert.ok(output.indexOf('udevadm settle') < output.indexOf('systemctl start boot.mount'));
-  assert.ok(output.indexOf('findmnt --mountpoint /boot/efi') < output.indexOf('start default.target'));
+  assert.ok(output.indexOf('findmnt --mountpoint /boot/efi') < output.indexOf('systemctl --no-block default'));
   assert.ok(output.includes('systemctl start boot.mount boot-efi.mount'));
+});
+
+test('recovered emergency boot requeues cloud-init configuration and finalization', () => {
+  const output = bootRecovery();
+  const mounted = output.indexOf('findmnt --mountpoint /boot/efi');
+  const normalBoot = output.indexOf('systemctl --no-block default');
+  const resumed = output.indexOf('systemctl --no-block start cloud-config.service cloud-final.service');
+  assert.ok(normalBoot > mounted, 'Normal boot must resume only after both original mounts are present');
+  assert.ok(resumed > normalBoot, 'The interrupted cloud-init stages must be queued after normal boot resumes');
 });
 
 test('healthy boot needs no mount recovery and a failed mount never starts default', () => {
@@ -69,7 +78,8 @@ test('healthy boot needs no mount recovery and a failed mount never starts defau
     () => bootRecovery({ BOOT_MOUNT_FAILURE: '73' }),
     (error) => {
       assert.equal(error.status, 73);
-      assert.ok(!error.stdout.includes('start default.target'));
+      assert.ok(!error.stdout.includes('systemctl --no-block default'));
+      assert.ok(!error.stdout.includes('cloud-config.service'));
       return true;
     },
   );

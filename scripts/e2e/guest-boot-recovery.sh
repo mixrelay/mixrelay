@@ -19,4 +19,5 @@ systemctl start boot.mount boot-efi.mount
 for directory in /boot /boot/efi; do
   findmnt --mountpoint "$directory"
 done
-systemctl --no-block start default.target
+systemctl --no-block default
+systemctl --no-block start cloud-config.service cloud-final.service
