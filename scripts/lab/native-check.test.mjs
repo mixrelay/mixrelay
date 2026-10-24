@@ -81,6 +81,8 @@ for (const os of ["linux", "darwin"]) {
       "build and release script tests need the macOS zsh build scripts");
     assert.equal(plan.some(c => c.join(" ") === "node --test scripts/ci/macos-removal-launchd.test.mjs"), os === "darwin",
       "launchd XPC fixtures run only in the macOS CI plan");
+    assert.equal(plan.some(c => c.includes("scripts/ci/macos-ui-runner-native.test.mjs")), os === "darwin",
+      "exact-code signing fixtures execute in the macOS CI plan");
     assert.equal(plan.some(c => c.includes("scripts/check-pcm-native.sh")), true);
   });
 }

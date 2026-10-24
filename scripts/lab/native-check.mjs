@@ -109,7 +109,8 @@ export function buildPlan(os, mode) {
       // Build, signing and release tooling is tested with mocked Apple tools. Some of these
       // tests run the zsh universal-build scripts, so they run on macOS only.
       commands.push(["pnpm", "test:scripts"]);
-      commands.push(["node", "--test", "scripts/ci/macos-input-permission.test.mjs"]);
+      commands.push(["node", "--test", "scripts/ci/macos-input-permission.test.mjs",
+        "scripts/ci/macos-ui-runner-native.test.mjs"]);
       // Real XPC lifetime fixtures register temporary user launchd jobs; CI only.
       commands.push(LAUNCHD_FIXTURES);
     }
