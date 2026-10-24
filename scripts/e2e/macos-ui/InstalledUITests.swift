@@ -4,6 +4,7 @@ import CoreGraphics
 
 final class InstalledUITests: XCTestCase {
     private var app: InstalledApplication?
+    private var editorPid: pid_t?
     private struct MissingControl: Error { let label: String }
 
     private func press(_ label: String) throws {
@@ -32,6 +33,7 @@ final class InstalledUITests: XCTestCase {
         }
         let app = InstalledApplication(pid: editor.processIdentifier)
         self.app = app
+        self.editorPid = editor.processIdentifier
         guard editor.activate(options: [.activateAllWindows]) else {
             throw MissingControl(label: "Installed editor PID \(editor.processIdentifier)")
         }
@@ -51,8 +53,7 @@ final class InstalledUITests: XCTestCase {
         try app.waitChoice("Recorder", in: "Destination").click()
         try press("Connect")
         _ = try app.wait("Compressor CH 1 → Recorder CH 1")
-        let shot = XCUIScreen.main.screenshot()
-        try shot.pngRepresentation.write(to: directory.appendingPathComponent("installed-ui.png"))
+        try WindowScreenshot.capture(pid: editor.processIdentifier, to: directory.appendingPathComponent("installed-ui.png"))
         try app.debugDescription.write(to: directory.appendingPathComponent("installed-ui-tree.txt"), atomically: true, encoding: .utf8)
         let window = try XCTUnwrap(app.editorWindow)
         let acknowledgement = AXUIElementSetAttributeValue(window.raw, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
@@ -74,7 +75,9 @@ final class InstalledUITests: XCTestCase {
         let directory = URL(fileURLWithPath: folder)
         do { try createGraph(in: directory) }
         catch {
-            try? XCUIScreen.main.screenshot().pngRepresentation.write(to: directory.appendingPathComponent("installed-ui-failure.png"))
+            if let pid = editorPid {
+                try? WindowScreenshot.capture(pid: pid, to: directory.appendingPathComponent("installed-ui-failure.png"))
+            }
             let detail = "\(error)\n\(app?.debugDescription ?? "Editor was not selected")"
             XCTFail(detail)
             try detail.write(to: directory.appendingPathComponent("installed-ui.error"), atomically: true, encoding: .utf8)

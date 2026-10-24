@@ -200,6 +200,13 @@ test video from competing with native audio. The observer still writes the requi
 `installed-ui.png` and failure screenshot explicitly and performs every UI and consent
 check. `native-probe-processes.txt` records process CPU after the signal has stopped.
 
+The explicit screenshot uses ScreenCaptureKit to capture the installed editor's single
+window by PID and title. It records window identity and dimensions in `installed-ui.window.json`.
+A uniform central body fails `GRAPH-01`, even if accessibility and graph assertions pass;
+the PNG and failure details remain evidence. The native bitmap fixture rejects blank content
+with window chrome or a cursor and accepts rendered content. This check does not replace
+visual review of the collected image.
+
 The GUI measurement probe completes its own microphone authorization before preparing any
 device or starting I/O. This follows [Apple's capture authorization procedure](https://developer.apple.com/documentation/avfoundation/requesting-authorization-to-capture-and-save-media).
 Denied, restricted or unresolved authorization fails measurement. A nongraphical CLI keeps

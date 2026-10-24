@@ -13,7 +13,7 @@ targets:
   InstalledUITests:
     type: bundle.ui-testing
     platform: macOS
-    sources: [InstalledUITests.swift, InstalledApplication.swift, InstalledApplicationTests.swift, PermissionPrompt.swift]
+    sources: [InstalledUITests.swift, InstalledApplication.swift, InstalledApplicationTests.swift, PermissionPrompt.swift, WindowScreenshot.swift]
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: io.mixrelay.qualification.ui
 schemes:

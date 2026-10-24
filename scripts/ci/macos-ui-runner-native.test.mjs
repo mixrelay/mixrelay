@@ -4,7 +4,45 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { prepareMacosUiRunner } from '../e2e/macos-ui-runner.mjs';
+
+test('native screenshot validation rejects a blank body with window chrome and a cursor but accepts rendered content', t => {
+  assert.equal(process.platform, 'darwin');
+  const directory = mkdtempSync(join(tmpdir(), 'mr-window-pixels-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const fixture = join(directory, 'main.swift');
+  writeFileSync(fixture, `
+import AppKit
+let space = CGColorSpace(name: CGColorSpace.sRGB)!
+let canvas = CGContext(data: nil, width: 256, height: 256, bitsPerComponent: 8,
+    bytesPerRow: 256 * 4, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+func fill(_ rect: CGRect, _ components: [CGFloat]) {
+    canvas.setFillColor(CGColor(colorSpace: space, components: components)!)
+    canvas.fill(rect)
+}
+func rendered() -> Bool { WindowScreenshot.hasRenderedContent(NSBitmapImageRep(cgImage: canvas.makeImage()!)) }
+fill(CGRect(x: 0, y: 0, width: 256, height: 256), [0.5, 0.5, 0.5, 1])
+fill(CGRect(x: 0, y: 0, width: 256, height: 32), [1, 0, 0, 1])
+fill(CGRect(x: 0, y: 224, width: 256, height: 32), [0, 0, 1, 1])
+precondition(!rendered(), "Window chrome cannot establish rendered app content")
+fill(CGRect(x: 126, y: 126, width: 4, height: 4), [0, 0, 0, 1])
+precondition(!rendered(), "A cursor on a blank body is insufficient")
+fill(CGRect(x: 90, y: 80, width: 100, height: 110), [1, 1, 1, 1])
+precondition(rendered(), "Rendered node content must be accepted")
+for path in CommandLine.arguments.dropFirst() {
+    let image = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: path)))!
+    print(path, WindowScreenshot.hasRenderedContent(image))
+}
+`);
+  const source = fileURLToPath(new URL('../e2e/macos-ui/WindowScreenshot.swift', import.meta.url));
+  const executable = join(directory, 'pixels');
+  const built = spawnSync('xcrun', ['swiftc', '-swift-version', '5', source, fixture, '-o', executable],
+    { encoding: 'utf8', timeout: 120000 });
+  assert.equal(built.status, 0, built.stderr);
+  const result = spawnSync(executable, [], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr);
+});
 
 test('native ad-hoc cdhash requirement compiles to a blob that validates only the signed code',
   () => {
