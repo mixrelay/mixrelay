@@ -35,6 +35,13 @@ Use the notarized, stapled final PKG. Installed verification requires `stapler v
 to succeed. Only its observed exit 68 with `NSURLErrorDomain Code=-1005` permits a retry:
 three attempts with 30- and 60-second waits, recorded in `package-verification.json`.
 Invalid tickets and exhausted transport failures stop before extraction or installation.
+On hosted macOS 15 Intel, validation uses HTTPS over TCP to avoid the
+[confirmed HTTP/3 runner failure](https://github.com/actions/runner-images/issues/14924).
+The QA adapter adds a private rule below the existing platform packet-filter anchor,
+blocks outbound UDP 443 only while validating, then removes that rule and releases its
+own enable reference before extraction. It preserves the main ruleset and records all
+commands and cleanup in `apple-ticket-transport.json`. Setup or cleanup failure fails the
+case; signature, Gatekeeper and Apple ticket verification remain required.
 Both CPUs and every macOS target install this
 same file on the CPUs supported by each macOS release. macOS 27 has only an arm64
 target because [Apple's compatibility list](https://support.apple.com/en-us/127255)

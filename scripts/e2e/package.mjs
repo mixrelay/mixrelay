@@ -13,6 +13,7 @@ import {
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { digest } from '../support-contract.mjs';
+import { withAppleTicketHttps } from './apple-ticket-transport.mjs';
 
 const run = (program, args, timeout = 120000) =>
   execFileSync(program, args, { encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 });
@@ -74,6 +75,7 @@ export function installAndVerify(
     runCommand = run,
     paths = installedPaths(os),
     wait = (milliseconds) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds),
+    ticketTransport = withAppleTicketHttps,
   } = {},
 ) {
   const run = runCommand;
@@ -125,7 +127,7 @@ export function installAndVerify(
     };
     verify('pkgutil', ['--check-signature', archive]);
     verify('spctl', ['--assess', '--type', 'install', archive]);
-    verify('xcrun', ['stapler', 'validate', archive]);
+    ticketTransport(output, () => verify('xcrun', ['stapler', 'validate', archive]));
     run('pkgutil', ['--expand-full', archive, extracted]);
     install('sudo', ['-n', 'installer', '-pkg', archive, '-target', '/'], 300000);
   } else {
