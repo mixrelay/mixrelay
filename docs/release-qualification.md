@@ -218,6 +218,9 @@ This reduces metadata work triggered by builds and installation during native au
 PCM duration, the 128-frame engine quantum and every signal assertion remain
 unchanged. macOS menu items receive native focus before one Return key submission;
 the observer requires the installed editor to be active and checks the committed graph.
+Linux leaf controls also require enabled state and observed focus before one Return.
+The node context menu uses the focused outer canvas panel and one ContextMenu key.
+The existing rendered-node, connection and Recorder readiness checks remain required.
 
 The explicit screenshot uses ScreenCaptureKit to capture the installed editor's single
 window by PID and title. It records window identity and dimensions in `installed-ui.window.json`.

@@ -13,10 +13,10 @@ Universal PKG 하나, CPU별 DEB와 같은 x64 payload의 Arch 패키지를 사�
 | PKG SHA-256 | `e21989692623ba38a9ba6922c9060e9e9343dd15a38c6efccdb02ed1aab9846f` |
 | PKG 크기 | 69,400,310바이트 |
 | Apple 공증 제출 | `5623bee9-9a6b-4161-ba4f-e9d0218cc8f5` |
-| 13개 환경의 fresh·upgrade·제거 | [40089143239](https://github.com/mixrelay/mixrelay/actions/runs/40089143239), suite `4f107f23` |
-| Native CI 13개 대상 | [40083592798](https://github.com/mixrelay/mixrelay/actions/runs/40083592798), 소스 `9ea91f35`, 모두 통과 |
-| Linux VM 부팅 7개 대상 | [40087631157](https://github.com/mixrelay/mixrelay/actions/runs/40087631157), 소스 `c93aa307`, 모두 통과 |
-| UI CI | [40087631149](https://github.com/mixrelay/mixrelay/actions/runs/40087631149), 소스 `c93aa307`, 통과 |
+| 13개 환경의 fresh·upgrade·제거 | [40089143239](https://github.com/mixrelay/mixrelay/actions/runs/40089143239), suite `4f107f23`, 최종 실패 |
+| Native CI 13개 대상 | [40089948523](https://github.com/mixrelay/mixrelay/actions/runs/40089948523), 소스 `f0427c53`, 모두 통과 |
+| Linux VM 부팅 7개 대상 | [40089948524](https://github.com/mixrelay/mixrelay/actions/runs/40089948524), 소스 `f0427c53`, 모두 통과 |
+| UI CI | [40089948514](https://github.com/mixrelay/mixrelay/actions/runs/40089948514), 소스 `f0427c53`, 통과 |
 | 이전 설치본 | 소스 `f7575aa4a8e2f0d97104033023bde12bf7b6d083`, Linux `40054217962`, macOS draft `qa-install-f7575aa` |
 
 후보 전체의 최종 수락은 위 13개 환경 실행의 `inventory`와 대상별 리포트를 따른다.
@@ -26,11 +26,19 @@ Universal PKG 하나, CPU별 DEB와 같은 x64 payload의 Arch 패키지를 사�
 | --- | --- |
 | macOS 15 ARM 업그레이드 | Destination 목록의 Recorder 미선택, PCM 누락·손상 640프레임 |
 | macOS 15 Intel 업그레이드 | 그래프 준비·창 최소화 성공 뒤 PCM 누락 7,832·반복 512·손상 22,432프레임 |
-| macOS 26 ARM 새 설치 | 그래프 준비·창 최소화 성공 뒤 PCM 누락·손상 12프레임 |
+| macOS 26 ARM 새 설치·업그레이드 | 새 설치는 그래프 준비·창 최소화 성공 뒤 PCM 누락·손상 12프레임, 업그레이드는 Destination 목록의 Recorder 미선택 |
+| macOS 26 Intel 새 설치·업그레이드 | 두 모드의 그래프 준비·창 최소화 성공 뒤 PCM 실패. 새 설치 누락·손상 1,772프레임, 업그레이드 누락 12,440·반복 2,560·손상 5,212프레임 |
+| macOS 27 ARM 업그레이드 | Destination 목록의 Recorder 미선택. 두 모드의 PCM·녹음·시스템 캡처·제거는 통과 |
+| Ubuntu 26.04 ARM 새 설치·업그레이드 | 부팅·API·오디오·녹음·제거 통과, UI 실패. 새 설치는 Recorder 메뉴가 선택되지 않았고 업그레이드는 Recorder 준비 확인 실패 뒤 연결 오류 화면이 남음 |
 
 모든 필수 시나리오와 정리가 통과해야 한다.
 실패·미실행·skip은 수락할 수 없으며, 개별 진단의 통과를 모아 전체 실행을 대신하지 않는다.
 후보는 draft로 보관하며 제품이나 업데이트 카탈로그를 공개하지 않았다.
+
+최종 inventory는 13개 대상을 모두 실행해 7개 통과·6개 실패를 기록했다. skip·미실행 대상은 없다.
+`fa09faed`는 숨긴 웹뷰의 상태·미터 전송을 1초로 제한하고 복귀 때 즉시 최신 창을 보내는 제품 수정과,
+오디오·녹음 종료 뒤 진단 도구를 실행하는 시험 수정을 포함한다. 제품 실행 파일이 달라졌으므로
+이 후보의 기존 설치 파일로 그 수정까지 검증했다고 판단할 수 없다. 같은 새 소스에서 macOS·Linux 설치 파일을 다시 빌드한다.
 
 후속 suite `d26298fe`의 [macOS 15 ARM 진단](https://github.com/mixrelay/mixrelay/actions/runs/40090519269)은
 선택 항목도 실제 포커스 확인 뒤 Return으로 확정하고 그래프 실패 뒤에도 오디오 준비를 수행한다.

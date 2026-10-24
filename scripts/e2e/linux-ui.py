@@ -147,17 +147,38 @@ def click(label, contains=False, right=False):
     print(f"Activated installed UI control: {label} ({time.monotonic() - started:.2f}s)", flush=True)
 
 
-def open_menu(label):
-    node = find(label)
+def focus(node, label, deadline):
     node.queryComponent().grabFocus()
-    deadline = time.monotonic() + observation_timeout()
     while True:
         node.clearCache()
         if node.getState().contains(pyatspi.STATE_FOCUSED):
-            break
+            return
         if time.monotonic() >= deadline:
-            raise AssertionError(f"Installed menu trigger did not receive focus: {label}")
+            raise AssertionError(f"Installed UI control did not receive focus: {label}")
         time.sleep(0.1)
+
+
+def activate(label, contains=False):
+    started = time.monotonic()
+    deadline = started + observation_timeout()
+    node = find(label, contains=contains, deadline=deadline, enabled=True)
+    focus(node, label, deadline)
+    pyatspi.Registry.generateKeyboardEvent(0xff0d, None, pyatspi.KEY_SYM)
+    print(f"Submitted installed UI control: {label} ({time.monotonic() - started:.2f}s)", flush=True)
+
+
+def open_context_menu(label):
+    deadline = time.monotonic() + observation_timeout()
+    node = find(label, interactive=False, roles=("panel",), deadline=deadline)
+    focus(node, label, deadline)
+    # ContextMenu and Shift+F10 share the outer node's keyboard contract.
+    pyatspi.Registry.generateKeyboardEvent(0xff67, None, pyatspi.KEY_SYM)
+
+
+def open_menu(label):
+    node = find(label)
+    deadline = time.monotonic() + observation_timeout()
+    focus(node, label, deadline)
     # WebKitGTK exposes the open menu but omits EXPANDED on this trigger.
     # One Return opens it; observing the named menu never toggles it again.
     pyatspi.Registry.generateKeyboardEvent(0xff0d, None, pyatspi.KEY_SYM)
@@ -249,17 +270,17 @@ def main(output):
     find("Add apps, devices, effects and more.", interactive=False, text=True)
     open_menu("Add node")
     open_submenu("Processor")
-    click("Compressor")
+    activate("Compressor")
     find("Compressor", interactive=False, roles=("panel",))
     open_menu("Add node")
     open_submenu("Output")
-    click("Recorder")
+    activate("Recorder")
     find("Recorder", interactive=False, roles=("panel",))
-    click("Compressor", right=True)
-    click("Connect channels…")
-    click("Destination", contains=True)
-    click("Recorder")
-    click("Connect")
+    open_context_menu("Compressor")
+    activate("Connect channels…")
+    activate("Destination", contains=True)
+    activate("Recorder")
+    activate("Connect")
     find("Compressor CH 1 → Recorder CH 1", interactive=False)
     find("Recorder: Record", roles=("toggle button", "button", "push button"), enabled=True)
     tree = tree_text(application())

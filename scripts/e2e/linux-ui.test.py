@@ -179,6 +179,68 @@ class InstalledEditorTest(unittest.TestCase):
         self.assertIs(self.ui.find("Add node"), self.add)
         self.assertEqual(reads, [])
 
+    def test_leaf_waits_for_enabled_and_observed_focus_before_one_return(self):
+        self.desktop[:] = [self.editor]
+        item = Node("Recorder", "menu item")
+        self.editor[0].extend([Node("Recorder", "panel"), item])
+        self.atspi.STATE_ENABLED = 4
+        self.atspi.STATE_FOCUSED = 2
+        self.atspi.KEY_SYM = 3
+        elapsed = 0
+        requested = False
+        events = []
+        def pause(seconds):
+            nonlocal elapsed
+            elapsed += seconds
+        def grab():
+            nonlocal requested
+            self.assertGreaterEqual(elapsed, 0.1)
+            events.append("focus")
+            requested = True
+            return True
+        item.queryComponent = lambda: types.SimpleNamespace(grabFocus=grab)
+        item.getState = lambda: types.SimpleNamespace(contains=lambda state:
+            elapsed >= 0.1 if state == self.atspi.STATE_ENABLED else
+            requested and elapsed >= 0.2 if state == self.atspi.STATE_FOCUSED else True)
+        self.atspi.Registry.generateKeyboardEvent = lambda *args: events.append(args)
+        self.atspi.Registry.generateMouseEvent = lambda *args: self.fail("Leaf must use observed focus and Return")
+        with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
+                patch.object(self.ui.time, "sleep", side_effect=pause):
+            self.ui.activate("Recorder")
+        self.assertEqual(events, ["focus", (0xff0d, None, 3)])
+        self.assertGreaterEqual(elapsed, 0.2)
+
+    def test_unobserved_focus_never_submits_a_leaf_action(self):
+        self.desktop[:] = [self.editor]
+        self.atspi.STATE_FOCUSED = 2
+        self.atspi.STATE_ENABLED = 4
+        self.atspi.KEY_SYM = 3
+        self.add.queryComponent = lambda: types.SimpleNamespace(grabFocus=lambda: True)
+        self.add.getState = lambda: types.SimpleNamespace(contains=lambda state: state != self.atspi.STATE_FOCUSED)
+        events = []
+        self.atspi.Registry.generateKeyboardEvent = lambda *args: events.append(args)
+        elapsed = 0
+        def pause(seconds):
+            nonlocal elapsed
+            elapsed += 31
+        with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
+                patch.object(self.ui.time, "sleep", side_effect=pause):
+            with self.assertRaisesRegex(AssertionError, "did not receive focus"):
+                self.ui.activate("Add node")
+        self.assertEqual(events, [])
+
+    def test_node_context_menu_uses_the_outer_canvas_panel(self):
+        self.desktop[:] = [self.editor]
+        panel = Node("Compressor", "panel")
+        self.editor[0].extend([Node("Compressor", "menu item"), panel])
+        self.atspi.STATE_FOCUSED = 2
+        self.atspi.KEY_SYM = 3
+        events = []
+        panel.queryComponent = lambda: types.SimpleNamespace(grabFocus=lambda: events.append("panel focus"))
+        self.atspi.Registry.generateKeyboardEvent = lambda *args: events.append(args)
+        self.ui.open_context_menu("Compressor")
+        self.assertEqual(events, ["panel focus", (0xff67, None, 3)])
+
     def test_bounds_queries_can_recover_before_the_single_pointer_action(self):
         self.desktop[:] = [self.editor]
         self.atspi.DESKTOP_COORDS = 0
