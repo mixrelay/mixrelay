@@ -139,6 +139,15 @@ final class InstalledApplication {
         throw Failure.control("Missing control \(label) in editor PID \(pid)")
     }
 
+    func waitEditorWindow(timeout: TimeInterval = 20) throws -> InstalledElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let window = root.children.first(where: { $0.matches("MixRelay", roles: [kAXWindowRole]) }) { return window }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+        throw Failure.control("Missing editor window in PID \(pid)")
+    }
+
     var debugDescription: String {
         var lines = ["Installed editor PID \(pid)"]
         guard let window = editorWindow else { return lines.joined(separator: "\n") + "\nEditor window unavailable" }
