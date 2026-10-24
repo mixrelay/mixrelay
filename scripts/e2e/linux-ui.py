@@ -94,7 +94,7 @@ def observation_timeout():
     return 120 if os.environ.get("MIXRELAY_E2E_VM_ACCELERATOR") == "tcg" else 30
 
 
-def find(label, contains=False, interactive=True, deadline=None, roles=None, text=False):
+def find(label, contains=False, interactive=True, deadline=None, roles=None, text=False, enabled=False):
     if deadline is None:
         deadline = time.monotonic() + observation_timeout()
     while time.monotonic() < deadline:
@@ -111,7 +111,8 @@ def find(label, contains=False, interactive=True, deadline=None, roles=None, tex
                         continue
                     if roles is None and interactive and node.getRoleName() not in ("button", "push button", "menu item", "combo box", "list item"):
                         continue
-                    if node.getState().contains(pyatspi.STATE_SHOWING):
+                    state = node.getState()
+                    if state.contains(pyatspi.STATE_SHOWING) and (not enabled or state.contains(pyatspi.STATE_ENABLED)):
                         return node
                 except Exception:
                     continue
@@ -260,7 +261,10 @@ def main(output):
     click("Recorder")
     click("Connect")
     find("Compressor CH 1 → Recorder CH 1", interactive=False)
-    (output / "installed-ui-tree.txt").write_text(tree_text(application()), encoding="utf-8")
+    find("Recorder: Record", roles=("toggle button", "button", "push button"), enabled=True)
+    tree = tree_text(application())
+    assert "Recording error" not in tree, "Recorder must be ready without an error after graph creation"
+    (output / "installed-ui-tree.txt").write_text(tree, encoding="utf-8")
     screenshot(output / "installed-ui.png")
     (output / "installed-ui.ready").write_text("ready\n", encoding="utf-8")
 

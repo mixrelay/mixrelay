@@ -117,6 +117,29 @@ class InstalledEditorTest(unittest.TestCase):
         self.desktop[:] = [self.editor]
         self.assertIs(self.ui.find("Compressor", interactive=False, roles=("panel",)), card)
 
+    def test_recorder_readiness_observes_enabled_state_and_fails_if_it_never_arrives(self):
+        self.desktop[:] = [self.editor]
+        self.atspi.STATE_ENABLED = 8
+        record = Node("Recorder: Record", "toggle button")
+        self.editor[0].append(record)
+        elapsed = 0
+        ready = False
+        record.getState = lambda: types.SimpleNamespace(contains=lambda flag:
+            True if flag == self.atspi.STATE_SHOWING else ready)
+        def advance(seconds):
+            nonlocal elapsed, ready
+            elapsed += seconds
+            ready = True
+        with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
+                patch.object(self.ui.time, "sleep", side_effect=advance):
+            self.assertIs(self.ui.find("Recorder: Record", roles=("toggle button",), enabled=True), record)
+        self.assertGreater(elapsed, 0)
+        ready = False
+        with patch.object(self.ui.time, "monotonic", side_effect=[0, 1, 31]), \
+                patch.object(self.ui.time, "sleep"):
+            with self.assertRaisesRegex(AssertionError, "Missing installed UI control"):
+                self.ui.find("Recorder: Record", roles=("toggle button",), enabled=True)
+
     def test_empty_canvas_paragraph_is_read_through_its_text_interface(self):
         paragraph = Node("", "paragraph")
         paragraph.queryText = lambda: types.SimpleNamespace(getText=lambda start, end: "Empty canvas")

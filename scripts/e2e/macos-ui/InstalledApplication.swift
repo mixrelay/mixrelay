@@ -155,10 +155,11 @@ final class InstalledApplication {
         throw Failure.control("Missing choice \(label) in list \(listLabel) in editor PID \(pid)")
     }
 
-    func wait(_ label: String, roles: [String] = [], contains: Bool = false, timeout: TimeInterval = 30) throws -> InstalledElement {
+    func wait(_ label: String, roles: [String] = [], contains: Bool = false, enabled: Bool = false, timeout: TimeInterval = 30) throws -> InstalledElement {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let element = find(label, roles: roles, contains: contains) { return element }
+            if let element = find(label, roles: roles, contains: contains),
+               !enabled || element.attribute(kAXEnabledAttribute) as? Bool == true { return element }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         } while Date() < deadline
         throw Failure.control("Missing control \(label) in editor PID \(pid)")

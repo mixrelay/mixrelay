@@ -60,6 +60,10 @@ final class InstalledUITests: XCTestCase {
         try app.waitChoice("Recorder", in: "Destination").click()
         try press("Connect")
         _ = try app.wait("Compressor CH 1 → Recorder CH 1")
+        _ = try app.wait("Recorder: Record", roles: [kAXCheckBoxRole, kAXButtonRole], enabled: true)
+        guard app.find("Recording error", roles: [kAXStaticTextRole], contains: true) == nil else {
+            throw MissingControl(label: "Recorder must be ready without an error after graph creation")
+        }
         try WindowScreenshot.capture(pid: editor.processIdentifier, to: directory.appendingPathComponent("installed-ui.png"))
         try app.debugDescription.write(to: directory.appendingPathComponent("installed-ui-tree.txt"), atomically: true, encoding: .utf8)
         let window = try XCTUnwrap(app.editorWindow)
