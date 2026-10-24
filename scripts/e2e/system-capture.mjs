@@ -64,6 +64,22 @@ export function systemCaptureGraph(document, graphId) {
       destination: { nodeId: 'qa-system-recorder', portId: 'audio' }, channelMapping: { mode: 'auto' } }] };
 }
 
+export async function waitForSystemSignal(api, revision, { now = Date.now, wait = delay, observe = () => {} } = {}) {
+  const deadline = now() + 30000;
+  let consecutive = 0;
+  while (now() < deadline) {
+    const snapshot = await api('meters');
+    const source = snapshot.nodes.find(node => node.nodeId === 'qa-system' && node.portId === 'audio');
+    observe({ at: now(), revision: snapshot.revision, peaks: source?.peaks ?? null });
+    const live = snapshot.revision === revision && source?.peaks.length === 2
+      && source.peaks.every(peak => Number.isFinite(peak) && peak > 0.04 && peak < 0.06);
+    consecutive = live ? consecutive + 1 : 0;
+    if (consecutive >= 3) return;
+    await wait(100);
+  }
+  assert.fail('Both whole-system source channels did not become live after consent');
+}
+
 export async function wholeSystemCapture({ api, apply, graphId, document, device, output }) {
   const access = await invoke('licensing_status', {});
   assert.equal(access.status, 'free', 'Whole-system acceptance requires actual free access');
@@ -82,6 +98,12 @@ export async function wholeSystemCapture({ api, apply, graphId, document, device
       child.stdin.on('error', () => {});
       const [ready] = await once(child.stdout, 'data', { signal: AbortSignal.timeout(15000) });
       assert.equal(ready.toString().trim(), `ready ${uid}`);
+    }
+    const readiness = [];
+    try {
+      await waitForSystemSignal(api, applied.revision, { observe: value => readiness.push(value) });
+    } finally {
+      writeFileSync(join(output, 'whole-system-ready.json'), JSON.stringify(readiness, null, 2) + '\n', { flag: 'wx' });
     }
     let take = await api(recorder);
     await api(recorder, { expectedRevision: applied.revision, expectedRecording: { state: take.state, path: take.path },

@@ -44,12 +44,12 @@ async function eventually(read, predicate, description, { timeoutMs = 30000, now
   throw new Error(`${description}: ${JSON.stringify(last)}`);
 }
 
-export function installedReadyStatus(api, { accelerator = process.env.MIXRELAY_E2E_VM_ACCELERATOR,
+export function installedReadyStatus(api, { os, accelerator = process.env.MIXRELAY_E2E_VM_ACCELERATOR,
   now = Date.now, wait = delay } = {}) {
-  // TCG guest startup exceeded 30s while the independent Driver already answered.
-  // Require the same ready observation, with a bounded emulated-CPU budget.
+  // Cold HAL discovery and emulated guest startup both exceeded 30s in hosted
+  // installs. These paths still need an actual ready observation within 120s.
   return eventually(() => api('status'), value => value.driverState === 'ready',
-    'Installed engine/Driver not ready', { timeoutMs: accelerator === 'tcg' ? 120000 : 30000, now, wait });
+    'Installed engine/Driver not ready', { timeoutMs: os === 'macos' || accelerator === 'tcg' ? 120000 : 30000, now, wait });
 }
 
 export function signalGraph(original, graphId, spec) {
@@ -262,7 +262,7 @@ export async function qualifyMode({
     if (!installed) throw new Error('Installation or installed artifact identity failed');
     stop = await launchInstalled(target.os, output);
     const ready = await scenario('APP-01', async () => {
-      const status = await installedReadyStatus(api);
+      const status = await installedReadyStatus(api, { os: target.os });
       const snapshot = await driver();
       assert.equal(snapshot.state, 'ready');
       assert.equal(snapshot.installedVersion, candidate.version);
