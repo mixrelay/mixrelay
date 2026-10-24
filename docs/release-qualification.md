@@ -157,7 +157,27 @@ ready at the candidate version and the engine reports the expected protocol, ena
 power and native backend. `readiness-disagreement.json` preserves both responses.
 The gate still requires `APP-01` to pass.
 `GRAPH-01` uses the installed editor to create and connect nodes and checks the committed
-graph against the engine. The macOS UI observer handles first-use audio consent and
+graph against the engine. Both hosted workflows build and sign one XCTest observer before
+installing the product. Preparation grants Accessibility to that exact code requirement,
+restarts the disposable runner's system TCC daemon and confirms its replacement PID.
+Fresh and upgrade reuse the prepared observer; each XCTest configuration keeps its original
+product paths and changes only `MIXRELAY_UI_EVIDENCE`. The installed phase verifies the
+signed code and uses `test-without-building` with signing disabled. The synthetic native
+probe self-test also compiles before installation. The audio scenarios retain their first
+native I/O and full PCM checks.
+
+For a hosted diagnostic job, prepare these tools before invoking the installed runner:
+
+```sh
+node scripts/e2e/prepare-macos-host.mjs macos-host
+node scripts/e2e/prepare-macos-ui.mjs
+bash scripts/e2e/macos-ui.sh --prepare installed-ui-tools
+zsh scripts/probe-macos-roundtrip.sh --self-test
+export MIXRELAY_E2E_MACOS_UI_TOOLS="$PWD/installed-ui-tools"
+```
+
+The signed observer's identity and TCC restart PIDs are included in the target artifact.
+The macOS UI observer handles first-use audio consent and
 remains active through Quit and removal. macOS `AUDIO-11` exercises free whole-system
 capture. After recording the UI screenshot, accessibility tree and committed graph,
 macOS minimizes the editor window and measures background native audio at 48kHz/128 frames;
