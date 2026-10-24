@@ -7,6 +7,38 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareMacosUiRunner } from '../e2e/macos-ui-runner.mjs';
 
+test('native WebKit preference bridge changes the real feature and rejects absent keys and invalid objects', t => {
+  assert.equal(process.platform, 'darwin');
+  const directory = mkdtempSync(join(tmpdir(), 'mr-webkit-feature-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const source = fileURLToPath(new URL('../../apps/desktop/src-tauri/src/macos_webview/MRWebKitPreferences.m', import.meta.url));
+  const fixture = join(directory, 'main.m');
+  writeFileSync(fixture, `
+#import <WebKit/WebKit.h>
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+extern int32_t mr_webkit_set_bool_feature(void *, const char *, bool);
+int main(void) { @autoreleasepool {
+  WKPreferences *preferences = [WKPreferences new];
+  const char *key = "UseGPUProcessForDOMRenderingEnabled";
+  assert(mr_webkit_set_bool_feature((__bridge void *)preferences, key, false) == 0);
+  assert(mr_webkit_set_bool_feature((__bridge void *)preferences, key, true) == 0);
+  assert(mr_webkit_set_bool_feature((__bridge void *)preferences, "MissingQualificationFeature", true) == 3);
+  assert(mr_webkit_set_bool_feature(NULL, key, true) == 1);
+  assert(mr_webkit_set_bool_feature((__bridge void *)preferences, NULL, true) == 1);
+  assert(mr_webkit_set_bool_feature((__bridge void *)[NSObject new], key, true) == 1);
+} return 0; }
+`);
+  const executable = join(directory, 'feature');
+  const built = spawnSync('xcrun', ['clang', '-fobjc-arc', '-Wall', '-Wextra', '-Werror', source,
+    fixture, '-framework', 'WebKit', '-framework', 'Foundation', '-o', executable],
+  { encoding: 'utf8', timeout: 60000 });
+  assert.equal(built.status, 0, built.stderr);
+  const result = spawnSync(executable, [], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('native screenshot validation rejects a blank body with window chrome and a cursor but accepts rendered content', t => {
   assert.equal(process.platform, 'darwin');
   const directory = mkdtempSync(join(tmpdir(), 'mr-window-pixels-'));

@@ -4,6 +4,8 @@ import ApplicationServices
 // AX roots retain the selected process identity even when two roles share a bundle ID.
 struct InstalledElement {
     let raw: AXUIElement
+    private static let rightArrowKey: CGKeyCode = 124
+    private static let returnKey: CGKeyCode = 36
 
     func attribute(_ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
@@ -65,19 +67,35 @@ struct InstalledElement {
         }
     }
 
-    func openSubmenu() throws {
+    private func focus() throws {
         let acknowledgement = AXUIElementSetAttributeValue(raw, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         let deadline = Date().addingTimeInterval(30)
         while attribute(kAXFocusedAttribute) as? Bool != true {
-            guard Date() < deadline else { throw InstalledApplication.Failure.control("Submenu never received focus: \(labels), acknowledgement \(acknowledgement.rawValue)") }
+            guard Date() < deadline else { throw InstalledApplication.Failure.control("Control never received focus: \(labels), acknowledgement \(acknowledgement.rawValue)") }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
+    }
+
+    private func sendKey(_ key: CGKeyCode) throws {
         for down in [true, false] {
-            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 124, keyDown: down) else {
-                throw InstalledApplication.Failure.control("Could not create Right Arrow event")
+            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: down) else {
+                throw InstalledApplication.Failure.control("Could not create keyboard event")
             }
             event.post(tap: .cghidEventTap)
         }
+    }
+
+    func openSubmenu() throws {
+        try focus()
+        try sendKey(Self.rightArrowKey)
+    }
+
+    func chooseMenuItem() throws {
+        guard role == kAXMenuItemRole else {
+            throw InstalledApplication.Failure.control("Expected a menu item: \(labels)")
+        }
+        try focus()
+        try sendKey(Self.returnKey)
     }
 }
 

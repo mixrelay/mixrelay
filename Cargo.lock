@@ -2781,6 +2781,8 @@ dependencies = [
  "mixrelay-test-support",
  "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-web-kit",
  "open",
  "reqwest",
  "rfd",

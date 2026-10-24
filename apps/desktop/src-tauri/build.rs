@@ -24,6 +24,17 @@ fn main() {
 }
 
 fn build_macos_audio(identity: &str) {
+    let webkit_bridge = "src/macos_webview/MRWebKitPreferences.m";
+    println!("cargo:rerun-if-changed={webkit_bridge}");
+    println!("cargo:rerun-if-changed=src/macos_webview/MRWebKitPreferences.h");
+    cc::Build::new()
+        .file(webkit_bridge)
+        .flag("-fobjc-arc")
+        .flag("-Wall")
+        .flag("-Wextra")
+        .flag("-Werror")
+        .compile("mixrelay_webkit_preferences");
+    println!("cargo:rustc-link-lib=framework=WebKit");
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .expect("Cargo provides CARGO_MANIFEST_DIR to build scripts");
     let info_plist = std::path::Path::new(&manifest_dir).join(identity);

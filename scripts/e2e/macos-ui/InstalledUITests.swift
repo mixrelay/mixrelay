@@ -9,7 +9,9 @@ final class InstalledUITests: XCTestCase {
 
     private func press(_ label: String) throws {
         let app = try XCTUnwrap(app)
-        try app.wait(label, roles: [kAXButtonRole, kAXPopUpButtonRole, kAXMenuItemRole, kAXCellRole]).click()
+        let control = try app.wait(label, roles: [kAXButtonRole, kAXPopUpButtonRole, kAXMenuItemRole, kAXCellRole])
+        if control.role == kAXMenuItemRole { try control.chooseMenuItem() }
+        else { try control.click() }
     }
 
     private func createGraph(in directory: URL) throws {
@@ -36,6 +38,11 @@ final class InstalledUITests: XCTestCase {
         self.editorPid = editor.processIdentifier
         guard editor.activate(options: [.activateAllWindows]) else {
             throw MissingControl(label: "Installed editor PID \(editor.processIdentifier)")
+        }
+        let activationDeadline = Date().addingTimeInterval(20)
+        while !editor.isActive {
+            guard Date() < activationDeadline else { throw MissingControl(label: "Installed editor did not become active") }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
         app.editorWindow = try app.waitEditorWindow()
         _ = try app.wait("Add apps, devices, effects and more.", roles: [kAXStaticTextRole])

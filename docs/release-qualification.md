@@ -200,12 +200,30 @@ test video from competing with native audio. The observer still writes the requi
 `installed-ui.png` and failure screenshot explicitly and performs every UI and consent
 check. `native-probe-processes.txt` records process CPU after the signal has stopped.
 
+Hosted preparation disables Spotlight indexing on the disposable data volume before
+building the UI observer or installing the product. `host-preparation.json` records
+the observed indexing states; an unknown state or unsuccessful change fails preparation.
+This reduces metadata work triggered by builds and installation during native audio.
+PCM duration, the 128-frame engine quantum and every signal assertion remain
+unchanged. macOS menu items receive native focus before one Return key submission;
+the observer requires the installed editor to be active and checks the committed graph.
+
 The explicit screenshot uses ScreenCaptureKit to capture the installed editor's single
 window by PID and title. It records window identity and dimensions in `installed-ui.window.json`.
 A uniform central body fails `GRAPH-01`, even if accessibility and graph assertions pass;
 the PNG and failure details remain evidence. The native bitmap fixture rejects blank content
 with window chrome or a cursor and accepts rendered content. This check does not replace
 visual review of the collected image.
+
+macOS 27.0 can deny IOSurface allocation in its low-core WebContent rendering path while
+DOM and accessibility remain responsive. On that OS with fewer than four processors,
+MixRelay creates its configured windows with GPU-process DOM rendering enabled before
+the first webview exists. The narrow compatibility path follows WebKit's
+[removal of the obsolete core-count gate](https://github.com/WebKit/WebKit/commit/300502def54cfcc3062172eeb217fa5a41c07151).
+It checks the private WebKit feature API, verifies the selected value and preserves the original
+window configuration. The native fixture uses the same bridge to reproduce the blank
+window and capture rendered content after enabling that path. A WebKit snapshot alone
+can contain the content while the visible window is blank; the window image is required.
 
 The GUI measurement probe completes its own microphone authorization before preparing any
 device or starting I/O. This follows [Apple's capture authorization procedure](https://developer.apple.com/documentation/avfoundation/requesting-authorization-to-capture-and-save-media).

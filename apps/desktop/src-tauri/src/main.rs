@@ -24,6 +24,8 @@ mod child_engine_lifecycle;
 mod engine_lifecycle;
 #[cfg(target_os = "linux")]
 use child_engine_lifecycle as engine_lifecycle;
+#[cfg(any(test, target_os = "macos"))]
+mod macos_webview;
 #[cfg(target_os = "macos")]
 mod native_termination;
 
@@ -48,6 +50,8 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     #[cfg(target_os = "linux")]
     system_stop::observe_background_stop(app.handle())?;
     if *app.state::<app_mode::AppMode>() == app_mode::AppMode::Graph {
+        #[cfg(target_os = "macos")]
+        macos_webview::create_deferred(app)?;
         start_audio(app.handle())?;
         workspace_menu::install(app)?;
         if tauri::is_dev()
@@ -190,6 +194,8 @@ fn main() {
     let mode = app_mode::AppMode::detect(arguments.iter().map(std::ffi::OsString::as_os_str));
     mode.configure(context.config_mut());
     let builder = tauri::Builder::default().manage(mode);
+    #[cfg(target_os = "macos")]
+    let builder = builder.manage(macos_webview::prepare(context.config_mut()));
     #[cfg(target_os = "macos")]
     let builder = if mode == app_mode::AppMode::Service {
         // Ownership contention is an expected rejected launch. Tauri panics on
