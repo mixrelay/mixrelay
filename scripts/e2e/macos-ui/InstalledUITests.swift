@@ -32,14 +32,12 @@ final class InstalledUITests: XCTestCase {
         guard editor.activate(options: [.activateAllWindows]) else {
             throw MissingControl(label: "Installed editor PID \(editor.processIdentifier)")
         }
-        _ = try app.wait("MixRelay", roles: [kAXWindowRole], timeout: 20)
+        app.editorWindow = try app.wait("MixRelay", roles: [kAXWindowRole], timeout: 20)
         try press("Add node")
-        // Move the pointer with the submenu trigger. WebKit can acknowledge
-        // AXPress while the pointer still hovers a different parent menu item.
-        try app.wait("Processor", roles: [kAXMenuItemRole]).click(pointer: true)
+        try app.wait("Processor", roles: [kAXMenuItemRole]).openSubmenu()
         try press("Compressor")
         try press("Add node")
-        try app.wait("Output", roles: [kAXMenuItemRole]).click(pointer: true)
+        try app.wait("Output", roles: [kAXMenuItemRole]).openSubmenu()
         try press("Recorder")
         _ = try app.wait("Recorder", roles: [kAXGroupRole])
         try app.wait("Compressor", roles: [kAXStaticTextRole]).click(right: true)
@@ -91,7 +89,7 @@ final class InstalledUITests: XCTestCase {
                     }
                 }
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            RunLoop.current.run(until: Date().addingTimeInterval(1))
         }
     }
 }

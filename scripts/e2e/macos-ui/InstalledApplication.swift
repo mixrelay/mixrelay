@@ -27,8 +27,8 @@ struct InstalledElement {
         }
     }
 
-    func click(right: Bool = false, pointer: Bool = false) throws {
-        if !right && !pointer && AXUIElementPerformAction(raw, kAXPressAction as CFString) == .success { return }
+    func click(right: Bool = false) throws {
+        if !right && AXUIElementPerformAction(raw, kAXPressAction as CFString) == .success { return }
         guard let position = attribute(kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
               let size = attribute(kAXSizeAttribute), CFGetTypeID(size) == AXValueGetTypeID() else {
             throw InstalledApplication.Failure.control("Element has no clickable bounds: \(labels)")
@@ -41,17 +41,27 @@ struct InstalledElement {
         }
         point.x += extent.width / 2
         point.y += extent.height / 2
-        if pointer {
-            guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
-                                     mouseCursorPosition: point, mouseButton: .left) else {
-                throw InstalledApplication.Failure.control("Could not move pointer")
-            }
-            move.post(tap: .cghidEventTap)
-        }
         let button: CGMouseButton = right ? .right : .left
         for type: CGEventType in right ? [.rightMouseDown, .rightMouseUp] : [.leftMouseDown, .leftMouseUp] {
             guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button) else {
                 throw InstalledApplication.Failure.control("Could not create mouse event")
+            }
+            event.post(tap: .cghidEventTap)
+        }
+    }
+
+    func openSubmenu() throws {
+        guard AXUIElementSetAttributeValue(raw, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success else {
+            throw InstalledApplication.Failure.control("Submenu rejected keyboard focus: \(labels)")
+        }
+        let deadline = Date().addingTimeInterval(30)
+        while attribute(kAXFocusedAttribute) as? Bool != true {
+            guard Date() < deadline else { throw InstalledApplication.Failure.control("Submenu never received focus: \(labels)") }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        for down in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 124, keyDown: down) else {
+                throw InstalledApplication.Failure.control("Could not create Right Arrow event")
             }
             event.post(tap: .cghidEventTap)
         }
@@ -62,6 +72,7 @@ final class InstalledApplication {
     enum Failure: Error { case control(String) }
     let root: InstalledElement
     let pid: pid_t
+    var editorWindow: InstalledElement?
 
     init(pid: pid_t, messagingTimeout: Float = 2) {
         self.pid = pid
@@ -83,7 +94,7 @@ final class InstalledApplication {
     }
 
     func find(_ label: String, roles: [String] = [], contains: Bool = false) -> InstalledElement? {
-        Self.first(root: root, children: { $0.children }) { $0.matches(label, roles: roles, contains: contains) }
+        Self.first(root: editorWindow ?? root, children: { $0.children }) { $0.matches(label, roles: roles, contains: contains) }
     }
 
     static func choice<Node>(root: Node, label: String, listLabel: String, children: (Node) -> [Node], role: (Node) -> String, labels: (Node) -> [String]) -> Node? {
@@ -100,7 +111,7 @@ final class InstalledApplication {
     func waitChoice(_ label: String, in listLabel: String, timeout: TimeInterval = 30) throws -> InstalledElement {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let option = Self.choice(root: root, label: label, listLabel: listLabel, children: { $0.children }, role: { $0.role }, labels: { $0.labels }) { return option }
+            if let option = Self.choice(root: editorWindow ?? root, label: label, listLabel: listLabel, children: { $0.children }, role: { $0.role }, labels: { $0.labels }) { return option }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         } while Date() < deadline
         throw Failure.control("Missing choice \(label) in list \(listLabel) in editor PID \(pid)")
