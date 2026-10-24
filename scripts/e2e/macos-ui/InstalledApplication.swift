@@ -141,7 +141,8 @@ final class InstalledApplication {
 
     var debugDescription: String {
         var lines = ["Installed editor PID \(pid)"]
-        _ = Self.first(root: root, children: { $0.children }) { element in
+        guard let window = editorWindow else { return lines.joined(separator: "\n") + "\nEditor window unavailable" }
+        _ = Self.first(root: window, children: { $0.children }) { element in
             lines.append("\(element.role): \(element.labels)")
             return false
         }
