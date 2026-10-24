@@ -34,6 +34,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.baseline.outputs.matrix }}
+      macos: ${{ steps.groups.outputs.macos }}
+      linux: ${{ steps.groups.outputs.linux }}
       source: ${{ steps.prepare.outputs.source }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -79,6 +81,14 @@ jobs:
         env:
           TARGET_IDS: ''
         run: node scripts/e2e/baseline.mjs --inputs baseline-inputs --output candidate/baseline --candidate candidate/mix-relay.candidate.json --comparison baseline-inputs/comparison.json
+      - name: Separate scheduling while preserving every selected target
+        id: groups
+        env:
+          MATRIX: ${{ steps.baseline.outputs.matrix }}
+        run: |
+          jq -e '.include | all(.os == "macos" or .os == "linux")' <<< "$MATRIX" > /dev/null
+          printf 'macos=%s\n' "$(jq -c '{include: [.include[] | select(.os == "macos")]}' <<< "$MATRIX")" >> "$GITHUB_OUTPUT"
+          printf 'linux=%s\n' "$(jq -c '{include: [.include[] | select(.os == "linux")]}' <<< "$MATRIX")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           overwrite: true
@@ -87,12 +97,60 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-  installed:
+  installed-macos:
+    if: needs.prepare.outputs.macos != '{"include":[]}'
     needs: prepare
     name: Install and qualify ${{ matrix.id }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+      # Keep native audio measurements separate from other macOS test builds.
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.prepare.outputs.macos) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: qualification-candidate
+          path: candidate
+      - name: Prepare native macOS UI test tools
+        run: |
+          node scripts/e2e/prepare-macos-host.mjs macos-host
+          node scripts/e2e/prepare-macos-ui.mjs
+      - name: Install and exercise final PKG on macOS
+        env:
+          TARGET: ${{ matrix.id }}
+        run: node scripts/e2e/installed.mjs --target "$TARGET" --directory candidate --candidate candidate/mix-relay.candidate.json --output evidence --disposable-environment
+      - name: Preserve macOS failure diagnostics
+        if: always()
+        run: node scripts/e2e/collect-macos.mjs --output evidence
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          overwrite: true
+          name: qualification-target-${{ matrix.id }}
+          path: |
+            macos-host/*.json
+            macos-host/*.log
+            evidence/*
+            !evidence/**/payload/**
+            !evidence/**/ui-tools/**
+          retention-days: 90
+          if-no-files-found: error
+
+  installed-linux:
+    if: needs.prepare.outputs.linux != '{"include":[]}'
+    needs: prepare
+    name: Install and qualify ${{ matrix.id }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.linux) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 150
     steps:
@@ -107,33 +165,18 @@ jobs:
           name: qualification-candidate
           path: candidate
       - name: Prepare full Linux VM tools
-        if: matrix.os == 'linux'
         env:
           TARGET_ARCH: ${{ matrix.arch }}
         run: bash scripts/e2e/github-vm-tools.sh "$TARGET_ARCH"
-      - name: Prepare native macOS UI test tools
-        if: matrix.os == 'macos'
-        run: node scripts/e2e/prepare-macos-ui.mjs
-      - name: Install the same candidate on hosted macOS
-        if: matrix.os == 'macos'
-        env:
-          TARGET: ${{ matrix.id }}
-        run: node scripts/e2e/installed.mjs --target "$TARGET" --directory candidate --candidate candidate/mix-relay.candidate.json --output evidence --disposable-environment
-      - name: Install the same candidate inside a full Linux VM
-        if: matrix.os == 'linux'
+      - name: Install and exercise final package in the distro VM
         env:
           TARGET: ${{ matrix.id }}
         run: node scripts/e2e/github-vm.mjs --target "$TARGET" --directory candidate --output evidence
-      - name: Preserve macOS failure diagnostics
-        if: always() && matrix.os == 'macos'
-        run: node scripts/e2e/collect-macos.mjs --output evidence
-      - name: Preserve failures and raw evidence
-        if: always()
+      - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           overwrite: true
           name: qualification-target-${{ matrix.id }}
-          # Extracted package payload is reproducible from the pinned artifact.
           path: |
             evidence/*
             !evidence/**/payload/**
@@ -143,7 +186,7 @@ jobs:
 
   gate:
     if: always() && needs.prepare.result == 'success'
-    needs: [prepare, installed]
+    needs: [prepare, installed-macos, installed-linux]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
