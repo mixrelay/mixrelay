@@ -146,6 +146,25 @@ def click(label, contains=False, right=False):
     print(f"Activated installed UI control: {label} ({time.monotonic() - started:.2f}s)", flush=True)
 
 
+def open_menu(label):
+    node = find(label)
+    node.queryComponent().grabFocus()
+    deadline = time.monotonic() + observation_timeout()
+    for flag, description in [(pyatspi.STATE_FOCUSED, "receive focus"),
+                              (pyatspi.STATE_EXPANDED, "expand")]:
+        while True:
+            node.clearCache()
+            if node.getState().contains(flag):
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError(f"Installed menu trigger did not {description}: {label}")
+            time.sleep(0.1)
+        if flag == pyatspi.STATE_FOCUSED:
+            # One Return opens the focused trigger; never toggle an uncertain result.
+            pyatspi.Registry.generateKeyboardEvent(0xff0d, None, pyatspi.KEY_SYM)
+    print(f"Observed installed menu expansion: {label}", flush=True)
+
+
 def open_submenu(label):
     node, bounds = locate(label)
     component = node.queryComponent()
@@ -228,11 +247,11 @@ def main(output):
     Atspi.set_timeout(2000, 15000)
     find("Untitled Graph")
     find("Add apps, devices, effects and more.", interactive=False, text=True)
-    click("Add node")
+    open_menu("Add node")
     open_submenu("Processor")
     click("Compressor")
     find("Compressor", interactive=False, roles=("panel",))
-    click("Add node")
+    open_menu("Add node")
     open_submenu("Output")
     click("Recorder")
     find("Recorder", interactive=False, roles=("panel",))

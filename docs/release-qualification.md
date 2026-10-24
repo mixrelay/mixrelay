@@ -175,8 +175,9 @@ ready at the candidate version and the engine reports the expected protocol, ena
 power and native backend. `readiness-disagreement.json` preserves both responses.
 The gate still requires `APP-01` to pass.
 `GRAPH-01` uses the installed editor to create and connect nodes and checks the committed
-graph against the engine. Linux submenu navigation refreshes native accessibility state
-and requires an observed expansion before selecting a leaf. Each submenu permits at most
+graph against the engine. Linux opens the Add node trigger with one Return after observing
+native focus, then requires its expanded state. Linux submenu navigation refreshes native
+accessibility state and requires an observed expansion before selecting a leaf. Each submenu permits at most
 three focus requests and three Right Arrow submissions; each leaf receives one pointer click.
 An unexpanded menu or an uncommitted graph fails the case.
 
