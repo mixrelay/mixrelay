@@ -289,6 +289,26 @@ pub(crate) fn spawn_editor(executable: &std::path::Path) -> std::io::Result<()> 
     Ok(())
 }
 
+fn forward_transport_error(name: &str, reason: String) -> Result<Value, Value> {
+    if name == "control_get_graph_catalog"
+        && matches!(
+            reason.as_str(),
+            "background connection timed out"
+                | "background connection closed"
+                | "background connection unavailable"
+                | "background disconnected; command was not replayed"
+                | "background response is uncertain; command was not replayed"
+                | "background controller unavailable"
+        )
+    {
+        Ok(
+            json!({"status":503,"body":{"code":"control_unavailable","parameters":{"reason":reason}}}),
+        )
+    } else {
+        Err(Value::String(reason))
+    }
+}
+
 /// Only the documented native command set is forwarded; dialogs stay in the editor.
 pub(crate) fn forward(invoke: tauri::ipc::Invoke) -> Option<tauri::ipc::Invoke> {
     if !is_service_command(invoke.message.command()) {
@@ -313,10 +333,11 @@ pub(crate) fn forward(invoke: tauri::ipc::Invoke) -> Option<tauri::ipc::Invoke> 
             .ok_or_else(|| {
                 tauri::ipc::InvokeError(Value::String("background controller unavailable".into()))
             })?;
-        connection
-            .invoke(&name, arguments)
-            .await
-            .map_err(tauri::ipc::InvokeError)
+        match connection.exchange(&name, arguments).await {
+            Ok(response) => response,
+            Err(reason) => forward_transport_error(&name, reason),
+        }
+        .map_err(tauri::ipc::InvokeError)
     });
     None
 }

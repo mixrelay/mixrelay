@@ -3,6 +3,48 @@ use std::{fs, os::unix::fs::PermissionsExt, time::Instant};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::UnixListener;
 
+#[tokio::test]
+async fn an_interrupted_initial_catalog_read_reports_retryable_transport_without_replaying() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = fixture_connection(directory.path());
+    let listener = UnixListener::bind(&connection.path).unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut reader = BufReader::new(stream);
+        let frame = request(&mut reader).await;
+        assert_eq!(frame["command"]["name"], "control_get_graph_catalog");
+    });
+    let failure = connection
+        .exchange("control_get_graph_catalog", Value::Null)
+        .await
+        .unwrap_err();
+    let result = forward_transport_error("control_get_graph_catalog", failure).unwrap();
+    assert_eq!(result["status"], 503);
+    assert_eq!(result["body"]["code"], "control_unavailable");
+    server.await.unwrap();
+}
+
+#[test]
+fn catalog_transport_classification_keeps_security_protocol_and_mutation_failures_terminal() {
+    for reason in [
+        "background controller belongs to a different user",
+        "invalid background result",
+        "background request is too large",
+    ] {
+        assert_eq!(
+            forward_transport_error("control_get_graph_catalog", reason.into()),
+            Err(Value::String(reason.into()))
+        );
+    }
+    assert!(
+        forward_transport_error(
+            "control_mutate_graph_catalog",
+            "background response is uncertain; command was not replayed".into()
+        )
+        .is_err()
+    );
+}
+
 fn fixture_connection(directory: &std::path::Path) -> Connection {
     Connection {
         path: directory.join("service.sock"),
