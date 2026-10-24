@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { invoke } from '../lab/macos-installed-capture-acceptance.mjs';
@@ -80,6 +80,13 @@ export async function waitForSystemSignal(api, revision, { now = Date.now, wait 
   assert.fail('Both whole-system source channels did not become live after consent');
 }
 
+async function toneStatus(child) {
+  const response = once(child.stdout, 'data', { signal: AbortSignal.timeout(5000) });
+  child.stdin.write('status\n');
+  const [bytes] = await response;
+  return JSON.parse(bytes.toString());
+}
+
 export async function wholeSystemCapture({ api, apply, graphId, document, device, output }) {
   const access = await invoke('licensing_status', {});
   assert.equal(access.status, 'free', 'Whole-system acceptance requires actual free access');
@@ -93,17 +100,24 @@ export async function wholeSystemCapture({ api, apply, graphId, document, device
   try {
     applied = await apply(systemCaptureGraph(document, graphId));
     for (let index = 0; index < 2; index++) {
-      const child = spawn(compileTone(output, index), ['--mixrelay-virtual-only', uid], { stdio: ['pipe', 'pipe', 'pipe'] });
-      children.push(child); child.stderr.resume();
+      const executable = compileTone(output, index);
+      const stderr = openSync(join(output, `tone-${index}.stderr.log`), 'wx');
+      let child;
+      try { child = spawn(executable, ['--mixrelay-virtual-only', uid], { stdio: ['pipe', 'pipe', stderr] }); }
+      finally { closeSync(stderr); }
+      children.push(child);
       child.stdin.on('error', () => {});
       const [ready] = await once(child.stdout, 'data', { signal: AbortSignal.timeout(15000) });
       assert.equal(ready.toString().trim(), `ready ${uid}`);
     }
     const readiness = [];
+    const sources = { before: await Promise.all(children.map(toneStatus)) };
     try {
       await waitForSystemSignal(api, applied.revision, { observe: value => readiness.push(value) });
     } finally {
       writeFileSync(join(output, 'whole-system-ready.json'), JSON.stringify(readiness, null, 2) + '\n', { flag: 'wx' });
+      sources.after = await Promise.all(children.map(toneStatus));
+      writeFileSync(join(output, 'whole-system-sources.json'), JSON.stringify(sources, null, 2) + '\n', { flag: 'wx' });
     }
     let take = await api(recorder);
     await api(recorder, { expectedRevision: applied.revision, expectedRecording: { state: take.state, path: take.path },

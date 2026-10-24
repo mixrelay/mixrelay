@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #ifndef MR_TONE_FREQUENCY
 #define MR_TONE_FREQUENCY 440.0
@@ -61,6 +62,16 @@ int main(int argc, const char *argv[]) {
                 kAudioUnitScope_Global, 0, &actual, &bytes) != noErr || actual != device) return EXIT_FAILURE;
         AVAudioFormat *format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:48000 channels:2];
         __block double phase = 0;
+        _Atomic uint64_t rendered_frames = 0;
+        _Atomic uint64_t configuration_changes = 0;
+        _Atomic uint64_t *rendered = &rendered_frames;
+        _Atomic uint64_t *changes = &configuration_changes;
+        id observer = [NSNotificationCenter.defaultCenter
+            addObserverForName:AVAudioEngineConfigurationChangeNotification object:engine queue:nil
+            usingBlock:^(NSNotification *notification) {
+                (void)notification;
+                atomic_fetch_add_explicit(changes, 1, memory_order_relaxed);
+            }];
         AVAudioSourceNode *source = [[AVAudioSourceNode alloc] initWithFormat:format
             renderBlock:^OSStatus(BOOL *silent, const AudioTimeStamp *time,
                 AVAudioFrameCount frames, AudioBufferList *output) {
@@ -73,6 +84,7 @@ int main(int argc, const char *argv[]) {
                         ((float *)output->mBuffers[channel].mData)[frame] =
                             MR_TONE_CHANNEL < 0 || channel == (UInt32)MR_TONE_CHANNEL ? sample : 0;
                 }
+                atomic_fetch_add_explicit(rendered, frames, memory_order_relaxed);
                 return noErr;
             }];
         [engine attachNode:source];
@@ -90,6 +102,14 @@ int main(int argc, const char *argv[]) {
         while (fgets(command, sizeof(command), stdin) != NULL) {
             command[strcspn(command, "\r\n")] = '\0';
             if (strcmp(command, "quit") == 0) break;
+            if (strcmp(command, "status") == 0) {
+                printf("{\"renderedFrames\":%llu,\"configurationChanges\":%llu,\"running\":%s}\n",
+                    (unsigned long long)atomic_load_explicit(rendered, memory_order_relaxed),
+                    (unsigned long long)atomic_load_explicit(changes, memory_order_relaxed),
+                    engine.isRunning ? "true" : "false");
+                fflush(stdout);
+                continue;
+            }
             if (strncmp(command, "route ", 6) != 0) {
                 [engine stop];
                 return EXIT_FAILURE;
@@ -111,6 +131,7 @@ int main(int argc, const char *argv[]) {
             fflush(stdout);
         }
         [engine stop];
+        [NSNotificationCenter.defaultCenter removeObserver:observer];
     }
     return EXIT_SUCCESS;
 }
