@@ -250,7 +250,10 @@ I/O procedures run. The observer verifies `activityProtection` in the probe resu
 The [activity API](https://developer.apple.com/documentation/foundation/processinfo/beginactivity(options:reason:))
 classifies the background GUI probe's recording work; the token ends when the I/O
 routine returns, including failed measurements. It does not guarantee a virtual host's scheduling.
-Failed PCM also collects bounded host CPU and process snapshots after the signal ends.
+The probe saves every captured interleaved native Float32 frame to `native-signal.f32`
+after I/O stops, including silence and damage. Its retained callback timeline includes
+entry/exit host ticks and their timebase. Failed PCM also collects bounded host CPU,
+process snapshots and WebContent samples after the signal ends.
 Collection preserves the PCM failure and never repeats the signal.
 
 For a hosted diagnostic job, prepare these tools before invoking the installed runner:
@@ -267,8 +270,9 @@ The signed observer's identity and TCC restart PIDs are included in the target a
 The macOS UI observer handles first-use audio consent and
 remains active through Quit and removal. macOS `AUDIO-11` exercises free whole-system
 capture. After recording the UI screenshot, accessibility tree and committed graph,
-macOS minimizes the editor window and measures background native audio at 48kHz/128 frames;
-`installed-ui-audio-phase.json` records the editor state. The consent observer remains
+macOS minimizes the editor window and measures background native audio while the engine
+graph runs at 48kHz/128 frames. The duplex probe records its own native buffer size;
+it does not change that setting. `installed-ui-audio-phase.json` records the editor state. The consent observer remains
 active. The system-capture graph is prepared before its two owned tone apps start.
 Recording starts after both channels produce live graph meters within 30 seconds.
 `whole-system-ready.json` preserves those observations, including a readiness failure.
