@@ -83,9 +83,17 @@ impl Drop for ProcessLease {
 /// # Errors
 /// Returns missing-file, permission, or lock-system errors; callers must fail closed.
 pub fn is_owned(path: impl AsRef<Path>) -> io::Result<bool> {
-    let file = File::open(path)?;
+    probe_ownership(&File::open(path)?)
+}
+
+fn probe_ownership(file: &File) -> io::Result<bool> {
     match file.try_lock_shared() {
-        Ok(()) => Ok(false),
+        Ok(()) => {
+            // A fork can inherit this open-file description before close-on-exec.
+            // Release the probe's shared lock before any new owner is admitted.
+            file.unlock()?;
+            Ok(false)
+        }
         Err(std::fs::TryLockError::WouldBlock) => Ok(true),
         Err(std::fs::TryLockError::Error(error)) => Err(error),
     }
@@ -152,5 +160,23 @@ mod tests {
         let path = directory.join("missing-parent/owner");
         assert!(is_owned(&path).is_err());
         assert!(ProcessLease::acquire(&path).is_err());
+    }
+
+    #[test]
+    fn an_inherited_probe_descriptor_cannot_block_the_next_owner() {
+        let directory = mixrelay_test_support::FixtureDir::new("app-lifecycle").unwrap();
+        let path = directory.join("lease");
+        File::create(&path).expect("test inode");
+        let probe = File::open(&path).expect("probe descriptor");
+        // Duplicates retain the same open-file description, as an in-flight fork does.
+        let inherited = probe.try_clone().expect("inherited probe descriptor");
+        assert!(!probe_ownership(&probe).expect("unowned probe"));
+        drop(probe);
+        let owner = ProcessLease::acquire(&path).expect("probe must release its shared lock");
+        assert!(is_owned(&path).expect("new owner"));
+        drop(inherited);
+        assert!(is_owned(&path).expect("inherited probe never owned the lease"));
+        drop(owner);
+        assert!(!is_owned(&path).expect("owner released"));
     }
 }
