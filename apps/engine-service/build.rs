@@ -62,6 +62,7 @@ fn build_macos_service() {
         .compile("mixrelay_microphone_permission");
     println!("cargo:rerun-if-changed={engine_root}/src/MRMicrophonePermission.m");
     println!("cargo:rustc-link-lib=framework=AVFoundation");
+    println!("cargo:rustc-link-lib=framework=Security");
 }
 
 fn embed_service_info_plist() {

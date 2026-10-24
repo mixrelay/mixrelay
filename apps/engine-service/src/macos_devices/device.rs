@@ -23,7 +23,6 @@ use std::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     thread,
-    time::Duration,
 };
 pub(super) struct Device {
     pub(super) input_continuity: InputContinuity,
@@ -147,11 +146,9 @@ impl Device {
             clock_aligned,
             worker: Some(worker),
         };
-        match super::permission::initialization(
-            rx.recv_timeout(Duration::from_secs(5)),
-            permission,
-            || result.native.host.input_permission(),
-        ) {
+        match super::permission::wait_for_native(&*result.native.host, permission, |timeout| {
+            rx.recv_timeout(timeout)
+        }) {
             Ok(()) => Ok(result),
             Err(error) => {
                 result.stop.store(true, Ordering::Release);

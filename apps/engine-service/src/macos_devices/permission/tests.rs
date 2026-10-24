@@ -110,6 +110,53 @@ fn first_use_waits_through_the_prompt_and_continues_without_a_second_request() {
 }
 
 #[test]
+fn brokered_consent_requires_native_readiness_and_keeps_ordinary_device_limits() {
+    use crate::macos_devices::{host::Host as _, simulated::SimulatedHost};
+    use std::time::Duration;
+    let host = SimulatedHost::new();
+    host.consent_decisions([InputPermission::Brokered]);
+    assert_eq!(authorize(&*host), Ok(()));
+    assert_eq!(host.consent_requests(), 0);
+    assert_eq!(
+        wait_for_native(&*host, Some(InputPermission::Brokered), |timeout| {
+            assert_eq!(timeout, Duration::from_mins(2));
+            assert!(host.permission_waiting());
+            Err(RecvTimeoutError::Timeout)
+        }),
+        Err(HostAudioBackendError::PermissionPending {
+            capability: "microphone".into()
+        })
+    );
+    assert!(!host.permission_waiting());
+    assert_eq!(
+        wait_for_native(&*host, Some(InputPermission::Brokered), |_| Ok(Ok(()))),
+        Ok(())
+    );
+    assert!(!host.permission_waiting());
+    assert!(matches!(
+        wait_for_native(&*host, Some(InputPermission::Brokered), |_| {
+            Ok(Err("native input was rejected".into()))
+        }),
+        Err(HostAudioBackendError::BackendFailure { .. })
+    ));
+    for permission in [
+        None,
+        Some(InputPermission::Authorized),
+        Some(InputPermission::Unknown),
+    ] {
+        host.consent_decisions([permission.unwrap_or(InputPermission::Authorized)]);
+        assert!(matches!(
+            wait_for_native(&*host, permission, |timeout| {
+                assert_eq!(timeout, Duration::from_secs(5));
+                assert!(!host.permission_waiting());
+                Err(RecvTimeoutError::Timeout)
+            }),
+            Err(HostAudioBackendError::BackendFailure { .. })
+        ));
+    }
+}
+
+#[test]
 fn denied_consent_and_an_unanswered_prompt_are_bounded_and_distinct() {
     assert!(matches!(
         wait_for_decision(InputPermission::Pending, || {}, || InputPermission::Denied),

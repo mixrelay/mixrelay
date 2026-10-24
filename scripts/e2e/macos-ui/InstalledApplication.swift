@@ -27,8 +27,8 @@ struct InstalledElement {
         }
     }
 
-    func click(right: Bool = false) throws {
-        if !right && AXUIElementPerformAction(raw, kAXPressAction as CFString) == .success { return }
+    func click(right: Bool = false, pointer: Bool = false) throws {
+        if !right && !pointer && AXUIElementPerformAction(raw, kAXPressAction as CFString) == .success { return }
         guard let position = attribute(kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
               let size = attribute(kAXSizeAttribute), CFGetTypeID(size) == AXValueGetTypeID() else {
             throw InstalledApplication.Failure.control("Element has no clickable bounds: \(labels)")

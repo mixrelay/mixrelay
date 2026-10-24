@@ -7,6 +7,8 @@ pub(super) enum InputPermission {
     Pending,
     Denied,
     Authorized,
+    /// This session relies on the `CoreAudio` user-session consent broker.
+    Brokered,
     Unknown,
 }
 
@@ -20,6 +22,7 @@ pub(super) fn current() -> InputPermission {
         0 => InputPermission::Pending,
         1 | 2 => InputPermission::Denied,
         3 => InputPermission::Authorized,
+        4 => InputPermission::Brokered,
         _ => InputPermission::Unknown,
     }
 }
@@ -71,8 +74,25 @@ fn wait_for_decision(
         InputPermission::Denied => Err(HostAudioBackendError::PermissionDenied {
             capability: "microphone".into(),
         }),
-        InputPermission::Authorized | InputPermission::Unknown => Ok(()),
+        InputPermission::Authorized | InputPermission::Brokered | InputPermission::Unknown => {
+            Ok(())
+        }
     }
+}
+
+pub(super) fn wait_for_native(
+    host: &dyn super::host::Host,
+    permission: Option<InputPermission>,
+    receive: impl FnOnce(std::time::Duration) -> Result<Result<(), String>, RecvTimeoutError>,
+) -> Result<(), HostAudioBackendError> {
+    let brokered = permission == Some(InputPermission::Brokered);
+    // A daemon cannot preflight the user's TCC grant through AVFoundation.
+    // Its actual IOProc registration requests consent through CoreAudio instead.
+    host.set_permission_waiting(brokered);
+    let timeout = std::time::Duration::from_secs(if brokered { 120 } else { 5 });
+    let result = receive(timeout);
+    host.set_permission_waiting(false);
+    initialization(result, permission, || host.input_permission())
 }
 
 pub(super) fn initialization(
@@ -92,7 +112,12 @@ pub(super) fn initialization(
         current => current,
     });
     match result {
-        Err(RecvTimeoutError::Timeout) if permission == Some(InputPermission::Pending) => {
+        Err(RecvTimeoutError::Timeout)
+            if matches!(
+                permission,
+                Some(InputPermission::Pending | InputPermission::Brokered)
+            ) =>
+        {
             Err(HostAudioBackendError::PermissionPending {
                 capability: "microphone".into(),
             })
