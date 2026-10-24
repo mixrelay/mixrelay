@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { launchCadenceControl, requireCadenceExecution, stopCadenceControl, waitCadenceReady } from './macos-cadence-control.mjs';
 
 // BlackHole v0.7.1, built without source edits as an independent host control.
 const revision = 'e2b22aaaba4e507a097131704bf96dabc004d9cf';
@@ -27,6 +28,7 @@ export async function macosAudioControl(evidence, target) {
   mkdirSync(output);
   const workspace = mkdtempSync(join(tmpdir(), 'mr-audio-control-'));
   let installed = false;
+  let cadence;
   const result = { source: 'https://github.com/ExistentialAudio/BlackHole', revision,
     candidateSource: report.sourceRevision, candidateStatus: report.status, status: 'failed' };
   let sequence = 0;
@@ -61,6 +63,13 @@ export async function macosAudioControl(evidence, target) {
       assert.ok(Date.now() < deadline, 'Independent device was not published');
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
+    const companion = join(workspace, 'macos-cadence-control');
+    run('xcrun', ['clang', '-std=c17', '-Wall', '-Wextra', '-Wpedantic', '-Wconversion',
+      '-Wsign-conversion', '-Werror', '-mmacosx-version-min=14.2', 'scripts/e2e/macos-cadence-control.c',
+      '-framework', 'CoreAudio', '-framework', 'CoreFoundation', '-o', companion]);
+    run(companion, ['--self-test']);
+    cadence = launchCadenceControl(companion, output);
+    await waitCadenceReady(cadence);
     const stdout = join(output, 'native-probe.stdout.json');
     const stderr = join(output, 'native-probe.stderr.log');
     run('open', ['-W', '-n', '-g', '--stdout', stdout, '--stderr', stderr, bundle, '--args',
@@ -68,11 +77,15 @@ export async function macosAudioControl(evidence, target) {
       '--seconds', '3', '--channels', '2', 'BlackHole2ch_UID'], 60000);
     const measured = JSON.parse(readFileSync(stdout, 'utf8'));
     result.measured = measured;
+    result.cadence = await stopCadenceControl(cadence);
+    cadence = null;
+    requireCadenceExecution(result.cadence);
     assert.equal(measured.inputAuthorization?.final, 3);
     assert.equal(measured.inputAuthorization?.requested, false, 'The independent control must reuse established consent');
     assert.equal(measured.complete, true);
     assert.equal(measured.channelOrder, true);
     assert.equal(measured.output.rate, 48000);
+    assert.equal(measured.output.bufferFrames, 512, 'The measurement client keeps its original native buffer');
     for (const field of ['missingFrames', 'repeatedFrames', 'corruptFrames', 'nonfiniteSamples'])
       assert.equal(measured[field], 0, field);
     result.status = 'passed';
@@ -81,6 +94,12 @@ export async function macosAudioControl(evidence, target) {
     throw error;
   } finally {
     try {
+      let cadenceError;
+      if (cadence && !cadence.closed) {
+        try { result.cadence = await stopCadenceControl(cadence); }
+        catch (error) { cadenceError = error; }
+      }
+      if (cadence) assert.equal(cadence.closed, true, 'Cadence I/O must exit before removing its driver');
       if (installed) {
         const executable = resolve('target/macos-probes/io.mixrelay.qualification.probe.app/Contents/MacOS/MRRoundTripProbe');
         const pattern = `^${executable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`;
@@ -90,6 +109,7 @@ export async function macosAudioControl(evidence, target) {
         run('sudo', ['-n', 'rm', '-rf', driver]);
         run('sudo', ['-n', 'killall', 'coreaudiod']);
       }
+      if (cadenceError) throw cadenceError;
       result.cleanup = 'passed';
     } catch (error) {
       result.status = 'failed';

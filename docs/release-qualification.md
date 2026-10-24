@@ -100,10 +100,15 @@ For host diagnosis, `independent_audio_control=true` builds unmodified BlackHole
 v0.7.1 at commit `e2b22aaaba4e507a097131704bf96dabc004d9cf` after candidate removal.
 It uses the same permission-authorized probe and saves its raw PCM and callback
 timeline separately. It neither changes the candidate verdict nor contributes
-qualification evidence. The control has its own default native buffer and no
-engine client, so a pass cannot establish that the host meets the candidate
-engine deadline. This comparison runs only in the disposable hosted session;
-an existing BlackHole installation blocks it.
+qualification evidence. A separate silent client uses a private BlackHole aggregate
+at 48 kHz/128 frames while the measurement client retains its 512-frame buffer.
+The helper reports acknowledged and actual callback geometry, clock breaks and
+completed I/O cleanup. It exits before the owned driver is removed. The synthetic
+callback self-test needs no device; native execution requires the disposable hosted session.
+An existing BlackHole installation blocks the comparison. Earlier comparisons without
+this client do not establish that the host meets the candidate engine deadline.
+The silent client also does not reproduce the complete engine workload, so a successful
+comparison alone cannot exclude a product defect or qualify the candidate.
 
 Only preparation jobs receive `contents: write`: GitHub exposes draft releases to
 callers with [push access](https://docs.github.com/en/rest/releases/releases#list-releases).
