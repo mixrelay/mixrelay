@@ -771,7 +771,7 @@ fn latency_properties_are_directional_and_reentrant_without_control_locks() {
     let _control = super::lock(&device.control);
     let _identity = super::lock(&fixture.registry.client_identity_gate);
     let _audio = crate::transport::AudioScope::enter();
-    // An app reads the frames; coreaudiod reads its change marker (one change so far).
+    // Application latency metadata does not change the host's capture coordinates.
     let input = Address {
         selector: u32::from_be_bytes(*b"ltnc"),
         scope: u32::from_be_bytes(*b"inpt"),
@@ -781,7 +781,7 @@ fn latency_properties_are_directional_and_reentrant_without_control_locks() {
         u32::from_ne_bytes(fixture.property_for::<4>(id, &input, 4242)),
         321
     );
-    assert_eq!(u32::from_ne_bytes(fixture.property::<4>(id, &input)), 1);
+    assert_eq!(u32::from_ne_bytes(fixture.property::<4>(id, &input)), 0);
     for (object, selector, scope, expected) in [
         (id, *b"ltnc", *b"outp", 0),
         (id, *b"saft", *b"inpt", 0),
@@ -801,14 +801,13 @@ fn latency_properties_are_directional_and_reentrant_without_control_locks() {
     }
 }
 
-/// Like Loopback's ARK driver, coreaudiod never reads a latency for its own IO scheduling:
-/// it reads a marker that toggles on each change, so the change still reaches apps, which
-/// read the measured frames.
+/// The host's zero latency stays stable while app measurements and notifications change.
 #[test]
-fn coreaudiod_reads_a_change_marker_while_apps_read_the_measured_latency() {
+fn latency_notifications_preserve_host_coordinates_and_app_measurements() {
     use mixrelay_macos_transport::control_inventory::InputLatency;
     let fixture = Fixture::new();
     let id = fixture.add(1, 48_000);
+    super::lock(&fixture.host.changes).clear();
     let input = Address {
         selector: u32::from_be_bytes(*b"ltnc"),
         scope: u32::from_be_bytes(*b"inpt"),
@@ -828,11 +827,15 @@ fn coreaudiod_reads_a_change_marker_while_apps_read_the_measured_latency() {
         }]);
     };
     publish(300);
-    assert_eq!((app(&fixture), coreaudiod(&fixture, 0)), (300, 1));
+    assert_eq!((app(&fixture), coreaudiod(&fixture, 0)), (300, 0));
     publish(300);
-    assert_eq!((app(&fixture), coreaudiod(&fixture, 0)), (300, 1));
+    assert_eq!((app(&fixture), coreaudiod(&fixture, 0)), (300, 0));
     publish(400);
     assert_eq!((app(&fixture), coreaudiod(&fixture, 0)), (400, 0));
+    assert_eq!(
+        *super::lock(&fixture.host.changes),
+        [(id, crate::abi::INPUT_LATENCY), (id, crate::abi::INPUT_LATENCY)]
+    );
     // coreaudiod may also ask under its own PID, registered with its own bundle.
     let registry = (&raw const *fixture.registry).cast_mut();
     // SAFETY: the fixture keeps the registry alive; the bundle outlives the call.
@@ -1000,9 +1003,9 @@ fn audio_thread_property_reads_never_allocate() {
     }
     drop(audio);
     let mut expected = vec![
-        // An app reads the measured frames; coreaudiod reads the change marker.
+        // The host's zero scheduling latency is independent of app measurements.
         (id, *b"ltnc", *b"inpt", APP, 321),
-        (id, *b"ltnc", *b"inpt", 0, 1),
+        (id, *b"ltnc", *b"inpt", 0, 0),
     ];
     for requester in [0, APP] {
         expected.extend([

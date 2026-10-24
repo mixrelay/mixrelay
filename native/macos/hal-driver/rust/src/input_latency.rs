@@ -40,10 +40,6 @@ pub(crate) struct InputLatency {
     engine_start: AtomicU64,
     frames: AtomicU32,
     notified: AtomicU32,
-    /// What coreaudiod itself reads instead of the frames: toggles on every change of the
-    /// effective value, so a change still notifies through coreaudiod while its own IO
-    /// scheduling never sees a latency (as Loopback's ARK driver does).
-    marker: AtomicU32,
 }
 impl Default for InputLatency {
     fn default() -> Self {
@@ -57,7 +53,6 @@ impl Default for InputLatency {
             engine_start: AtomicU64::default(),
             frames: AtomicU32::default(),
             notified: AtomicU32::default(),
-            marker: AtomicU32::default(),
         }
     }
 }
@@ -197,14 +192,7 @@ impl InputLatency {
     /// Control ticks coalesce IO-side gate changes; host notification happens outside locks.
     pub(crate) fn changed(&self, rate: u32) -> bool {
         let effective = self.effective(rate);
-        let changed = self.notified.swap(effective, Ordering::AcqRel) != effective;
-        if changed {
-            self.marker.fetch_xor(1, Ordering::AcqRel);
-        }
-        changed
-    }
-    pub(crate) fn coreaudio_marker(&self) -> u32 {
-        self.marker.load(Ordering::Acquire)
+        self.notified.swap(effective, Ordering::AcqRel) != effective
     }
 }
 

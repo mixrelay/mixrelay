@@ -229,9 +229,9 @@ No client/identity/control mutex is taken by the IO marker or latency/safety
 property reads. Stop/Remove and device-rate changes cannot expose obsolete frames.
 
 Only apps read the frames. coreaudiod itself (requester PID 0, or the client it
-registered under `com.apple.audio.coreaudiod`, tracked in a lock-free atomic) reads a
-0/1 marker that toggles on each change of the effective value, so its own IO
-scheduling never sees a latency while a change still notifies. The control tick coalesces IO-side gate transitions and calls PropertiesChanged
+registered under `com.apple.audio.coreaudiod`, tracked in a lock-free atomic) reads
+zero latency, so app content-delay metadata does not shift its input scheduling.
+The control tick coalesces IO-side gate transitions and calls PropertiesChanged
 for device `ltnc` on input scope. Publication also sends this notification only
 when the effective integer changes. Host callbacks run after registry, inventory,
 device and identity locks are released. Tests reenter the property API while

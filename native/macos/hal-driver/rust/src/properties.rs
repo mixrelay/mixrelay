@@ -688,13 +688,9 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_get(
                 && address.scope == INPUT
                 && registry.transport.is_coreaudio(requester_pid)
             {
-                // Apps read the measured frames; coreaudiod reads only a change marker.
-                registry
-                    .pin(object)
-                    .filter(|device| device.id == object)
-                    .map_or(value, |device| {
-                        number(device.input_latency.coreaudio_marker())
-                    })
+                // Even a one-frame marker changes the host's input coordinates.
+                // App content-delay updates notify without changing host scheduling.
+                number(0)
             } else {
                 value
             }
