@@ -54,6 +54,9 @@ export const Incompatible: Story = {
 export const Unavailable: Story = {
   args: { port: { connect: async () => 'unavailable', status: async () => 'unavailable' } },
 };
+export const StartupRecovery: Story = {
+  args: { port: { connect: async () => 'unavailable', status: async () => 'ready' } },
+};
 export const LongTranslation: Story = { ...NotInstalled, globals: { locale: 'pseudo' } };
 export const Narrow: Story = {
   ...NotInstalled,

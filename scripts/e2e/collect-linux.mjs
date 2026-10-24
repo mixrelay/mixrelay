@@ -1,9 +1,22 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, lstatSync, writeFileSync } from 'node:fs';
+import { constants, copyFileSync, existsSync, readFileSync, readdirSync, lstatSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+export function collectDesktopLogs(output, home = homedir()) {
+  const directory = join(home, '.local/state/mixrelay/logs');
+  if (!existsSync(directory)) return;
+  for (const file of readdirSync(directory)) {
+    if (!/^(desktop|driver-runtime)-\d+\.log$/.test(file)) continue;
+    const source = join(directory, file);
+    if (!lstatSync(source).isFile()) continue;
+    copyFileSync(source, join(output, `app-log-${file}`), constants.COPYFILE_EXCL);
+  }
+}
+
 export function collectLinux(output) {
+  collectDesktopLogs(output);
   function capture(file, command, args, timeout = 15000) {
     const result = spawnSync(command, args, { encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 });
     writeFileSync(join(output, file), `${result.stdout ?? ''}\n${result.stderr ?? ''}\nexit=${result.status}; error=${result.error?.message ?? ''}\n`, { flag: 'wx' });

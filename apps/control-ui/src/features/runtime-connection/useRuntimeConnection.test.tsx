@@ -14,6 +14,43 @@ function port() {
   };
 }
 afterEach(() => vi.useRealTimers());
+it.each(['unavailable', 'rejected'] as const)(
+  'opens a late-ready runtime after startup is %s without another launch',
+  async (outcome) => {
+    vi.useFakeTimers();
+    const native = port();
+    if (outcome === 'rejected') native.connect.mockRejectedValueOnce(new Error('IPC lost'));
+    else native.connect.mockResolvedValueOnce('unavailable');
+    native.status.mockRejectedValueOnce(new Error('still starting'));
+    const { result, unmount } = renderHook(() => useRuntimeConnection(native));
+    await act(async () => Promise.resolve());
+    expect(result.current).toMatchObject({ state: 'unavailable', opened: false });
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(native.status).toHaveBeenCalledOnce();
+    expect(result.current).toMatchObject({ state: 'unavailable', opened: false });
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(result.current).toMatchObject({ state: 'ready', opened: true });
+    expect(native.connect).toHaveBeenCalledOnce();
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
+it.each(['not_installed', 'incompatible'] as const)(
+  'does not poll or launch again when startup is %s',
+  async (state) => {
+    vi.useFakeTimers();
+    const native = port();
+    native.connect.mockResolvedValueOnce(state);
+    const { result } = renderHook(() => useRuntimeConnection(native));
+    await act(async () => Promise.resolve());
+    await act(async () => vi.advanceTimersByTimeAsync(10000));
+    expect(result.current).toMatchObject({ state, opened: false });
+    expect(native.status).not.toHaveBeenCalled();
+    expect(native.connect).toHaveBeenCalledOnce();
+  },
+);
+
 it('opens only after connecting and observes without restarting the Driver', async () => {
   vi.useFakeTimers();
   const native = port();

@@ -76,6 +76,24 @@ class InstalledEditorTest(unittest.TestCase):
         self.assertIn("button Compressor", tree)
         self.assertNotIn("gone", tree)
         self.assertEqual(list(self.ui.descendants(None)), [])
+        diagnostic = self.ui.tree_text(self.desktop, diagnostic=True)
+        self.assertIn("AT-SPI child 0 returned null", diagnostic)
+        self.assertIn("AT-SPI child 1 failed: AT-SPI child disappeared", diagnostic)
+        self.assertIn("AT-SPI description failed: AT-SPI object disappeared", diagnostic)
+        self.assertIn("button Compressor", diagnostic)
+        self.assertIn("AT-SPI childCount=0", diagnostic)
+        hidden = self.ui.tree_text(Node("Retry connection", "button", showing=False), diagnostic=True)
+        self.assertIn("button Retry connection [showing=False]", hidden)
+
+    def test_diagnostics_report_an_unreadable_child_count(self):
+        class Unreadable(Node):
+            @property
+            def childCount(self):
+                raise RuntimeError("query timed out")
+
+        tree = self.ui.tree_text(Unreadable("panel", "panel"), diagnostic=True)
+        self.assertIn("panel panel", tree)
+        self.assertIn("AT-SPI childCount failed: query timed out", tree)
 
     def test_missing_hidden_or_noninteractive_controls_still_fail(self):
         self.desktop[:] = [self.runtime, self.editor]

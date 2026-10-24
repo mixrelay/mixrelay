@@ -7,41 +7,53 @@ import traceback
 import pyatspi
 
 
-def children(node):
+def children(node, report=None):
     if node is None:
         return
     try:
         count = node.childCount
-    except Exception:
+    except Exception as error:
+        if report is not None:
+            report(f"[AT-SPI childCount failed: {error}]")
         return
+    if report is not None:
+        report(f"[AT-SPI childCount={count}]")
     for index in range(count):
         try:
             child = node[index]
-        except Exception:
+        except Exception as error:
+            if report is not None:
+                report(f"[AT-SPI child {index} failed: {error}]")
             continue
         if child is not None:
             yield child
+        elif report is not None:
+            report(f"[AT-SPI child {index} returned null]")
 
 
-def describe(node):
+def describe(node, report=None):
     try:
         return node.getRoleName(), node.name or "", node.getState().contains(pyatspi.STATE_SHOWING)
-    except Exception:
+    except Exception as error:
         # AT-SPI proxies can disappear between enumeration and inspection.
+        if report is not None:
+            report(f"[AT-SPI description failed: {error}]")
         return None
 
 
-def tree_text(root):
+def tree_text(root, diagnostic=False):
     lines = []
-    for node, depth in descendants(root):
-        description = describe(node)
+    report = lines.append if diagnostic else None
+    for node, depth in descendants(root, report):
+        description = describe(node, report)
         if description is not None:
-            role, name, _ = description
-            lines.append(f"{' ' * depth}{role} {name}")
+            role, name, showing = description
+            state = f" [showing={showing}]" if diagnostic else ""
+            lines.append(f"{' ' * depth}{role} {name}{state}")
     return "\n".join(lines)
 
 
-def descendants(root):
+def descendants(root, report=None):
     queue = [(root, 0)]
     count = 0
     while queue:
@@ -53,7 +65,7 @@ def descendants(root):
             raise RuntimeError("Installed accessibility tree exceeded its bound")
         yield node, depth
         if depth < 60:
-            queue.extend((child, depth + 1) for child in reversed(list(children(node))))
+            queue.extend((child, depth + 1) for child in reversed(list(children(node, report))))
 
 
 def application():
@@ -149,8 +161,17 @@ if __name__ == "__main__":
         traceback.print_exc()
         try:
             (folder / "installed-ui-failure.txt").write_text(
-                tree_text(pyatspi.Registry.getDesktop(0)), encoding="utf-8")
+                tree_text(pyatspi.Registry.getDesktop(0), diagnostic=True), encoding="utf-8")
             screenshot(folder / "installed-ui-failure.png")
+        except Exception:
+            traceback.print_exc()
+        try:
+            # Keep the original observation above. Refresh only the failure diagnostic,
+            # so a stale client cache can be distinguished from missing WebKit content.
+            desktop = pyatspi.Registry.getDesktop(0)
+            desktop.clearCache()
+            (folder / "installed-ui-a11y-refreshed.txt").write_text(
+                tree_text(desktop, diagnostic=True), encoding="utf-8")
         except Exception:
             traceback.print_exc()
         sys.exit(1)

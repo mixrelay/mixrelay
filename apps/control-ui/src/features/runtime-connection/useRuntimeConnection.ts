@@ -37,7 +37,9 @@ export function useRuntimeConnection(port: RuntimePort) {
   }, [connect]);
 
   useEffect(() => {
-    if (state !== 'ready' && !(opened && state === 'unavailable')) return;
+    // A bounded startup can finish before the runtime does. Observe its recovery
+    // without repeating connect(), which may launch audio the user stopped.
+    if (state !== 'ready' && state !== 'unavailable') return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const check = async () => {
@@ -48,6 +50,7 @@ export function useRuntimeConnection(port: RuntimePort) {
         result = 'unavailable';
       }
       if (cancelled) return;
+      if (result === 'ready') setOpened(true);
       setState(result);
       if (result === 'ready' || result === 'unavailable')
         timer = setTimeout(() => void check(), 2000);
@@ -57,7 +60,7 @@ export function useRuntimeConnection(port: RuntimePort) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [port, state, opened]);
+  }, [port, state]);
 
   return { state, stage, opened, connect };
 }

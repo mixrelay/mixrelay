@@ -279,6 +279,9 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Workspace: Story = {};
+export const StartupRecovery: Story = {
+  args: { runtimePort: { connect: async () => 'unavailable', status: async () => 'ready' } },
+};
 export const AllEffects: Story = {
   parameters: {
     allEffects: true,

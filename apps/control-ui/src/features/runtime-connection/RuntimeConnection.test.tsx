@@ -7,7 +7,7 @@ import type {
   RuntimeStatus,
 } from '../../core/runtime/RuntimePort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
-import { eventually, find } from '../../test-support/fakeTimerQueries';
+import { advance, eventually, find } from '../../test-support/fakeTimerQueries';
 import { RuntimeConnection } from './RuntimeConnection';
 
 function renderConnection(port: RuntimePort, install = vi.fn()) {
@@ -104,6 +104,27 @@ describe('Driver connection gate', () => {
     ).toBeVisible();
     expect(screen.queryByText('private socket error')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry connection' })).toBeEnabled();
+  });
+
+  it('exposes the startup error and Retry while observing a late-ready engine', async () => {
+    vi.useFakeTimers();
+    const connect = vi.fn<RuntimePort['connect']>().mockResolvedValue('unavailable');
+    const status = vi.fn<RuntimePort['status']>().mockResolvedValue('ready');
+    const view = renderConnection({ connect, status });
+    try {
+      await advance();
+      expect(screen.getByRole('heading', { name: 'Cannot connect to MixRelay' })).toBeVisible();
+      expect(screen.getByRole('alert')).toHaveTextContent('MixRelay could not be reached');
+      expect(screen.getByRole('button', { name: 'Retry connection' })).toBeEnabled();
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      await advance(2000);
+      expect(screen.getByRole('textbox')).toBeVisible();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(connect).toHaveBeenCalledOnce();
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it('preserves editor state on disconnect and never automatically restarts stopped audio', async () => {
