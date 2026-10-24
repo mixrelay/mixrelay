@@ -75,6 +75,7 @@ export async function wholeSystemCapture({ api, apply, graphId, document, device
   const path = join(resolve(output), 'whole-system.wav');
   const recorder = `graphs/${encodeURIComponent(graphId)}/recorders/qa-system-recorder`;
   try {
+    applied = await apply(systemCaptureGraph(document, graphId));
     for (let index = 0; index < 2; index++) {
       const child = spawn(compileTone(output, index), ['--mixrelay-virtual-only', uid], { stdio: ['pipe', 'pipe', 'pipe'] });
       children.push(child); child.stderr.resume();
@@ -82,7 +83,6 @@ export async function wholeSystemCapture({ api, apply, graphId, document, device
       const [ready] = await once(child.stdout, 'data', { signal: AbortSignal.timeout(15000) });
       assert.equal(ready.toString().trim(), `ready ${uid}`);
     }
-    applied = await apply(systemCaptureGraph(document, graphId));
     let take = await api(recorder);
     await api(recorder, { expectedRevision: applied.revision, expectedRecording: { state: take.state, path: take.path },
       request: { action: 'record', path, sampleRate: 48000, encoding: 'float32' } });

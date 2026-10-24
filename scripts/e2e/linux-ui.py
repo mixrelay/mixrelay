@@ -111,12 +111,9 @@ def click(label, contains=False, right=False):
     node = find(label, contains=contains, interactive=not right)
     bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
     assert bounds.width > 0 and bounds.height > 0, f"Invisible UI control: {label}"
-    if right:
-        pyatspi.Registry.generateMouseEvent(bounds.x + bounds.width // 2, bounds.y + bounds.height // 2, "b3c")
-    else:
-        action = node.queryAction()
-        assert action.nActions > 0, f"Installed UI control has no accessible action: {label}"
-        assert action.doAction(0), f"Installed UI control rejected its accessible action: {label}"
+    x, y = bounds.x + bounds.width // 2, bounds.y + bounds.height // 2
+    pyatspi.Registry.generateMouseEvent(x, y, "abs")
+    pyatspi.Registry.generateMouseEvent(x, y, "b3c" if right else "b1c")
     print(f"Activated installed UI control: {label} ({time.monotonic() - started:.2f}s)", flush=True)
 
 
@@ -128,9 +125,17 @@ def open_submenu(label):
     # A submenu trigger has no leaf action. Move off the previous hovered item,
     # then use the menu's focus + Right Arrow keyboard contract.
     pyatspi.Registry.generateMouseEvent(bounds.x + bounds.width // 2, bounds.y + bounds.height // 2, "abs")
-    assert component.grabFocus(), f"Installed submenu rejected focus: {label}"
+    try:
+        component.grabFocus()
+    except Exception as error:
+        print(f"Submenu focus acknowledgement unavailable: {label}: {error}", flush=True)
     deadline = time.monotonic() + 30
-    while not node.getState().contains(pyatspi.STATE_FOCUSED):
+    while True:
+        try:
+            if node.getState().contains(pyatspi.STATE_FOCUSED):
+                break
+        except Exception:
+            pass
         assert time.monotonic() < deadline, f"Installed submenu never received focus: {label}"
         time.sleep(0.1)
     pyatspi.Registry.generateKeyboardEvent(0xff53, None, pyatspi.KEY_SYM)
@@ -160,6 +165,10 @@ def screenshot(path):
 
 
 def main(output):
+    from gi.repository import Atspi
+    # Keep native queries below the registry's three-second keyboard budget.
+    # The default 800ms expires during otherwise successful TCG UI updates.
+    Atspi.set_timeout(2000, 15000)
     click("Add node")
     open_submenu("Processor")
     click("Compressor")

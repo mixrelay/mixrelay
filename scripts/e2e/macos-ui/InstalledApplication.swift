@@ -28,7 +28,6 @@ struct InstalledElement {
     }
 
     func click(right: Bool = false) throws {
-        if !right && AXUIElementPerformAction(raw, kAXPressAction as CFString) == .success { return }
         guard let position = attribute(kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
               let size = attribute(kAXSizeAttribute), CFGetTypeID(size) == AXValueGetTypeID() else {
             throw InstalledApplication.Failure.control("Element has no clickable bounds: \(labels)")
@@ -41,6 +40,11 @@ struct InstalledElement {
         }
         point.x += extent.width / 2
         point.y += extent.height / 2
+        guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                                 mouseCursorPosition: point, mouseButton: .left) else {
+            throw InstalledApplication.Failure.control("Could not move pointer")
+        }
+        move.post(tap: .cghidEventTap)
         let button: CGMouseButton = right ? .right : .left
         for type: CGEventType in right ? [.rightMouseDown, .rightMouseUp] : [.leftMouseDown, .leftMouseUp] {
             guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button) else {
@@ -51,12 +55,10 @@ struct InstalledElement {
     }
 
     func openSubmenu() throws {
-        guard AXUIElementSetAttributeValue(raw, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success else {
-            throw InstalledApplication.Failure.control("Submenu rejected keyboard focus: \(labels)")
-        }
+        let acknowledgement = AXUIElementSetAttributeValue(raw, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         let deadline = Date().addingTimeInterval(30)
         while attribute(kAXFocusedAttribute) as? Bool != true {
-            guard Date() < deadline else { throw InstalledApplication.Failure.control("Submenu never received focus: \(labels)") }
+            guard Date() < deadline else { throw InstalledApplication.Failure.control("Submenu never received focus: \(labels), acknowledgement \(acknowledgement.rawValue)") }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
         for down in [true, false] {

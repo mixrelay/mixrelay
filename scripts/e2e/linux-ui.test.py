@@ -105,22 +105,21 @@ class InstalledEditorTest(unittest.TestCase):
                     with self.assertRaisesRegex(AssertionError, "Missing installed UI control"):
                         self.ui.find("Add node")
 
-    def test_activation_uses_the_native_accessible_action_and_rejects_failure(self):
+    def test_activation_posts_one_pointer_click_without_an_uncertain_accessibility_action(self):
         self.desktop[:] = [self.editor]
         self.add.queryComponent = lambda: types.SimpleNamespace(
             getExtents=lambda coords: types.SimpleNamespace(x=10, y=20, width=30, height=40))
         self.atspi.DESKTOP_COORDS = 0
-        accepted = []
-        self.add.queryAction = lambda: types.SimpleNamespace(
-            nActions=1, doAction=lambda index: accepted.append(index) or True)
+        events = []
+        self.atspi.Registry.generateMouseEvent = lambda *args: events.append(args)
+        def uncertain_action():
+            raise RuntimeError("AT-SPI action timed out after dispatch")
+        self.add.queryAction = uncertain_action
         self.ui.click("Add node")
-        self.assertEqual(accepted, [0])
-        self.add.queryAction = lambda: types.SimpleNamespace(nActions=1, doAction=lambda index: False)
-        with self.assertRaisesRegex(AssertionError, "rejected its accessible action"):
-            self.ui.click("Add node")
-        self.add.queryAction = lambda: types.SimpleNamespace(nActions=0)
-        with self.assertRaisesRegex(AssertionError, "no accessible action"):
-            self.ui.click("Add node")
+        self.assertEqual(events, [(25, 40, "abs"), (25, 40, "b1c")])
+        events.clear()
+        self.ui.click("Add node", right=True)
+        self.assertEqual(events, [(25, 40, "abs"), (25, 40, "b3c")])
 
     def test_submenu_receives_focus_and_right_arrow_instead_of_a_leaf_action(self):
         self.desktop[:] = [self.editor]
@@ -138,8 +137,10 @@ class InstalledEditorTest(unittest.TestCase):
         self.assertEqual(events, [(25, 40, "abs"), "focus", (0xff53, None, 3)])
         events.clear()
         component.grabFocus = lambda: False
-        with self.assertRaisesRegex(AssertionError, "rejected focus"):
-            self.ui.open_submenu("Add node")
+        self.add.getState = lambda: types.SimpleNamespace(contains=lambda state: state == self.atspi.STATE_SHOWING)
+        with patch.object(self.ui.time, "monotonic", side_effect=[0, 0, 0, 31]):
+            with self.assertRaisesRegex(AssertionError, "never received focus"):
+                self.ui.open_submenu("Add node")
         self.assertEqual(events, [(25, 40, "abs")])
 
 
