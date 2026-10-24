@@ -114,12 +114,13 @@ export function installAndVerify(
           // tickets and exhausted retries still stop before extraction or install.
           retry = attempt < 3 && program === 'xcrun' && entry.status === 68
             && /NSURLErrorDomain Code=-1005\b/.test(`${entry.stdout}\n${entry.stderr}`);
+          if (retry) entry.retryDelayMs = 30000 * 2 ** (attempt - 1);
           if (!retry)
             throw new Error(`${error.message}\n${entry.stdout}\n${entry.stderr}`, { cause: error });
         } finally {
           writeFileSync(join(output, 'package-verification.json'), `${JSON.stringify(verification, null, 2)}\n`);
         }
-        if (retry) wait(attempt * 2000);
+        if (retry) wait(entry.retryDelayMs);
       }
     };
     verify('pkgutil', ['--check-signature', archive]);
