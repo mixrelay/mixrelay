@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
-import { arch, platform } from 'node:os';
+import { arch, availableParallelism, platform } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
@@ -83,6 +83,12 @@ systemctl --no-block start default.target
 }
 
 const guestMacAddress = '52:54:00:12:34:56';
+export function guestCpuCount(accelerator, hostCpus) {
+  assert.ok(['kvm', 'tcg'].includes(accelerator));
+  assert.ok(Number.isInteger(hostCpus) && hostCpus > 0);
+  return Math.min(hostCpus, accelerator === 'tcg' ? 4 : 2);
+}
+
 export function cloudNetwork() {
   return {
     version: 2,
@@ -99,17 +105,19 @@ export function qemuArguments({
   variables,
   port,
   serial,
+  cpus = 2,
 }) {
   assert.ok(['x64', 'arm64'].includes(cpuArch));
   assert.ok(['kvm', 'tcg'].includes(accelerator));
   assert.ok(Number.isInteger(port) && port > 1024 && port < 65536);
+  assert.ok(Number.isInteger(cpus) && cpus >= 1 && cpus <= 4);
   return [
     '-machine',
     `${cpuArch === 'x64' ? 'q35' : 'virt'},accel=${accelerator}`,
     '-cpu',
     accelerator === 'kvm' ? 'host' : cpuArch === 'arm64' ? 'cortex-a72' : 'max',
     '-smp',
-    '2',
+    String(cpus),
     '-m',
     '4096',
     '-drive',
@@ -328,6 +336,8 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     session.accelerator = kvm.code === 0 && writable.code === 0 ? 'kvm' : 'tcg';
     session.cpuModel =
       session.accelerator === 'kvm' ? 'host' : target.arch === 'arm64' ? 'cortex-a72' : 'max';
+    session.hostCpuCount = availableParallelism();
+    session.guestCpuCount = guestCpuCount(session.accelerator, session.hostCpuCount);
     phase(`Booting ${target.arch} guest with ${session.accelerator}; waiting for SSH`);
     qemu = spawn(
       arch() === 'arm64' ? 'qemu-system-aarch64' : 'qemu-system-x86_64',
@@ -340,6 +350,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
         variables,
         port,
         serial,
+        cpus: session.guestCpuCount,
       }),
       { stdio: ['ignore', 'ignore', 'pipe'] },
     );

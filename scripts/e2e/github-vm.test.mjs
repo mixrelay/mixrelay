@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { cloudConfig, cloudNetwork, guestDiskSize, qemuArguments } from './github-vm.mjs';
+import { cloudConfig, cloudNetwork, guestCpuCount, guestDiskSize, qemuArguments } from './github-vm.mjs';
 
 test('cloud guest has a locked account and a job-specific SSH key', () => {
   const config = JSON.parse(cloudConfig('ssh-ed25519 AAAA test').split('\n').slice(1).join('\n'));
@@ -129,6 +129,12 @@ test('QEMU uses the native guest CPU and binds SSH only to the hosted runner loo
   assert.equal(x64[1], 'q35,accel=kvm');
   assert.equal(x64[3], 'host');
   assert.throws(() => qemuArguments({ ...settings, cpuArch: 'arm64', accelerator: 'fake' }));
+  const emulated = qemuArguments({ ...settings, cpuArch: 'arm64', accelerator: 'tcg', cpus: guestCpuCount('tcg', 4) });
+  assert.equal(emulated[emulated.indexOf('-smp') + 1], '4');
+  assert.equal(guestCpuCount('kvm', 4), 2);
+  assert.equal(guestCpuCount('tcg', 2), 2);
+  assert.equal(guestCpuCount('tcg', 1), 1);
+  assert.throws(() => guestCpuCount('tcg', 0));
 });
 
 test('candidate transfer includes the pinned baseline directory in the same guest', async (t) => {
