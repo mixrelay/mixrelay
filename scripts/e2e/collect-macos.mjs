@@ -17,6 +17,7 @@ export function snapshotMacosProcesses(output, run = spawnSync) {
 }
 
 export function collectMacosLoad(output, run = spawnSync) {
+  let processes = '';
   for (const [file, program, args] of [
     ['native-failure-host.txt', 'sysctl', ['hw.ncpu', 'hw.logicalcpu', 'hw.physicalcpu', 'hw.memsize', 'machdep.cpu.brand_string']],
     ['native-failure-processes.txt', 'ps', ['-A', '-r', '-o', 'pid=,ppid=,state=,%cpu=,rss=,comm=']],
@@ -24,6 +25,18 @@ export function collectMacosLoad(output, run = spawnSync) {
   ]) {
     const result = run(program, args, { encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 });
     writeFileSync(join(output, file), `${result.stdout ?? ''}\n${result.stderr ?? ''}\nexit=${result.status}; error=${result.error?.message ?? ''}\n`, { flag: 'wx' });
+    if (program === 'ps' && result.status === 0) processes = result.stdout ?? '';
+  }
+  // The disposable session can have several WebKit roles; inspect only WebContent.
+  const webviews = processes.split('\n').flatMap(line => {
+    const match = line.match(/^\s*(\d+)\s+.*\/com\.apple\.WebKit\.WebContent\.xpc\/Contents\/MacOS\/com\.apple\.WebKit\.WebContent\s*$/);
+    return match ? [match[1]] : [];
+  });
+  for (const pid of [...new Set(webviews)].slice(0, 4)) {
+    const result = run('sample', [pid, '1', '-file', join(output, `native-failure-webcontent-${pid}.sample.txt`)],
+      { encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 });
+    writeFileSync(join(output, `native-failure-webcontent-${pid}-command.log`),
+      `${result.stdout ?? ''}\n${result.stderr ?? ''}\nexit=${result.status}; error=${result.error?.message ?? ''}\n`, { flag: 'wx' });
   }
 }
 

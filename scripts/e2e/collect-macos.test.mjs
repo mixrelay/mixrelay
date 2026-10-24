@@ -52,6 +52,23 @@ test('large hosted logs retain events after the old 16 MiB buffer boundary', t =
   assert.equal(readFileSync(path, 'utf8'), log);
 });
 
+test('failed PCM samples WebContent after the signal without sampling networking roles or arbitrary process text', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-webcontent-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const calls = [];
+  collectMacosLoad(directory, (program, args) => {
+    calls.push([program, args]);
+    return { status: 0, stdout: program === 'ps' ? [
+      '111 1 Ss 80.2 3000 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent',
+      '222 1 Ss 0.2 3000 /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.Networking.xpc/Contents/MacOS/com.apple.WebKit.Networking',
+      'not-a-pid /com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent',
+    ].join('\n') : '' };
+  });
+  assert.deepEqual(calls.map(([program]) => program), ['sysctl', 'ps', 'top', 'sample']);
+  assert.deepEqual(calls[3][1], ['111', '1', '-file', join(directory, 'native-failure-webcontent-111.sample.txt')]);
+  assert.match(readFileSync(join(directory, 'native-failure-webcontent-111-command.log'), 'utf8'), /exit=0/);
+});
+
 test('CoreAudio samples include the daemon and isolated HAL hosts across users', () => {
   const calls = [];
   collectCoreaudioServers((...args) => {

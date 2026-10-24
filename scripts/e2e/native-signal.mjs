@@ -166,7 +166,8 @@ function macosSignal(device, directory, execFileSync, snapshot) {
   const stdout = join(directory, 'native-probe.stdout.json'), stderr = join(directory, 'native-probe.stderr.log');
   try {
     execFileSync('open', ['-W', '-n', '-g', '--stdout', stdout, '--stderr', stderr, bundle,
-      '--args', '--json', '--timing', '--seconds', '3', '--channels', '2', uid], { timeout: 60000 });
+      '--args', '--json', '--timing', '--capture-file', join(directory, 'native-signal.f32'),
+      '--seconds', '3', '--channels', '2', uid], { timeout: 60000 });
   } finally {
     const executable = `${bundle}/Contents/MacOS/MRRoundTripProbe`;
     const pattern = `^${executable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`;

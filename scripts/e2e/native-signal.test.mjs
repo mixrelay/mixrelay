@@ -105,10 +105,13 @@ test('failed Mac PCM keeps the original verdict and collects host load only afte
     channelOrder: true, missingFrames: 128, repeatedFrames: 0, corruptFrames: 0, nonfiniteSamples: 0, receivedFrames: 48000 };
   const phases = [];
   await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
-    execute(program) {
+    execute(program, args) {
       phases.push(program);
       if (program === 'zsh') return '/probe.app';
-      if (program === 'open') writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
+      if (program === 'open') {
+        assert.equal(args[args.indexOf('--capture-file') + 1], join(directory, 'native-signal.f32'));
+        writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
+      }
     },
     snapshot() { phases.push('snapshot'); },
     diagnostics(output) {

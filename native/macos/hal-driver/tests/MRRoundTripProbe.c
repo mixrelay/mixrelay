@@ -84,6 +84,7 @@ typedef struct MRChunk {
     double sample_time, rate_scalar;
     uint64_t host_time, first;  // first: recording frame (input) or signal frame (output)
     uint32_t flags, frames;
+    uint64_t callback_enter, callback_exit;
 } MRChunk;
 
 typedef struct MRSide {
@@ -225,7 +226,7 @@ static void mr_note(MRSide *side, const AudioTimeStamp *time, uint32_t frames, u
         return;
     }
     side->chunks[index] = (MRChunk){time->mSampleTime, time->mRateScalar, time->mHostTime,
-                                    first, time->mFlags, frames};
+                                    first, time->mFlags, frames, 0U, 0U};
     atomic_store(&side->count, index + 1U);
 }
 
@@ -299,8 +300,20 @@ static OSStatus mr_io(AudioObjectID device, const AudioTimeStamp *now, const Aud
                       const AudioTimeStamp *out_time, void *context) {
     (void)now;
     MRProbe *probe = context;
+    const uint64_t entered = mach_absolute_time();
+    const uint32_t out_before = atomic_load(&probe->out.count);
+    const uint32_t in_before = atomic_load(&probe->in.count);
     if (device == probe->output && out != NULL && out_time != NULL) mr_play(probe, out, out_time);
     if (device == probe->input && in != NULL && in_time != NULL) mr_record(probe, in, in_time);
+    const uint64_t exited = mach_absolute_time();
+    if (device == probe->output && atomic_load(&probe->out.count) > out_before) {
+        probe->out.chunks[out_before].callback_enter = entered;
+        probe->out.chunks[out_before].callback_exit = exited;
+    }
+    if (device == probe->input && atomic_load(&probe->in.count) > in_before) {
+        probe->in.chunks[in_before].callback_enter = entered;
+        probe->in.chunks[in_before].callback_exit = exited;
+    }
     return noErr;
 }
 
@@ -1211,6 +1224,14 @@ static void mr_report_text(const MRProbe *probe, const MRAnalysis *a, const MRRe
 // ---------------------------------------------------------------------------------------
 // Set-up and self test
 
+// Called only after callback drain; retain every received frame, including damage.
+static bool mr_write_capture(FILE *file, const MRProbe *probe) {
+    const uint64_t frames = atomic_load(&probe->recorded_frames);
+    if (frames > probe->capacity || frames > SIZE_MAX / sizeof(float) / probe->channels) return false;
+    const size_t samples = (size_t)frames * probe->channels;
+    return fwrite(probe->recorded, sizeof(float), samples, file) == samples && fflush(file) == 0;
+}
+
 static bool mr_allocate(MRProbe *probe, double seconds) {
     probe->lead = (uint64_t)(MR_LEAD_SECONDS * probe->rate);
     probe->signal_frames = probe->lead + (uint64_t)(seconds * probe->rate);
@@ -1240,11 +1261,11 @@ static void mr_synthesize(MRProbe *probe, uint64_t host_extra) {
         const uint64_t first = (uint64_t)i * 512U;
         probe->out.chunks[i] = (MRChunk){(double)first, 1.0,
                                          (uint64_t)((double)first * ticks_per_frame), first,
-                                         flags, 512U};
+                                         flags, 512U, 0U, 0U};
         probe->in.chunks[i] =
             (MRChunk){(double)first, 1.0,
                       (uint64_t)((double)(first + host_extra) * ticks_per_frame), first, flags,
-                      512U};
+                      512U, 0U, 0U};
     }
     atomic_store(&probe->out.count, chunks);
     atomic_store(&probe->in.count, chunks);
@@ -1591,7 +1612,20 @@ static int mr_self_test(void) {
     const bool repeats = mr_self_test_repeats();
     const bool early = mr_self_test_early_damage();
     const bool signal = mr_self_test_signal();
-    const bool passed = impulses && jitter && damage && channels && anchor && repeats && early && signal;
+    float captured[] = {0.25F, -0.125F, 0.0F, 0.0F, -0.5F, 0.5F};
+    MRProbe recording = {.channels = 2U, .capacity = 3U, .recorded = captured};
+    atomic_store(&recording.recorded_frames, 3U);
+    FILE *file = tmpfile();
+    float recovered[6] = {0};
+    bool capture = file != NULL && mr_write_capture(file, &recording);
+    if (file != NULL) {
+        rewind(file);
+        capture = capture && fread(recovered, sizeof(float), 6U, file) == 6U &&
+            memcmp(captured, recovered, sizeof(captured)) == 0 && fgetc(file) == EOF;
+        capture = fclose(file) == 0 && capture;
+    }
+    capture = mr_expect(capture, "raw capture preserves all frames and damaged silence");
+    const bool passed = impulses && jitter && damage && channels && anchor && repeats && early && signal && capture;
     printf("self test %s\n", passed ? "passed" : "FAILED");
     return passed ? 0 : 1;
 }
@@ -1611,6 +1645,7 @@ static void mr_usage(FILE *stream) {
             "received, missing and repeated signal frames, damaged samples, slips, channel\n"
             "order and the latency the devices report. Changes no default device or setting.\n"
             "--timing writes the retained callback timeline to stderr after IO stops.\n"
+            "--capture-file PATH saves all captured interleaved native Float32 frames after IO stops.\n"
             "--impulse measures paths that change samples (asynchronous clocks, sample-rate\n"
             "conversion): it plays pulses at irregular ~0.25 s spacing and finds the one delay\n"
             "that aligns their arrivals.\n"
@@ -1635,6 +1670,7 @@ typedef struct MROptions {
     bool json, impulse, timing;
     double seconds, channels;
     const char *uids[2];
+    const char *capture_file;
     int found;
 } MROptions;
 
@@ -1656,6 +1692,9 @@ static int mr_options(int argc, char **argv, MROptions *options) {
             options->impulse = true;
         } else if (strcmp(argv[i], "--timing") == 0) {
             options->timing = true;
+        } else if (strcmp(argv[i], "--capture-file") == 0 && i + 1 < argc) {
+            options->capture_file = argv[++i];
+            ok = options->capture_file[0] != '\0';
         } else if (strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
             ok = mr_parse_number(argv[++i], 1.0, 120.0, &options->seconds);
         } else if (strcmp(argv[i], "--channels") == 0 && i + 1 < argc) {
@@ -1819,18 +1858,31 @@ int main(int argc, char **argv) {
     mr_describe("input", probe->input, kAudioObjectPropertyScopeInput, options.json);
     if (options.json) printf("\"channels\":%u,\"seconds\":%.1f,", probe->channels, options.seconds);
     if (!mr_probe_with_activity(mr_run, probe)) return 1;
+    if (options.capture_file != NULL) {
+        FILE *file = fopen(options.capture_file, "wbx");
+        bool saved = file != NULL && mr_write_capture(file, probe);
+        if (file != NULL) saved = fclose(file) == 0 && saved;
+        if (!saved) {
+            fprintf(stderr, "could not preserve the complete raw capture\n");
+            return 1;
+        }
+    }
     if (options.json) printf("\"activityProtection\":true,");
     if (options.json) printf("\"inputLatencyNotifications\":%u,", atomic_load(&probe->latency_notifications));
     if (options.timing) {
-        fprintf(stderr, "side,first,sampleTime,hostTime,frames,flags\n");
+        mach_timebase_info_data_t timebase;
+        mach_timebase_info(&timebase);
+        fprintf(stderr, "timebase,%u,%u\n", timebase.numer, timebase.denom);
+        fprintf(stderr, "side,first,sampleTime,hostTime,frames,flags,callbackEnter,callbackExit\n");
         const MRSide *sides[] = {&probe->out, &probe->in};
         for (size_t side = 0; side < 2; ++side) {
             const uint32_t count = atomic_load(&sides[side]->count);
             for (uint32_t index = 0; index < count; ++index) {
                 const MRChunk *chunk = &sides[side]->chunks[index];
-                fprintf(stderr, "%s,%llu,%.17g,%llu,%u,%u\n", side == 0 ? "output" : "input",
+                fprintf(stderr, "%s,%llu,%.17g,%llu,%u,%u,%llu,%llu\n", side == 0 ? "output" : "input",
                     (unsigned long long)chunk->first, chunk->sample_time,
-                    (unsigned long long)chunk->host_time, chunk->frames, chunk->flags);
+                    (unsigned long long)chunk->host_time, chunk->frames, chunk->flags,
+                    (unsigned long long)chunk->callback_enter, (unsigned long long)chunk->callback_exit);
             }
         }
     }
