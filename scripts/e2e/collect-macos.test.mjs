@@ -4,7 +4,22 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { collectCoreaudioLog, collectCoreaudioServers } from './collect-macos.mjs';
+import { collectCoreaudioLog, collectCoreaudioServers, collectMacosLoad } from './collect-macos.mjs';
+
+test('immediate failed-PCM collection preserves bounded hardware and CPU diagnostics even if one command fails', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-native-load-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const calls = [];
+  collectMacosLoad(directory, (program, args, options) => {
+    calls.push(program);
+    assert.ok(options.timeout <= 10000);
+    assert.equal(program === 'top' ? args[args.indexOf('-l') + 1] : '2', '2');
+    return program === 'ps' ? { status: 1, stderr: 'process snapshot failed' } : { status: 0, stdout: `${program} diagnostic` };
+  });
+  assert.deepEqual(calls, ['sysctl', 'ps', 'top']);
+  assert.match(readFileSync(join(directory, 'native-failure-processes.txt'), 'utf8'), /process snapshot failed.*\nexit=1/);
+  assert.match(readFileSync(join(directory, 'native-failure-load.txt'), 'utf8'), /top diagnostic/);
+});
 
 test('large hosted logs retain events after the old 16 MiB buffer boundary', t => {
   const directory = mkdtempSync(join(tmpdir(), 'mr-ca-log-'));

@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { analyseStereo, analyseRf64, stopSignalProcesses, waitForSignalBoundary } from './native-signal.mjs';
+import { analyseStereo, analyseRf64, nativeSignal, stopSignalProcesses, waitForSignalBoundary } from './native-signal.mjs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { analyseSystemMix } from './system-capture.mjs';
 
 function recording() {
@@ -93,4 +96,26 @@ test('a stalled stream fails within its bound and a process failure is never ret
   let reads = 0;
   await assert.rejects(waitForSignalBoundary(() => { reads++; throw new Error('player exited 1'); }, 'playback drain'), /player exited 1/);
   assert.equal(reads, 1);
+});
+
+test('failed Mac PCM keeps the original verdict and collects host load only after the single signal ends', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-native-failure-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const measured = { inputAuthorization: { final: 3 }, activityProtection: true, complete: true,
+    channelOrder: true, missingFrames: 128, repeatedFrames: 0, corruptFrames: 0, nonfiniteSamples: 0, receivedFrames: 48000 };
+  const phases = [];
+  await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
+    execute(program) {
+      phases.push(program);
+      if (program === 'zsh') return '/probe.app';
+      if (program === 'open') writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
+    },
+    diagnostics(output) {
+      assert.deepEqual(phases, ['zsh', 'open', 'pkill']);
+      assert.deepEqual(JSON.parse(readFileSync(join(output, 'native-probe.stdout.json'))), measured);
+      phases.push('diagnostics');
+      throw new Error('diagnostic collection unavailable');
+    },
+  }), /missingFrames/);
+  assert.deepEqual(phases, ['zsh', 'open', 'pkill', 'diagnostics']);
 });

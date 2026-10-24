@@ -1762,7 +1762,10 @@ static OSStatus mr_latency_changed(AudioObjectID object, UInt32 count,
 }
 
 /// Runs the devices for the signal and its tail. False when they could not start.
-static bool mr_run(MRProbe *probe) {
+extern bool mr_probe_with_activity(bool (*measure)(void *), void *context);
+
+static bool mr_run(void *context) {
+    MRProbe *probe = context;
     const bool same = probe->output == probe->input;
     AudioDeviceIOProcID out_proc = NULL, in_proc = NULL;
     if (AudioDeviceCreateIOProcID(probe->output, mr_io, probe, &out_proc) != noErr ||
@@ -1815,7 +1818,8 @@ int main(int argc, char **argv) {
     mr_describe("output", probe->output, kAudioObjectPropertyScopeOutput, options.json);
     mr_describe("input", probe->input, kAudioObjectPropertyScopeInput, options.json);
     if (options.json) printf("\"channels\":%u,\"seconds\":%.1f,", probe->channels, options.seconds);
-    if (!mr_run(probe)) return 1;
+    if (!mr_probe_with_activity(mr_run, probe)) return 1;
+    if (options.json) printf("\"activityProtection\":true,");
     if (options.json) printf("\"inputLatencyNotifications\":%u,", atomic_load(&probe->latency_notifications));
     if (options.timing) {
         fprintf(stderr, "side,first,sampleTime,hostTime,frames,flags\n");

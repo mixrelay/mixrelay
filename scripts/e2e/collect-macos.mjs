@@ -6,6 +6,17 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
+export function collectMacosLoad(output, run = spawnSync) {
+  for (const [file, program, args] of [
+    ['native-failure-host.txt', 'sysctl', ['hw.ncpu', 'hw.logicalcpu', 'hw.physicalcpu', 'hw.memsize', 'machdep.cpu.brand_string']],
+    ['native-failure-processes.txt', 'ps', ['-A', '-r', '-o', 'pid=,ppid=,state=,%cpu=,rss=,comm=']],
+    ['native-failure-load.txt', 'top', ['-l', '2', '-s', '1', '-o', 'cpu', '-n', '20', '-stats', 'pid,cpu,time,command']],
+  ]) {
+    const result = run(program, args, { encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 });
+    writeFileSync(join(output, file), `${result.stdout ?? ''}\n${result.stderr ?? ''}\nexit=${result.status}; error=${result.error?.message ?? ''}\n`, { flag: 'wx' });
+  }
+}
+
 export function collectCoreaudioServers(capture, path, systemLog = '') {
   const servers = capture('coreaudio-server-processes.txt', 'pgrep', ['-fl', 'coreaudiod|Core-Audio-Driver-Service']);
   const pids = new Set((servers.stdout ?? '').split('\n')

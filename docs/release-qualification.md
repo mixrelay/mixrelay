@@ -201,6 +201,15 @@ MixRelay's first-use microphone and system-audio dialogs continue through the UI
 The signal still starts with its original first frame and runs for the complete requested
 duration; the probe performs no preliminary audio run.
 
+The finite native measurement holds a process activity with
+`NSActivityUserInitiatedAllowingIdleSystemSleep | NSActivityLatencyCritical` while its
+I/O procedures run. The observer verifies `activityProtection` in the probe result.
+The [activity API](https://developer.apple.com/documentation/foundation/processinfo/beginactivity(options:reason:))
+classifies the background GUI probe's recording work; the token ends when the I/O
+routine returns, including failed measurements. It does not guarantee a virtual host's scheduling.
+Failed PCM also collects bounded host CPU and process snapshots after the signal ends.
+Collection preserves the PCM failure and never repeats the signal.
+
 For a hosted diagnostic job, prepare these tools before invoking the installed runner:
 
 ```sh

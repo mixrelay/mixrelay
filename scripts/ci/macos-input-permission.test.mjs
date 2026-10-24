@@ -6,6 +6,60 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+test('finite measurement retains a latency activity only while I/O runs and releases it on failure', t => {
+  assert.equal(process.platform, 'darwin');
+  const directory = mkdtempSync(join(tmpdir(), 'mr-probe-activity-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const fixture = join(directory, 'activity.m');
+  writeFileSync(fixture, `
+#import <Foundation/Foundation.h>
+#import <objc/runtime.h>
+#include <assert.h>
+#include <stdbool.h>
+extern bool mr_probe_with_activity(bool (*measure)(void *), void *context);
+static id token;
+static bool active, refuse;
+static unsigned begins, ends, measurements;
+static id begin(id receiver, SEL selector, NSActivityOptions options, NSString *reason) {
+    assert(!active);
+    assert((options & NSActivityLatencyCritical) == NSActivityLatencyCritical);
+    assert((options & NSActivityUserInitiatedAllowingIdleSystemSleep) == NSActivityUserInitiatedAllowingIdleSystemSleep);
+    assert(reason.length > 0);
+    begins++;
+    active = !refuse;
+    return active ? token : nil;
+}
+static void end(id receiver, SEL selector, id activity) {
+    assert(active && activity == token);
+    active = false; ends++;
+}
+static bool measure(void *context) { assert(active); measurements++; return *(bool *)context; }
+int main(void) {
+    @autoreleasepool {
+        token = [NSObject new];
+        Class processClass = object_getClass([NSProcessInfo processInfo]);
+        method_setImplementation(class_getInstanceMethod(processClass, @selector(beginActivityWithOptions:reason:)), (IMP)begin);
+        method_setImplementation(class_getInstanceMethod(processClass, @selector(endActivity:)), (IMP)end);
+        bool result = true;
+        assert(mr_probe_with_activity(measure, &result));
+        assert(!active && begins == 1 && ends == 1 && measurements == 1);
+        result = false;
+        assert(!mr_probe_with_activity(measure, &result));
+        assert(!active && begins == 2 && ends == 2 && measurements == 2);
+        refuse = true;
+        assert(!mr_probe_with_activity(measure, &result));
+        assert(!active && begins == 3 && ends == 2 && measurements == 2);
+        [token release];
+    }
+}
+`);
+  const source = fileURLToPath(new URL('../../native/macos/hal-driver/tests/MRProbeActivity.m', import.meta.url));
+  const executable = join(directory, 'activity');
+  execFileSync('xcrun', ['clang', '-mmacosx-version-min=14.2', source, fixture,
+    '-framework', 'Foundation', '-o', executable]);
+  execFileSync(executable, [], { timeout: 10000 });
+});
+
 test('daemon consent does not query AVFoundation while GUI denial remains authoritative', (t) => {
   assert.equal(process.platform, 'darwin', 'Run the native permission boundary on macOS');
   const directory = mkdtempSync(join(tmpdir(), 'mr-input-consent-'));
@@ -66,9 +120,10 @@ test('measurement consent completes before device preparation and denial or time
 #undef main
 #include <assert.h>
 static long current, decision;
-static unsigned queries, requests;
+static unsigned queries, requests, measurements;
 long mr_microphone_authorization_status(void) { queries++; return current; }
 void mr_microphone_request_authorization(void) { requests++; if (decision >= 0) current = decision; }
+bool mr_probe_with_activity(bool (*measure)(void *), void *context) { measurements++; return measure(context); }
 static bool authorize(long initial, long answer, MRInputAuthorization *result) {
     current = initial; decision = answer; queries = requests = 0;
     return mr_authorize_input(0, result);
@@ -93,10 +148,12 @@ int main(void) {
     char *arguments[] = {"probe", "io.mixrelay.test-device-must-not-be-opened"};
     assert(mr_probe_measurement_main(2, arguments) == 2);
     assert(queries == 1 && requests == 0);
+    assert(measurements == 0);
     MROptions options = {0};
     char *help[] = {"probe", "--help"};
     assert(mr_options(2, help, &options) == 0);
     assert(queries == 1 && requests == 0);
+    assert(measurements == 0);
 }
 `);
   const executable = join(directory, 'probe-consent');
