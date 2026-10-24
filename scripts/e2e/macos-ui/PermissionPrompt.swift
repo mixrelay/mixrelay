@@ -20,6 +20,18 @@ enum PermissionPrompt {
         labels.contains { ["Allow", "OK"].contains($0) }
     }
 
+    static func identity(owner: pid_t, labels: [String]) -> String? {
+        guard belongsToQualification(labels) else { return nil }
+        let text = labels.joined(separator: "\n").lowercased()
+        let capability: String
+        if text.contains("microphone") { capability = "microphone" }
+        else if text.contains("system audio") { capability = "system-audio" }
+        else { return nil }
+        let subject = text.contains("mixrelay-engine-service") ? "engine"
+            : text.contains("qualification.probe") || text.contains("mrroundtripprobe") ? "probe" : "desktop"
+        return "\(owner):\(subject):\(capability)"
+    }
+
     static func approval(in dialog: InstalledElement) -> (buttons: [InstalledElement], labels: [String]) {
         var labels: [String] = []
         var buttons: [InstalledElement] = []

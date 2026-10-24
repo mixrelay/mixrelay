@@ -33,4 +33,15 @@ final class InstalledApplicationTests: XCTestCase {
         XCTAssertTrue(PermissionPrompt.isApproval(["Allow"]))
         XCTAssertFalse(PermissionPrompt.isApproval(["Don't Allow"]))
     }
+
+    func testPermissionIdentitySurvivesNativeElementChangesAndDistinguishesSubjects() {
+        let microphone = ["_NS:91", "MixRelay microphone", "Allow", "action-button-1"]
+        let refreshed = ["action-button-1", "_NS:74", "Allow", "MixRelay microphone"]
+        XCTAssertEqual(PermissionPrompt.identity(owner: 10, labels: microphone), PermissionPrompt.identity(owner: 10, labels: refreshed))
+        XCTAssertNotEqual(PermissionPrompt.identity(owner: 10, labels: microphone), PermissionPrompt.identity(owner: 10, labels: ["MixRelay system audio"]))
+        XCTAssertNotEqual(PermissionPrompt.identity(owner: 10, labels: microphone), PermissionPrompt.identity(owner: 11, labels: microphone))
+        XCTAssertEqual(PermissionPrompt.identity(owner: 10, labels: microphone), PermissionPrompt.identity(owner: 10, labels: ["MIXRELAY MICROPHONE", "MixRelay captures applications", "Allow"]))
+        XCTAssertNil(PermissionPrompt.identity(owner: 10, labels: ["MixRelay", "Allow"]))
+        XCTAssertNil(PermissionPrompt.identity(owner: 10, labels: ["Other app microphone", "Allow"]))
+    }
 }

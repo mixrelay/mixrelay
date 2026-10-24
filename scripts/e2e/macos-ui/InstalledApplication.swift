@@ -12,7 +12,11 @@ struct InstalledElement {
     }
 
     var children: [InstalledElement] {
-        (attribute(kAXChildrenAttribute) as? [AXUIElement] ?? []).map { InstalledElement(raw: $0) }
+        availableChildren ?? []
+    }
+
+    var availableChildren: [InstalledElement]? {
+        (attribute(kAXChildrenAttribute) as? [AXUIElement])?.map { InstalledElement(raw: $0) }
     }
 
     var role: String { attribute(kAXRoleAttribute) as? String ?? "" }

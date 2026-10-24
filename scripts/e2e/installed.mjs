@@ -459,6 +459,7 @@ export async function qualifyMode({
         await wholeSystemCapture({
           api,
           operation,
+          firstUse: !baselineDirectory,
           graphId,
           document: applied,
           device,
@@ -470,7 +471,8 @@ export async function qualifyMode({
             return applied;
           },
         });
-        return ['whole-system-analysis.json', 'whole-system.wav'].map((file) => ({
+        return ['whole-system-analysis.json', 'whole-system.wav', 'whole-system-consent.json',
+          'whole-system-ready.json', 'whole-system-sources.json'].map((file) => ({
           file,
           sha256: digest(readFileSync(join(output, file))),
         }));

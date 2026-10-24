@@ -1,7 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { systemCaptureGraph, waitForSystemSignal } from './system-capture.mjs';
+import { systemCaptureGraph, waitForSystemSignal, waitForSystemConsent } from './system-capture.mjs';
 import { applyDesktopGraph } from './installed.mjs';
+
+test('first system sources wait for native approval and actual dialog dismissal', async () => {
+  let elapsed = 0;
+  const granted = { action: 'Allow/action-button-1', subject: ['MixRelay would like access to record your system audio'],
+    dismissedAt: '2026-10-24T00:00:01Z' };
+  const observed = await waitForSystemConsent(async () => elapsed >= 1000 ? [granted]
+    : [{ ...granted, dismissedAt: undefined }], { now: () => elapsed, wait: async ms => { elapsed += ms; } });
+  assert.equal(observed, granted); assert.equal(elapsed, 1000);
+});
+
+test('microphone, another app, denial and an unconfirmed click cannot satisfy system consent', async () => {
+  const grant = { action: 'Allow/action-button-1', subject: ['MixRelay system audio'], dismissedAt: '2026-10-24T00:00:01Z' };
+  for (const invalid of [{ ...grant, subject: ['MixRelay microphone'] },
+    { ...grant, subject: ['Other app system audio'] }, { ...grant, action: 'Don’t Allow' },
+    { ...grant, dismissedAt: undefined }]) {
+    let elapsed = 0;
+    await assert.rejects(waitForSystemConsent(async () => [invalid],
+      { now: () => elapsed, wait: async ms => { elapsed += ms; } }), /confirmed dialog dismissal/);
+    assert.equal(elapsed, 30000);
+  }
+});
 
 test('system recording waits for both live source channels after first-use consent', async () => {
   let elapsed = 0, reads = 0;

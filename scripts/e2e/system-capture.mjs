@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { closeSync, copyFileSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { invoke } from '../lab/macos-installed-capture-acceptance.mjs';
@@ -81,6 +81,18 @@ export async function waitForSystemSignal(api, revision, { now = Date.now, wait 
   assert.fail('Both whole-system source channels did not become live after consent');
 }
 
+export async function waitForSystemConsent(readGrants, { now = Date.now, wait = delay } = {}) {
+  const deadline = now() + 30000;
+  while (now() < deadline) {
+    const grant = (await readGrants()).find(item => /^(Allow|OK)(\/|$)/.test(item.action)
+      && item.subject?.some(text => /mixrelay/i.test(text) && /system audio/i.test(text))
+      && Number.isFinite(Date.parse(item.dismissedAt)));
+    if (grant) return grant;
+    await wait(100);
+  }
+  assert.fail('First-use system-audio approval did not reach confirmed dialog dismissal');
+}
+
 async function toneStatus(child) {
   const response = once(child.stdout, 'data', { signal: AbortSignal.timeout(5000) });
   child.stdin.write('status\n');
@@ -88,7 +100,8 @@ async function toneStatus(child) {
   return JSON.parse(bytes.toString());
 }
 
-export async function wholeSystemCapture({ api, operation, apply, graphId, document, device, output }) {
+export async function wholeSystemCapture({ api, operation, apply, graphId, document, device, output, firstUse }) {
+  assert.equal(typeof firstUse, 'boolean');
   const access = await invoke('licensing_status', {});
   assert.equal(access.status, 'free', 'Whole-system acceptance requires actual free access');
   assert.equal(access.hasActivation, false);
@@ -104,6 +117,10 @@ export async function wholeSystemCapture({ api, operation, apply, graphId, docum
   });
   try {
     applied = await apply(systemCaptureGraph(document, graphId));
+    const grantsFile = join(output, 'audio-permission-actions.json');
+    const consent = firstUse ? await waitForSystemConsent(() => existsSync(grantsFile)
+      ? JSON.parse(readFileSync(grantsFile, 'utf8')) : []) : null;
+    writeFileSync(join(output, 'whole-system-consent.json'), JSON.stringify({ firstUse, consent }, null, 2) + '\n', { flag: 'wx' });
     for (let index = 0; index < 2; index++) {
       const executable = compileTone(output, index);
       const stderr = openSync(join(output, `tone-${index}.stderr.log`), 'wx');
