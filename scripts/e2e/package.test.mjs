@@ -1,10 +1,64 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { installedPaths, requireDisposableHost, spawnLogged } from './package.mjs';
+
+test('stapler retries a lost Apple connection and requires validation before extraction', async (t) => {
+  const { installAndVerify } = await import('./package.mjs');
+  const output = mkdtempSync(join(tmpdir(), 'mr-stapler-network-'));
+  t.after(() => rmSync(output, { recursive: true, force: true }));
+  const calls = [], waits = [];
+  let attempts = 0;
+  const runCommand = (program, args) => {
+    calls.push([program, args]);
+    if (program === 'xcrun' && ++attempts === 1)
+      throw Object.assign(new Error('stapler exited 68'), {
+        status: 68, stderr: 'NSURLErrorDomain Code=-1005 "The network connection was lost."',
+      });
+    if (program === 'pkgutil' && args[0] === '--expand-full') {
+      assert.equal(attempts, 2);
+      mkdirSync(args[2]);
+    }
+    return 'accepted';
+  };
+  installAndVerify({ file: 'candidate.pkg' }, {}, output, output, 'macos', {
+    runCommand, paths: [], wait: (milliseconds) => waits.push(milliseconds),
+  });
+  assert.equal(calls.at(-1)[0], 'sudo');
+  assert.deepEqual(waits, [2000]);
+  const report = JSON.parse(readFileSync(join(output, 'package-verification.json')));
+  assert.deepEqual(report.filter((entry) => entry.program === 'xcrun').map((entry) => entry.status), [68, 0]);
+  assert.match(report[2].stderr, /Code=-1005/);
+});
+
+test('persistent stapler transport failure is bounded and never installs', async (t) => {
+  const { installAndVerify } = await import('./package.mjs');
+  const output = mkdtempSync(join(tmpdir(), 'mr-stapler-offline-'));
+  t.after(() => rmSync(output, { recursive: true, force: true }));
+  let attempts = 0;
+  const waits = [];
+  const runCommand = (program, args) => {
+    assert.notEqual(program, 'sudo');
+    assert.notEqual(args[0], '--expand-full');
+    if (program === 'xcrun') {
+      attempts++;
+      throw Object.assign(new Error('stapler exited 68'), {
+        status: 68, stderr: 'NSURLErrorDomain Code=-1005 "The network connection was lost."',
+      });
+    }
+    return 'accepted';
+  };
+  assert.throws(() => installAndVerify({ file: 'candidate.pkg' }, {}, output, output, 'macos', {
+    runCommand, wait: (milliseconds) => waits.push(milliseconds),
+  }), /stapler exited 68/);
+  assert.equal(attempts, 3);
+  assert.deepEqual(waits, [2000, 4000]);
+  const report = JSON.parse(readFileSync(join(output, 'package-verification.json')));
+  assert.equal(report.filter((entry) => entry.program === 'xcrun').length, 3);
+});
 
 test('stapler failure preserves raw diagnostics and stops before extraction or installation', async (t) => {
   const { installAndVerify } = await import('./package.mjs');

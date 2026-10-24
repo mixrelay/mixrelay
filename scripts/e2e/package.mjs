@@ -70,7 +70,11 @@ export function installAndVerify(
   directory,
   output,
   os,
-  { runCommand = run, paths = installedPaths(os) } = {},
+  {
+    runCommand = run,
+    paths = installedPaths(os),
+    wait = (milliseconds) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds),
+  } = {},
 ) {
   const run = runCommand;
   const archive = join(directory, artifact.file);
@@ -93,19 +97,29 @@ export function installAndVerify(
   if (os === 'macos') {
     const verification = [];
     const verify = (program, args) => {
-      const entry = { program, args };
-      verification.push(entry);
-      try {
-        entry.stdout = run(program, args);
-        entry.status = 0;
-      } catch (error) {
-        Object.assign(entry, {
-          stdout: String(error.stdout ?? ''), stderr: String(error.stderr ?? ''),
-          status: error.status ?? null, signal: error.signal ?? null, error: error.message,
-        });
-        throw new Error(`${error.message}\n${entry.stdout}\n${entry.stderr}`, { cause: error });
-      } finally {
-        writeFileSync(join(output, 'package-verification.json'), `${JSON.stringify(verification, null, 2)}\n`);
+      for (let attempt = 1; ; attempt++) {
+        const entry = { program, args, attempt };
+        verification.push(entry);
+        let retry = false;
+        try {
+          entry.stdout = run(program, args);
+          entry.status = 0;
+          return;
+        } catch (error) {
+          Object.assign(entry, {
+            stdout: String(error.stdout ?? ''), stderr: String(error.stderr ?? ''),
+            status: error.status ?? null, signal: error.signal ?? null, error: error.message,
+          });
+          // Retry only Apple's observed connection-loss error. Invalid or missing
+          // tickets and exhausted retries still stop before extraction or install.
+          retry = attempt < 3 && program === 'xcrun' && entry.status === 68
+            && /NSURLErrorDomain Code=-1005\b/.test(`${entry.stdout}\n${entry.stderr}`);
+          if (!retry)
+            throw new Error(`${error.message}\n${entry.stdout}\n${entry.stderr}`, { cause: error });
+        } finally {
+          writeFileSync(join(output, 'package-verification.json'), `${JSON.stringify(verification, null, 2)}\n`);
+        }
+        if (retry) wait(attempt * 2000);
       }
     };
     verify('pkgutil', ['--check-signature', archive]);
