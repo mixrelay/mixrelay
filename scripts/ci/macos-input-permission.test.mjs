@@ -77,11 +77,12 @@ int main(void) {
     MRInputAuthorization result;
     assert(authorize(3, -1, &result));
     assert(queries == 1 && requests == 0 && !result.requested);
-    for (long refused = 1; refused <= 4; refused++) {
-        if (refused == 3) continue;
+    for (long refused = 1; refused <= 2; refused++) {
         assert(!authorize(refused, -1, &result));
         assert(requests == 0 && result.final == refused);
     }
+    assert(authorize(4, -1, &result));
+    assert(requests == 0 && result.final == 4);
     assert(authorize(0, 3, &result));
     assert(queries == 2 && requests == 1 && result.requested && result.initial == 0 && result.final == 3);
     assert(!authorize(0, 2, &result));

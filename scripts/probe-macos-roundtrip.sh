@@ -11,8 +11,8 @@
 #   pnpm probe:macos-roundtrip --self-test
 #   pnpm probe:macos-roundtrip --prepare-bundle BUNDLE_ID
 #     (prints a signed probe app path for a LaunchServices permission test)
-# Recording requests microphone permission for its responsible app before opening devices.
-# Denied, restricted or unresolved permission exits with status 2; read-only modes need none.
+# GUI recording resolves microphone consent before opening devices; a nongraphical CLI
+# retains CoreAudio's native broker. Denied or unresolved consent exits with status 2.
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then

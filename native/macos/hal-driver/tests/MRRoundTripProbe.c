@@ -42,7 +42,7 @@ typedef struct MRInputAuthorization {
     bool requested;
 } MRInputAuthorization;
 
-// Finish the probe's own recording consent before any device or signal starts.
+// Finish GUI consent before I/O; a nongraphical CLI retains CoreAudio's broker.
 static bool mr_authorize_input(double timeout, MRInputAuthorization *result) {
     result->initial = result->final = mr_microphone_authorization_status();
     result->requested = result->initial == 0;
@@ -60,7 +60,7 @@ static bool mr_authorize_input(double timeout, MRInputAuthorization *result) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
         }
     }
-    if (result->final == 3) return true;
+    if (result->final == 3 || result->final == 4) return true;
     fprintf(stderr, "input recording authorization was not granted before I/O (initial %ld, final %ld)\n",
             result->initial, result->final);
     return false;
