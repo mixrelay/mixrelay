@@ -6,6 +6,7 @@ struct InstalledElement {
     let raw: AXUIElement
     private static let rightArrowKey: CGKeyCode = 124
     private static let returnKey: CGKeyCode = 36
+    private static let f10Key: CGKeyCode = 109
 
     func attribute(_ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
@@ -76,11 +77,12 @@ struct InstalledElement {
         }
     }
 
-    private func sendKey(_ key: CGKeyCode) throws {
+    private func sendKey(_ key: CGKeyCode, flags: CGEventFlags = []) throws {
         for down in [true, false] {
             guard let event = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: down) else {
                 throw InstalledApplication.Failure.control("Could not create keyboard event")
             }
+            event.flags = flags
             event.post(tap: .cghidEventTap)
         }
     }
@@ -96,6 +98,11 @@ struct InstalledElement {
         }
         try focus()
         try sendKey(Self.returnKey)
+    }
+
+    func openContextMenu() throws {
+        try focus()
+        try sendKey(Self.f10Key, flags: .maskShift)
     }
 }
 

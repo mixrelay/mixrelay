@@ -7,9 +7,13 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 export function snapshotMacosProcesses(output, run = spawnSync) {
-  const result = run('ps', ['-A', '-r', '-o', 'pid=,ppid=,state=,%cpu=,rss=,comm='],
-    { encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 });
-  writeFileSync(join(output, 'native-probe-processes.txt'), `${result.stdout ?? ''}\n${result.stderr ?? ''}\nexit=${result.status}; error=${result.error?.message ?? ''}\n`, { flag: 'wx' });
+  for (const [file, args] of [
+    ['native-probe-processes.txt', ['-A', '-r', '-o', 'pid=,ppid=,state=,%cpu=,rss=,comm=']],
+    ['native-probe-threads.txt', ['-A', '-M', '-r', '-o', 'pid=,ppid=,pri=,nice=,state=,comm=']],
+  ]) {
+    const result = run('ps', args, { encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 });
+    writeFileSync(join(output, file), `${result.stdout ?? ''}\n${result.stderr ?? ''}\nexit=${result.status}; error=${result.error?.message ?? ''}\n`, { flag: 'wx' });
+  }
 }
 
 export function collectMacosLoad(output, run = spawnSync) {
