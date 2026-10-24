@@ -194,6 +194,7 @@ unsafe fn adopt(
     callback.frame_nanos = 1e9 / f64::from(connection.rate);
     callback.frame_ticks = 0.0;
     callback.previous_timestamp = None;
+    io.execution.reset();
     io.progress
         .frame_nanos
         .store(callback.frame_nanos.to_bits(), Release);

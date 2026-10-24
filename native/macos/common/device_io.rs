@@ -28,6 +28,7 @@ use crate::{
 mod callback;
 mod control;
 mod diagnostics;
+mod execution;
 mod ffi;
 mod latency;
 mod lifecycle;
@@ -210,6 +211,7 @@ pub struct DeviceIo {
     capture_cadence: UnsafeCell<timestamps::CaptureCadence>,
     clock: CallbackClock,
     clock_evidence: diagnostics::ClockEvidence,
+    execution: execution::Execution,
     progress: Progress,
     measurements: latency::Measurements,
 }
@@ -281,6 +283,7 @@ impl DeviceIo {
             capture_cadence: UnsafeCell::new(timestamps::CaptureCadence::default()),
             clock: CallbackClock::default(),
             clock_evidence: diagnostics::ClockEvidence::default(),
+            execution: execution::Execution::default(),
             progress: Progress::default(),
             measurements: latency::Measurements::default(),
         })

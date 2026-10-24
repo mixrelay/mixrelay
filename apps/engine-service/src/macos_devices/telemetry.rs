@@ -70,6 +70,8 @@ impl Native {
                 previous_host = event.previous_host, actual_host = event.actual_host,
                 flags = event.flags, callback_host = event.callback_host,
                 callback_flags = event.callback_flags, missed_before = record.missed_before,
+                previous_enter = event.previous_enter, previous_exit = event.previous_exit,
+                callback_enter = event.callback_enter,
                 "native clock break evidence");
             cursor = record.next_cursor;
             self.clock_trace_cursor.store(cursor, Ordering::Relaxed);

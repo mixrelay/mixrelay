@@ -42,12 +42,14 @@ pub unsafe extern "C" fn mr_device_io_process(
     output_time: *const c_void,
     context: *mut c_void,
 ) -> i32 {
+    let entered = mixrelay_realtime::host_time();
     // SAFETY: callback owns advertised output PCM; silence precedes all early returns.
     unsafe { silence(output.cast()) };
     // SAFETY: retained stable context, with field-level cells for concurrent roles.
     let Some(io) = (unsafe { context.cast::<DeviceIo>().as_ref() }) else {
         return 0;
     };
+    let _execution = io.execution.enter(entered, mixrelay_realtime::host_time);
     if io.progress.invalid.load(Acquire) {
         return 0;
     }
@@ -331,6 +333,7 @@ unsafe fn record_clock(
     frames: u32,
     now: *const c_void,
 ) {
+    io.execution.observe_clock();
     // SAFETY: exact CoreAudio AudioTimeStamp ABI, asserted below.
     let timestamp = unsafe { timestamp.cast::<Timestamp>().as_ref() };
     let (sample, host, valid) = timestamp.map_or((0.0, 0, false), |time| {
@@ -354,6 +357,7 @@ unsafe fn record_clock(
         let now = unsafe { now.cast::<Timestamp>().as_ref() };
         let (previous_sample, previous_host, previous_frames) =
             callback.previous_timestamp.unwrap_or((f64::NAN, 0, 0));
+        let (previous_enter, previous_exit, callback_enter) = io.execution.coordinates();
         io.clock_evidence.publish(super::ClockBreak {
             count: after,
             expected_sample: previous_sample + f64::from(previous_frames),
@@ -363,6 +367,9 @@ unsafe fn record_clock(
             flags: timestamp.map_or(0, |time| u64::from(time.flags)),
             callback_host: now.map_or(0, |time| time.host),
             callback_flags: now.map_or(0, |time| u64::from(time.flags)),
+            previous_enter,
+            previous_exit,
+            callback_enter,
         });
     } else if let Some((previous_sample, previous_host, _)) = callback.previous_timestamp
         && valid

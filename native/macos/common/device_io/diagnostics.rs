@@ -28,6 +28,12 @@ pub struct ClockBreak {
     pub callback_host: u64,
     /// `inNow` validity flags; zero when no callback timestamp was supplied.
     pub callback_flags: u64,
+    /// Actual host ticks at entry and completion of the preceding native packet's `IOProc`.
+    /// Completion includes validation, transfer/rendering and credit publication.
+    pub previous_enter: u64,
+    pub previous_exit: u64,
+    /// Actual entry ticks for this packet, distinct from `CoreAudio`'s `inNow` timestamp.
+    pub callback_enter: u64,
 }
 
 /// One coherent event plus that reader's next cursor and overwrite accounting.
@@ -46,7 +52,7 @@ pub struct ClockBreakRecord {
 struct Slot {
     sequence: AtomicU64,
     position: AtomicU64,
-    fields: [AtomicU64; 8],
+    fields: [AtomicU64; 11],
 }
 
 impl Slot {
@@ -62,6 +68,9 @@ impl Slot {
             event.flags,
             event.callback_host,
             event.callback_flags,
+            event.previous_enter,
+            event.previous_exit,
+            event.callback_enter,
         ];
         for (field, value) in self.fields.iter().zip(values) {
             field.store(value, SeqCst);
@@ -84,6 +93,9 @@ impl Slot {
             flags: values[5],
             callback_host: values[6],
             callback_flags: values[7],
+            previous_enter: values[8],
+            previous_exit: values[9],
+            callback_enter: values[10],
         })
     }
 }
@@ -168,8 +180,8 @@ pub unsafe extern "C" fn mr_device_io_next_clock_break(
     true
 }
 
-const _: () = assert!(size_of::<ClockBreak>() == 64 && align_of::<ClockBreak>() == 8);
-const _: () = assert!(size_of::<ClockBreakRecord>() == 80 && align_of::<ClockBreakRecord>() == 8);
+const _: () = assert!(size_of::<ClockBreak>() == 88 && align_of::<ClockBreak>() == 8);
+const _: () = assert!(size_of::<ClockBreakRecord>() == 104 && align_of::<ClockBreakRecord>() == 8);
 
 #[cfg(test)]
 mod tests;

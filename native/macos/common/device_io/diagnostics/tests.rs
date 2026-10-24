@@ -12,6 +12,9 @@ fn event(count: u64) -> ClockBreak {
         flags: count ^ 0x53,
         callback_host: previous_host.wrapping_add(3),
         callback_flags: count ^ 0x37,
+        previous_enter: previous_host.wrapping_add(4),
+        previous_exit: previous_host.wrapping_add(5),
+        callback_enter: previous_host.wrapping_add(6),
     }
 }
 
@@ -40,6 +43,18 @@ fn assert_event(actual: ClockBreak, count: u64) {
             expected.flags,
             expected.callback_host,
             expected.callback_flags
+        )
+    );
+    assert_eq!(
+        (
+            actual.previous_enter,
+            actual.previous_exit,
+            actual.callback_enter
+        ),
+        (
+            expected.previous_enter,
+            expected.previous_exit,
+            expected.callback_enter
         )
     );
 }
@@ -195,6 +210,9 @@ fn measure_clock_evidence_publication() {
             flags: 3,
             callback_host: 13,
             callback_flags: 2,
+            previous_enter: 1,
+            previous_exit: 2,
+            callback_enter: 3,
         };
         for _ in 0..10_000 {
             evidence.publish(black_box(event));
