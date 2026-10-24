@@ -33,9 +33,11 @@ final class InstalledUITests: XCTestCase {
             throw MissingControl(label: "Installed editor PID \(editor.processIdentifier)")
         }
         app.editorWindow = try app.wait("MixRelay", roles: [kAXWindowRole], timeout: 20)
+        _ = try app.wait("Add apps, devices, effects and more.", roles: [kAXStaticTextRole])
         try press("Add node")
         try app.wait("Processor", roles: [kAXMenuItemRole]).openSubmenu()
         try press("Compressor")
+        _ = try app.wait("Compressor", roles: [kAXGroupRole])
         try press("Add node")
         try app.wait("Output", roles: [kAXMenuItemRole]).openSubmenu()
         try press("Recorder")

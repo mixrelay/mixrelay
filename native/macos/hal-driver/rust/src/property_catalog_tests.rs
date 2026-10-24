@@ -834,7 +834,10 @@ fn latency_notifications_preserve_host_coordinates_and_app_measurements() {
     assert_eq!((app(&fixture), coreaudiod(&fixture, 0)), (400, 0));
     assert_eq!(
         *super::lock(&fixture.host.changes),
-        [(id, crate::abi::INPUT_LATENCY), (id, crate::abi::INPUT_LATENCY)]
+        [
+            (id, crate::abi::INPUT_LATENCY),
+            (id, crate::abi::INPUT_LATENCY)
+        ]
     );
     // coreaudiod may also ask under its own PID, registered with its own bundle.
     let registry = (&raw const *fixture.registry).cast_mut();

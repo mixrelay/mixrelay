@@ -106,6 +106,20 @@ class InstalledEditorTest(unittest.TestCase):
                     with self.assertRaisesRegex(AssertionError, "Missing installed UI control"):
                         self.ui.find("Add node")
 
+    def test_a_menu_choice_cannot_stand_in_for_the_rendered_canvas_node(self):
+        item = Node("Compressor", "menu item")
+        card = Node("Compressor", "panel")
+        self.editor[0][:] = [item, card]
+        self.desktop[:] = [self.editor]
+        self.assertIs(self.ui.find("Compressor", interactive=False, roles=("panel",)), card)
+
+    def test_empty_canvas_paragraph_is_read_through_its_text_interface(self):
+        paragraph = Node("", "paragraph")
+        paragraph.queryText = lambda: types.SimpleNamespace(getText=lambda start, end: "Empty canvas")
+        self.editor[0][:] = [paragraph]
+        self.desktop[:] = [self.editor]
+        self.assertIs(self.ui.find("Empty canvas", interactive=False, text=True), paragraph)
+
     def test_activation_posts_one_pointer_click_without_an_uncertain_accessibility_action(self):
         self.desktop[:] = [self.editor]
         self.add.queryComponent = lambda: types.SimpleNamespace(

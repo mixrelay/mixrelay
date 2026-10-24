@@ -94,7 +94,7 @@ def observation_timeout():
     return 120 if os.environ.get("MIXRELAY_E2E_VM_ACCELERATOR") == "tcg" else 30
 
 
-def find(label, contains=False, interactive=True, deadline=None):
+def find(label, contains=False, interactive=True, deadline=None, roles=None, text=False):
     if deadline is None:
         deadline = time.monotonic() + observation_timeout()
     while time.monotonic() < deadline:
@@ -102,10 +102,14 @@ def find(label, contains=False, interactive=True, deadline=None):
             for node, _ in descendants(application()):
                 try:
                     name = node.name or ""
+                    if text and node.getRoleName() == "paragraph":
+                        name = node.queryText().getText(0, -1)
                     matched = label in name if contains else name == label
                     if not matched:
                         continue
-                    if interactive and node.getRoleName() not in ("button", "push button", "menu item", "combo box", "list item"):
+                    if roles is not None and node.getRoleName() not in roles:
+                        continue
+                    if roles is None and interactive and node.getRoleName() not in ("button", "push button", "menu item", "combo box", "list item"):
                         continue
                     if node.getState().contains(pyatspi.STATE_SHOWING):
                         return node
@@ -193,12 +197,15 @@ def main(output):
     # The default 800ms expires during otherwise successful TCG UI updates.
     Atspi.set_timeout(2000, 15000)
     find("Untitled Graph")
+    find("Add apps, devices, effects and more.", interactive=False, text=True)
     click("Add node")
     open_submenu("Processor")
     click("Compressor")
+    find("Compressor", interactive=False, roles=("panel",))
     click("Add node")
     open_submenu("Output")
     click("Recorder")
+    find("Recorder", interactive=False, roles=("panel",))
     click("Compressor", right=True)
     click("Connect channels…")
     click("Destination", contains=True)
