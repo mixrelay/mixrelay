@@ -123,16 +123,20 @@ class InstalledEditorTest(unittest.TestCase):
         self.assertEqual(events, [(25, 40, "abs"), (25, 40, "b3c")])
 
     def test_unrelated_controls_do_not_require_role_or_state_round_trips(self):
+        reads = []
         class Busy(Node):
             def getRoleName(self):
-                raise AssertionError("Unrelated role query would block the native provider")
+                reads.append("role")
+                return super().getRoleName()
 
             def getState(self):
-                raise AssertionError("Unrelated state query would block the native provider")
+                reads.append("state")
+                return super().getState()
 
         self.editor[0].insert(0, Busy("Unrelated", "panel"))
         self.desktop[:] = [self.editor]
         self.assertIs(self.ui.find("Add node"), self.add)
+        self.assertEqual(reads, [])
 
     def test_bounds_queries_can_recover_before_the_single_pointer_action(self):
         self.desktop[:] = [self.editor]
