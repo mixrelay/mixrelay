@@ -58,6 +58,13 @@ struct InstalledElement {
         }
     }
 
+    func pressNative() throws {
+        let acknowledgement = AXUIElementPerformAction(raw, kAXPressAction as CFString)
+        guard acknowledgement == .success else {
+            throw InstalledApplication.Failure.control("Native approval failed: \(labels), acknowledgement \(acknowledgement.rawValue)")
+        }
+    }
+
     func openSubmenu() throws {
         let acknowledgement = AXUIElementSetAttributeValue(raw, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         let deadline = Date().addingTimeInterval(30)

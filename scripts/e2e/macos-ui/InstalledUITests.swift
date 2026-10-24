@@ -103,7 +103,7 @@ final class InstalledUITests: XCTestCase {
                     guard let identity = PermissionPrompt.identity(owner: owner.processIdentifier, labels: approval.labels) else { continue }
                     guard submitted[identity] == nil, let button = approval.buttons.first else { continue }
                     let action = button.labels.joined(separator: "/")
-                    try button.click()
+                    try button.pressNative()
                     submitted[identity] = (grants.count, owner.processIdentifier, dialog.raw)
                     grants.append(["owner": bundle, "action": action, "subject": approval.labels, "at": ISO8601DateFormatter().string(from: Date())])
                     changed = true
