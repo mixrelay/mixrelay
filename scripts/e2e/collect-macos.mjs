@@ -32,7 +32,7 @@ export function collectCoreaudioLog(outputPath, run = spawnSync) {
     // Hosted upgrade logs exceed spawnSync's former 16 MiB pipe limit. Write
     // directly to the evidence file so later permission/publication events survive.
     result = run('log', ['show', '--last', '5m', '--style', 'compact', '--predicate',
-      'process CONTAINS[c] "mixrelay" OR process == "coreaudiod" OR process CONTAINS[c] "audio" OR (process == "tccd" AND eventMessage CONTAINS[c] "mixrelay")'],
+      'process CONTAINS[c] "mixrelay" OR process == "coreaudiod" OR process CONTAINS[c] "audio" OR process == "tccd" OR process == "UserNotificationCenter" OR process == "SecurityAgent"'],
     { stdio: ['ignore', descriptor, descriptor], timeout: 30000 });
   } finally { closeSync(descriptor); }
   appendFileSync(outputPath, `\nexit=${result.status}; signal=${result.signal ?? ''}; error=${result.error?.message ?? ''}\n`);
@@ -55,6 +55,12 @@ if (existsSync(logs)) for (const file of readdirSync(logs).filter(name => /^[A-Z
 }
 const systemLog = collectCoreaudioLog(path('coreaudio-system.log'));
 collectCoreaudioServers(capture, path, systemLog);
+const brokers = capture('permission-broker-processes.txt', 'pgrep', ['-fl', 'tccd|UserNotificationCenter|SecurityAgent|CoreServicesUIAgent|iconservicesagent|iconservicesd']);
+for (const pid of new Set((brokers.stdout ?? '').split('\n').map(line => line.match(/^(\d+)\s/)?.[1]).filter(Boolean))) {
+  capture(`permission-broker-${pid}-sample-command.log`, 'sudo',
+    ['-n', 'sample', pid, '1', '-file', path(`permission-broker-${pid}.sample.txt`)]);
+}
+capture('desktop-screen-command.log', 'screencapture', ['-x', path('desktop-screen.png')]);
 capture('coreaudio-devices.txt', 'system_profiler', ['SPAudioDataType', '-json']);
 capture('coreaudio-probe.txt', 'zsh', ['scripts/probe-macos-roundtrip.sh', '--list']);
 for (const [role, path] of [
@@ -63,7 +69,7 @@ for (const [role, path] of [
   ['driver', '/Library/Application Support/MixRelay/bin/mixrelay-driver-service'],
 ]) capture(`${role}-entitlements.txt`, 'codesign', ['-d', '--entitlements', ':-', path]);
 capture('desktop-windows.txt', 'osascript', ['-e',
-  'tell application "System Events" to get {name, name of windows} of every process whose background only is false'], 15000);
+  'tell application "System Events" to get {name, name of windows} of (every process whose background only is false)'], 15000);
 const processes = capture('product-processes.txt', 'pgrep', ['-u', String(process.getuid()), '-fl', 'mixrelay|MixRelay']);
 for (const role of ['engine', 'driver']) {
   const pid = processes.stdout?.split('\n').find(line => line.includes(`/bin/mixrelay-${role}-service`))?.match(/^(\d+) /)?.[1];
