@@ -41,6 +41,13 @@ struct InstalledElement {
         }
         point.x += extent.width / 2
         point.y += extent.height / 2
+        if pointer {
+            guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                                     mouseCursorPosition: point, mouseButton: .left) else {
+                throw InstalledApplication.Failure.control("Could not move pointer")
+            }
+            move.post(tap: .cghidEventTap)
+        }
         let button: CGMouseButton = right ? .right : .left
         for type: CGEventType in right ? [.rightMouseDown, .rightMouseUp] : [.leftMouseDown, .leftMouseUp] {
             guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button) else {
