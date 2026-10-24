@@ -1,33 +1,16 @@
-import { Badge } from '@mantine/core';
 import type { PropsWithChildren } from 'react';
+import styles from './StatusBadge.module.css';
 
-export type StatusTone = 'neutral' | 'positive' | 'warning' | 'critical';
+export type StatusTone = 'neutral' | 'accent' | 'positive' | 'warning' | 'critical';
 
 interface StatusBadgeProps extends PropsWithChildren {
   tone?: StatusTone;
 }
 
 export function StatusBadge({ children, tone = 'neutral' }: StatusBadgeProps) {
-  const colors: Record<StatusTone, string> = {
-    neutral: 'gray',
-    positive: 'signal',
-    warning: 'yellow',
-    critical: 'red',
-  };
-
   return (
-    <Badge
-      className="status-badge"
-      color={colors[tone]}
-      radius={999}
-      size="sm"
-      styles={{
-        label: { lineHeight: 1.25, whiteSpace: 'normal' },
-        root: { height: 'auto', maxWidth: '100%', minHeight: '1.75rem' },
-      }}
-      variant="light"
-    >
+    <span className={styles.root} data-tone={tone}>
       {children}
-    </Badge>
+    </span>
   );
 }

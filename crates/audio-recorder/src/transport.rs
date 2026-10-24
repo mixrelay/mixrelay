@@ -1,0 +1,228 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+};
+
+mod packets;
+pub(crate) use packets::Packet;
+use packets::PacketRing;
+
+pub(crate) const PACKET_FRAMES: usize = 256;
+pub(crate) const PACKETS: usize = 128;
+// Least common multiple of all product sample rates: input duration stays exact
+// across rate changes without floating-point drift or a realtime clock query.
+pub(crate) const DURATION_TICKS_PER_SECOND: u64 = 28_224_000;
+const MAX_CALLBACK_FRAMES: usize = 4096;
+const FAULT_SHIFT: u32 = 56;
+const CLOSED: u64 = 1 << 63;
+pub(crate) const MAX_TOKEN: u64 = (1 << FAULT_SHIFT) - 1;
+
+/// A cheap handle to a preallocated transport. Clone/Drop belong to render-plan
+/// preparation/retirement, not an audio invocation. The registry owns the worker.
+#[derive(Debug)]
+pub struct RecorderTap {
+    pub(crate) shared: Arc<Transport>,
+}
+
+#[derive(Debug)]
+pub(crate) struct Transport {
+    pub(crate) channels: u16,
+    pub(crate) rate: AtomicU32,
+    pub(crate) gate: AtomicU64,
+    pub(crate) taps: AtomicUsize,
+    producer: AtomicBool,
+    in_flight: AtomicUsize,
+    packets: PacketRing,
+    remaining_ticks: AtomicU64,
+}
+
+impl Transport {
+    pub(crate) fn new(channels: u16) -> Result<Arc<Self>, std::collections::TryReserveError> {
+        Ok(Arc::new(Self {
+            channels,
+            rate: AtomicU32::new(0),
+            gate: AtomicU64::new(0),
+            taps: AtomicUsize::new(0),
+            producer: AtomicBool::new(false),
+            in_flight: AtomicUsize::new(0),
+            packets: PacketRing::new(usize::from(channels))?,
+            remaining_ticks: AtomicU64::new(u64::MAX),
+        }))
+    }
+
+    pub(crate) fn set_duration_ticks(&self, ticks: Option<u64>) {
+        // Called with admission closed. Opening the gate publishes the new budget.
+        self.remaining_ticks
+            .store(ticks.unwrap_or(u64::MAX), Ordering::Release);
+    }
+
+    pub(crate) fn duration_reached(&self) -> bool {
+        // Acquire observes the final partial packet published before exhaustion.
+        self.remaining_ticks.load(Ordering::Acquire) == 0
+    }
+
+    /// Only the off-RT session owner calls this before draining commands.
+    pub(crate) fn cutoff(&self) -> Option<&'static str> {
+        // Preserve the token until its producer has left: a late invalid block
+        // or overflow must remain a visible failure, even after admission closes.
+        self.gate.fetch_or(CLOSED, Ordering::SeqCst);
+        self.wait_producer();
+        // Cutoff transfers the producer-owned partial slot to this control
+        // thread. Preserve it for Stop/Pause and for admission-fault salvage.
+        self.packets.finish_pending();
+        fault(self.gate.load(Ordering::SeqCst))
+    }
+
+    pub(crate) fn wait_producer(&self) {
+        while self.in_flight.load(Ordering::SeqCst) != 0 {
+            std::thread::yield_now();
+        }
+    }
+
+    pub(crate) fn acknowledge_failure(&self) {
+        // The worker has closed admission, waited for every entrant (including
+        // rejected overlapping producers), and copied the failure into status.
+        self.gate.store(CLOSED, Ordering::SeqCst);
+    }
+
+    pub(crate) fn read_packet(&self, packet: &mut Packet) -> bool {
+        self.packets.read(packet)
+    }
+
+    fn fail(&self, token: u64, code: u64) {
+        let marked = token | (code << FAULT_SHIFT);
+        if self
+            .gate
+            .compare_exchange(token, marked, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            let _ = self.gate.compare_exchange(
+                token | CLOSED,
+                marked | CLOSED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+        }
+    }
+}
+
+pub(crate) fn fault(gate: u64) -> Option<&'static str> {
+    match (gate & !CLOSED) >> FAULT_SHIFT {
+        0 => None,
+        1 => Some("recorder packet queue overrun"),
+        2 => Some("recorder received invalid PCM geometry or sample rate"),
+        _ => Some("recorder has overlapping audio producers"),
+    }
+}
+
+struct Producer<'a>(&'a AtomicBool);
+impl Drop for Producer<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+struct Flight<'a>(&'a AtomicUsize);
+impl Drop for Flight<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl RecorderTap {
+    pub(crate) fn new(shared: Arc<Transport>) -> Self {
+        shared.taps.fetch_add(1, Ordering::SeqCst);
+        Self { shared }
+    }
+    /// Capture one interleaved block, with its actual processing rate.
+    ///
+    /// This performs no allocation, lock, file I/O, wakeup or waiting. At most
+    /// 4096 frames are copied into 256-frame packets (at most 17 slot claims
+    /// including a carried partial packet). Invalid geometry, queue
+    /// exhaustion or overlapping producers fails only this recorder. Calling
+    /// while stopped/paused still observes the rate for the next Record command.
+    pub fn capture(&self, samples: &[f32], sample_rate: u32) {
+        let shared = &self.shared;
+        if super::valid_rate(sample_rate) {
+            shared.rate.store(sample_rate, Ordering::Release);
+        }
+        let token = shared.gate.load(Ordering::SeqCst);
+        if token == 0 || token > MAX_TOKEN {
+            return;
+        }
+        shared.in_flight.fetch_add(1, Ordering::SeqCst);
+        let _flight = Flight(&shared.in_flight);
+        if shared.gate.load(Ordering::SeqCst) != token {
+            return;
+        }
+        if shared
+            .producer
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            shared.fail(token, 3);
+            return;
+        }
+        let _producer = Producer(&shared.producer);
+        // The monotonic admission token prevents a callback paused before Stop
+        // from publishing into a later take or a later Resume.
+        if shared.gate.load(Ordering::SeqCst) != token {
+            return;
+        }
+        let channels = usize::from(shared.channels);
+        if !super::valid_rate(sample_rate)
+            || !samples.len().is_multiple_of(channels)
+            || samples.len() / channels > MAX_CALLBACK_FRAMES
+        {
+            shared.fail(token, 2);
+            return;
+        }
+        // Only this producer changes the budget while admission is open.
+        let remaining = shared.remaining_ticks.load(Ordering::Relaxed);
+        let (accepted, ticks) = admit_duration(remaining, samples.len() / channels, sample_rate);
+        for source in samples[..accepted * channels].chunks(PACKET_FRAMES * channels) {
+            if !shared.packets.publish(source, sample_rate) {
+                shared.fail(token, 1);
+                return;
+            }
+        }
+        if remaining != u64::MAX {
+            if ticks == 0 {
+                shared.packets.finish_pending();
+                shared.gate.fetch_or(CLOSED, Ordering::SeqCst);
+            }
+            // Release publishes the complete accepted prefix before the worker
+            // observes exhaustion and drains the converter tail.
+            shared.remaining_ticks.store(ticks, Ordering::Release);
+        }
+    }
+}
+
+// The caller validates the rate against the product sample-rate catalog.
+fn admit_duration(remaining: u64, frames: usize, rate: u32) -> (usize, u64) {
+    if remaining == u64::MAX {
+        return (frames, remaining);
+    }
+    let ticks_per_frame = DURATION_TICKS_PER_SECOND / u64::from(rate);
+    let accepted =
+        frames.min(usize::try_from(remaining.div_ceil(ticks_per_frame)).unwrap_or(usize::MAX));
+    (
+        accepted,
+        remaining.saturating_sub(accepted as u64 * ticks_per_frame),
+    )
+}
+
+impl Clone for RecorderTap {
+    fn clone(&self) -> Self {
+        Self::new(Arc::clone(&self.shared))
+    }
+}
+
+impl Drop for RecorderTap {
+    fn drop(&mut self) {
+        self.shared.taps.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests;

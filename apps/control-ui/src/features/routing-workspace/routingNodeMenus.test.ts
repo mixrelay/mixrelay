@@ -1,0 +1,259 @@
+import { expect, it } from 'vitest';
+import type { AudioGraphNodeMenuItem } from '../../core/audio-graph/AudioGraphCanvas';
+import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
+import type { AudioSessionStatus, CapturableApplication } from '../../core/control-port/types';
+import { i18n } from '../../core/i18n';
+import { createNodeMenuItems } from './routingNodeMenus';
+import { unknownNativeFormats, virtualPolicy, virtualSpec } from './virtualEndpointFixtures';
+
+function node(id: string, type: string, config: unknown = {}): AudioGraphNode {
+  return {
+    id,
+    runtime: { type, config },
+    position: { x: 0, y: 0 },
+    inputPorts: [],
+    outputPorts: [],
+    appearance: { category: type, icon: 'audio', title: id },
+  };
+}
+function options(paid: boolean) {
+  const driver = {
+    ...node('driver', 'virtual_endpoint', { id: virtualSpec.id }),
+    inputPorts: [{ id: 'sink', label: 'sink' }],
+  };
+  const model: AudioGraphModel = {
+    revision: 1,
+    edges: [],
+    nodes: [
+      driver,
+      node('app-a', 'application_capture'),
+      node('mic', 'audio_device_input'),
+      node('effect-a', 'provider'),
+      node('effect-b', 'provider'),
+      node('recorder', 'recorder'),
+      node('monitor', 'audio_device_output', {
+        selector: { match: 'persistent_uid', uid: 'monitor' },
+      }),
+    ],
+  };
+  const session: AudioSessionStatus = {
+    format: { sampleRate: 48000, blockFrames: 128 },
+    clockAuthority: 'device',
+    observedDeviceSampleRate: 48000,
+    issue: null,
+    transportLatencyFrames: null,
+    capabilities: {
+      backend: 'core_audio',
+      supportedSampleRates: [48000],
+      supportedBlockFrames: [128],
+      canReconfigureLive: true,
+      hardwareInput: true,
+      hardwareOutput: true,
+      virtualEndpoint: true,
+      applicationCapture: true,
+      sampleRateConversion: false,
+      driftCorrection: false,
+    },
+    virtualEndpointSettings: {
+      ...virtualPolicy,
+      devices: [
+        ...virtualPolicy.devices,
+        {
+          nativeDeviceIds: [],
+          nativeFormats: unknownNativeFormats,
+          observedSampleRate: 48000,
+          supportedSampleRates: [48000],
+          canSetSampleRate: true,
+          spec: { ...virtualSpec, id: 'other' },
+        },
+      ],
+    },
+  };
+  return {
+    paid,
+    model,
+    session,
+    t: i18n.getFixedT('en'),
+    applications: [],
+    processors: [],
+    processorEmptyLabel: 'Empty',
+    audioDevices: ['monitor', 'third'].map((uid) => ({
+      uid,
+      displayName: uid,
+      inputChannels: 2,
+      outputChannels: 2,
+      isDefaultInput: false,
+      isDefaultOutput: uid === 'monitor',
+    })),
+  };
+}
+function item(items: readonly AudioGraphNodeMenuItem[], id: string): AudioGraphNodeMenuItem {
+  for (const entry of items) {
+    if (entry.id === id) return entry;
+    const child = entry.children?.find((value) => value.id === id);
+    if (child) return child;
+    if (entry.children) {
+      const nested = entry.children
+        .flatMap((value) => value.children ?? [])
+        .find((value) => value.id === id);
+      if (nested) return nested;
+    }
+  }
+  throw new Error(`Missing menu item: ${id}`);
+}
+it('free menus count source nodes and distinct outputs without restricting builtins or an existing monitor', () => {
+  const menus = createNodeMenuItems(options(false));
+  for (const id of [
+    'audio-input:monitor',
+    'audio-output:third',
+    'recorder',
+    'virtual-new-input',
+    'virtual/input/other',
+  ]) {
+    expect(item(menus, id).disabled).toBe(true);
+  }
+  for (const id of [
+    'audio-output:monitor',
+    'compressor',
+    'limiter',
+    'add-processor-directory',
+    'rescan-processors',
+  ]) {
+    expect(item(menus, id).disabled).not.toBe(true);
+  }
+  expect(item(menus, 'audio-input:monitor').description).toBe(
+    i18n.getFixedT('en')('licensing.limits.inputs'),
+  );
+});
+
+it('whole-system capture is available on macOS within the free input quota', () => {
+  const value = options(false);
+  expect(item(createNodeMenuItems(value), 'system-audio').disabled).toBe(true);
+  value.model.nodes = [];
+  expect(item(createNodeMenuItems(value), 'system-audio').disabled).toBe(false);
+  value.session.capabilities.applicationCapture = false;
+  expect(item(createNodeMenuItems(value), 'system-audio').disabled).toBe(true);
+  value.session.capabilities.backend = 'pipe_wire';
+  expect(() => item(createNodeMenuItems(value), 'system-audio')).toThrow(/Missing menu item/);
+});
+it('describes the output quota when an already used virtual device would add a third output', () => {
+  const base = options(false);
+  base.model.nodes = [
+    ...base.model.nodes.map((entry) =>
+      entry.id === 'driver'
+        ? { ...entry, inputPorts: [], outputPorts: [{ id: 'source', label: 'source' }] }
+        : entry,
+    ),
+    node('third', 'audio_device_output', { selector: { match: 'persistent_uid', uid: 'third' } }),
+  ];
+  const menus = createNodeMenuItems(base);
+  expect(item(menus, `virtual/output/${encodeURIComponent(virtualSpec.id)}`)).toMatchObject({
+    disabled: true,
+    description: base.t('licensing.limits.outputs'),
+  });
+  expect(item(menus, 'virtual-new-output').description).toBe(
+    base.t('licensing.limits.virtualDevices'),
+  );
+});
+it('paid menus admit the same expansion and free menus retain a full-width Driver source', () => {
+  const paid = createNodeMenuItems(options(true));
+  for (const id of [
+    'audio-input:monitor',
+    'audio-output:third',
+    'recorder',
+    'virtual-new-input',
+    'virtual/input/other',
+  ]) {
+    expect(item(paid, id).disabled).not.toBe(true);
+  }
+  const free = createNodeMenuItems(options(false));
+  expect(item(free, `virtual/input/${encodeURIComponent(virtualSpec.id)}`).disabled).not.toBe(true);
+});
+
+it('deduplicates exact app selectors while upgrading only a missing icon and reports locked capture', () => {
+  const app: CapturableApplication = {
+    displayName: 'Player',
+    iconDataUrl: null,
+    bundleId: 'org.example.player',
+    processId: 10,
+    selector: { match: 'bundle_id', bundle_id: 'org.example.player', include_descendants: true },
+  };
+  const value = options(true);
+  const menus = createNodeMenuItems({
+    ...value,
+    applications: [
+      app,
+      { ...app, iconDataUrl: 'data:image/png;base64,first' },
+      { ...app, iconDataUrl: 'data:image/png;base64,second' },
+    ],
+    session: {
+      ...value.session,
+      capabilities: { ...value.session.capabilities, applicationCapture: false },
+    },
+  });
+  const choice = item(menus, 'application:["bundle","org.example.player"]');
+  expect(choice.iconUrl).toBe('data:image/png;base64,first');
+  expect(choice.disabled).toBe(true);
+  expect(choice.description).toBe(i18n.getFixedT('en')('audioSession.captureRateLocked'));
+});
+it('uses legacy output identity fallbacks and explains unsupported hardware', () => {
+  const value = options(false);
+  const model = {
+    ...value.model,
+    nodes: [
+      node('named-output', 'audio_device_output', { selector: { match: 'legacy-name' } }),
+      node('no-selector', 'audio_device_output'),
+    ],
+  };
+  const menus = createNodeMenuItems({
+    ...value,
+    model,
+    session: {
+      ...value.session,
+      capabilities: { ...value.session.capabilities, hardwareInput: false },
+    },
+  });
+  expect(item(menus, 'audio-input:monitor').disabled).toBe(true);
+  expect(item(menus, 'audio-input:monitor').description).toBe(
+    i18n.getFixedT('en')('audioSession.unsupported'),
+  );
+  expect(item(menus, 'audio-output:third').disabled).toBe(true);
+});
+
+it('offers honest empty hardware placeholders and ignores incomplete discovered app selectors without a graph', () => {
+  const value = options(false);
+  const menus = createNodeMenuItems({
+    ...value,
+    model: null,
+    audioDevices: [],
+    session: undefined,
+    applications: [
+      {
+        displayName: 'Incomplete',
+        bundleId: 'broken',
+        processId: 1,
+        iconDataUrl: null,
+        selector: {
+          match: 'bundle_id',
+          bundle_id: 'mismatched.discovery',
+          include_descendants: false,
+        },
+      },
+      {
+        displayName: 'Valid',
+        bundleId: 'org.example.valid',
+        processId: 2,
+        iconDataUrl: null,
+        selector: {
+          match: 'bundle_id',
+          bundle_id: 'org.example.valid',
+          include_descendants: false,
+        },
+      },
+    ],
+  });
+  expect(item(menus, 'no-input-devices').disabled).toBe(true);
+  expect(item(menus, 'no-output-devices').disabled).toBe(true);
+  expect(item(menus, 'application:["bundle","org.example.valid"]').disabled).toBe(false);
+  expect(item(menus, 'virtual-new-input').disabled).toBe(true);
+});

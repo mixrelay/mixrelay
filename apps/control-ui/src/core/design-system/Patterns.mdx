@@ -1,0 +1,199 @@
+import { Meta, Canvas } from '@storybook/addon-docs/blocks';
+import { DocsLayout } from './DocsLayout';
+import * as Forms from '../ui/Composition.stories';
+import * as Recovery from '../ui/RecoveryActions.stories';
+import * as Controls from '../ui/SystemControls.stories';
+import * as Transport from '../ui/TransportButton.stories';
+import * as Routing from '../../features/routing-workspace/RoutingWorkspace.stories';
+import * as Graph from '../audio-graph/AudioGraphCanvas.stories';
+import * as IconActions from '../ui/IconActions.stories';
+
+<Meta title="Design System/Patterns" />
+
+<DocsLayout>
+
+# Patterns
+
+패턴은 Core 컴포넌트를 실제 과업에 맞게 조합하는 규칙이다. Core는 표시·입력·포커스를, Feature는 요청·확인된 값·실패·복구를 소유한다. Screen은 작업 영역과 진입점을 배치한다.
+
+예시는 제품과 같은 Core를 렌더한다. Form Flow와 System Controls의 응답은 로컬 상태이며 Driver 저장·오디오 실행을 검증하지 않는다. Routing 예시는 실제 Feature에 fixture 제어 포트를 연결한다.
+
+## 정보와 아이콘 조작
+
+설명은 값의 범위·단위·제한·오류·복구 행동을 이해하는 데 필요할 때 제공한다. 이름과 버튼이 이미 전달하는 행동을 문장으로 반복하지 않는다. 기본값은 placeholder로 보완하며 필드 label을 유지한다. 무료 한도는 해당 행동의 한도만 안내한다.
+
+| 조작 | 이름·상태 | 키·포커스 |
+| --- | --- | --- |
+| 그래프 삭제 | Core CollectionItem이 `그래프 이름: 삭제 행동`을 조합 | 실제 버튼 하나, Enter/Space; 현재 그래프 선택 버튼과 분리 |
+| 노드 Options·Bypass·플러그인 에디터 | AudioNodeCard가 인스턴스 제목을 이름에 포함 | 실제 버튼 하나, Options expanded/controls·Bypass pressed; 제거된 복구 행동은 인접 조작으로 복귀 |
+| Record·Pause·Resume·Stop·폴더 | RecorderControls가 인스턴스 표시 이름을 전달 | 실제 명령·busy/disabled 유지; Core TransportButton/PathField가 키 실행 소유 |
+| 비밀번호 표시·숨기기 | TextField가 필드 이름과 번역된 행동을 조합 | Enter/Space, pressed; 값을 유지하고 폼 제출을 실행하지 않음 |
+| 전원·음소거·사이드바·닫기 | 기존 접근성 이름과 공통 Tooltip 사용 | wrapper Tab 대상 없음; pressed/expanded와 native disabled 유지 |
+| 테마·추가·파일 메뉴 | 현재 상태/행동 이름과 메뉴 관계 | Enter/Space, 방향키·Esc; 트리거로 복귀 |
+
+KeyboardOwners는 실제 Core의 17개 행동 버튼과 폴더·비밀번호·테마 버튼을 실행한다. Enter와 Space의 호출 횟수, 순·역방향 Tab, 메뉴 Escape 복귀를 검사한다. callback은 fixture 기록이며 녹음·파일·Driver 명령을 실행하지 않는다. 실제 Feature의 명령 연결은 해당 페이지·회귀 검사에서 확인한다.
+
+<Canvas of={IconActions.KeyboardOwners} story={{ inline: false, height: 540, autoplay: true }} />
+<Canvas of={IconActions.Disabled} story={{ inline: false, height: 460 }} />
+
+저장된 Off·Mute의 키보드 복구는 실제 RoutingWorkspace가 소유합니다. RecoveryKeyboard는 fixture 응답을 500ms 지연시키고 Enter로 Enable → 대기 중 disabled → Unmute로 포커스 복귀, Space로 Unmute → Bypass로 복귀를 검사합니다. SavedEffectOffAndMute는 복구 전 상태의 시각 표본으로 유지합니다.
+
+<Canvas of={Routing.RecoveryKeyboard} story={{ inline: false, height: 720, autoplay: true }} />
+
+## 1. 입력과 제출
+
+| 구조 | 계약 | 사용하는 Core |
+| --- | --- | --- |
+| 필드 묶음 | 이름 → 선택 → 도움말/오류의 DOM 순서. 필드별 margin 대신 부모가 간격 소유 | Stack, TextField, SelectField |
+| 값과 단위 | 숫자는 Mono, 문장·레이블은 Sans. 표시 단위와 실제 값 범위를 함께 제공 | NumericValueControl, ParameterField |
+| 선택 설명 | 현재 항목의 동작·입출력 관계를 해당 선택기에 연결. 설명에 별도 Tab 정지점 없음 | SelectField |
+| 최종 명령 | 취소 → 제출. 제출은 strong, 빈 이름은 제출 불가. 좁은 폭에서는 행 줄바꿈 | FormActions, ActionButton |
+| 결과 | 실패 이유와 다음 행동을 입력 가까이에 표시. 색 외 문구 제공 | InlineNotice |
+
+Form Flow는 이름과 샘플레이트를 선택하고 제출 결과를 같은 폼에 표시하는 구성 예시다. 취소 버튼은 예시의 결과 표시를 지운다. 실제 장치 설정을 되돌리는 명령은 아니다.
+
+<Canvas of={Forms.Interactive} story={{ inline: false, height: 340 }} />
+
+### pending·disabled·readOnly·invalid
+
+| 상태 | 의미 | 유지할 것 | 피할 것 |
+| --- | --- | --- | --- |
+| pending / busy | 요청 결과 대기. 중복 명령 방지 | 대상·값·버튼 크기, 진행 상태의 이름 | 응답 전 성공 표시, 불확실한 요청 반복 |
+| disabled | 현재 행동을 실행할 수 없음 | 필드 값과 실행 불가 사유 | 색만 옅게 만들어 비활성 흉내내기 |
+| readOnly | 확인된 값을 읽되 편집하지 못함 | 값·단위·접근성 이름; 텍스트 입력의 읽기/선택 | disabled와 같은 상태로 문서화 |
+| invalid / error | 입력 또는 요청 실패 | 오류와 필드 관계, 사용자가 작성한 값 | 실패 때 입력·그래프 초안 삭제 |
+
+busy는 필드와 제출을 잠그며 버튼 위치를 유지한다. 이 예시의 실패 문구와 Retry는 구성 표본이며 실제 재시도 동작을 제공하지 않는다.
+
+<Canvas of={Forms.Pending} story={{ inline: false, height: 340 }} />
+<Canvas of={Forms.Failed} story={{ inline: false, height: 460 }} />
+
+입력 readOnly와 invalid의 실제 Core 표본은 <a href="/?path=/story/core-design-system-component-catalog--overview" target="_top">Component Catalog</a>의 Feedback에 있다. 제품 전체에 임의 readOnly mode를 추가하지 않는다.
+
+## 2. 오류와 복구
+
+일반적인 그래프 revision 갱신은 오류 선택 화면을 열지 않는다. 다른 작성자가 바꾼 항목을 최신 문서에서 읽고, 사용자가 실제로 변경한 항목만 자동 병합한다. 확정된 revision 거부가 반복되어도 제한 시간 안에서 다시 병합한다. 그래프 선택·덮어쓰기·편집 취소를 매번 요구하지 않는다.
+
+다음 표본은 녹음기 추가 중 외부 trim 노드가 두 번 추가되는 상황이다. 실제 Feature가 녹음기와 외부 변경 둘을 유지하고 정상 편집 상태로 돌아가는지 검사한다.
+
+<Canvas of={Routing.AutomaticRevisionMerge} story={{ inline: false, height: 720, autoplay: true }} />
+
+| 상황 | 표시 | 행동·값·포커스 계약 | 소유자 |
+| --- | --- | --- | --- |
+| 저장 경고 | 진단 창 현재 문제의 warning + 보존 상태 | 오디오 실패와 구별. 현재 작업 유지 | WorkspaceProblems |
+| 일반 revision 거부 | 선택 화면 없이 최신 문서 자동 병합 | 로컬 변경·다른 작성자의 변경 보존, 확정 거부만 제한 시간 내 다시 병합 | GraphApplicationQueue |
+| 제출 응답 실패·timeout / blocked | 진단 창 현재 문제의 critical + 초안 보존 + 다시 시도 하나 | 불확실한 명령 자동 반복 금지. 명시적 재시도도 최신 문서에 자동 병합 | GraphApplicationQueue |
+| 계속되는 충돌 / graph_conflict_unresolved | 진단 창 현재 문제의 critical + 초안 보존 + 두 복구 선택 | 10초 재병합으로 해결하지 못한 경우만 편집본 적용 또는 편집 취소 후 실행부 문서 복구 | GraphApplicationQueue |
+| 배치 revision 거부 | 최신 배치에 변경한 좌표·크기·viewport 자동 병합 | 반복 확정 거부도 제한 시간 내 병합; 오디오 문서 revision과 별개 | GraphLayoutController |
+| 배치 조회·저장 실패 | 진단 창의 배치 오류 + “다시 시도” 하나, 조회 실패 중 작업 영역은 실패 안내 | 조회 실패는 내부에서 다시 읽기. 저장 실패는 로컬 배치를 보존하고 최신 배치에 자동 병합 | GraphLayoutController |
+| 값 변경 실패 | 관련 파라미터 오류 | 마지막 확인된 값·대상 유지. 실패 원인을 실제 응답에서 가져옴 | Feature의 값 소유자 |
+| 초기 그래프 조회 실패 | unavailable placeholder | 빈 그래프와 구별. 제한된 재조회로 실행부 문서 읽기 | RoutingWorkspace |
+| 복구 버튼 제거 | 진단 창 안에 유지 | 해결된 문제가 사라지면 Dialog focus scope가 창 안의 다음 대상으로 옮긴다 | Core Dialog |
+
+다음 Core 예시는 해결되지 않은 충돌의 두 복구 행동을 critical `InlineNotice`의 행동 슬롯에 조합하는 표본이다. callback 이름은 onRetry/onReload다. 일반 revision 갱신이나 통신 실패에 매번 두 선택을 제공하는 예시가 아니다. 실제 실패 분류는 Feature가 소유한다.
+
+<Canvas of={Recovery.Blocked} story={{ inline: false, height: 260 }} />
+
+다음은 실제 명령 응답 실패·복구 경로다. play가 Add node → Output → Recorder를 실행하고 첫 제출의 응답만 fixture에서 503으로 실패시킨다. 제품은 불확실한 요청을 자동 반복하지 않고 초안·실패 이유·“다시 시도” 하나를 제공한다. 사용자의 재시도는 최신 실행부 문서를 읽어 자동 병합한 뒤 적용한다. 그래프를 고르거나 편집본 적용/편집 취소 중 하나를 고르라고 요구하지 않는다. 앱에서는 이 실패가 진단 창의 현재 문제에 나타나고, Feature 스토리는 같은 영역을 작업 영역 아래에 둔다.
+
+<Canvas of={Routing.SubmissionRecovery} story={{ inline: false, height: 720, autoplay: true }} />
+
+<a href="/?path=/story/features-routing-workspace--submission-pending" target="_top">Submission Pending</a>은 같은 실제 추가 과업에서 응답을 기다리며, 제품의 10초 상한 뒤 timeout 복구로 전환한다. <a href="/?path=/story/features-routing-workspace--narrow-submission-recovery" target="_top">Narrow Submission Recovery</a>는 390px·Pseudo에서 초안·실패 이유·단일 다시 시도를 함께 검토한다. 이 fixture들은 native 오디오·녹음 파일을 만들지 않는다.
+
+작업 영역 위에는 오류 바를 두지 않는다. `WorkspaceProblems`가 작업 영역 실패를 코드와 심각도로 요약해 하단 진단 버튼의 개수·버튼 앞 상태 점(critical/warning)과 화면 낭독기 상태 알림에 전달하고, 복구 행동이 있는 `InlineNotice`는 진단 창의 현재 문제에 그린다. 배치 조회 실패처럼 캔버스를 그릴 수 없을 때만 작업 영역 자리 표시가 실패와 진단 위치를 알린다. <a href="/?path=/story/app-workspace--workspace-problem" target="_top">App Workspace Problem</a>이 실제 조합이다.
+
+### 플러그인 검색과 실행 장애
+
+검색의 부분 실패는 우측 하단 진단 버튼과 프로세서 메뉴의 ‘검색 리포트 보기…’에서 확인한다. 진단 창은 엔진·Driver 상태도 표시한다. 두 진입점은 같은 검색 세션을 사용한다. 메뉴의 오류 개수는 검색 진단이며, 사용 중인 노드의 오디오 상태를 뜻하지 않는다. Core Dialog·ContentSection·DisclosureList·ActionButton이 요약·재검색과 항목별 한 줄 행을 제공하고, 행을 펼치면 설명과 기술 정보가 나온다. 닫으면 진단 버튼 또는 노드 추가 트리거 중 창을 연 대상으로 포커스가 돌아간다. 재검색은 그래프나 플러그인 인스턴스를 변경하지 않는다.
+
+엔진이 확인한 처리 중단은 해당 AudioNodeCard의 critical 상태·설명·처리 재시도로 표시한다. 편집기 통신 실패는 해당 노드 내부의 InlineNotice와 편집기 재시도로 표시하며, 오디오 처리 실패로 바꾸어 표시하지 않는다. 검색·편집기 오류를 작업 영역 위의 상시 오류 바로 올리지 않는다.
+
+<Canvas of={Routing.EffectSearchReport} story={{ inline: false, height: 720, autoplay: true }} />
+<Canvas of={Routing.FailedPluginNode} story={{ inline: false, height: 540 }} />
+
+<a href="/?path=/story/features-routing-workspace--effect-search-report-narrow" target="_top">Effect Search Report Narrow</a>는 390px·긴 번역의 스크롤·줄바꿈 표본이다. <a href="/?path=/story/features-routing-workspace--plugin-editor-issue" target="_top">Plugin Editor Issue</a>는 한 노드의 편집기 통신 오류와 다른 정상 노드를 함께 표시한다. 포트 응답은 fixture이며 실제 플러그인·오디오 장애를 실행하지 않는다.
+
+## 3. 생성·이름 변경·삭제 확인
+
+| 단계 | 계약 |
+| --- | --- |
+| 열기 | 실제 버튼 하나가 트리거. 새 그래프는 허용된 상태에서 플랫폼 modifier + Shift + N도 사용 |
+| 구조 | Core Dialog의 제목·설명 → 의미 있는 필드/내용 → FormActions |
+| 시작 포커스 | 첫 의미 있는 필드 또는 버튼. 모달 내부 Tab 순환, 바깥 UI 접근 차단 |
+| 확인 | 대상 이름과 실제 삭제 범위를 표시. 화면 선택을 실행 여부로 간주하지 않음 |
+| busy | 중복 제출·Esc·바깥 클릭·닫기 차단. 같은 dialog와 입력을 유지 |
+| 실패 | dialog 내부에 이유와 다음 행동 표시. 원래 입력·대상 유지 |
+| 취소·닫기 | 트리거 또는 인접한 남은 조작으로 복귀. 이미 다른 곳으로 이동했다면 포커스 회수하지 않음 |
+
+<a href="/?path=/story/core-design-system-component-catalog--overview" target="_top">Component Catalog</a>의 New graph와 Delete graph는 실제 NameDialog·ConfirmationDialog를 연다. catalog의 확인 결과는 로컬 상태다. 제품의 생성·삭제 흐름은 <a href="/?path=/story/app-workspace--workspace" target="_top">App Workspace</a>에서 fixture 그래프에 실행한다. 실제 파일·장치 삭제의 증거는 아니다.
+
+## 4. 메뉴와 선택
+
+| 구분 | 이름·역할·상태 | 키와 포커스 |
+| --- | --- | --- |
+| 명령 메뉴 | 트리거 이름, menu 관계, expanded, 항목 disabled | Enter/Space 열기 → 방향키 이동 → Enter 실행 → Esc 닫기 |
+| 하위 메뉴 | 오른쪽 진입 방향, 메뉴 계층 | 방향키로 하위 목록 진입·복귀; 닫으면 트리거로 복귀 |
+| 값 선택 | 이름과 현재 선택 값, listbox 관계, 항목 설명 | 기본 선택 키 동작. 선택과 focus를 구별 |
+| 테마 | system / light / dark의 checked 항목 | 같은 Core ThemePicker 사용. 앱은 저장·복원, Storybook toolbar는 앱 저장값을 쓰지 않음 |
+| Options | 헤더 트리거와 패널의 expanded·controls 관계 | 열리면 기존 내부 필드 순서로 이어짐. 별도 카드 선택 Tab 대상 추가하지 않음 |
+
+선택값은 소유자가 확인한 readback이 기준이다. 같은 항목을 다시 선택하는 행동도 재시도로 전달할 수 있다. 메뉴·선택을 Screen의 스타일이나 임의 DOM으로 다시 만들지 않는다.
+
+<Canvas of={Controls.Interactive} story={{ inline: false, height: 600 }} />
+
+<a href="/?path=/story/core-design-system-system-controls--busy" target="_top">System Controls / Busy</a>, <a href="/?path=/story/core-design-system-system-controls--disabled" target="_top">Disabled</a>, <a href="/?path=/story/core-design-system-system-controls--narrow-long-translation" target="_top">Narrow Long Translation</a>에서 동일 계약의 상태를 비교한다.
+
+## 5. 오디오 상태는 서로 독립이다
+
+| 상태 | 실제 의미 | 유지되는 것 | 대응 표본 |
+| --- | --- | --- | --- |
+| 그래프·노드 선택 | 편집 명령의 대상 | 실제 실행 상태와 무관 | <a href="/?path=/story/core-audio-graph-canvas--connect-disconnect-reconnect" target="_top">Graph Canvas</a> |
+| 노드 Off | 처리를 제외하고 신호 차단 | 노드·설정·복구 행동 | <a href="/?path=/story/core-audio-nodes-frame--off" target="_top">Node Frame / Off</a> |
+| 노드 Mute | 처리는 유지, 출력 끔 | 처리·설정 | <a href="/?path=/story/features-routing-workspace--saved-effect-off-and-mute" target="_top">Saved Effect Off And Mute</a> |
+| 효과 Bypass | 원음을 통과시킴 | 효과 노드와 파라미터 | <a href="/?path=/story/features-builtin-effects--equalizer-bypassed" target="_top">Equalizer Bypassed</a> |
+| 앱 전체 오디오 Pause | 그래프·앱 캡처 중단 | 그래프·설정; 같은 녹음 파일에서 재개 | <a href="/?path=/story/app-workspace--audio-paused" target="_top">App / Audio Paused</a> |
+| 개별 녹음 Pause | 해당 파일의 기록 중단 | 라우팅·파일·누적 기록 프레임 | <a href="/?path=/story/core-controls-transportbutton--pause" target="_top">Transport / Pause</a> |
+| 개별 녹음 Stop | 해당 파일 정상 마무리 | 오디오 라우팅 | <a href="/?path=/story/core-controls-transportbutton--stop" target="_top">Transport / Stop</a> |
+
+녹음 Pause 구간은 무음으로 파일에 기록하지 않는다. 앱 오디오를 재개할 때 사용자가 개별 Pause·Stop·삭제한 녹음을 자동 시작하지 않는다. 무료 녹음 시간은 실제 기록한 누적 프레임으로 계산한다.
+
+`active + disabled`는 이미 녹음 중인 Record처럼 의미 있는 조합이다. disabled가 현재 실행 사실을 지우지 않는다. 다음 표본은 transport 표시 계약이며 녹음 파일을 만들지 않는다.
+
+<Canvas of={Transport.ActiveDisabled} story={{ inline: false, height: 140 }} />
+
+외부에서 저장된 Off/Mute인 효과에는 그 상태를 해제하는 복구 행동을 먼저 제공한다. 일반 효과 헤더는 bypass → Options 순서다. 복구 버튼이 사라지면 같은 헤더의 인접 enabled 동작으로 포커스를 돌린다.
+
+<Canvas of={Routing.SavedEffectOffAndMute} story={{ inline: false, height: 720 }} />
+
+## 6. 그래프 편집과 포커스
+
+| 대상 | 포커스·키 계약 | 상태·관계 |
+| --- | --- | --- |
+| 노드 | React Flow 바깥 노드 한 곳이 선택 소유. Enter/Space 선택, 방향키 이동, Shift+방향키 큰 이동 | 이름·선택·조작 안내. AudioNodeCard 내부에 선택 대상을 중복 생성하지 않음 |
+| 내부 입력·버튼 | 실제 컨트롤 각각. nokey 경계에서 입력·메뉴·슬라이더 키 처리 | 입력 중 Delete·방향키가 노드 삭제·이동으로 전파되지 않음 |
+| 연결선 | 연결선 한 곳. Enter/Space 선택, Delete/Backspace 삭제, Esc 해제 | 소스·CH → 목적지·CH, 선택 상태 |
+| 배경 | 일반 Tab 대상 없음. 선택 취소 중에만 프로그램 포커스 허용 | 이름 있는 graph region; 선택과 실행 독립 |
+| 포트 | 채널별 Tab 대상을 추가하지 않음 | 입력/출력 방향, CH·범위·개수. 같은 소스 출력 안에서 Shift 추가 선택 |
+| 미터·상태 | Tab 대상 없음 | 이름·현재 값·범위; 계측 부재는 대시, 측정 0과 구별. 실시간 값을 계속 발표하지 않음 |
+
+<Canvas of={Graph.ChannelSelectionFeedback} story={{ inline: false, height: 720 }} />
+
+포트 드래그의 시각 피드백과 Esc 취소는 위 표본에서 검토한다. 노드에서 소스·목적지·채널을 선택하는 동등한 키보드 연결 경로와 실제 보조 기술 읽기는 별도 미확인 범위다. Canvas의 존재나 자동 a11y 검사만으로 지원 완료라고 표시하지 않는다.
+
+## 7. 검토와 변경
+
+| 확인 | 방법 | 근거 범위 |
+| --- | --- | --- |
+| 순·역방향 Tab | 같은 행동에 포커스 소유자 하나, 입력/그래프 키 충돌 확인 | 실제 브라우저 키 실행 |
+| pending·실패·복구 | 같은 대상·초안·확인 값 유지, 복구 후 포커스 | Core·Feature 회귀 검사 + 해당 story |
+| 긴 번역·좁은 폭 | locale Pseudo와 11언어, 390px에서 필드·명령·Options 확인 | 브라우저 표본; Pseudo가 실제 번역 검토를 대체하지 않음 |
+| 테마 | 같은 story를 Light/Dark/System으로 비교 | 실제 Provider·역할 토큰 소비 |
+| 제품 실행 | 실제 장치·녹음 파일·실행부 readback 확인 | 설치본 검증; fixture와 구분 |
+
+소스: `core/ui/{Stack,Inline,FormActions,InlineNotice,Dialog,RecoveryActions,SelectField}.tsx`, `core/audio-graph/AudioGraphCanvas.tsx`, `features/routing-workspace/{RoutingWorkspace,WorkspaceProblems,GraphApplicationQueue,GraphLayoutController}`, `screens/StudioScreen.tsx`.
+
+동작·무료 정책은 `docs/product.md`, 키·포커스·ARIA의 변경 기준은 `docs/design/interaction-accessibility.md`가 소유한다. 변경은 토큰·Core 계약에서 시작하고 실제 Feature·Screen 소비자와 story에 함께 반영한다.
+
+검토 원칙은 <a href="https://www.carbondesignsystem.com/getting-started/contributing/component-checklist" target="_blank" rel="noreferrer">Carbon 완료 기준</a>의 사용 구분·지원 상태·코드·검증 대응을 참고한다. <a href="https://www.carbondesignsystem.com/building-blocks/core/components/overview/accessibility-status" target="_blank" rel="noreferrer">Carbon 접근성 검증 구분</a>처럼 자동 검사와 실제 키보드·보조 기술 근거를 구별한다. Carbon의 팔레트·서체·치수를 MixRelay 값으로 채택하지 않는다.
+
+</DocsLayout>

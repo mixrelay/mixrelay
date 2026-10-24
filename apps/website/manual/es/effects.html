@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="La versión gratuita permite usar el procesamiento integrado sin límite de instancias.">
+    <title>Efectos integrados y preajustes — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/effects.html">
+    <link rel="alternate" hreflang="ko" href="../ko/effects.html">
+    <link rel="alternate" hreflang="ja" href="../ja/effects.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/effects.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/effects.html">
+    <link rel="alternate" hreflang="de" href="../de/effects.html">
+    <link rel="alternate" hreflang="fr" href="../fr/effects.html">
+    <link rel="alternate" hreflang="it" href="../it/effects.html">
+    <link rel="alternate" hreflang="es" href="../es/effects.html">
+    <link rel="alternate" hreflang="pt" href="../pt/effects.html">
+    <link rel="alternate" hreflang="ru" href="../ru/effects.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Página del producto"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Idioma"><a href="../en/effects.html" lang="en" hreflang="en">English</a> <a href="../ko/effects.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/effects.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/effects.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/effects.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/effects.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/effects.html" lang="fr" hreflang="fr">Français</a> <a href="../it/effects.html" lang="it" hreflang="it">Italiano</a> <a href="../es/effects.html" lang="es" hreflang="es" aria-current="page">Español</a> <a href="../pt/effects.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/effects.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Borrador previo al lanzamiento</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Capítulos del manual">
+        <a class="back-link" href="../../index.html">← Página del producto</a>
+        <a class="manual-mobile-index" href="index.html">Todos los capítulos</a>
+        <nav class="guide-nav" aria-label="Capítulos del manual"><a href="index.html">Resumen del manual</a>
+<a href="installation.html">Requisitos del sistema e instalación</a>
+<a href="first-launch.html">Primer inicio y permisos</a>
+<a href="workspace.html">Espacio de trabajo de enrutamiento</a>
+<a href="devices.html">Dispositivos y conexiones virtuales</a>
+<a href="app-capture.html">Captura de audio de aplicaciones</a>
+<a href="recording.html">Grabación</a>
+<a href="effects.html" aria-current="page">Efectos integrados y preajustes</a>
+<a href="plugins.html">Plug-ins externos</a>
+<a href="stream-deck.html">Plug-in de Stream Deck</a>
+<a href="licensing.html">Versión gratuita y licencias</a>
+<a href="updates.html">Actualizaciones</a>
+<a href="uninstall.html">Desinstalación</a>
+<a href="troubleshooting.html">Solución de problemas y diagnóstico</a>
+<a href="support.html">Contacto de soporte</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Efectos integrados y preajustes</h1><p>La versión gratuita permite usar el procesamiento integrado sin límite de instancias.</p><p class="guide-draft-note">Borrador previo al lanzamiento. Las descargas y las compras públicas aún no están disponibles. Estas instrucciones describen la compilación actual del código fuente; aún queda por verificar el comportamiento de la instalación en los entornos indicados a continuación.</p></header>
+        <nav class="manual-toc" aria-label="En esta página"><p class="sidebar-label">En esta página</p><ul><li><a href="#processors">Añadir y ajustar efectos</a></li><li><a href="#presets">Preajustes y cadenas de efectos</a></li></ul></nav>
+        <section class="guide-section" id="processors" aria-labelledby="processors-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="processors-title">Añadir y ajustar efectos</h2>
+<p>Elige <code>Añadir nodo → Procesador</code>, selecciona un efecto y conecta sus canales de entrada y salida. Abre <code>Opciones</code> para acceder a los parámetros. Los efectos disponibles son Compresor, Limitador, Ecualizador, Paso alto, Paso bajo, Puerta de ruido, Expansor, Herramientas de canales, Panorámica mono, Balance estéreo, Retardo, Atenuación automática, Reverberación y Coro.</p><ul><li>Compresor y Limitador controlan la dinámica y los picos. Su medidor de reducción de ganancia usa las mediciones del motor; un guion indica que no hay mediciones disponibles.</li><li>Ecualizador tiene tres bandas de pico. Arrastra un punto para cambiar la frecuencia y la ganancia, o usa los campos Frecuencia, Ganancia y Q en Opciones. Paso alto y Paso bajo eliminan las frecuencias bajas o altas.</li><li>Puerta de ruido y Expansor reducen las señales por debajo de su umbral. Herramientas de canales permite sumar en mono, duplicar canales, intercambiar izquierda y derecha e invertir la polaridad. Suma mono calcula la media de L y R.</li><li>Panorámica mono sitúa una señal mono en estéreo; Balance estéreo ajusta el balance entre izquierda y derecha. Atenuación automática usa una <code>Entrada de control</code> mono independiente para reducir la señal principal. Conecta la fuente de control por separado; no se mezcla con la salida.</li><li>Retardo añade ecos temporizados. Reverberación y Coro añaden espacio o modulación. Sus configuraciones de canales son distintas; conecta los puertos que ofrezca cada efecto.</li></ul><p><code>Omitir efecto</code> deja pasar el audio sin procesar. Apagar un nodo bloquea su señal. No hay supresión de ruido integrada ni medición de LUFS.</p>
+</div></section>
+<section class="guide-section" id="presets" aria-labelledby="presets-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="presets-title">Preajustes y cadenas de efectos</h2>
+<p>Usa <code>Preajuste</code> en las Opciones del efecto. Reverberación incluye Sala pequeña, Estudio, Sala grande, Karaoke, Túnel y Pecera. Retardo incluye Eco corto, Slapback, Eco vocal, Karaoke, Eco largo y Ping-pong. Al modificar los valores de un preajuste, pasa a <code>Personalizado</code>.</p><p>Para añadir varios efectos conectados, elige <code>Añadir nodo → Procesador → Cadenas de efectos</code> y después Karaoke, Túnel, Pecera, Radio o Voz doble. Una cadena añade sus propios nodos y conexiones sin modificar los cables existentes. Conecta tu fuente y tu salida a la cadena. Una sola acción de deshacer elimina la inserción. Los espacios de trabajo guardados conservan los parámetros y las conexiones reales. No se necesita instalar respuestas a impulsos ni muestras externas.</p><!-- TODO screenshot: Equalizer Options, Reverb preset menu and an inserted effect chain. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="Capítulos del manual"><a rel="prev" href="recording.html">← Anterior: Grabación</a><a rel="next" href="plugins.html">Siguiente: Plug-ins externos →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Borrador previo al lanzamiento · MixRelay 0.1.0</p><a href="../../index.html">Página del producto</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

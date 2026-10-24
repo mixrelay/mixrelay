@@ -1,0 +1,26 @@
+[package]
+name = "mixrelay-driver-control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mixrelay-local-socket = { path = "../local-socket" }
+# Common endpoint types; no graph, engine, licensing, or platform dependency.
+mixrelay-audio-io.workspace = true
+axum.workspace = true
+parking_lot.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Startup failures are reported by the service's existing tracing subscriber.
+tracing = "0.1.41"
+tokio = { workspace = true, features = ["sync", "time"] }
+
+[dev-dependencies]
+mixrelay-test-support = { path = "../test-support" }
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

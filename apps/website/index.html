@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="MixRelay는 오디오 소스, 프로세서, 출력과 녹음을 하나의 그래프로 연결하는 오디오 라우팅 앱입니다.">
+    <title>MixRelay — 오디오를 그래프로 연결하세요</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <header class="site-header">
+      <a class="brand-link" href="index.html" aria-label="MixRelay 홈">
+        <img class="brand-symbol" src="assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96">
+      </a>
+      <nav class="primary-nav" aria-label="주요 메뉴">
+        <a href="#features">기능</a>
+        <a href="#access">이용 방식</a>
+        <a href="manual/ko/index.html">사용 안내서</a>
+      </nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 사전 공개 초안</span>
+    </header>
+
+    <main id="main">
+      <section class="hero page-width" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> 라우팅 · 프로세싱 · 녹음</p>
+          <h1 id="hero-title">오디오 경로를<br>한눈에 그리고,<br><em>유연하게 연결하세요.</em></h1>
+          <p class="hero-intro">앱과 입력 장치에서 시작해 프로세서, 가상·실제 출력과 녹음까지. MixRelay에서 케이블로 이어지는 하나의 그래프로 다룹니다.</p>
+          <a class="text-link" href="manual/ko/index.html">사용 흐름 살펴보기 <span aria-hidden="true">↗</span></a>
+          <p class="availability-note">제품과 안내서의 사전 공개 초안입니다. 현재 다운로드와 구매는 제공하지 않습니다.</p>
+        </div>
+
+        <figure class="routing-art">
+          <svg viewBox="0 0 600 430" role="img" aria-labelledby="routing-title routing-desc">
+            <title id="routing-title">MixRelay 오디오 그래프 예시</title>
+            <desc id="routing-desc">두 오디오 소스가 하나의 컴프레서로 연결됩니다. 컴프레서의 출력은 오디오 출력과 녹음기로 이어집니다.</desc>
+            <path class="wire wire-green" d="M190 117 C246 117 229 178 285 178" />
+            <path class="wire wire-green" d="M190 298 C245 298 229 231 285 231" />
+            <path class="wire wire-coral" d="M421 205 C462 205 447 128 486 128" />
+            <path class="wire wire-coral" d="M352 253 C352 314 409 325 451 325" />
+            <circle class="wire-port port-green" cx="190" cy="117" r="5" />
+            <circle class="wire-port port-green" cx="190" cy="298" r="5" />
+            <circle class="wire-port port-green" cx="285" cy="178" r="5" />
+            <circle class="wire-port port-green" cx="285" cy="231" r="5" />
+            <circle class="wire-port port-coral" cx="421" cy="205" r="5" />
+            <circle class="wire-port port-coral" cx="486" cy="128" r="5" />
+            <circle class="wire-port port-coral" cx="352" cy="253" r="5" />
+            <circle class="wire-port port-coral" cx="451" cy="325" r="5" />
+
+            <g class="graph-node source-node">
+              <rect x="34" y="78" width="156" height="78" rx="15" />
+              <circle class="node-icon" cx="61" cy="117" r="13" />
+              <path class="icon-mark" d="M56 117h10M61 112v10" />
+              <text class="node-kicker" x="84" y="108">소스</text>
+              <text class="node-name" x="84" y="130">앱</text>
+            </g>
+            <g class="graph-node source-node">
+              <rect x="34" y="259" width="156" height="78" rx="15" />
+              <circle class="node-icon" cx="61" cy="298" r="13" />
+              <path class="icon-mark" d="M57 294v8m4-12v16m4-12v8" />
+              <text class="node-kicker" x="84" y="289">소스</text>
+              <text class="node-name" x="84" y="311">입력 장치</text>
+            </g>
+            <g class="graph-node process-node">
+              <rect x="285" y="165" width="136" height="88" rx="17" />
+              <circle class="process-dot" cx="310" cy="190" r="4" />
+              <text class="node-kicker" x="324" y="194">프로세서</text>
+              <text class="node-name process-name" x="306" y="224">컴프레서</text>
+              <path class="meter-line" d="M306 237h23l8-8 9 11 9-6h42" />
+            </g>
+            <g class="graph-node output-node">
+              <rect x="486" y="89" width="91" height="78" rx="15" />
+              <path class="output-glyph" d="M508 119h7l11-9v26l-11-9h-7zM532 116q9 7 0 14" />
+              <text class="node-kicker" x="503" y="153">출력</text>
+            </g>
+            <g class="graph-node recorder-node">
+              <rect x="451" y="286" width="126" height="78" rx="15" />
+              <circle class="record-dot" cx="474" cy="315" r="6" />
+              <text class="node-kicker" x="489" y="319">출력</text>
+              <text class="node-name" x="469" y="343">녹음기</text>
+            </g>
+            <text class="graph-caption" x="35" y="390">소스에서 출력까지 — 필요한 경로를 직접 구성</text>
+          </svg>
+        </figure>
+      </section>
+
+      <section class="feature-band" id="features" aria-labelledby="features-title">
+        <div class="page-width">
+          <div class="section-heading">
+            <p class="eyebrow">하나의 작업 공간</p>
+            <h2 id="features-title">듣고, 다듬고, 남기는 흐름을<br>한 그래프 안에.</h2>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card">
+              <span class="feature-index">01 / ROUTE</span>
+              <h3>필요한 소리를 모으기</h3>
+              <p>실행 중인 앱, 오디오 입력 장치, MixRelay 가상 장치를 소스로 놓고 원하는 출력에 연결합니다.</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-index">02 / PROCESS</span>
+              <h3>경로마다 다듬기</h3>
+              <p>내장 컴프레서와 리미터, 현재 검색된 오디오 플러그인을 신호 흐름에 배치합니다.</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-index">03 / RECORD</span>
+              <h3>믹스를 파일로 기록</h3>
+              <p>녹음기에서 폴더, WAV 샘플레이트와 비트 심도를 정하고 녹음·일시정지·재개·정지를 제어합니다.</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-index">04 / STREAM DECK</span>
+              <h3>자주 쓰는 제어를 버튼에</h3>
+              <p>macOS Stream Deck 플러그인에서 전원, 음소거, 볼륨과 녹음 동작을 그래프의 노드에 연결합니다.</p>
+            </article>
+          </div>
+          <p class="feature-footnote">플러그인 형식, 채널 연결과 장치 사용 가능 여부는 운영체제와 각 장치·플러그인에 따라 달라질 수 있습니다. 가상 장치는 신호를 자동 전달하거나 시스템 기본 장치를 바꾸지 않습니다.</p>
+        </div>
+      </section>
+
+      <section class="access-section page-width" id="access" aria-labelledby="access-title">
+        <div class="access-copy">
+          <p class="eyebrow">이용 방식</p>
+          <h2 id="access-title">설치는 무료.<br>기간 제한 없이 사용해 보세요.</h2>
+          <p>무료 모드는 기간 제한 없이 기본 라우팅과 녹음을 제공합니다. 그래프·입력·출력·채널 매핑·플러그인·녹음에는 기능 한도가 있으며, 유료 라이선스로 추가 기능을 사용할 수 있습니다. 무료 Driver의 최대 64채널과 장치 설정은 구매 인증 없이 사용할 수 있습니다.</p>
+          <p>유료 인증을 해제한 기기에서도 무료 기능은 계속 사용할 수 있습니다. 이전 기기의 인증을 해제한 뒤 새 기기에서 같은 라이선스 키로 활성화할 수 있습니다.</p>
+          <p>구매 후 30일 이내에는 이유를 묻지 않고 전액 환불합니다. 지원 문의는 한국의 영업일 기준 2일 이내 첫 응답을 목표로 합니다.</p>
+          <h3 id="requirements-title">시스템 요구사항</h3>
+          <ul aria-labelledby="requirements-title">
+            <li>macOS 14.2 이상 · Apple Silicon과 Intel · macOS 27까지 확인</li>
+            <li>Linux x86_64·arm64 · PipeWire 1.2 이상 · WirePlumber 0.5 이상</li>
+          </ul>
+        </div>
+        <aside class="release-card" aria-label="공개 준비 상태">
+          <span class="release-mark" aria-hidden="true">↗</span>
+          <p class="release-label">공개 전</p>
+          <h3>다운로드와 구매를 준비하고 있습니다.</h3>
+          <p>구매 스토어는 아직 개설되지 않았습니다. 확정 가격은 세금 별도 정가 US$69, 상시 판매가 US$39입니다. 구매 링크와 공개 다운로드는 준비 중입니다.</p>
+          <a href="manual/ko/index.html">현재 사용 안내서 읽기 <span aria-hidden="true">→</span></a>
+        </aside>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="page-width footer-inner">
+        <a class="brand-link footer-brand" href="index.html" aria-label="MixRelay 홈"><img class="brand-symbol" src="assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+        <p>오디오 경로를 직접 연결하고 제어하세요.</p>
+        <a href="manual/ko/index.html">사용 안내서</a>
+      <nav class="footer-policies" aria-label="정책" lang="ko"><a href="legal/ko/terms.html">판매조건·환불</a><a href="legal/ko/privacy.html">개인정보 처리방침</a></nav><a href="assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+      <section class="page-width business-info" aria-labelledby="business-info-title">
+        <h2 id="business-info-title">사업자 정보</h2>
+        <dl>
+          <dt>제품 판매·운영 및 사용권 제공자</dt><dd>에코 비전 랩 (Echo Vision Lab), 대한민국 개인사업자</dd>
+          <dt>대표자</dt><dd>배승현</dd>
+          <dt>사업자등록번호</dt><dd>111-42-04359</dd>
+          <dt>주소</dt><dd>서울특별시 강남구 논현로10길 30, 5층 505-S80호<br><span lang="en">Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul, Republic of Korea</span></dd>
+          <dt>전화</dt><dd>+82 10-6380-9646</dd>
+          <dt>이메일</dt><dd><a href="mailto:support@rawsector.com">support@rawsector.com</a></dd>
+          <dt>웹 호스팅 제공자</dt><dd>에코 비전 랩 자체 서버(대한민국), Cloudflare, Inc.(요청 처리·보안)</dd>
+          <dt>결제 거래의 판매자</dt><dd>Lemon Squeezy (Merchant of Record)</dd>
+        </dl>
+      </section>
+    </footer>
+  </body>
+</html>

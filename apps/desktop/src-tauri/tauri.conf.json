@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ToneNari",
+  "productName": "MixRelay",
   "version": "0.1.0",
-  "identifier": "io.tonenari.desktop",
+  "identifier": "io.mixrelay.desktop",
   "build": {
-    "beforeDevCommand": "pnpm --dir ../control-ui dev",
-    "beforeBuildCommand": "pnpm --dir ../control-ui build",
+    "beforeDevCommand": "pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui dev",
+    "beforeBuildCommand": "pnpm --dir ../.. desktop:prepare-engine --profile release && pnpm --dir ../.. desktop:prepare-driver --profile release && pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../../control-ui/dist"
   },
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "ToneNari",
+        "title": "MixRelay",
         "width": 1180,
         "height": 780,
         "minWidth": 390,
@@ -28,6 +28,61 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "category": "Music"
+    "licenseFile": "../../../LICENSE.txt",
+    "resources": {
+      "../../../LICENSE.txt": "LICENSE.txt",
+      "../../../LICENSE-Driver.txt": "LICENSE-Driver.txt",
+      "../../../LICENSE-Driver.ko.txt": "LICENSE-Driver.ko.txt",
+      "../../../CHANGELOG.md": "CHANGELOG.md",
+      "../../control-ui/src/core/theme/fonts/OFL.txt": "third-party/IBM-Plex/OFL.txt",
+      "../../../vendor/LICENSE-MIT": "third-party/truce-rack/LICENSE-MIT",
+      "../../../vendor/LICENSE-APACHE": "third-party/truce-rack/LICENSE-APACHE",
+      "../../../LICENSE.ja.txt": "LICENSE.ja.txt",
+      "../../../LICENSE-Driver.ja.txt": "LICENSE-Driver.ja.txt",
+      "../../../LICENSE.ko.txt": "LICENSE.ko.txt",
+      "../../../LICENSE.zh-Hans.txt": "LICENSE.zh-Hans.txt",
+      "../../../LICENSE-Driver.zh-Hans.txt": "LICENSE-Driver.zh-Hans.txt",
+      "../../../LICENSE.zh-Hant.txt": "LICENSE.zh-Hant.txt",
+      "../../../LICENSE-Driver.zh-Hant.txt": "LICENSE-Driver.zh-Hant.txt",
+      "../../../LICENSE.fr.txt": "LICENSE.fr.txt",
+      "../../../LICENSE-Driver.fr.txt": "LICENSE-Driver.fr.txt",
+      "../../../LICENSE.de.txt": "LICENSE.de.txt",
+      "../../../LICENSE-Driver.de.txt": "LICENSE-Driver.de.txt",
+      "../../../LICENSE.es.txt": "LICENSE.es.txt",
+      "../../../LICENSE-Driver.es.txt": "LICENSE-Driver.es.txt",
+      "../../../LICENSE.pt.txt": "LICENSE.pt.txt",
+      "../../../LICENSE-Driver.pt.txt": "LICENSE-Driver.pt.txt",
+      "../../../LICENSE.it.txt": "LICENSE.it.txt",
+      "../../../LICENSE-Driver.it.txt": "LICENSE-Driver.it.txt",
+      "../../../LICENSE.ru.txt": "LICENSE.ru.txt",
+      "../../../LICENSE-Driver.ru.txt": "LICENSE-Driver.ru.txt",
+      "../../../packaging/macos/localization/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
+      "../../../packaging/macos/localization/ko.lproj/InfoPlist.strings": "ko.lproj/InfoPlist.strings",
+      "../../../packaging/macos/localization/ja.lproj/InfoPlist.strings": "ja.lproj/InfoPlist.strings",
+      "../../../packaging/macos/localization/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings",
+      "../../../packaging/macos/localization/zh-Hant.lproj/InfoPlist.strings": "zh-Hant.lproj/InfoPlist.strings",
+      "../../../packaging/macos/localization/fr.lproj/InfoPlist.strings": "fr.lproj/InfoPlist.strings",
+      "../../../packaging/macos/localization/de.lproj/InfoPlist.strings": "de.lproj/InfoPlist.strings",
+      "../../../packaging/macos/localization/es.lproj/InfoPlist.strings": "es.lproj/InfoPlist.strings",
+      "../../../packaging/macos/localization/pt.lproj/InfoPlist.strings": "pt.lproj/InfoPlist.strings",
+      "../../../packaging/macos/localization/it.lproj/InfoPlist.strings": "it.lproj/InfoPlist.strings",
+      "../../../packaging/macos/localization/ru.lproj/InfoPlist.strings": "ru.lproj/InfoPlist.strings"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns"
+    ],
+    "category": "Music",
+    "shortDescription": "Audio routing and processing",
+    "longDescription": "Route audio between devices and applications, apply audio processors, and record signals using node-based graphs.",
+    "macOS": {
+      "entitlements": "Entitlements.plist",
+      "minimumSystemVersion": "14.2",
+      "files": {
+        "Resources/mixrelay-driver-launcher": "../../../target/universal-apple-darwin/release/mixrelay-driver-launcher"
+      }
+    }
   }
 }

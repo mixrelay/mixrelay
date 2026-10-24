@@ -1,0 +1,90 @@
+MixRelay App
+Contrato de licença de software
+Licenciante e titular dos direitos autorais: Echo Vision Lab
+Versão: 2026-10-10
+
+1. Uso da aplicação
+Estes termos regem a aplicação MixRelay gratuita e paga e o seu motor de grafos no macOS e no Linux. O MixRelay Driver é regido separadamente por LICENSE-Driver.txt, mesmo quando fornecido no mesmo instalador.
+
+O contrato de uso do software é celebrado quando você aceita estes termos depois de eles serem apresentados antes da instalação ou do uso. Se não os aceitar, não instale nem use os componentes proprietários da aplicação MixRelay. Uma pessoa autorizada pode aceitar em nome de uma organização. A aceitação ou a recusa destes termos não afeta os direitos concedidos por licenças de terceiros.
+
+A Echo Vision Lab concede autorização não exclusiva para instalar e executar os binários autorizados da aplicação em trabalhos de áudio pessoais ou profissionais, incluindo gravação, produção e transmissão comerciais, dentro das funcionalidades aplicáveis e dos direitos adquiridos na compra. Você pode manter as cópias de segurança necessárias para esse uso. A propriedade do software não é transferida.
+
+2. Avaliação gratuita, compras e atualizações
+A aplicação gratuita oferece uma avaliação com funcionalidades limitadas e sem limite de tempo. A aplicação gratuita também permite guardar e carregar um grafo e os seus mapeamentos de canais. As configurações do Driver permanecem gratuitas. A avaliação não acrescenta redução da qualidade do áudio, ruído nem atraso artificial.
+
+O Driver gratuito fornece um dispositivo virtual básico padrão, com configurações gratuitas de número de canais, taxa de amostragem e formato PCM. Renomear um dispositivo exige a aplicação paga. Criar ou remover várias identidades de dispositivos virtuais (Create/Remove) exige a aplicação paga; nem a aplicação gratuita nem o Driver independente oferecem essas operações. Os dispositivos virtuais já criados pela aplicação paga permanecem disponíveis após o encerramento dessa aplicação. Quaisquer limites de grafos, nós, canais de processamento ou gravação são indicados nas informações de funcionalidades da versão utilizada. Uma compra abrange as funcionalidades descritas na sua oferta; estes termos não autorizam limites não divulgados nem a redução de funcionalidades adquiridas.
+
+A licença paga cobre a versão principal comprada. Qualquer limite de ativações é informado na oferta antes do pagamento. As atualizações oferecidas para essa versão principal estão incluídas. Se outra versão principal for oferecida, sua compra será opcional. Não comprar outra versão não cancela os direitos da versão comprada.
+
+Não se trata de uma assinatura mensal. A instalação de uma atualização não cancela, por si só, os seus direitos sobre a versão principal adquirida.
+
+3. Ativação e troca de dispositivos
+A aplicação paga exige autenticação de compra on-line. A autenticação off-line é válida por 30 dias a partir da última verificação on-line bem-sucedida. As condições de novas verificações on-line são apresentadas antes do pagamento. Esse período não é a duração da licença nem um período de pagamento recorrente. Reiniciar ou uma verificação malsucedida não o estendem. Expiração ou erro de rede, por si sós, não cancelam a compra nem interrompem abruptamente o áudio em reprodução.
+
+Para transferir a ativação, desative o dispositivo antigo on-line e ative o novo conforme as condições de ativação compradas. A desativação no servidor só termina após confirmação do serviço de licenças. Se o dispositivo antigo estiver inacessível ou a desativação não puder ser concluída, contate support@rawsector.com. Desinstalar, reinstalar ou excluir credenciais locais não libera, por si só, uma ativação do servidor nem cancela a compra.
+
+Após desativação ou retirada dos direitos pagos, o sistema pode continuar usando as funções gratuitas da aplicação e do Driver. Essa mudança não exclui gravações, projetos ou configurações de dispositivos. Operações exclusivas pagas exigem direitos pagos válidos. Não compartilhe chaves para uso não autorizado nem contorne a autenticação de compra ou os limites gratuitos.
+
+4. Redistribuição, integração e licenças de terceiros
+O código proprietário do próprio MixRelay permanece privado. A distribuição gratuita ou a compra da aplicação não concede acesso ao seu repositório privado de código-fonte nem permissão para publicar esse código, modificar os seus componentes proprietários ou redistribuí-los.
+
+OEM, distribuição conjunta, revenda, distribuição de marca branca e o fornecimento do próprio MixRelay como componente de um produto ou serviço de terceiros exigem autorização prévia por escrito e um contrato pago separado. O uso habitual como ferramenta de áudio instalada para trabalhos comerciais não constitui, por si só, integração em um produto. A compra da aplicação não inclui esses direitos de integração ou redistribuição. Consulte support@rawsector.com sobre um contrato separado.
+
+Estas restrições não anulam direitos concedidos pela legislação aplicável, incluindo atos lícitos de cópia de segurança ou relacionados à interoperabilidade, nem os concedidos por licenças de terceiros.
+
+As licenças de terceiros regem os seus componentes correspondentes e prevalecem sobre restrições incompatíveis destes termos. Isso inclui código de fornecedores sob MIT/Apache-2.0 e as suas modificações licenciadas, incluindo alterações relativas ao estado LV2 feitas pelo MixRelay, quaisquer componentes MPL-2.0 incluídos e código derivado de exemplos da Apple sob as suas licenças originais. Os direitos concedidos por essas licenças sobre o código-fonte, a sua modificação e a sua redistribuição são preservados. Os avisos de direitos autorais aplicáveis, os textos das licenças e os avisos exigidos de acesso ao código-fonte devem acompanhar os componentes correspondentes.
+
+5. Seus trabalhos, arquivos e plug-ins
+Você mantém os seus direitos sobre gravações, projetos e outros materiais criados ou processados com o MixRelay. Estes termos não concedem à Echo Vision Lab direitos de propriedade, publicação, marketing ou treinamento sobre esses materiais. Você é responsável por obter as permissões necessárias para gravar, processar ou transmitir materiais de terceiros. Uma compra do MixRelay não concede licença para um plug-in de terceiros.
+
+Mantenha cópias dos trabalhos importantes antes de alterar a sua configuração. Deixar de usar o software ou encerrar a sua licença não transfere os seus trabalhos para nós nem exige a sua exclusão. Para os arquivos gerenciados pela aplicação, use as opções de exclusão de dados oferecidas durante a desinstalação; as suas gravações e os seus projetos externos não fazem parte da licença do software.
+
+6. Compras e reembolsos
+Nas compras por meio do Lemon Squeezy, o Lemon Squeezy é o vendedor responsável pela transação (merchant of record) e gerencia o pagamento, os impostos sobre vendas, os reembolsos e as contestações de cobrança conforme os seus termos de transação. A Echo Vision Lab continua sendo a desenvolvedora e licenciante da aplicação e assume o suporte do produto e as obrigações que lhe cabem conforme estes termos e a legislação aplicável.
+
+O vendedor, o preço, os impostos, o âmbito da licença e as condições de reembolso aplicáveis são apresentados antes do pagamento. Para solicitar cancelamento ou reembolso, entre em contato com support@rawsector.com ou com o canal de suporte do pedido indicado no recibo, fornecendo informações que identifiquem a compra e a sua solicitação. Não envie dados de cartões de pagamento nem senhas. Auxiliaremos nas reclamações relacionadas ao produto; usar o Lemon Squeezy não exclui qualquer responsabilidade imposta à Echo Vision Lab pela legislação aplicável.
+
+Você pode solicitar reembolso integral dentro de 30 dias corridos após a compra sem indicar motivo. Envie a solicitação a support@rawsector.com ou ao suporte do pedido indicado no recibo, com informações que identifiquem a compra. Uma solicitação enviada dentro do prazo continua válida mesmo se processada depois. Esta política complementa e não limita direitos obrigatórios de desistência, reembolso ou reparação por defeitos. Baixar, instalar ou usar a aplicação não exclui, por si só, esta política de reembolso de 30 dias.
+
+Os direitos obrigatórios de desistência, reembolso e reparação por defeitos permanecem disponíveis. Quando a legislação coreana de defesa do consumidor no comércio eletrônico for aplicável, o prazo comum de desistência é de sete dias a contar do recebimento das informações contratuais escritas ou do fornecimento, se este ocorrer depois. As prorrogações legais se aplicam quando faltarem informações obrigatórias ou quando a desistência tiver sido impedida. O início do fornecimento de conteúdo digital só pode limitar a desistência comum se forem cumpridas as condições legais, incluindo aviso claro e as medidas de teste ou inspeção exigidas. As partes separáveis ainda não fornecidas continuam sujeitas à desistência. Experimentar a aplicação gratuita ou aceitar estes termos não constitui, por si só, renúncia aos direitos de desistência.
+
+Para conteúdo fornecido em desacordo com a sua descrição ou o contrato, a legislação coreana permite a desistência dentro de três meses após o fornecimento ou dentro de 30 dias a contar do momento em que a divergência foi conhecida ou poderia ter sido conhecida. A desistência legal de uma compra de conteúdo digital exige reembolso dentro de três dias úteis a contar da desistência, juntamente com medidas de cancelamento do pagamento e qualquer compensação legal por atraso. Não é imposta penalidade por desistência. Os direitos locais obrigatórios mais favoráveis e as condições de reembolso acordadas permanecem intactos. Os direitos pagos reembolsados podem terminar, mas a autorização separada para o Driver gratuito continua.
+
+Após reembolso integral, os direitos pagos são retirados quando uma resposta on-line do serviço de licenças confirma que os direitos reembolsados não são mais válidos. Uma falha de conexão, por si só, não é essa confirmação. Não exigimos reconectar um computador off-line apenas para aplicar o reembolso e permitimos continuar usando-o dentro da autorização off-line existente. Isso não estende o período off-line aplicável nem autoriza nova ativação paga. As funções gratuitas da aplicação e do Driver continuam disponíveis; o reembolso não exclui gravações, projetos ou configurações do usuário.
+
+7. Licenciamento, atualizações e informações pessoais
+A ativação online envia a sua chave de licença e o nome de ativação escolhido diretamente ao Lemon Squeezy por HTTPS. A validação e a desativação enviam a chave e o identificador de ativação. Essas solicitações autenticam a sua compra e gerenciam as ativações de dispositivos. As credenciais locais de ativação usam o armazenamento de credenciais do sistema operacional. As informações de pagamento são inseridas na página de pagamento do Lemon Squeezy, não no formulário de chave de licença da aplicação.
+
+A aplicação verifica atualizações ao iniciar, a cada 24 horas enquanto está em execução e quando você solicita uma verificação. As verificações entram em contato com https://appserver.rawsector.com com o produto, o sistema operacional e a arquitetura do processador. O serviço também recebe informações normais de conexão, como o seu endereço IP. As solicitações de licenciamento e de atualização não enviam o seu áudio, as suas gravações, o conteúdo dos projetos, os grafos nem os nomes dos dispositivos de áudio. Abrir um download usa o seu navegador e o servidor de download selecionado. Os plug-ins e serviços de terceiros têm as suas próprias práticas de tratamento de dados.
+
+Quando você entra em contato com o suporte, recebemos os dados de contato, a mensagem e os arquivos que escolher enviar. Envie apenas as informações necessárias para a sua solicitação. O tratamento dos dados de compra e de licenciamento pelo Lemon Squeezy, incluindo o processamento fora do seu país, está descrito em https://www.lemonsqueezy.com/privacy.
+
+Aceitar este contrato não constitui consentimento para marketing opcional, análises opcionais nem transferências internacionais. Você pode enviar dúvidas sobre privacidade e solicitações de acesso, correção, exclusão ou restrição do tratamento das suas informações para privacy@dsub.io. Os requisitos aplicáveis de verificação de identidade e as obrigações legais de conservação de registros permanecem em vigor. Recusar um tratamento opcional não remove a sua licença de software nem os seus direitos legais.
+
+8. Suporte, compatibilidade e responsabilidade
+Use as configurações compatíveis de sistema operacional, dispositivos e plug-ins descritas para a versão publicada. Dúvidas de suporte e de compatibilidade podem ser enviadas para support@rawsector.com. Não se promete compatibilidade com todas as configurações nem funcionamento ininterrupto e sem erros. Essas declarações não anulam a descrição do produto, as condições de compra acordadas nem os direitos legais de reparação relativos à qualidade.
+
+Nossa meta é uma primeira resposta em dois dias úteis coreanos, excluindo fins de semana e feriados da Coreia do Sul (Asia/Seoul). É uma meta de resposta, não um prazo garantido de solução, e não estende prazos legais de resposta ou reembolso.
+
+A responsabilidade de cada parte é determinada pela legislação aplicável. Estes termos não excluem responsabilidade por dolo ou negligência grave, não impõem um limite geral de indenização nem transferem a você riscos contrários à legislação obrigatória.
+
+9. Desinstalação e encerramento
+Você pode deixar de usar a aplicação e desinstalá-la a qualquer momento. Isso, por si só, não cancela uma compra nem constitui uma solicitação de reembolso. A desativação de dispositivos segue a seção 3.
+
+Desativar um dispositivo ou reembolsar os direitos pagos não encerra, por si só, a permissão de usar a aplicação gratuita ou o Driver gratuito nem exige desinstalá-los ou excluir seus trabalhos.
+
+Se uma violação fornecer motivos legais para restrição ou encerramento, a Echo Vision Lab identificará os motivos e cumprirá os requisitos de notificação e oportunidade de correção previstos na legislação aplicável. Estes termos não concedem um direito arbitrário de revogar uma licença paga. Após um encerramento legítimo, deixe de usar os componentes proprietários cuja autorização tenha terminado e remova as cópias correspondentes, observada a legislação aplicável. Os seus trabalhos, os direitos de licenças de terceiros, as solicitações de reembolso ou indenização e o Driver regido separadamente não são extintos automaticamente.
+
+10. Alterações e disputas
+Identificamos as alterações e a data de vigência de uma revisão, fornecemos aviso prévio e obtemos consentimento quando a legislação aplicável exigir. O silêncio ou a simples continuação do uso não constitui concordância com a redução de direitos adquiridos nem renúncia a direitos obrigatórios. Uma condição de compra acordada individualmente prevalece sobre uma condição padrão conflitante na medida prevista pela legislação aplicável.
+
+A interpretação e qualquer disputa continuam sujeitas à legislação aplicável e aos direitos obrigatórios dos consumidores, incluindo regras de competência judicial. Estes termos não estabelecem um tribunal exclusivo nem uma escolha geral de legislação. Entre em contato com support@rawsector.com para reclamações sobre o produto ou a compra, ou com legal@dsub.io para questões legais; esses contatos não limitam o acesso aos tribunais nem aos procedimentos legais de resolução de disputas.
+
+Informações da empresa
+Desenvolvedora, licenciante e titular dos direitos autorais: Echo Vision Lab (에코 비전 랩), empresa individual coreana
+Número de registro empresarial: 111-42-04359
+Endereço: Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul, Republic of Korea
+Telefone: +82 10-6380-9646
+Suporte do produto e integração: support@rawsector.com
+Contatos jurídicos e de privacidade: legal@dsub.io / privacy@dsub.io

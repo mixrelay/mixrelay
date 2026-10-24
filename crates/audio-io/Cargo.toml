@@ -1,0 +1,30 @@
+[package]
+name = "mixrelay-audio-io"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+rubato.workspace = true
+audioadapter-buffers.workspace = true
+base64.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Decode installed theme icons through the same bounded native loader shipped with GTK.
+gdk-pixbuf = "0.18.5"
+png = "0.17.16"
+serde_json.workspace = true
+libc = "0.2.183"
+
+[dev-dependencies]
+allocation-counter = "0.8.1"
+mixrelay-test-support = { path = "../test-support" }
+serde_json.workspace = true

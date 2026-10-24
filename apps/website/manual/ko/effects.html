@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="무료 기능에서도 내장 처리를 개수 제한 없이 사용할 수 있습니다.">
+    <title>내장 효과와 프리셋 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/effects.html">
+    <link rel="alternate" hreflang="ko" href="../ko/effects.html">
+    <link rel="alternate" hreflang="ja" href="../ja/effects.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/effects.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/effects.html">
+    <link rel="alternate" hreflang="de" href="../de/effects.html">
+    <link rel="alternate" hreflang="fr" href="../fr/effects.html">
+    <link rel="alternate" hreflang="it" href="../it/effects.html">
+    <link rel="alternate" hreflang="es" href="../es/effects.html">
+    <link rel="alternate" hreflang="pt" href="../pt/effects.html">
+    <link rel="alternate" hreflang="ru" href="../ru/effects.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="제품 소개"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="언어"><a href="../en/effects.html" lang="en" hreflang="en">English</a> <a href="../ko/effects.html" lang="ko" hreflang="ko" aria-current="page">한국어</a> <a href="../ja/effects.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/effects.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/effects.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/effects.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/effects.html" lang="fr" hreflang="fr">Français</a> <a href="../it/effects.html" lang="it" hreflang="it">Italiano</a> <a href="../es/effects.html" lang="es" hreflang="es">Español</a> <a href="../pt/effects.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/effects.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 사전 공개 초안</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="안내서 목차">
+        <a class="back-link" href="../../index.html">← 제품 소개</a>
+        <a class="manual-mobile-index" href="index.html">전체 목차</a>
+        <nav class="guide-nav" aria-label="안내서 목차"><a href="index.html">안내서 시작</a>
+<a href="installation.html">시스템 요구사항과 설치</a>
+<a href="first-launch.html">처음 실행과 권한</a>
+<a href="workspace.html">라우팅 작업 영역</a>
+<a href="devices.html">장치와 가상 장치</a>
+<a href="app-capture.html">앱 오디오 캡처</a>
+<a href="recording.html">녹음</a>
+<a href="effects.html" aria-current="page">내장 효과와 프리셋</a>
+<a href="plugins.html">외부 플러그인</a>
+<a href="stream-deck.html">Stream Deck 플러그인</a>
+<a href="licensing.html">무료 기능과 라이선스</a>
+<a href="updates.html">업데이트</a>
+<a href="uninstall.html">제거</a>
+<a href="troubleshooting.html">문제 해결과 진단</a>
+<a href="support.html">지원 문의</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>내장 효과와 프리셋</h1><p>무료 기능에서도 내장 처리를 개수 제한 없이 사용할 수 있습니다.</p><p class="guide-draft-note">사전 공개 초안입니다. 공개 다운로드와 구매는 아직 제공하지 않습니다. 현재 소스 빌드를 기준으로 작성했으며 아래에 표시한 환경의 설치본 검증은 남아 있습니다.</p></header>
+        <nav class="manual-toc" aria-label="이 페이지 목차"><p class="sidebar-label">이 페이지 목차</p><ul><li><a href="#processors">효과 추가와 조절</a></li><li><a href="#presets">프리셋과 효과 체인</a></li></ul></nav>
+        <section class="guide-section" id="processors" aria-labelledby="processors-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="processors-title">효과 추가와 조절</h2>
+<p><code>노드 추가 → 프로세서</code>에서 효과를 고르고 입력·출력 채널을 연결하세요. <code>옵션</code>에서 파라미터를 조절합니다. 컴프레서·리미터·이퀄라이저·하이패스·로우패스·게이트·익스팬더·채널 유틸리티·모노 팬·스테레오 밸런스·딜레이·더킹·리버브·코러스를 제공합니다.</p><ul><li>컴프레서와 리미터는 다이내믹 레인지와 피크를 제어합니다. 감쇠 미터는 엔진 측정값을 사용하며 대시는 측정값이 없다는 뜻입니다.</li><li>이퀄라이저는 피크 밴드 세 개를 제공합니다. 점을 드래그해 주파수·게인을 바꾸거나 옵션의 주파수·게인·Q 필드를 사용하세요. 하이패스와 로우패스는 낮거나 높은 주파수를 줄입니다.</li><li>게이트와 익스팬더는 문턱 아래 신호를 줄입니다. 채널 유틸리티는 모노 합산·채널 복제·좌우 교환·극성 반전을 제공합니다. 모노 합산은 L과 R의 평균을 사용합니다.</li><li>모노 팬은 모노 신호를 스테레오에 배치하고 스테레오 밸런스는 좌우 균형을 조절합니다. 더킹은 별도의 모노 <code>제어 입력</code>으로 주 신호를 줄입니다. 제어 소스를 따로 연결하세요. 제어 신호는 출력에 합치지 않습니다.</li><li>딜레이는 시간차 에코를 만듭니다. 리버브와 코러스는 공간감이나 변조를 더합니다. 채널 구성이 다르므로 실제 제공하는 포트를 연결하세요.</li></ul><p><code>바이패스</code>는 원음을 통과시킵니다. 노드를 끄면 신호를 차단합니다. 내장 노이즈 억제와 LUFS 측정은 제공하지 않습니다.</p>
+</div></section>
+<section class="guide-section" id="presets" aria-labelledby="presets-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="presets-title">프리셋과 효과 체인</h2>
+<p>효과 옵션의 <code>프리셋</code>을 사용하세요. 리버브는 작은 방·스튜디오·홀·가라오케·터널·어항을 제공합니다. 딜레이는 짧은 에코·슬랩백·보컬 에코·가라오케·긴 에코·핑퐁을 제공합니다. 값을 편집하면 <code>사용자 설정</code>으로 바뀝니다.</p><p>여러 효과를 함께 넣으려면 <code>노드 추가 → 프로세서 → 효과 체인</code>에서 가라오케·터널·어항·라디오·더블 보컬을 선택하세요. 기존 케이블은 바꾸지 않고 체인의 노드와 연결을 추가합니다. 소스와 출력을 체인에 연결하세요. 실행 취소 한 번으로 삽입을 되돌립니다. 작업 공간에는 실제 파라미터와 연결이 저장됩니다. 외부 임펄스 응답이나 샘플 설치는 필요하지 않습니다.</p><!-- TODO screenshot: Equalizer Options, Reverb preset menu and an inserted effect chain. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="안내서 목차"><a rel="prev" href="recording.html">← 이전: 녹음</a><a rel="next" href="plugins.html">다음: 외부 플러그인 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>사전 공개 초안 · MixRelay 0.1.0</p><a href="../../index.html">제품 소개</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="정책" lang="ko"><a href="../../legal/ko/terms.html">판매조건·환불</a><a href="../../legal/ko/privacy.html">개인정보 처리방침</a></nav></div>
+    </footer>
+  </body>
+</html>

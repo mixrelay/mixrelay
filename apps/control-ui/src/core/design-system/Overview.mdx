@@ -1,0 +1,55 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocsLayout } from './DocsLayout';
+
+<Meta title="Design System/Overview" />
+
+<DocsLayout>
+
+# MixRelay 디자인 시스템
+
+오디오 라우팅 도구의 시각 규격, 조작 계약, 사용 규칙과 실제 제품 조합을 설명합니다.
+Storybook은 앱과 같은 토큰·Provider·Core를 렌더합니다. 예시의 로컬 상태나 검증용 포트는 실제 오디오 실행을 증명하지 않습니다.
+
+## 문서 탐색
+
+| 문서 | 확인할 내용 |
+| --- | --- |
+| <a href="/?path=/docs/design-system-get-started--docs" target="_top">Get Started</a> | 실행·환경·컴포넌트 선택과 실제 폼 조합 |
+| <a href="/?path=/docs/design-system-foundations--docs" target="_top">Foundations</a> | 팔레트 → 의미 역할 → 컴포넌트 토큰, 테마, 지역별 타이포, 간격·밀도·아이콘·브랜드 |
+| <a href="/?path=/docs/design-system-components--docs" target="_top">Components</a> | 목적·사용 구분·구조·공개 속성·상태·토큰·접근성·실제 소비자 |
+| <a href="/?path=/docs/design-system-patterns--docs" target="_top">Patterns</a> | 입력과 제출, 오류 복구, 메뉴·모달, 그래프와 노드의 조작 규칙 |
+| <a href="/?path=/docs/design-system-pages--docs" target="_top">Pages</a> | 시작·연결, 작업 화면, 장치·라이선스·제품 정보와 페이지별 상태 |
+| <a href="/?path=/docs/design-system-review--docs" target="_top">Review</a> | 변경 소유자, 리뷰 순서, 자동 검사와 실제 환경 검증의 경계 |
+| <a href="/?path=/docs/design-system-contributing--docs" target="_top">Contributing</a> | 공식 기준의 채택 범위, 작성·리뷰·호환성·변경 절차 |
+
+문서 테마는 우측 테마 메뉴로 바꿉니다. 각 실행 예시의 테마·언어는 Canvas의 도구 모음에서 바꿉니다. Pseudo는 긴 번역을 확인하는 용도입니다.
+
+## 정의의 소유권
+
+| 정의 | 기준 소스 | 변경 책임 |
+| --- | --- | --- |
+| 제품 동작·범위·진행 상태 | `docs/product.md` | 제품 계약 |
+| 시각 값·상태 색·크기 | `src/core/theme/tokens.ts` | Core 토큰 |
+| Light/Dark/System, 글꼴과 공통 상태 표현 | `MixRelayProvider`, `theme.ts`, `Fonts.css`, `ComponentTheme.module.css` | Core 테마 |
+| 표시·조작·포커스·공개 API | `src/core/ui`, `src/core/audio-graph` | Core 컴포넌트 |
+| 엔진 상태·명령·오류·복구 연결 | `src/features` | Feature |
+| 화면 배치·섹션과 과업의 조합 | `src/screens`, `src/app` | Screen/App |
+| 문서와 실행 가능한 사용례 | `src/core/design-system`, 기존 `*.stories.tsx` | 해당 계약 소유자와 함께 갱신 |
+
+의존 방향은 **React Aria / React Flow → Core → Feature → Screen**입니다. 공통 시각 변경은 토큰·테마·Core에서 하고, Feature/Screen의 스타일로 우회하지 않습니다.
+
+## 공통 표현
+
+텍스트·정렬·간격을 우선합니다. 일반 명령은 중립색, 제출·확인은 중립색 반전, 실행·녹음·오류 색은 실제 의미를 나타냅니다. 선택과 포커스는 실행 상태와 구별합니다. 앱 노드는 발견된 실제 앱 아이콘을 우선 사용합니다.
+
+컴포넌트 API는 의미 있는 선택지만 제공합니다. 색·글꼴·모서리·내부 크기를 임의로 바꾸는 `style`·`classNames` 확장점은 제공하지 않습니다. 새 표현이 필요하면 Core 계약과 상태 사용례를 함께 확장합니다.
+
+## 문서 작성 기준
+
+컴포넌트는 **목적 → 사용 구분 → 구조 → 속성·기본값 → 상태 → 토큰·치수 → 조작·접근성 → 소스·소비자 → 검증 범위** 순서로 설명합니다. 해당 없음과 미확인을 구분합니다. 페이지는 사용자 과업, 콘텐츠·조작 순서, 정상·빈 상태·대기·실패, 좁은 폭과 긴 번역을 설명합니다.
+
+Carbon의 역할·상태·명세 관리 방식을 참고합니다. 색·글꼴·밀도·형태와 조작 규격은 MixRelay가 결정합니다. [Carbon 컴포넌트 완료 기준](https://carbondesignsystem.com/getting-started/contributing/component-checklist/)
+
+문서 구성과 운영은 Storybook의 공식 디자인 시스템 작성·구조·Docs addon 가이드를 함께 따릅니다. 각 공식 원문과 채택한 규칙은 <a href="/?path=/docs/design-system-contributing--docs" target="_top">Contributing</a>에서 확인합니다.
+
+</DocsLayout>

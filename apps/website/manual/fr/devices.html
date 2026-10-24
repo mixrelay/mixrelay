@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Échangez de l’audio avec d’autres applications via MixRelay IO. Le format du périphérique est indépendant du format d’enregistrement.">
+    <title>Périphériques et points de terminaison virtuels — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/devices.html">
+    <link rel="alternate" hreflang="ko" href="../ko/devices.html">
+    <link rel="alternate" hreflang="ja" href="../ja/devices.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/devices.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/devices.html">
+    <link rel="alternate" hreflang="de" href="../de/devices.html">
+    <link rel="alternate" hreflang="fr" href="../fr/devices.html">
+    <link rel="alternate" hreflang="it" href="../it/devices.html">
+    <link rel="alternate" hreflang="es" href="../es/devices.html">
+    <link rel="alternate" hreflang="pt" href="../pt/devices.html">
+    <link rel="alternate" hreflang="ru" href="../ru/devices.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Aller au contenu</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Accueil du produit"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Langue"><a href="../en/devices.html" lang="en" hreflang="en">English</a> <a href="../ko/devices.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/devices.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/devices.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/devices.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/devices.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/devices.html" lang="fr" hreflang="fr" aria-current="page">Français</a> <a href="../it/devices.html" lang="it" hreflang="it">Italiano</a> <a href="../es/devices.html" lang="es" hreflang="es">Español</a> <a href="../pt/devices.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/devices.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Version provisoire avant publication</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Chapitres du manuel">
+        <a class="back-link" href="../../index.html">← Accueil du produit</a>
+        <a class="manual-mobile-index" href="index.html">Tous les chapitres</a>
+        <nav class="guide-nav" aria-label="Chapitres du manuel"><a href="index.html">Vue d’ensemble du manuel</a>
+<a href="installation.html">Configuration requise et installation</a>
+<a href="first-launch.html">Premier lancement et autorisations</a>
+<a href="workspace.html">Espace de routage</a>
+<a href="devices.html" aria-current="page">Périphériques et points de terminaison virtuels</a>
+<a href="app-capture.html">Capture audio des applications</a>
+<a href="recording.html">Enregistrement</a>
+<a href="effects.html">Effets intégrés et préréglages</a>
+<a href="plugins.html">Plug-ins externes</a>
+<a href="stream-deck.html">Plug-in Stream Deck</a>
+<a href="licensing.html">Version gratuite et licences</a>
+<a href="updates.html">Mises à jour</a>
+<a href="uninstall.html">Désinstallation</a>
+<a href="troubleshooting.html">Dépannage et diagnostic</a>
+<a href="support.html">Contacter l’assistance</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUEL</p><h1>Périphériques et points de terminaison virtuels</h1><p>Échangez de l’audio avec d’autres applications via MixRelay IO. Le format du périphérique est indépendant du format d’enregistrement.</p><p class="guide-draft-note">Version provisoire avant publication. Les téléchargements et les achats ne sont pas encore ouverts au public. Ces instructions décrivent la version actuelle compilée à partir du code source. Le comportement après installation reste à vérifier dans les environnements indiqués ci-dessous.</p></header>
+        <nav class="manual-toc" aria-label="Sur cette page"><p class="sidebar-label">Sur cette page</p><ul><li><a href="#directions">Choisir le sens de l’audio</a></li><li><a href="#formats">Canaux, fréquences d’échantillonnage et PCM</a></li><li><a href="#buffers">Tampons de traitement et latence</a></li></ul></nav>
+        <section class="guide-section" id="directions" aria-labelledby="directions-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="directions-title">Choisir le sens de l’audio</h2>
+<p><code>MixRelay IO</code> est le périphérique virtuel par défaut. Pour recevoir l’audio qu’une autre application lui envoie, ajoutez-le via <code>Ajouter un nœud → Source → MixRelay Virtual I/O</code>. Il s’agit du sens <code>Périphérique → graphe</code>. Pour envoyer le mixage d’un graphe à une application comme OBS, ajoutez le périphérique via <code>Ajouter un nœud → Sortie → MixRelay Virtual I/O</code>. Il s’agit du sens <code>Graphe → périphérique</code>. Dans OBS ou votre DAW, sélectionnez MixRelay IO comme entrée audio.</p><p>Connectez les canaux nécessaires. MixRelay ne sélectionne pas le périphérique par défaut du système et ne crée pas de trajet d’écoute vers le matériel à votre place. Pour l’écoute, ajoutez une sortie physique et connectez-y le mixage. Le Driver fournit aussi un bouclage de base de la lecture du système vers la capture, indépendant des limites d’affectation du graphe dans l’éditeur.</p><p>Supprimer une référence dans le graphe ne supprime pas le périphérique virtuel. Avec une licence, la création de périphériques est accessible via <code>Nouveau périphérique virtuel</code>. Supprimer un périphérique depuis le menu d’état supprime aussi ses paramètres enregistrés ; les autres applications qui l’utilisent perdent ce périphérique.</p>
+</div></section>
+<section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="formats-title">Canaux, fréquences d’échantillonnage et PCM</h2>
+<p>Ouvrez les <code>Options</code> du nœud virtuel pour modifier <code>Nom du périphérique</code>, <code>Canaux</code>, Fréquence d’échantillonnage et <code>Profondeur de bits</code>. Seuls les réglages pris en charge dans les deux directions sont proposés. Le renommage nécessite une licence. Le menu d’état propose 2, 4, 8, 16, 32 et 64 canaux ; le périphérique sous-jacent prend en charge 1–64 canaux par direction.</p><p>Sur macOS, les fréquences prises en charge sont 44.1, 48, 88.2, 96, 176.4 et 192 kHz. Les formats de périphérique sont Float32, PCM16, PCM24 compacté et PCM32. Linux propose les combinaisons prises en charge par PipeWire. Les périphériques physiques suivent leurs propres capacités. Le DSP interne utilise Float32 ; modifier la profondeur de bits du périphérique ne change pas le format d’enregistrement WAV.</p><p>Un changement de format interrompt brièvement l’audio. En cas d’échec, vérifiez le message et la valeur actuelle avant de réessayer. Un échec d’enregistrement des paramètres peut signifier que le périphérique a été modifié, mais que ses nouveaux réglages n’ont pas été sauvegardés.</p><!-- TODO screenshot: virtual endpoint Options with supported format choices and status-menu device settings. -->
+</div></section>
+<section class="guide-section" id="buffers" aria-labelledby="buffers-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="buffers-title">Tampons de traitement et latence</h2>
+<p>Le <code>Tampon de traitement</code> du pied de fenêtre modifie le tampon d’E/S du moteur lorsque les changements en cours d’exécution sont pris en charge. Sélectionner une valeur l’applique. En cas d’erreur récupérable, <code>Appliquer</code> permet de réessayer un réglage pris en charge. Un tampon plus petit peut réduire son délai, mais augmenter le risque de coupures. Augmentez-le si l’audio s’interrompt.</p><p>Il n’y a pas de sélecteur de tampon distinct pour chaque périphérique virtuel. Les autres applications choisissent leurs propres tampons clients. <code>Délai du tampon</code> indique la durée d’un tampon de traitement, pas la latence totale d’entrée/sortie. Cette valeur ne garantit pas un quantum commun à tout PipeWire. Plusieurs périphériques physiques peuvent nécessiter une conversion de fréquence d’échantillonnage et une synchronisation des horloges.</p><p>La capture d’applications nécessite actuellement 48 kHz. Le pied de fenêtre propose un réglage du tampon, pas un sélecteur de fréquence d’échantillonnage du traitement. La fréquence des périphériques virtuels se modifie dans leurs paramètres. Certains plug-ins natifs empêchent les changements de format en cours d’exécution, car l’état de leurs préréglages ne peut pas encore être transféré.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Chapitres du manuel"><a rel="prev" href="workspace.html">← Précédent : Espace de routage</a><a rel="next" href="app-capture.html">Suivant : Capture audio des applications →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Version provisoire avant publication · MixRelay 0.1.0</p><a href="../../index.html">Accueil du produit</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

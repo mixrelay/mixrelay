@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="使用 MixRelay IO 与其他应用交换音频。设备格式与录音格式分别设置。">
+    <title>设备与虚拟端点 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/devices.html">
+    <link rel="alternate" hreflang="ko" href="../ko/devices.html">
+    <link rel="alternate" hreflang="ja" href="../ja/devices.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/devices.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/devices.html">
+    <link rel="alternate" hreflang="de" href="../de/devices.html">
+    <link rel="alternate" hreflang="fr" href="../fr/devices.html">
+    <link rel="alternate" hreflang="it" href="../it/devices.html">
+    <link rel="alternate" hreflang="es" href="../es/devices.html">
+    <link rel="alternate" hreflang="pt" href="../pt/devices.html">
+    <link rel="alternate" hreflang="ru" href="../ru/devices.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="产品首页"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="语言"><a href="../en/devices.html" lang="en" hreflang="en">English</a> <a href="../ko/devices.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/devices.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/devices.html" lang="zh-Hans" hreflang="zh-Hans" aria-current="page">简体中文</a> <a href="../zh-Hant/devices.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/devices.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/devices.html" lang="fr" hreflang="fr">Français</a> <a href="../it/devices.html" lang="it" hreflang="it">Italiano</a> <a href="../es/devices.html" lang="es" hreflang="es">Español</a> <a href="../pt/devices.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/devices.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 发布前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手册章节">
+        <a class="back-link" href="../../index.html">← 产品首页</a>
+        <a class="manual-mobile-index" href="index.html">所有章节</a>
+        <nav class="guide-nav" aria-label="手册章节"><a href="index.html">手册概览</a>
+<a href="installation.html">系统要求与安装</a>
+<a href="first-launch.html">首次启动与权限</a>
+<a href="workspace.html">路由工作区</a>
+<a href="devices.html" aria-current="page">设备与虚拟端点</a>
+<a href="app-capture.html">应用音频采集</a>
+<a href="recording.html">录音</a>
+<a href="effects.html">内置效果与预设</a>
+<a href="plugins.html">外部插件</a>
+<a href="stream-deck.html">Stream Deck 插件</a>
+<a href="licensing.html">免费版与许可</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html">卸载</a>
+<a href="troubleshooting.html">故障排查与诊断</a>
+<a href="support.html">联系支持</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手册</p><h1>设备与虚拟端点</h1><p>使用 MixRelay IO 与其他应用交换音频。设备格式与录音格式分别设置。</p><p class="guide-draft-note">发布前草稿。目前尚不提供公开下载或购买。本手册介绍当前源代码构建版本的行为；在下文所列环境中，仍需验证安装后的实际行为。</p></header>
+        <nav class="manual-toc" aria-label="本页内容"><p class="sidebar-label">本页内容</p><ul><li><a href="#directions">选择音频方向</a></li><li><a href="#formats">通道、采样率与 PCM</a></li><li><a href="#buffers">处理缓冲区与延迟</a></li></ul></nav>
+        <section class="guide-section" id="directions" aria-labelledby="directions-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="directions-title">选择音频方向</h2>
+<p><code>MixRelay IO</code> 是默认虚拟设备。如需接收其他应用向它播放的音频，请通过 <code>添加节点 → 音源 → MixRelay Virtual I/O</code> 添加该设备，此方向为 <code>设备 → 音频图</code>。如需将音频图中的混音发送至 OBS 等应用，请通过 <code>添加节点 → 输出 → MixRelay Virtual I/O</code> 添加该设备，此方向为 <code>音频图 → 设备</code>。在 OBS 或 DAW 中，将 MixRelay IO 选为音频输入。</p><p>请连接所需通道。MixRelay 不会替您选择系统默认设备，也不会自动添加硬件监听路由。如需监听，请添加物理输出并连接混音。Driver 还提供从操作系统播放到采集的基本回环，不受编辑器音频图映射数量的限制。</p><p>删除音频图中的设备引用不会删除虚拟设备本身。有许可时，可通过 <code>新建虚拟设备</code> 创建设备。从状态菜单移除设备时，也会移除其已保存的设备设置；正在使用该设备的其他应用将失去对它的访问。</p>
+</div></section>
+<section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="formats-title">通道、采样率与 PCM</h2>
+<p>打开虚拟节点的 <code>选项</code>，可更改 <code>设备名称</code>、<code>通道</code>、采样率和 <code>位深度</code>。仅提供受支持的通用设置。重命名需要许可。状态菜单中的通道数选项为 2、4、8、16、32 和 64；底层设备在每个方向上支持 1–64 个通道。</p><p>macOS 支持的采样率为 44.1、48、88.2、96、176.4 和 192 kHz。设备格式为 Float32、PCM16、紧凑型 PCM24 和 PCM32。Linux 提供 PipeWire 支持的组合。物理设备则取决于各自的能力。内部 DSP 使用 Float32；更改设备位深度不会更改 WAV 录音格式。</p><p>更改格式会短暂中断音频。如果更改失败，请先检查消息和当前值，再重试。保存失败可能表示设备已更改，但新设置未能保存。</p><!-- TODO screenshot: virtual endpoint Options with supported format choices and status-menu device settings. -->
+</div></section>
+<section class="guide-section" id="buffers" aria-labelledby="buffers-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="buffers-title">处理缓冲区与延迟</h2>
+<p>支持运行中更改时，页脚的 <code>处理缓冲区</code> 可更改引擎的 I/O 缓冲区。选中数值即会应用。出现可恢复的错误时，可使用 <code>应用</code> 重试受支持的设置。较小的缓冲区可减少缓冲延迟，但也可能更容易出现音频中断。如有断音，请增大缓冲区。</p><p>没有为每个虚拟设备单独设置的缓冲区选择器。其他应用会选择各自的客户端缓冲区。<code>缓冲区延迟</code> 是一个处理缓冲区的时长，并非输入/输出总延迟，也不保证 PipeWire 全局的 quantum 大小。使用多个物理设备时，可能需要采样率转换和时钟同步。</p><p>应用音频采集目前要求 48 kHz。页脚目前提供缓冲区控制，不提供处理采样率选择器。虚拟设备的采样率需在设备设置中编辑。部分原生插件尚无法转移预设状态，因此会阻止运行中更改格式。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="手册章节"><a rel="prev" href="workspace.html">← 上一章：路由工作区</a><a rel="next" href="app-capture.html">下一章：应用音频采集 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>发布前草稿 · MixRelay 0.1.0</p><a href="../../index.html">产品首页</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

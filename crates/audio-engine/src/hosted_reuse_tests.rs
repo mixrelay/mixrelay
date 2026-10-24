@@ -1,0 +1,234 @@
+use super::*;
+use crate::ProcessorExchange;
+use mixrelay_audio_graph::{CompileContext, CompileLimits, GraphCompiler, GraphDocument};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct Counter {
+    identity: u64,
+    cursor: usize,
+    placeholder: bool,
+    drops: Arc<AtomicUsize>,
+}
+
+impl HostedAudioProcessor for Counter {
+    fn process(&mut self, _input: &[f32], output: &mut [f32], _frames: usize) -> bool {
+        self.cursor += 1;
+        output[0] = u16::try_from(self.cursor).map(f32::from).unwrap();
+        !self.placeholder
+    }
+    fn reuse_identity(&self) -> Option<u64> {
+        Some(self.identity)
+    }
+    fn requests_reuse(&self) -> bool {
+        self.placeholder
+    }
+}
+impl Drop for Counter {
+    fn drop(&mut self) {
+        if !self.placeholder {
+            self.drops.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+fn processor(revision: u64, placeholder: bool, drops: &Arc<AtomicUsize>) -> Box<BlockProcessor> {
+    let execution = GraphCompiler::default()
+        .compile(
+            &GraphDocument::new(revision, vec![], vec![]),
+            CompileContext {
+                format: RenderFormat {
+                    sample_rate: 48000,
+                    block_frames: 32,
+                },
+                limits: CompileLimits::default(),
+            },
+        )
+        .unwrap();
+    let mut processor =
+        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
+    processor.hosted_processors = vec![Box::new(Counter {
+        identity: 7,
+        cursor: 0,
+        placeholder,
+        drops: Arc::clone(drops),
+    }) as Box<dyn HostedAudioProcessor>]
+    .into_boxed_slice();
+    processor.hosted_identities = Box::new([(7, 0)]);
+    Box::new(processor)
+}
+
+#[test]
+fn activation_moves_the_complete_instance_without_resetting_pcm_cursor() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let mut current = processor(1, false, &drops);
+    let exchange = ProcessorExchange::new(1);
+    let mut output = [0.0];
+    assert!(current.hosted_processors[0].process(&[], &mut output, 1));
+    exchange.submit(processor(2, true, &drops)).unwrap();
+    assert!(
+        exchange
+            .activate_pending_configured(&mut current, |_| Ok::<_, ()>(()))
+            .unwrap()
+    );
+    exchange.reclaim_retired();
+    assert_eq!(drops.load(Ordering::Relaxed), 0);
+    assert!(current.hosted_processors[0].process(&[], &mut output, 1));
+    assert_eq!(output[0].to_bits(), 2.0_f32.to_bits());
+    drop(current);
+    assert_eq!(drops.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn rejected_configuration_and_cancel_do_not_take_the_active_instance() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let mut current = processor(1, false, &drops);
+    let exchange = ProcessorExchange::new(1);
+    exchange.submit(processor(2, true, &drops)).unwrap();
+    assert_eq!(
+        exchange.activate_pending_configured(&mut current, |_| Err("rejected")),
+        Err("rejected")
+    );
+    assert!(!current.hosted_processors[0].requests_reuse());
+    drop(exchange);
+    assert_eq!(drops.load(Ordering::Relaxed), 0);
+    assert!(current.hosted_processors[0].process(&[], &mut [0.0], 1));
+}
+
+#[test]
+fn missing_identity_never_activates_a_placeholder() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let mut current = processor(1, false, &drops);
+    current.hosted_identities = Box::new([(8, 0)]);
+    let exchange = ProcessorExchange::new(1);
+    exchange.submit(processor(2, true, &drops)).unwrap();
+    assert!(
+        !exchange
+            .activate_pending_configured(&mut current, |_| -> Result<(), ()> {
+                panic!("native activation must not run without the required owner")
+            })
+            .unwrap()
+    );
+    assert_eq!(exchange.revisions().active, 1);
+    assert_eq!(drops.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn removal_marks_the_old_owner_inactive_before_retired_reclamation() {
+    struct OwnerFlag(Arc<std::sync::atomic::AtomicBool>);
+    impl HostedAudioProcessor for OwnerFlag {
+        fn process(&mut self, _: &[f32], _: &mut [f32], _: usize) -> bool {
+            true
+        }
+        fn set_active(&mut self, active: bool) {
+            self.0.store(active, Ordering::Release);
+        }
+    }
+    let active = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let drops = Arc::new(AtomicUsize::new(0));
+    let mut current = processor(1, false, &drops);
+    current.hosted_processors =
+        vec![Box::new(OwnerFlag(Arc::clone(&active))) as Box<dyn HostedAudioProcessor>]
+            .into_boxed_slice();
+    current.hosted_identities = Box::new([]);
+    let mut removed = processor(2, true, &drops);
+    removed.hosted_processors = Box::new([]);
+    removed.hosted_identities = Box::new([]);
+    let exchange = ProcessorExchange::new(1);
+    exchange.submit(removed).unwrap();
+    assert!(
+        exchange
+            .activate_pending_configured(&mut current, |_| Ok::<_, ()>(()))
+            .unwrap()
+    );
+    // The retired holder still owns the flag; it is no longer a reuse candidate.
+    assert_eq!(Arc::strong_count(&active), 2);
+    assert!(!active.load(Ordering::Acquire));
+    exchange.reclaim_retired();
+    assert_eq!(Arc::strong_count(&active), 1);
+}
+
+#[test]
+fn pending_and_retired_shutdown_release_each_hosted_owner_once() {
+    for _ in 0..128 {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let pending = ProcessorExchange::new(1);
+        pending.submit(processor(2, false, &drops)).unwrap();
+        drop(pending);
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(Arc::strong_count(&drops), 1);
+
+        let exchange = ProcessorExchange::new(1);
+        let mut current = processor(1, false, &drops);
+        exchange.submit(processor(2, false, &drops)).unwrap();
+        assert!(exchange.activate_pending(&mut current));
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        drop(exchange);
+        assert_eq!(drops.load(Ordering::Relaxed), 2);
+        assert_eq!(Arc::strong_count(&drops), 2);
+        drop(current);
+        assert_eq!(drops.load(Ordering::Relaxed), 3);
+        assert_eq!(Arc::strong_count(&drops), 1);
+    }
+}
+
+#[test]
+fn reuse_replacement_and_removal_never_accumulate_hosted_owners() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let exchange = ProcessorExchange::new(1);
+    let mut current = processor(1, false, &drops);
+    for revision in 2..=1_025 {
+        let reuse = revision % 2 == 0;
+        exchange.submit(processor(revision, reuse, &drops)).unwrap();
+        assert!(exchange.activate_pending(&mut current));
+        exchange.reclaim_retired();
+        // This includes placeholders: their retained Arc must also be released.
+        assert_eq!(Arc::strong_count(&drops), 2);
+        assert_eq!(
+            drops.load(Ordering::Relaxed),
+            usize::try_from((revision - 1) / 2).unwrap()
+        );
+    }
+    let mut removed = processor(1_026, true, &drops);
+    removed.hosted_processors = Box::new([]);
+    removed.hosted_identities = Box::new([]);
+    exchange.submit(removed).unwrap();
+    assert!(exchange.activate_pending(&mut current));
+    exchange.reclaim_retired();
+    assert_eq!(drops.load(Ordering::Relaxed), 513);
+    assert_eq!(Arc::strong_count(&drops), 1);
+}
+
+#[test]
+fn failed_submission_and_activation_release_hosted_owners_without_touching_active() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let exchange = ProcessorExchange::new(1);
+    let mut current = processor(1, false, &drops);
+    assert_eq!(
+        exchange.submit_configured(processor(2, false, &drops), || Err("configuration failed")),
+        Err(crate::ProcessorConfigurationError::Configuration(
+            "configuration failed"
+        ))
+    );
+    assert_eq!(drops.load(Ordering::Relaxed), 1);
+    exchange.submit(processor(2, false, &drops)).unwrap();
+    assert_eq!(
+        exchange.submit(processor(3, false, &drops)),
+        Err(crate::ProcessorSubmitError::Busy {
+            proposed_revision: 3
+        })
+    );
+    assert_eq!(drops.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        exchange.activate_pending_configured(&mut current, |_| Err("activation failed")),
+        Err("activation failed")
+    );
+    assert_eq!(drops.load(Ordering::Relaxed), 2);
+    drop(exchange);
+    assert_eq!(drops.load(Ordering::Relaxed), 3);
+    let mut output = [0.0];
+    assert!(current.hosted_processors[0].process(&[], &mut output, 1));
+    assert_eq!(output[0].to_bits(), 1.0_f32.to_bits());
+    drop(current);
+    assert_eq!(drops.load(Ordering::Relaxed), 4);
+    assert_eq!(Arc::strong_count(&drops), 1);
+}

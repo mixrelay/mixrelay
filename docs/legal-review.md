@@ -1,0 +1,69 @@
+# MixRelay 계약·판매 운영 기준
+
+이 문서는 개발용 계약 원칙과 판매 운영 요건을 정리한다. 고객에게 제공하는 사용권 계약이나 개인정보 처리방침을 대신하지 않는다. 제품 동작·가격·무료/유료 범위와 진행 상태는 [제품 문서](product.md)가 기준이다. 고객 계약에는 내부 검토 상태·출시 체크리스트를 넣지 않는다.
+
+## 계약 원칙
+
+| 항목 | 기준 |
+| --- | --- |
+| 적용 범위 | Driver 무료 허가와 App 구매·활성화를 구분한다. 유료 해제·환불로 무료 App·Driver 사용권이 자동 종료되거나 녹음·프로젝트·장치 설정이 삭제되지 않는다. 독립된 합법적 계약 위반에 따른 종료와 구분한다. |
+| 무료 사용·구매 | 기간 제한 없는 무료 기능과 구매 메이저 버전을 구분한다. 개인 1명이 본인 기기에서 사용하는 조건·기기 수 무제한·마지막 온라인 인증 성공부터 30일의 오프라인 인증을 결제 전에 표시한다. 무료 그래프 1개 저장·불러오기는 무료 기능 한도를 따른다. 알리지 않은 제한이나 구매 기능 축소를 약관으로 허용하지 않는다. |
+| 업데이트 | 구매 메이저 내 제공 업데이트를 포함한다. 다른 메이저의 구매는 선택 사항이며 구매하지 않아도 기존 구매 버전 사용권을 유지한다. 미래 출시·가격·할인·업그레이드 권리를 약속하지 않는다. |
+| 기기 해제 | 서버가 확인한 해당 활성화 인스턴스만 해제한다. 다른 기기의 활성화와 사용자 설정을 보존하고 새 기기에서 활성화할 수 있다. 삭제·재설치·구매 취소와 구분하며 접근할 수 없는 기기는 지원 경로를 제공한다. |
+| 환불 | 구매 후 30달력일 이내 사유 불필요 전액 환불을 제공한다. 기간 내 요청 발송일을 기준으로 하며 설치·사용·미사용 조건이나 환불 이유를 요구하지 않는다. 구매 식별 정보는 필요하다. 강행법규의 더 유리한 권리를 유지한다. |
+| 환불 후 인증 | 온라인 서비스 응답으로 유료 권한이 유효하지 않음을 확인하면 회수한다. 연결 실패 자체를 환불 확인으로 취급하지 않는다. 유효한 오프라인 인증 중 사용을 허용하며 기간 연장·새 활성화와 구분한다. 환불 집행을 위한 강제 재연결이나 추가 DRM을 요구하지 않는다. |
+| 지원 | 한국 영업일 2일 이내 첫 응답을 목표로 한다. 한국 주말·공휴일을 제외하고 Asia/Seoul을 따른다. 해결 기한이나 환불 처리 SLA를 새로 보장하거나 법정 기한을 연장하지 않는다. |
+| 작업물·제3자 권리 | 녹음·프로젝트 권리는 사용자에게 남는다. 학습·마케팅 권리를 얻지 않는다. 독점 코드 제한과 Apple/MIT/Apache/MPL 구성요소의 권리를 구분한다. |
+| 면책·종료·변경·분쟁 | 고의·중과실 면책, 일괄 배상 상한, 임의 유료권 박탈, 계속 사용에 따른 묵시적 불이익 동의, 불리한 전속 관할을 부여하지 않는다. 개별 약정과 강행 소비자 권리를 보존한다. |
+
+한국 소비자법이 적용될 때 일반 7일 청약철회, 디지털 공급 예외의 요건, 미공급 가분 부분과 표시·계약 불일치에 대한 공급 후 3개월 또는 인지 후 30일 기준을 설명한다. 무료 체험·약관 동의 자체를 포기로 취급하지 않는다. 디지털콘텐츠의 법정 청약철회에는 3영업일 환급, 결제 취소 조치, 지연배상과 위약금 금지 등 해당 법정 절차를 따른다. 이 설명을 자발적 30일 환불 정책의 거부 조건으로 사용하지 않는다.
+
+## 판매 운영과 사업자 표시
+
+Lemon Squeezy의 거래상 판매자 역할은 결제·고객국가 판매세·환불·차지백 처리와 관련된다. Echo Vision Lab의 제품 지원과 자신에게 귀속되는 법정 책임까지 없애지는 않는다. 자발적 환불 정책과 플랫폼 자체 환불·차지백 권한을 구분한다. 전액 환불이 라이선스 키를 자동 비활성화한다고 단정하지 않으며, 환불 → 키 회수 → 다음 온라인 확인 → 무료 기능 유지의 실제 연결을 확인해야 한다. 키 전체 회수와 해당 컴퓨터의 활성화 해제는 다른 행동이다.
+
+Lemon Squeezy store/product/variant/checkout 설정이 없는 빌드는 구매·활성화를 제공하지 않는다. 판매 설정, 실제 거래 판매자, 가격·세금, 결제 전 계약·환불 고지, 지원 및 인증 복구 절차가 판매 운영과 일치해야 한다. 통신판매 신고/면제와 과세유형을 사용권 원문의 사업자 정보만으로 확정하거나 설정 값·신고번호를 추측하지 않는다. 직접 세무 처리와 자체 인증 서버 도입은 확정 정책으로 표시하지 않는다.
+
+사용권 허가자의 상호·사업자등록번호·주소·연락처를 유지한다. `Echo Vision Lab (에코 비전 랩)`과 `에코 비전 랩 (Echo Vision Lab)`은 같은 상호이며 개인사업자를 법인으로 표시하지 않는다. 독립 무료 Driver 사용권 원문에 대표자 성명을 별도 줄로 반복하지 않는 판단은 판매 경로의 신원 고지와 구분한다.
+
+전자상거래법 제10조와 시행규칙 제7조의 사이버몰 표시, 제13조의 청약 목적 표시·광고와 구매 전 거래조건 고지 및 공급 시까지 교부하는 계약내용 서면은 실제 공급자·판매자와 대표자 등 필수 정보를 충족해야 한다. App 사용권 원문만으로 구매 계약내용 서면을 대신하지 않는다. 거래상 판매자 이용을 Echo Vision Lab의 모든 고지 의무 면제로 해석하지 않는다.
+
+## 개인정보 처리방침과 국외 이전
+
+App 계약은 인증 요청의 키·활성화 이름·ID, HTTPS 전송과 OS 자격 증명 저장소, 업데이트 요청의 제품·OS·아키텍처 및 일반 접속 정보, 자발적 지원 제출물을 설명한다. 결제 카드 입력은 Lemon Squeezy 결제 화면에서 한다. 활성화 이름에 컴퓨터 실명·개인 이름을 자동 수집한다고 표시하거나 개인 이름 사용을 요구하지 않는다. 녹음·프로젝트·그래프·오디오 장치 이름은 인증·업데이트 요청에 넣지 않는다. 무료 Driver 사용에는 유료 인증이 필요하지 않으며 선택적 인증의 데이터·목적·저장은 App 계약을 따른다.
+
+업데이트 서버 소스와 ingress/CDN 설정만으로 서버·CDN 접속 로그와 지원 메일의 실제 수령자, 국가, 보존·삭제 주기를 확정하지 않는다. 업데이트 서버의 데이터베이스나 구매 인증 역할과 판매 플랫폼의 인증 처리를 혼동하지 않는다.
+
+공개 개인정보 처리방침에는 실제 처리 목적·보유기간·파기방법·법정 보존 근거·수령자·국가·처리 위탁 및 제3자 제공 여부·권리 행사 경로·책임부서가 필요하다. 실제 운영 설정을 확인하지 않은 보유기간·삭제 완료·수령국을 보장하지 않는다. 개인정보 보호법 제30조의 처리방침 공개와 제28조의8의 국외 이전 근거 및 경로별 고지 절차를 적용한다. 해외 판매 플랫폼 사용만으로 모두 별도 동의가 필요하거나 불필요하다고 단정하지 않는다.
+
+문의·열람·정정·삭제·처리 제한 연락처를 제공한다. 사용권 동의를 선택적 마케팅·분석이나 국외 이전 동의로 취급하지 않는다. Lemon Squeezy 방침 링크나 설치 약관 동의는 별도 처리방침과 국외 이전 고지를 대신하지 않는다.
+
+## 언어와 문서 전달
+
+App·Driver 계약은 영어·일본어·한국어·중국어 간체·번체·프랑스어·독일어·스페인어·포르투갈어·이탈리아어·러시아어 전문을 제공한다. 원문 파일 대응은 [languages.json](../packaging/localization/languages.json)이 소유한다. 앱의 `appLicenseTerms`는 선택 언어의 정본 전체를 표시하고 열린 상태에서도 언어 변경을 반영한다. macOS/Linux 패키징도 같은 파일 대응을 사용한다.
+
+macOS Installer의 언어별 약관·설치 안내와 관리 앱·제거 앱의 계약 사본은 정본을 보존한다. 번들의 `CFBundleLocalizations`와 권한 요청 설명의 `InfoPlist.strings`는 지원 언어와 일치해야 한다. 언어 변경으로 사용권 제한·언어 우선권·준거법·관할을 추가하지 않는다. 국내 이용자에게 약관법 제3조의 한글 작성·명시·중요 내용 설명을 제공한다. 언어 리소스만으로 중요 조건 설명이나 개인정보 고지가 완료됐다고 판단하지 않는다.
+
+원문·RTF·번들 사본 일치와 서명·공증은 문서 전달의 확인이며 계약 동의·설치 인증·오디오 실행·실제 결제 및 환불의 확인과 구분한다. 외부 전문가 검토나 모든 국가의 법적 요건 충족을 확인 없이 표시하지 않는다.
+
+## 원문 자료
+
+법령과 플랫폼 운영 조건은 적용 시점의 원문을 다시 확인한다.
+
+- [약관법 제3조: 작성·명시·설명](https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1021562635)
+- [약관법 제6–14조: 불공정 조항](https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1025032405)
+- [전자상거래법 제13조: 신원·거래조건 정보](https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805891)
+- [전자상거래법 시행규칙 제7조: 사이버몰 표시](https://www.law.go.kr/LSW/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=900616963)
+- [전자상거래법 제17조: 청약철회](https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805939)
+- [전자상거래법 제18조: 환급](https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805883)
+- [공정위 전자상거래 소비자 보호 안내](https://www.ftc.go.kr/www/contents.do?key=703), [한눈에 보는 공정거래제도 28쪽](https://www.ftc.go.kr/DATA/download/www/cts5995_file.pdf)
+- [개인정보 보호법 제30조: 처리방침](https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1029332499)
+- [개인정보 보호법 제28조의8: 국외 이전](https://law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1020398611)
+- [Lemon Squeezy: Merchant of Record](https://docs.lemonsqueezy.com/help/payments/merchant-of-record)
+- [Lemon Squeezy: Refunds and Chargebacks](https://docs.lemonsqueezy.com/help/payments/refunds-chargebacks)
+- [Lemon Squeezy: 키·활성화 제한 설정](https://docs.lemonsqueezy.com/help/licensing/generating-license-keys)
+- [Lemon Squeezy: 기기 활성화 해제 API](https://docs.lemonsqueezy.com/api/license-api/deactivate-license-key)
+- [Lemon Squeezy: Validate API](https://docs.lemonsqueezy.com/api/license-api/validate-license-key)
+- [Lemon Squeezy: Privacy](https://www.lemonsqueezy.com/privacy)
+- [Apple: 번들 현지화 키](https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html)
+- [Appserver README](https://github.com/echovisionlab/appserver/blob/main/README.md), [실행 코드](https://github.com/echovisionlab/appserver/blob/main/cmd/appserver/main.go)

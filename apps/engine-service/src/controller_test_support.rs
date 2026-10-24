@@ -1,0 +1,35 @@
+use super::*;
+
+/// Acts as the audio owner's block-boundary acknowledgement and returns the
+/// submitted processor for PCM assertions. Never starts a second preparation
+/// while the controller is awaiting acknowledgement of its pending publication.
+pub(crate) fn settle(controller: &EngineGraphController) -> Box<BlockProcessor> {
+    let revisions = controller.exchange.revisions();
+    assert_ne!(
+        revisions.active, revisions.submitted,
+        "no pending publication"
+    );
+    let plan = GraphCompiler::default()
+        .compile(
+            &GraphDocument::new(revisions.active, vec![], vec![]),
+            *controller.context.read(),
+        )
+        .unwrap();
+    let mut processor = BuiltInProcessorFactory::default().prepare(&plan).unwrap();
+    assert!(controller.exchange.activate_pending(&mut processor));
+    assert_eq!(processor.plan().revision(), revisions.submitted);
+    controller.exchange.reclaim_retired();
+    processor
+}
+
+/// Files a catalog directory keeps, without the crash guard's run marker and lock that
+/// every running (or uncleanly dropped) engine leaves beside its catalog.
+pub(crate) fn stored_files(directory: &std::path::Path) -> usize {
+    std::fs::read_dir(directory)
+        .unwrap()
+        .filter(|entry| {
+            let name = entry.as_ref().unwrap().file_name();
+            name != crate::crash_guard::RUN_MARKER && name != crate::crash_guard::RUN_LOCK
+        })
+        .count()
+}

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Use o MixRelay IO para trocar áudio com outros aplicativos. O formato do dispositivo é independente do formato de gravação.">
+    <title>Dispositivos e conexões virtuais — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/devices.html">
+    <link rel="alternate" hreflang="ko" href="../ko/devices.html">
+    <link rel="alternate" hreflang="ja" href="../ja/devices.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/devices.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/devices.html">
+    <link rel="alternate" hreflang="de" href="../de/devices.html">
+    <link rel="alternate" hreflang="fr" href="../fr/devices.html">
+    <link rel="alternate" hreflang="it" href="../it/devices.html">
+    <link rel="alternate" hreflang="es" href="../es/devices.html">
+    <link rel="alternate" hreflang="pt" href="../pt/devices.html">
+    <link rel="alternate" hreflang="ru" href="../ru/devices.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Pular para o conteúdo</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Página do produto"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Idioma"><a href="../en/devices.html" lang="en" hreflang="en">English</a> <a href="../ko/devices.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/devices.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/devices.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/devices.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/devices.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/devices.html" lang="fr" hreflang="fr">Français</a> <a href="../it/devices.html" lang="it" hreflang="it">Italiano</a> <a href="../es/devices.html" lang="es" hreflang="es">Español</a> <a href="../pt/devices.html" lang="pt" hreflang="pt" aria-current="page">Português</a> <a href="../ru/devices.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Rascunho de pré-lançamento</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Capítulos do manual">
+        <a class="back-link" href="../../index.html">← Página do produto</a>
+        <a class="manual-mobile-index" href="index.html">Todos os capítulos</a>
+        <nav class="guide-nav" aria-label="Capítulos do manual"><a href="index.html">Visão geral do manual</a>
+<a href="installation.html">Requisitos do sistema e instalação</a>
+<a href="first-launch.html">Primeira execução e permissões</a>
+<a href="workspace.html">Espaço de trabalho de roteamento</a>
+<a href="devices.html" aria-current="page">Dispositivos e conexões virtuais</a>
+<a href="app-capture.html">Captura de áudio de aplicativos</a>
+<a href="recording.html">Gravação</a>
+<a href="effects.html">Efeitos integrados e predefinições</a>
+<a href="plugins.html">Plug-ins externos</a>
+<a href="stream-deck.html">Plug-in do Stream Deck</a>
+<a href="licensing.html">Versão gratuita e licenciamento</a>
+<a href="updates.html">Atualizações</a>
+<a href="uninstall.html">Desinstalação</a>
+<a href="troubleshooting.html">Solução de problemas e diagnóstico</a>
+<a href="support.html">Contato com o suporte</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Dispositivos e conexões virtuais</h1><p>Use o MixRelay IO para trocar áudio com outros aplicativos. O formato do dispositivo é independente do formato de gravação.</p><p class="guide-draft-note">Rascunho de pré-lançamento. Os downloads e as compras públicas ainda não estão disponíveis. Estas instruções descrevem a compilação atual do código-fonte; o comportamento após a instalação ainda precisa ser verificado nos ambientes indicados abaixo.</p></header>
+        <nav class="manual-toc" aria-label="Nesta página"><p class="sidebar-label">Nesta página</p><ul><li><a href="#directions">Escolher a direção do áudio</a></li><li><a href="#formats">Canais, taxas de amostragem e PCM</a></li><li><a href="#buffers">Buffers de processamento e latência</a></li></ul></nav>
+        <section class="guide-section" id="directions" aria-labelledby="directions-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="directions-title">Escolher a direção do áudio</h2>
+<p><code>MixRelay IO</code> é o dispositivo virtual padrão. Para receber o áudio que outro aplicativo reproduz nele, adicione-o por <code>Adicionar nó → Fonte → MixRelay Virtual I/O</code>. Essa direção é <code>Dispositivo → grafo</code>. Para enviar a mixagem de um grafo a um aplicativo como o OBS, adicione o dispositivo por <code>Adicionar nó → Saída → MixRelay Virtual I/O</code>. Essa direção é <code>Grafo → dispositivo</code>. No OBS ou na sua DAW, selecione MixRelay IO como entrada de áudio.</p><p>Conecte os canais necessários. O MixRelay não seleciona um dispositivo padrão do sistema nem adiciona uma rota de monitoração por hardware para você. Para monitorar, adicione uma saída física e conecte a mixagem a ela. O Driver também oferece loopback básico da reprodução do sistema operacional para a captura, sem os limites de mapeamento do grafo do editor.</p><p>Remover uma referência no grafo não remove o dispositivo virtual. Com uma licença, é possível criar dispositivos por <code>Novo dispositivo virtual</code>. Remover um dispositivo pelo menu de status também remove suas configurações salvas; outros aplicativos que o utilizam perdem esse dispositivo.</p>
+</div></section>
+<section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="formats-title">Canais, taxas de amostragem e PCM</h2>
+<p>Abra <code>Opções</code> do nó virtual para alterar <code>Nome do dispositivo</code>, <code>Canais</code>, a taxa de amostragem e <code>Profundidade de bits</code>. Só são oferecidas configurações comuns compatíveis. Renomear exige uma licença. O menu de status oferece 2, 4, 8, 16, 32 e 64 canais; o dispositivo subjacente aceita 1–64 canais por direção.</p><p>No macOS, as taxas compatíveis são 44.1, 48, 88.2, 96, 176.4 e 192 kHz. Os formatos de dispositivo são Float32, PCM16, PCM24 empacotado e PCM32. O Linux oferece as combinações aceitas pelo PipeWire. Os dispositivos físicos seguem suas próprias capacidades. O DSP interno usa Float32; alterar a profundidade de bits do dispositivo não altera o formato da gravação WAV.</p><p>Uma mudança de formato interrompe brevemente o áudio. Se falhar, confira a mensagem e o valor atual antes de tentar novamente. Uma falha ao salvar pode significar que o dispositivo foi alterado, mas suas novas configurações não foram salvas.</p><!-- TODO screenshot: virtual endpoint Options with supported format choices and status-menu device settings. -->
+</div></section>
+<section class="guide-section" id="buffers" aria-labelledby="buffers-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="buffers-title">Buffers de processamento e latência</h2>
+<p>O controle <code>Buffer de processamento</code> na barra inferior altera o buffer de E/S do mecanismo quando há suporte a mudanças durante o funcionamento. Selecionar um valor o aplica. Em caso de erro recuperável, <code>Aplicar</code> tenta aplicar novamente uma configuração compatível. Um buffer menor pode reduzir o atraso do buffer, mas aumentar a chance de cortes. Aumente-o se o áudio estiver entrecortado.</p><p>Não há um seletor de buffer separado para cada dispositivo virtual. Outros aplicativos escolhem seus próprios buffers de cliente. <code>Atraso do buffer</code> é a duração de um buffer de processamento, não a latência total de entrada e saída. Não garante um quantum comum a todo o PipeWire. Vários dispositivos físicos podem exigir conversão da taxa de amostragem e sincronização de relógios.</p><p>A captura de aplicativos exige atualmente 48 kHz. A barra inferior oferece controle de buffer, mas não um seletor de taxa de amostragem de processamento. As taxas dos dispositivos virtuais são alteradas nas configurações do dispositivo. Alguns plug-ins nativos impedem mudanças de formato durante o funcionamento porque ainda não é possível transferir o estado de suas predefinições.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Capítulos do manual"><a rel="prev" href="workspace.html">← Anterior: Espaço de trabalho de roteamento</a><a rel="next" href="app-capture.html">Próximo: Captura de áudio de aplicativos →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Rascunho de pré-lançamento · MixRelay 0.1.0</p><a href="../../index.html">Página do produto</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

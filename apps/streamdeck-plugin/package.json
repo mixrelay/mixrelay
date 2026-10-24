@@ -1,0 +1,17 @@
+{
+  "name": "@mixrelay/streamdeck-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test src/*.test.mjs"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "2.1.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.4",
+    "ws": "8.19.0"
+  }
+}

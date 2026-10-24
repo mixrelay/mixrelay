@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Use MixRelay IO to exchange audio with other apps. Its device format is separate from the recording format.">
+    <title>Devices and virtual endpoints — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/devices.html">
+    <link rel="alternate" hreflang="ko" href="../ko/devices.html">
+    <link rel="alternate" hreflang="ja" href="../ja/devices.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/devices.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/devices.html">
+    <link rel="alternate" hreflang="de" href="../de/devices.html">
+    <link rel="alternate" hreflang="fr" href="../fr/devices.html">
+    <link rel="alternate" hreflang="it" href="../it/devices.html">
+    <link rel="alternate" hreflang="es" href="../es/devices.html">
+    <link rel="alternate" hreflang="pt" href="../pt/devices.html">
+    <link rel="alternate" hreflang="ru" href="../ru/devices.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Product home"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Language"><a href="../en/devices.html" lang="en" hreflang="en" aria-current="page">English</a> <a href="../ko/devices.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/devices.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/devices.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/devices.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/devices.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/devices.html" lang="fr" hreflang="fr">Français</a> <a href="../it/devices.html" lang="it" hreflang="it">Italiano</a> <a href="../es/devices.html" lang="es" hreflang="es">Español</a> <a href="../pt/devices.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/devices.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Prerelease draft</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Manual chapters">
+        <a class="back-link" href="../../index.html">← Product home</a>
+        <a class="manual-mobile-index" href="index.html">All chapters</a>
+        <nav class="guide-nav" aria-label="Manual chapters"><a href="index.html">Manual overview</a>
+<a href="installation.html">System requirements and installation</a>
+<a href="first-launch.html">First launch and permissions</a>
+<a href="workspace.html">Routing workspace</a>
+<a href="devices.html" aria-current="page">Devices and virtual endpoints</a>
+<a href="app-capture.html">App audio capture</a>
+<a href="recording.html">Recording</a>
+<a href="effects.html">Built-in effects and presets</a>
+<a href="plugins.html">External plug-ins</a>
+<a href="stream-deck.html">Stream Deck plug-in</a>
+<a href="licensing.html">Free edition and licensing</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Uninstalling</a>
+<a href="troubleshooting.html">Troubleshooting and diagnostics</a>
+<a href="support.html">Support contact</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Devices and virtual endpoints</h1><p>Use MixRelay IO to exchange audio with other apps. Its device format is separate from the recording format.</p><p class="guide-draft-note">Prerelease draft. Public downloads and purchases are not available yet. These instructions describe the current source build; installed behaviour still needs verification in the environments noted below.</p></header>
+        <nav class="manual-toc" aria-label="On this page"><p class="sidebar-label">On this page</p><ul><li><a href="#directions">Choose the audio direction</a></li><li><a href="#formats">Channels, sample rates and PCM</a></li><li><a href="#buffers">Processing buffers and latency</a></li></ul></nav>
+        <section class="guide-section" id="directions" aria-labelledby="directions-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="directions-title">Choose the audio direction</h2>
+<p><code>MixRelay IO</code> is the default virtual device. To receive audio played to it by another app, add it through <code>Add node → Source → MixRelay Virtual I/O</code>. This is <code>Device → graph</code>. To send a graph mix to an app such as OBS, add the device through <code>Add node → Output → MixRelay Virtual I/O</code>. This is <code>Graph → device</code>. In OBS or your DAW, select MixRelay IO as the audio input.</p><p>Connect the channels you need. MixRelay does not select a system default device or add a hardware monitoring route for you. For monitoring, add a physical output and connect the mix to it. The Driver also provides basic loopback from OS playback to capture without the editor’s graph mapping limits.</p><p>Removing a graph reference does not remove the virtual device. Licensed device creation is available through <code>New virtual device</code>. Removing a device from the status menu also removes its saved device settings; other apps using it lose that device.</p>
+</div></section>
+<section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="formats-title">Channels, sample rates and PCM</h2>
+<p>Open the virtual node’s <code>Options</code> to change <code>Device name</code>, <code>Channels</code>, sample rate and <code>Bit depth</code>. Only supported common settings are offered. Renaming requires a licence. The status menu’s channel choices are 2, 4, 8, 16, 32 and 64; the underlying device supports 1–64 channels per direction.</p><p>On macOS, supported rates are 44.1, 48, 88.2, 96, 176.4 and 192 kHz. Device formats are Float32, PCM16, packed PCM24 and PCM32. Linux offers combinations supported by PipeWire. Physical devices follow their own capabilities. Internal DSP uses Float32; changing device bit depth does not change the WAV recording format.</p><p>A format change briefly interrupts audio. If it fails, check the message and the current value before retrying. A save failure can mean the device changed but its new settings were not saved.</p><!-- TODO screenshot: virtual endpoint Options with supported format choices and status-menu device settings. -->
+</div></section>
+<section class="guide-section" id="buffers" aria-labelledby="buffers-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="buffers-title">Processing buffers and latency</h2>
+<p>The footer’s <code>Processing buffer</code> changes the engine’s I/O buffer when live changes are supported. Selecting a value applies it. On a recoverable error, <code>Apply</code> retries a supported setting. A smaller buffer can reduce buffer delay but may make dropouts more likely. Increase it if audio breaks up.</p><p>There is no separate buffer selector for each virtual device. Other apps choose their own client buffers. <code>Buffer delay</code> is the duration of one processing buffer, not total input/output latency. It does not promise a PipeWire-wide quantum. Multiple physical devices may require sample rate conversion and clock synchronization.</p><p>Application capture currently requires 48 kHz. The footer currently offers buffer control, not a processing sample-rate selector. Virtual-device rates are edited in the device settings. Some native plug-ins prevent live format changes because their preset state cannot yet be transferred.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Manual chapters"><a rel="prev" href="workspace.html">← Previous: Routing workspace</a><a rel="next" href="app-capture.html">Next: App audio capture →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Prerelease draft · MixRelay 0.1.0</p><a href="../../index.html">Product home</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

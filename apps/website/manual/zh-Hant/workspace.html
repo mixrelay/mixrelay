@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="使用音源、處理器和輸出節點建立音訊圖。連線在各個聲道之間傳送音訊。">
+    <title>路由工作區 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/workspace.html">
+    <link rel="alternate" hreflang="ko" href="../ko/workspace.html">
+    <link rel="alternate" hreflang="ja" href="../ja/workspace.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/workspace.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/workspace.html">
+    <link rel="alternate" hreflang="de" href="../de/workspace.html">
+    <link rel="alternate" hreflang="fr" href="../fr/workspace.html">
+    <link rel="alternate" hreflang="it" href="../it/workspace.html">
+    <link rel="alternate" hreflang="es" href="../es/workspace.html">
+    <link rel="alternate" hreflang="pt" href="../pt/workspace.html">
+    <link rel="alternate" hreflang="ru" href="../ru/workspace.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="產品首頁"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="語言"><a href="../en/workspace.html" lang="en" hreflang="en">English</a> <a href="../ko/workspace.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/workspace.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/workspace.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/workspace.html" lang="zh-Hant" hreflang="zh-Hant" aria-current="page">繁體中文</a> <a href="../de/workspace.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/workspace.html" lang="fr" hreflang="fr">Français</a> <a href="../it/workspace.html" lang="it" hreflang="it">Italiano</a> <a href="../es/workspace.html" lang="es" hreflang="es">Español</a> <a href="../pt/workspace.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/workspace.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 發佈前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手冊章節">
+        <a class="back-link" href="../../index.html">← 產品首頁</a>
+        <a class="manual-mobile-index" href="index.html">所有章節</a>
+        <nav class="guide-nav" aria-label="手冊章節"><a href="index.html">手冊總覽</a>
+<a href="installation.html">系統需求與安裝</a>
+<a href="first-launch.html">首次啟動與權限</a>
+<a href="workspace.html" aria-current="page">路由工作區</a>
+<a href="devices.html">裝置與虛擬端點</a>
+<a href="app-capture.html">應用程式音訊擷取</a>
+<a href="recording.html">錄音</a>
+<a href="effects.html">內建效果與預設</a>
+<a href="plugins.html">外掛程式</a>
+<a href="stream-deck.html">Stream Deck 外掛程式</a>
+<a href="licensing.html">免費版與授權</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html">解除安裝</a>
+<a href="troubleshooting.html">疑難排解與診斷</a>
+<a href="support.html">聯絡支援</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手冊</p><h1>路由工作區</h1><p>使用音源、處理器和輸出節點建立音訊圖。連線在各個聲道之間傳送音訊。</p><p class="guide-draft-note">發佈前草稿。目前尚未提供公開下載或購買。本手冊說明目前原始碼建置版本的行為；在下文所列環境中，仍須驗證安裝後的實際行為。</p></header>
+        <nav class="manual-toc" aria-label="本頁內容"><p class="sidebar-label">本頁內容</p><ul><li><a href="#graphs">音訊圖、節點與儲存</a></li><li><a href="#connections">連接與對應聲道</a></li><li><a href="#keyboard">不用拖曳也能連接</a></li><li><a href="#states">關閉、靜音、旁通、暫停與結束</a></li></ul></nav>
+        <section class="guide-section" id="graphs" aria-labelledby="graphs-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="graphs-title">音訊圖、節點與儲存</h2>
+<p>使用 <code>新增音訊圖</code> 建立音訊圖，透過 <code>新增節點</code> 加入 <code>音源</code>、<code>處理器</code> 或 <code>輸出</code>。在 <code>音訊圖</code> 中選擇要編輯的音訊圖。選擇一個音訊圖不會關閉其他音訊圖。有授權時，多個音訊圖可以同時運作。</p><p>開啟節點的 <code>選項</code> 可查看可用參數。按兩下節點名稱、在節點取得焦點時按 <kbd>F2</kbd>，或使用選單中的 <code>變更顯示名稱</code> 可修改顯示名稱。顯示名稱僅影響目前節點，清空即可恢復原名。</p><p>編輯內容和配置會自動儲存。出現儲存警告時，變更可能在重新啟動後遺失。如需可攜式工作區，請使用 <code>檔案 → 儲存</code> 或 <code>另存新檔…</code> 寫入 <code>.mix</code> 檔案。<code>新增工作區</code> 和 <code>開啟…</code> 會在取代目前內容前詢問確認。工作區檔案不會安裝缺少的裝置或外掛程式。</p>
+</div></section>
+<section class="guide-section" id="connections" aria-labelledby="connections-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="connections-title">連接與對應聲道</h2>
+<p>將輸出連接埠拖曳至輸入連接埠。立體聲需要連接兩個聲道。按住 <kbd>Shift</kbd> 可在同一節點上選取更多輸出聲道，再將所選聲道拖曳至目標的第一個聲道；目標聲道之間的相對位移會保留。按 <kbd>Escape</kbd> 可取消並清除聲道選取。</p><p>在連線上按右鍵可選擇 <code>刪除連線</code>。連接埠選單提供 <code>斷開聲道</code> 或 <code>斷開所選聲道</code>。選取節點或連線後，按 <kbd>Delete</kbd> 或 <kbd>Backspace</kbd> 也可刪除。<code>縮放以顯示完整音訊圖</code> 可將整個音訊圖顯示在檢視中。在 macOS 上使用 <kbd>Command+Z</kbd>、在 Linux 上使用 <kbd>Ctrl+Z</kbd> 復原音訊圖編輯；同時按住 <kbd>Shift</kbd> 可重做。</p><p><code>刪除音訊圖</code> 會停止該音訊圖的音訊與錄音。刪除音訊圖無法復原，已儲存的工作區檔案仍會保留。</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
+</div></section>
+<section class="guide-section" id="keyboard" aria-labelledby="keyboard-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="keyboard-title">不用拖曳也能連接</h2>
+<ol><li>按 <kbd>Tab</kbd> 將焦點移至音源節點。按 <kbd>Enter</kbd> 或 <kbd>Space</kbd> 選取節點。方向鍵可移動選取的節點，按住 <kbd>Shift</kbd> 可增加移動幅度。</li><li>按 <kbd>Shift+F10</kbd> 或快顯選單鍵，然後選擇 <code>連接聲道…</code>。</li><li>選擇 <code>起始輸出聲道</code> 和 <code>聲道數</code>，或保留既有的聲道選取。再選擇 <code>目標</code> 和 <code>起始輸入聲道</code>。</li><li>查看 <code>預覽</code>，包括略過的連線及其原因。選擇 <code>連接</code>，或選擇 <code>取消</code> 以維持音訊圖不變。</li></ol><p>焦點位於連線或畫布時，同樣可以使用這些快顯選單快捷鍵。節點內的控制項保留各自的鍵盤操作方式。按 <kbd>Escape</kbd> 可關閉選單和對話框。</p>
+</div></section>
+<section class="guide-section" id="states" aria-labelledby="states-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="states-title">關閉、靜音、旁通、暫停與結束</h2>
+<ul><li>關閉節點電源會停用處理，並阻斷其訊號。</li><li>靜音會繼續處理，但使節點輸出無聲。</li><li>效果器的 <code>旁通</code> 會保留設定並傳遞乾音。</li><li>頁尾或狀態選單中的 <code>暫停</code> 會暫停所有音訊圖和進行中的錄音。<code>繼續</code> 從當前音訊繼續；暫停期間的音訊會捨棄。虛擬裝置的 ID、名稱和格式保持不變。</li></ul><p>關閉編輯器後，路由、效果、擷取和錄音仍會在背景運作。在 macOS 上，關閉視窗會將其隱藏，結束編輯器則會結束編輯器程序。在 Linux 上，關閉視窗會結束編輯器程序。使用狀態選單中的 <code>開啟 MixRelay</code> 可返回編輯器。</p><p>背景狀態選單中的 <code>結束</code> 會停止裝置和迴送，並完成錄音檔案的收尾。重新開啟 MixRelay 會還原已儲存的裝置。已儲存的全域暫停狀態會保持到您繼續音訊為止；手動暫停或已停止的錄音機不會只因您繼續所有音訊而開始錄音。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="手冊章節"><a rel="prev" href="first-launch.html">← 上一章：首次啟動與權限</a><a rel="next" href="devices.html">下一章：裝置與虛擬端點 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>發佈前草稿 · MixRelay 0.1.0</p><a href="../../index.html">產品首頁</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

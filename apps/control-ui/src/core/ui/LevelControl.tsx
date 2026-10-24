@@ -1,32 +1,40 @@
-import { Slider, Stack, Text } from '@mantine/core';
+import styles from './LevelControl.module.css';
+import { ValueSlider } from './ValueSlider';
 
-interface LevelControlProps {
+export function LevelControl({
+  label,
+  max,
+  min,
+  onChange,
+  suffix,
+  value,
+  disabled,
+}: {
   label: string;
   max: number;
   min: number;
   onChange: (value: number) => void;
   suffix: string;
   value: number;
-}
-
-export function LevelControl({ label, max, min, onChange, suffix, value }: LevelControlProps) {
+  disabled?: boolean;
+}) {
   return (
-    <Stack className="level-control" gap={8}>
-      <span className="level-control__label">
-        <Text size="sm">{label}</Text>
-        <Text c="dimmed" ff="monospace" size="xs">
+    <div className={styles.root}>
+      <span className={styles.label}>
+        <span>{label}</span>
+        <span className={styles.value}>
           {value} {suffix}
-        </Text>
+        </span>
       </span>
-      <Slider
-        aria-label={label}
-        color="signal"
-        label={null}
-        max={max}
-        min={min}
-        onChange={onChange}
+      <ValueSlider
+        label={label}
         value={value}
+        min={min}
+        max={max}
+        disabled={disabled}
+        onChange={onChange}
+        valueText={`${value} ${suffix}`}
       />
-    </Stack>
+    </div>
   );
 }

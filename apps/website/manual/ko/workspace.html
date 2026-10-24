@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="소스·프로세서·출력 노드로 그래프를 구성하세요. 케이블은 개별 채널 사이로 오디오를 전달합니다.">
+    <title>라우팅 작업 영역 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/workspace.html">
+    <link rel="alternate" hreflang="ko" href="../ko/workspace.html">
+    <link rel="alternate" hreflang="ja" href="../ja/workspace.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/workspace.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/workspace.html">
+    <link rel="alternate" hreflang="de" href="../de/workspace.html">
+    <link rel="alternate" hreflang="fr" href="../fr/workspace.html">
+    <link rel="alternate" hreflang="it" href="../it/workspace.html">
+    <link rel="alternate" hreflang="es" href="../es/workspace.html">
+    <link rel="alternate" hreflang="pt" href="../pt/workspace.html">
+    <link rel="alternate" hreflang="ru" href="../ru/workspace.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="제품 소개"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="언어"><a href="../en/workspace.html" lang="en" hreflang="en">English</a> <a href="../ko/workspace.html" lang="ko" hreflang="ko" aria-current="page">한국어</a> <a href="../ja/workspace.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/workspace.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/workspace.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/workspace.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/workspace.html" lang="fr" hreflang="fr">Français</a> <a href="../it/workspace.html" lang="it" hreflang="it">Italiano</a> <a href="../es/workspace.html" lang="es" hreflang="es">Español</a> <a href="../pt/workspace.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/workspace.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 사전 공개 초안</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="안내서 목차">
+        <a class="back-link" href="../../index.html">← 제품 소개</a>
+        <a class="manual-mobile-index" href="index.html">전체 목차</a>
+        <nav class="guide-nav" aria-label="안내서 목차"><a href="index.html">안내서 시작</a>
+<a href="installation.html">시스템 요구사항과 설치</a>
+<a href="first-launch.html">처음 실행과 권한</a>
+<a href="workspace.html" aria-current="page">라우팅 작업 영역</a>
+<a href="devices.html">장치와 가상 장치</a>
+<a href="app-capture.html">앱 오디오 캡처</a>
+<a href="recording.html">녹음</a>
+<a href="effects.html">내장 효과와 프리셋</a>
+<a href="plugins.html">외부 플러그인</a>
+<a href="stream-deck.html">Stream Deck 플러그인</a>
+<a href="licensing.html">무료 기능과 라이선스</a>
+<a href="updates.html">업데이트</a>
+<a href="uninstall.html">제거</a>
+<a href="troubleshooting.html">문제 해결과 진단</a>
+<a href="support.html">지원 문의</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>라우팅 작업 영역</h1><p>소스·프로세서·출력 노드로 그래프를 구성하세요. 케이블은 개별 채널 사이로 오디오를 전달합니다.</p><p class="guide-draft-note">사전 공개 초안입니다. 공개 다운로드와 구매는 아직 제공하지 않습니다. 현재 소스 빌드를 기준으로 작성했으며 아래에 표시한 환경의 설치본 검증은 남아 있습니다.</p></header>
+        <nav class="manual-toc" aria-label="이 페이지 목차"><p class="sidebar-label">이 페이지 목차</p><ul><li><a href="#graphs">그래프·노드·저장</a></li><li><a href="#connections">채널 연결과 매핑</a></li><li><a href="#keyboard">드래그 없이 연결하기</a></li><li><a href="#states">끄기·음소거·바이패스·일시정지·종료</a></li></ul></nav>
+        <section class="guide-section" id="graphs" aria-labelledby="graphs-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="graphs-title">그래프·노드·저장</h2>
+<p><code>새 그래프</code>로 그래프를 만들고 <code>노드 추가</code>에서 <code>소스</code>·<code>프로세서</code>·<code>출력</code>을 추가하세요. <code>그래프</code> 목록에서 편집 대상을 선택합니다. 선택을 바꿔도 다른 그래프는 꺼지지 않습니다. 유료 인증이 있으면 여러 그래프를 함께 실행할 수 있습니다.</p><p>노드의 <code>옵션</code>을 열어 제공하는 설정을 조절하세요. 이름을 두 번 클릭하거나 노드에 포커스를 두고 <kbd>F2</kbd>를 누르거나 메뉴의 <code>표시 이름 변경</code>을 사용하세요. 표시 이름은 해당 노드에만 적용됩니다. 비우면 원래 이름으로 돌아갑니다.</p><p>편집과 배치는 자동 저장됩니다. 저장 경고가 표시되면 재시작 후 변경 사항이 사라질 수 있습니다. 작업 공간을 파일로 보관하려면 <code>파일 → 저장</code> 또는 <code>다른 이름으로 저장…</code>으로 <code>.mix</code> 파일을 만드세요. <code>새 작업 공간</code>과 <code>열기…</code>는 현재 내용을 교체하기 전에 확인합니다. 작업 공간 파일이 없는 장치나 플러그인을 설치해 주지는 않습니다.</p>
+</div></section>
+<section class="guide-section" id="connections" aria-labelledby="connections-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="connections-title">채널 연결과 매핑</h2>
+<p>출력 포트에서 입력 포트로 드래그하세요. 스테레오는 두 채널을 모두 연결합니다. <kbd>Shift</kbd>를 누른 채 같은 노드의 출력 채널을 더 선택하고 대상의 첫 채널로 드래그할 수 있습니다. 대상 채널의 간격을 유지해 연결합니다. <kbd>Escape</kbd>로 취소하고 채널 선택을 해제하세요.</p><p>케이블을 오른쪽 클릭하면 <code>케이블 삭제</code>가 있습니다. 포트 메뉴에는 <code>채널 연결 해제</code> 또는 <code>선택 채널 연결 해제</code>가 있습니다. 노드나 케이블을 선택한 뒤 <kbd>Delete</kbd> 또는 <kbd>Backspace</kbd>로 삭제할 수 있습니다. <code>그래프 전체 보기</code>로 그래프를 화면에 맞추세요. macOS의 <kbd>Command+Z</kbd>, Linux의 <kbd>Ctrl+Z</kbd>로 그래프 편집을 실행 취소하고 <kbd>Shift</kbd>를 함께 눌러 다시 실행하세요.</p><p><code>그래프 삭제</code>는 해당 그래프의 오디오와 녹음을 멈춥니다. 그래프 삭제는 되돌릴 수 없으며 저장한 작업 공간 파일은 남습니다.</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
+</div></section>
+<section class="guide-section" id="keyboard" aria-labelledby="keyboard-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="keyboard-title">드래그 없이 연결하기</h2>
+<ol><li><kbd>Tab</kbd>으로 출발 노드에 포커스를 두세요. <kbd>Enter</kbd> 또는 <kbd>Space</kbd>로 선택합니다. 방향키로 선택한 노드를 옮기고 <kbd>Shift</kbd>를 함께 누르면 더 크게 옮깁니다.</li><li><kbd>Shift+F10</kbd> 또는 메뉴 키를 누르고 <code>채널 연결…</code>을 선택하세요.</li><li><code>첫 출력 채널</code>과 <code>채널 수</code>를 지정하거나 기존 채널 선택을 유지하세요. <code>대상</code>과 <code>첫 입력 채널</code>을 선택하세요.</li><li><code>미리 보기</code>에서 연결과 건너뛰는 이유를 확인하세요. <code>연결</code>을 누르거나 <code>취소</code>로 변경 없이 닫으세요.</li></ol><p>케이블이나 캔버스에 포커스를 두고 같은 키로 메뉴를 열 수 있습니다. 노드 안의 조작은 고유한 키 동작을 유지합니다. <kbd>Escape</kbd>로 메뉴와 대화상자를 닫으세요.</p>
+</div></section>
+<section class="guide-section" id="states" aria-labelledby="states-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="states-title">끄기·음소거·바이패스·일시정지·종료</h2>
+<ul><li>노드의 전원을 끄면 처리가 제외되고 신호가 차단됩니다.</li><li>음소거는 처리를 유지하면서 노드 출력을 끕니다.</li><li>효과의 <code>바이패스</code>는 설정을 유지하면서 원음을 통과시킵니다.</li><li>하단 또는 상태 메뉴의 <code>일시정지</code>는 모든 그래프와 진행 중인 녹음을 일시정지합니다. <code>재개</code>하면 현재 소리를 처리합니다. 일시정지 중 소리는 버리며 가상 장치의 ID·이름·형식은 유지합니다.</li></ul><p>편집 앱을 닫아도 라우팅·효과·캡처·녹음은 백그라운드에서 계속됩니다. macOS에서 창을 닫으면 창을 숨기고, 편집 앱을 종료하면 편집 프로세스를 끝냅니다. Linux에서 창을 닫으면 편집 프로세스를 끝냅니다. 상태 메뉴의 <code>MixRelay 열기</code>로 돌아오세요.</p><p>백그라운드 상태 메뉴의 <code>종료</code>는 장치와 루프백을 중지하고 녹음 파일을 마무리합니다. MixRelay를 다시 열면 저장한 장치를 복원합니다. 저장한 전체 일시정지는 재개할 때까지 유지됩니다. 따로 일시정지하거나 정지한 녹음기는 전체 재개만으로 시작하지 않습니다.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="안내서 목차"><a rel="prev" href="first-launch.html">← 이전: 처음 실행과 권한</a><a rel="next" href="devices.html">다음: 장치와 가상 장치 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>사전 공개 초안 · MixRelay 0.1.0</p><a href="../../index.html">제품 소개</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="정책" lang="ko"><a href="../../legal/ko/terms.html">판매조건·환불</a><a href="../../legal/ko/privacy.html">개인정보 처리방침</a></nav></div>
+    </footer>
+  </body>
+</html>

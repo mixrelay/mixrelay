@@ -1,23 +1,20 @@
-import { Group, Paper, Stack, Text, Title } from '@mantine/core';
 import type { PropsWithChildren, ReactNode } from 'react';
 
+import styles from './Panel.module.css';
+
 interface PanelProps extends PropsWithChildren {
-  eyebrow?: string;
   title: string;
   trailing?: ReactNode;
 }
 
-export function Panel({ children, eyebrow, title, trailing }: PanelProps) {
+export function Panel({ children, title, trailing }: PanelProps) {
   return (
-    <Paper className="panel" component="section" p="xl" withBorder>
-      <Group align="flex-start" className="panel__header" justify="space-between" wrap="nowrap">
-        <Stack gap={0}>
-          {eyebrow ? <Text className="eyebrow">{eyebrow}</Text> : null}
-          <Title order={2}>{title}</Title>
-        </Stack>
+    <section className={styles.root}>
+      <div className={styles.header}>
+        <h2 className={styles.title}>{title}</h2>
         {trailing}
-      </Group>
+      </div>
       {children}
-    </Paper>
+    </section>
   );
 }

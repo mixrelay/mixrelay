@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="グラフに接続した任意の信号をRF64 WAVファイルに録音します。">
+    <title>録音 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/recording.html">
+    <link rel="alternate" hreflang="ko" href="../ko/recording.html">
+    <link rel="alternate" hreflang="ja" href="../ja/recording.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/recording.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/recording.html">
+    <link rel="alternate" hreflang="de" href="../de/recording.html">
+    <link rel="alternate" hreflang="fr" href="../fr/recording.html">
+    <link rel="alternate" hreflang="it" href="../it/recording.html">
+    <link rel="alternate" hreflang="es" href="../es/recording.html">
+    <link rel="alternate" hreflang="pt" href="../pt/recording.html">
+    <link rel="alternate" hreflang="ru" href="../ru/recording.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">本文へスキップ</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="製品ホーム"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="言語"><a href="../en/recording.html" lang="en" hreflang="en">English</a> <a href="../ko/recording.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/recording.html" lang="ja" hreflang="ja" aria-current="page">日本語</a> <a href="../zh-Hans/recording.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/recording.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/recording.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/recording.html" lang="fr" hreflang="fr">Français</a> <a href="../it/recording.html" lang="it" hreflang="it">Italiano</a> <a href="../es/recording.html" lang="es" hreflang="es">Español</a> <a href="../pt/recording.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/recording.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 公開前の草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="マニュアルの章">
+        <a class="back-link" href="../../index.html">← 製品ホーム</a>
+        <a class="manual-mobile-index" href="index.html">すべての章</a>
+        <nav class="guide-nav" aria-label="マニュアルの章"><a href="index.html">マニュアル概要</a>
+<a href="installation.html">システム要件とインストール</a>
+<a href="first-launch.html">初回起動とアクセス許可</a>
+<a href="workspace.html">ルーティングワークスペース</a>
+<a href="devices.html">デバイスと仮想エンドポイント</a>
+<a href="app-capture.html">アプリの音声キャプチャ</a>
+<a href="recording.html" aria-current="page">録音</a>
+<a href="effects.html">内蔵エフェクトとプリセット</a>
+<a href="plugins.html">外部プラグイン</a>
+<a href="stream-deck.html">Stream Deckプラグイン</a>
+<a href="licensing.html">無料版とライセンス</a>
+<a href="updates.html">アップデート</a>
+<a href="uninstall.html">アンインストール</a>
+<a href="troubleshooting.html">トラブルシューティングと診断</a>
+<a href="support.html">サポート窓口</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / マニュアル</p><h1>録音</h1><p>グラフに接続した任意の信号をRF64 WAVファイルに録音します。</p><p class="guide-draft-note">公開前の草稿です。一般向けのダウンロードと購入はまだ利用できません。本書は現在のソースからビルドした製品を説明しています。以下に記載する環境では、インストール後の動作確認が引き続き必要です。</p></header>
+        <nav class="manual-toc" aria-label="このページの内容"><p class="sidebar-label">このページの内容</p><ul><li><a href="#setup">設定して録音する</a></li><li><a href="#pause">テイクを一時停止し、終了する</a></li><li><a href="#limits">無料版の制限と技術的な上限</a></li></ul></nav>
+        <section class="guide-section" id="setup" aria-labelledby="setup-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="setup-title">設定して録音する</h2>
+<ol><li><code>ノードを追加 → 出力 → レコーダー</code>を選び、録音するチャンネルを接続します。</li><li><code>オプション</code>を開きます。<code>チャンネル</code>を設定し、<code>フォルダーを選択…</code>で<code>録音フォルダー</code>を選びます。</li><li><code>WAV のサンプルレート</code>を選びます。<code>入力サンプルレート</code>はテイク開始時の入力サンプルレートに従います。<code>ビット深度</code>はPCM16、PCM24、Float32から選びます。</li><li><code>録音</code>を選びます。MixRelayがテイクのファイル名を作成します。必要に応じて<code>一時停止</code>、<code>再開</code>、<code>停止</code>を使います。</li></ol><p>録音設定を変更する前に停止してください。録音中と一時停止中は設定がロックされます。1テイクは1個のRF64 <code>.wav</code>ファイルになり、4 GiBを超えるファイルにも対応します。RF64に対応するソフトウェアで開いてください。ファイルサイズによるテイクの分割やMP3録音はできません。</p><!-- TODO screenshot: Recorder Options, recording and paused states in both languages. -->
+</div></section>
+<section class="guide-section" id="pause" aria-labelledby="pause-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="pause-title">テイクを一時停止し、終了する</h2>
+<p>再開すると同じファイルへの録音が続きます。一時停止した区間に無音は追加されません。10秒録音し、5秒一時停止した後に10秒録音すると、20秒のファイルになります。<code>録音時間</code>はファイルに書き込まれた音声の時間を示します。</p><p>全体の<code>一時停止</code>でも録音中のレコーダーが一時停止します。全体の<code>再開</code>では、手動で一時停止したレコーダーや停止済みのレコーダーは再開しません。全体の一時停止中でも、レコーダーの<code>停止</code>でファイルを仕上げられます。停止時にWAVヘッダーの仕上げ処理を行います。エディターを閉じても録音は続き、バックグラウンドの音声処理を終了すると開いている録音ファイルが仕上げられます。</p>
+</div></section>
+<section class="guide-section" id="limits" aria-labelledby="limits-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="limits-title">無料版の制限と技術的な上限</h2>
+<p>無料版ではレコーダー1個、最大2チャンネル、1テイクあたり2時間の音声を録音できます。一時停止の時間は含みません。上限に達するとファイルは正常に仕上げられ、音声ルーティングは続きます。一時停止中のテイクもレコーダーの枠を使用します。</p><p>ライセンス認証済みのエンジンは、レコーダーごとに1–8チャンネル、最大16の録音セッションに対応します。時間の上限はテイク開始時に決まります。後からアクティベートしても無料版で開始したテイクは延長されません。有料機能が有効な状態で開始したテイクが、ライセンスの期限切れで途中終了することもありません。現在のライセンスの上限を適用するには、新しいテイクを開始してください。</p><p><code>録音エラー</code>が表示された場合は、選んだフォルダー、書き込み権限、ディスクの空き容量を確認します。停止して保存済みファイルを確認してから、次のテイクを始めてください。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="マニュアルの章"><a rel="prev" href="app-capture.html">← 前へ: アプリの音声キャプチャ</a><a rel="next" href="effects.html">次へ: 内蔵エフェクトとプリセット →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

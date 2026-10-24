@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="ソース、プロセッサー、出力の各ノードを組み合わせてグラフを作成します。ケーブルはチャンネルごとに音声を伝えます。">
+    <title>ルーティングワークスペース — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/workspace.html">
+    <link rel="alternate" hreflang="ko" href="../ko/workspace.html">
+    <link rel="alternate" hreflang="ja" href="../ja/workspace.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/workspace.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/workspace.html">
+    <link rel="alternate" hreflang="de" href="../de/workspace.html">
+    <link rel="alternate" hreflang="fr" href="../fr/workspace.html">
+    <link rel="alternate" hreflang="it" href="../it/workspace.html">
+    <link rel="alternate" hreflang="es" href="../es/workspace.html">
+    <link rel="alternate" hreflang="pt" href="../pt/workspace.html">
+    <link rel="alternate" hreflang="ru" href="../ru/workspace.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">本文へスキップ</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="製品ホーム"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="言語"><a href="../en/workspace.html" lang="en" hreflang="en">English</a> <a href="../ko/workspace.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/workspace.html" lang="ja" hreflang="ja" aria-current="page">日本語</a> <a href="../zh-Hans/workspace.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/workspace.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/workspace.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/workspace.html" lang="fr" hreflang="fr">Français</a> <a href="../it/workspace.html" lang="it" hreflang="it">Italiano</a> <a href="../es/workspace.html" lang="es" hreflang="es">Español</a> <a href="../pt/workspace.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/workspace.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 公開前の草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="マニュアルの章">
+        <a class="back-link" href="../../index.html">← 製品ホーム</a>
+        <a class="manual-mobile-index" href="index.html">すべての章</a>
+        <nav class="guide-nav" aria-label="マニュアルの章"><a href="index.html">マニュアル概要</a>
+<a href="installation.html">システム要件とインストール</a>
+<a href="first-launch.html">初回起動とアクセス許可</a>
+<a href="workspace.html" aria-current="page">ルーティングワークスペース</a>
+<a href="devices.html">デバイスと仮想エンドポイント</a>
+<a href="app-capture.html">アプリの音声キャプチャ</a>
+<a href="recording.html">録音</a>
+<a href="effects.html">内蔵エフェクトとプリセット</a>
+<a href="plugins.html">外部プラグイン</a>
+<a href="stream-deck.html">Stream Deckプラグイン</a>
+<a href="licensing.html">無料版とライセンス</a>
+<a href="updates.html">アップデート</a>
+<a href="uninstall.html">アンインストール</a>
+<a href="troubleshooting.html">トラブルシューティングと診断</a>
+<a href="support.html">サポート窓口</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / マニュアル</p><h1>ルーティングワークスペース</h1><p>ソース、プロセッサー、出力の各ノードを組み合わせてグラフを作成します。ケーブルはチャンネルごとに音声を伝えます。</p><p class="guide-draft-note">公開前の草稿です。一般向けのダウンロードと購入はまだ利用できません。本書は現在のソースからビルドした製品を説明しています。以下に記載する環境では、インストール後の動作確認が引き続き必要です。</p></header>
+        <nav class="manual-toc" aria-label="このページの内容"><p class="sidebar-label">このページの内容</p><ul><li><a href="#graphs">グラフ、ノード、保存</a></li><li><a href="#connections">チャンネルを接続し、割り当てる</a></li><li><a href="#keyboard">ドラッグせずに接続する</a></li><li><a href="#states">オフ、ミュート、バイパス、一時停止、終了</a></li></ul></nav>
+        <section class="guide-section" id="graphs" aria-labelledby="graphs-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="graphs-title">グラフ、ノード、保存</h2>
+<p><code>新規グラフ</code>でグラフを作成し、<code>ノードを追加</code>から<code>ソース</code>、<code>プロセッサー</code>、<code>出力</code>を追加します。編集するグラフは<code>グラフ</code>で選びます。選択しても他のグラフはオフになりません。有料ライセンスでは複数のグラフを同時に動かせます。</p><p>ノードの<code>オプション</code>を開くと、使用可能なパラメーターを確認できます。名前をダブルクリックするか、ノードにフォーカスして<kbd>F2</kbd>を押すか、メニューの<code>表示名を変更</code>を使って名前を変更します。表示名の変更はそのノードだけに適用されます。空欄にすると元の名前に戻ります。</p><p>編集内容と配置は自動保存されます。保存の警告が出た場合、再起動後に変更が失われる可能性があります。持ち運べるワークスペースを作るには、<code>ファイル → 保存</code>または<code>名前を付けて保存…</code>で<code>.mix</code>ファイルに保存します。<code>新規ワークスペース</code>と<code>開く…</code>では、現在の内容を置き換える前に確認が表示されます。ワークスペースファイルから、不足しているデバイスやプラグインがインストールされることはありません。</p>
+</div></section>
+<section class="guide-section" id="connections" aria-labelledby="connections-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="connections-title">チャンネルを接続し、割り当てる</h2>
+<p>出力ポートを入力ポートにドラッグします。ステレオの場合は両チャンネルを接続してください。同じノードの出力チャンネルを追加選択するには<kbd>Shift</kbd>を押しながら選び、選択したチャンネルを接続先の最初のチャンネルにドラッグします。接続先でもチャンネル間の相対的な位置は維持されます。<kbd>Escape</kbd>でキャンセルし、チャンネルの選択を解除できます。</p><p>ケーブルを右クリックすると<code>ケーブルを削除</code>を選べます。ポートメニューには<code>チャンネルを切断</code>と<code>選択したチャンネルを切断</code>があります。ノードまたはケーブルを選んで<kbd>Delete</kbd>か<kbd>Backspace</kbd>を押しても削除できます。<code>グラフ全体を表示</code>でグラフ全体を表示できます。グラフの編集を取り消すにはmacOSでは<kbd>Command+Z</kbd>、Linuxでは<kbd>Ctrl+Z</kbd>を使います。<kbd>Shift</kbd>を加えるとやり直せます。</p><p><code>グラフを削除</code>を実行すると、そのグラフの音声と録音が停止します。グラフの削除は取り消せません。保存済みのワークスペースファイルは残ります。</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
+</div></section>
+<section class="guide-section" id="keyboard" aria-labelledby="keyboard-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="keyboard-title">ドラッグせずに接続する</h2>
+<ol><li><kbd>Tab</kbd>でソースノードにフォーカスし、<kbd>Enter</kbd>または<kbd>Space</kbd>で選択します。選択したノードは矢印キーで移動できます。<kbd>Shift</kbd>を押しながら操作すると移動量が大きくなります。</li><li><kbd>Shift+F10</kbd>またはコンテキストメニューキーを押し、<code>チャンネルを接続…</code>を選びます。</li><li><code>最初の出力チャンネル</code>と<code>チャンネル数</code>を指定するか、すでに選択したチャンネルを使います。<code>接続先</code>と<code>最初の入力チャンネル</code>を選びます。</li><li><code>プレビュー</code>で、スキップされる接続とその理由も確認します。<code>接続</code>を選んで接続するか、<code>キャンセル</code>で変更せずに閉じます。</li></ol><p>ケーブルやキャンバスにフォーカスしている場合も、同じキーでコンテキストメニューを開けます。ノード内の各コントロールは、それぞれのキーボード操作を維持します。<kbd>Escape</kbd>でメニューやダイアログを閉じます。</p>
+</div></section>
+<section class="guide-section" id="states" aria-labelledby="states-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="states-title">オフ、ミュート、バイパス、一時停止、終了</h2>
+<ul><li>ノードの電源をオフにすると、処理が無効になり信号が遮断されます。</li><li>ミュートは処理を続けたまま、ノードの出力を無音にします。</li><li>エフェクトの<code>バイパス</code>は設定を保持し、未処理の音声を通します。</li><li>フッターまたはステータスメニューの<code>一時停止</code>は、すべてのグラフと実行中の録音を一時停止します。<code>再開</code>はその時点の音声から再開します。一時停止中の音声は破棄されます。仮想デバイスのID、名前、形式は維持されます。</li></ul><p>エディターを閉じても、ルーティング、エフェクト、キャプチャ、録音はバックグラウンドで続きます。macOSではウインドウを閉じると非表示になり、エディターを終了するとエディターのプロセスが終了します。Linuxではウインドウを閉じるとエディターのプロセスが終了します。戻るにはステータスメニューの<code>MixRelay を開く</code>を使います。</p><p>バックグラウンドのステータスメニューの<code>終了</code>は、デバイスとループバックを停止し、録音ファイルの仕上げ処理を行います。MixRelayを再度開くと、保存済みのデバイスが復元されます。保存された全体の一時停止状態は、再開するまで維持されます。全体の音声を再開しても、手動で一時停止または停止したレコーダーは自動的に録音を始めません。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="マニュアルの章"><a rel="prev" href="first-launch.html">← 前へ: 初回起動とアクセス許可</a><a rel="next" href="devices.html">次へ: デバイスと仮想エンドポイント →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

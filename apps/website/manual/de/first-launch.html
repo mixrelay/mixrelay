@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Öffnen Sie MixRelay, warten Sie auf die Audio-Engine und wählen Sie dann die gewünschten Quellen.">
+    <title>Erster Start und Berechtigungen — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/first-launch.html">
+    <link rel="alternate" hreflang="ko" href="../ko/first-launch.html">
+    <link rel="alternate" hreflang="ja" href="../ja/first-launch.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/first-launch.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/first-launch.html">
+    <link rel="alternate" hreflang="de" href="../de/first-launch.html">
+    <link rel="alternate" hreflang="fr" href="../fr/first-launch.html">
+    <link rel="alternate" hreflang="it" href="../it/first-launch.html">
+    <link rel="alternate" hreflang="es" href="../es/first-launch.html">
+    <link rel="alternate" hreflang="pt" href="../pt/first-launch.html">
+    <link rel="alternate" hreflang="ru" href="../ru/first-launch.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Zum Inhalt springen</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Produktstartseite"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Sprache"><a href="../en/first-launch.html" lang="en" hreflang="en">English</a> <a href="../ko/first-launch.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/first-launch.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/first-launch.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/first-launch.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/first-launch.html" lang="de" hreflang="de" aria-current="page">Deutsch</a> <a href="../fr/first-launch.html" lang="fr" hreflang="fr">Français</a> <a href="../it/first-launch.html" lang="it" hreflang="it">Italiano</a> <a href="../es/first-launch.html" lang="es" hreflang="es">Español</a> <a href="../pt/first-launch.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/first-launch.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Vorläufige Fassung vor Veröffentlichung</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Kapitel des Handbuchs">
+        <a class="back-link" href="../../index.html">← Produktstartseite</a>
+        <a class="manual-mobile-index" href="index.html">Alle Kapitel</a>
+        <nav class="guide-nav" aria-label="Kapitel des Handbuchs"><a href="index.html">Handbuchübersicht</a>
+<a href="installation.html">Systemanforderungen und Installation</a>
+<a href="first-launch.html" aria-current="page">Erster Start und Berechtigungen</a>
+<a href="workspace.html">Routing-Arbeitsbereich</a>
+<a href="devices.html">Geräte und virtuelle Endpunkte</a>
+<a href="app-capture.html">Audio von Anwendungen erfassen</a>
+<a href="recording.html">Aufnahme</a>
+<a href="effects.html">Integrierte Effekte und Voreinstellungen</a>
+<a href="plugins.html">Externe Plug-ins</a>
+<a href="stream-deck.html">Stream Deck-Plug-in</a>
+<a href="licensing.html">Kostenlose Version und Lizenzierung</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Deinstallation</a>
+<a href="troubleshooting.html">Fehlerbehebung und Diagnose</a>
+<a href="support.html">Support kontaktieren</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / HANDBUCH</p><h1>Erster Start und Berechtigungen</h1><p>Öffnen Sie MixRelay, warten Sie auf die Audio-Engine und wählen Sie dann die gewünschten Quellen.</p><p class="guide-draft-note">Vorläufige Fassung vor Veröffentlichung. Öffentliche Downloads und Käufe sind noch nicht verfügbar. Diese Anleitung beschreibt den aktuellen Build aus dem Quellcode. Das Verhalten nach der Installation muss in den unten genannten Umgebungen noch überprüft werden.</p></header>
+        <nav class="manual-toc" aria-label="Auf dieser Seite"><p class="sidebar-label">Auf dieser Seite</p><ul><li><a href="#connection">Mit der Audio-Engine verbinden</a></li><li><a href="#permissions">Audioerfassung und Mikrofon unter macOS</a></li><li><a href="#first-route">Den ersten Signalweg erstellen</a></li></ul></nav>
+        <section class="guide-section" id="connection" aria-labelledby="connection-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="connection-title">Mit der Audio-Engine verbinden</h2>
+<p>Während das Audio vorbereitet wird, erscheint <code>Verbindung zu MixRelay wird hergestellt</code>. Erscheint <code>MixRelay wird benötigt</code>, installieren Sie das vollständige Produkt. Erscheint <code>MixRelay aktualisieren</code>, aktualisieren Sie das installierte Produkt. Bei <code>Keine Verbindung zu MixRelay</code> wählen Sie nach dem Prüfen der Installation <code>Erneut verbinden</code>.</p><p>Die kostenlose Version benötigt keine Kaufaktivierung. Die App verwendet die erste unterstützte Sprache aus den Spracheinstellungen des Betriebssystems und greift sonst auf Englisch zurück. <code>Darstellung</code> bietet <code>System</code>, <code>Hell</code> und <code>Dunkel</code>.</p>
+</div></section>
+<section class="guide-section" id="permissions" aria-labelledby="permissions-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="permissions-title">Audioerfassung und Mikrofon unter macOS</h2>
+<p>Wenn Sie erstmals eine Anwendung als Quelle verwenden, kann macOS die Berechtigung zur Erfassung von Anwendungs- oder Systemaudio anfordern. Bei einem Mikrofon oder einem anderen physischen Audioeingang kann macOS den Mikrofonzugriff anfordern. Erlauben Sie den angeforderten Zugriff, wenn Sie diese Quelle nutzen möchten. Dies sind getrennte Berechtigungen. Die Mikrofonfreigabe allein ermöglicht keine Anwendungserfassung.</p><p>Wurde der Zugriff verweigert, öffnen Sie Systemeinstellungen → Datenschutz &amp; Sicherheit. Prüfen Sie die Audioerfassung unter Bildschirm- &amp; Systemaudioaufnahme und den Eintrag Mikrofon für physische Eingänge. Bezeichnungen und Abfragen unterscheiden sich je nach macOS-Version. Erlauben Sie den Zugriff für den MixRelay-Eintrag, der die Anfrage ausgelöst hat, und folgen Sie gegebenenfalls der Neustartaufforderung von macOS. Versuchen Sie die Quelle danach erneut in MixRelay. Siehe <a href="https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/mac">Apples Anleitung zu Berechtigungen für Bildschirm- und Systemaudioaufnahmen</a>.</p><p>Unter Linux verwenden Quellen die normale PipeWire-Sitzung. Eine Berechtigungsabfrage wie unter macOS gehört nicht zu diesem Ablauf.</p><!-- TODO screenshot: actual installed capture and microphone requests and permission entries on supported macOS versions, both languages. -->
+</div></section>
+<section class="guide-section" id="first-route" aria-labelledby="first-route-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="first-route-title">Den ersten Signalweg erstellen</h2>
+<ol><li>Wählen Sie einen vorhandenen Graphen. Wenn keiner vorhanden ist, wählen Sie <code>Neuer Graph</code>, geben Sie unter <code>Graphname</code> einen Namen ein und wählen Sie <code>Erstellen</code>. Die kostenlose Version erlaubt einen Graphen.</li><li>Verwenden Sie <code>Knoten hinzufügen → Quelle</code>, um eine laufende App oder einen Audioeingang auszuwählen.</li><li>Verwenden Sie <code>Knoten hinzufügen → Ausgang</code>, um einen Audioausgang auszuwählen. Verbinden Sie jeden Ausgangskanal der Quelle mit einem Eingangskanal des Ausgangsknotens.</li><li>Spielen Sie Audio in der Quell-App ab oder sprechen Sie in das angeschlossene Mikrofon. Prüfen Sie die Pegelanzeigen und das Ausgabegerät.</li></ol><p>Um den Mix an OBS oder eine DAW zu senden, verwenden Sie <a href="devices.html#directions">MixRelay IO als virtuellen Ausgang</a> und wählen Sie ihn in der empfangenden App als Eingang.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Kapitel des Handbuchs"><a rel="prev" href="installation.html">← Zurück: Systemanforderungen und Installation</a><a rel="next" href="workspace.html">Weiter: Routing-Arbeitsbereich →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Vorläufige Fassung vor Veröffentlichung · MixRelay 0.1.0</p><a href="../../index.html">Produktstartseite</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

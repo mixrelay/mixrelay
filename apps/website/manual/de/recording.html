@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Nehmen Sie ein beliebiges verbundenes Graphsignal in einer RF64 WAV-Datei auf.">
+    <title>Aufnahme — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/recording.html">
+    <link rel="alternate" hreflang="ko" href="../ko/recording.html">
+    <link rel="alternate" hreflang="ja" href="../ja/recording.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/recording.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/recording.html">
+    <link rel="alternate" hreflang="de" href="../de/recording.html">
+    <link rel="alternate" hreflang="fr" href="../fr/recording.html">
+    <link rel="alternate" hreflang="it" href="../it/recording.html">
+    <link rel="alternate" hreflang="es" href="../es/recording.html">
+    <link rel="alternate" hreflang="pt" href="../pt/recording.html">
+    <link rel="alternate" hreflang="ru" href="../ru/recording.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Zum Inhalt springen</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Produktstartseite"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Sprache"><a href="../en/recording.html" lang="en" hreflang="en">English</a> <a href="../ko/recording.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/recording.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/recording.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/recording.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/recording.html" lang="de" hreflang="de" aria-current="page">Deutsch</a> <a href="../fr/recording.html" lang="fr" hreflang="fr">Français</a> <a href="../it/recording.html" lang="it" hreflang="it">Italiano</a> <a href="../es/recording.html" lang="es" hreflang="es">Español</a> <a href="../pt/recording.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/recording.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Vorläufige Fassung vor Veröffentlichung</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Kapitel des Handbuchs">
+        <a class="back-link" href="../../index.html">← Produktstartseite</a>
+        <a class="manual-mobile-index" href="index.html">Alle Kapitel</a>
+        <nav class="guide-nav" aria-label="Kapitel des Handbuchs"><a href="index.html">Handbuchübersicht</a>
+<a href="installation.html">Systemanforderungen und Installation</a>
+<a href="first-launch.html">Erster Start und Berechtigungen</a>
+<a href="workspace.html">Routing-Arbeitsbereich</a>
+<a href="devices.html">Geräte und virtuelle Endpunkte</a>
+<a href="app-capture.html">Audio von Anwendungen erfassen</a>
+<a href="recording.html" aria-current="page">Aufnahme</a>
+<a href="effects.html">Integrierte Effekte und Voreinstellungen</a>
+<a href="plugins.html">Externe Plug-ins</a>
+<a href="stream-deck.html">Stream Deck-Plug-in</a>
+<a href="licensing.html">Kostenlose Version und Lizenzierung</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Deinstallation</a>
+<a href="troubleshooting.html">Fehlerbehebung und Diagnose</a>
+<a href="support.html">Support kontaktieren</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / HANDBUCH</p><h1>Aufnahme</h1><p>Nehmen Sie ein beliebiges verbundenes Graphsignal in einer RF64 WAV-Datei auf.</p><p class="guide-draft-note">Vorläufige Fassung vor Veröffentlichung. Öffentliche Downloads und Käufe sind noch nicht verfügbar. Diese Anleitung beschreibt den aktuellen Build aus dem Quellcode. Das Verhalten nach der Installation muss in den unten genannten Umgebungen noch überprüft werden.</p></header>
+        <nav class="manual-toc" aria-label="Auf dieser Seite"><p class="sidebar-label">Auf dieser Seite</p><ul><li><a href="#setup">Einrichten und aufnehmen</a></li><li><a href="#pause">Eine Aufnahme pausieren und abschließen</a></li><li><a href="#limits">Kostenlose und technische Grenzen</a></li></ul></nav>
+        <section class="guide-section" id="setup" aria-labelledby="setup-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="setup-title">Einrichten und aufnehmen</h2>
+<ol><li>Wählen Sie <code>Knoten hinzufügen → Ausgang → Rekorder</code>. Verbinden Sie die Kanäle, die Sie aufnehmen möchten.</li><li>Öffnen Sie <code>Optionen</code>. Legen Sie <code>Kanäle</code> fest und wählen Sie mit <code>Ordner auswählen…</code> den <code>Aufnahmeordner</code>.</li><li>Wählen Sie die <code>WAV-Abtastrate</code> (<code>Eingangsabtastrate</code> übernimmt beim Start einer Aufnahme die Eingangsabtastrate) und die <code>Bittiefe</code>: PCM16, PCM24 oder Float32.</li><li>Wählen Sie <code>Aufnehmen</code>. MixRelay erstellt den Dateinamen der Aufnahme. Verwenden Sie bei Bedarf <code>Pausieren</code>, <code>Fortsetzen</code> und <code>Stoppen</code>.</li></ol><p>Stoppen Sie die Aufnahme, bevor Sie die Aufnahmeeinstellungen ändern. Während einer laufenden oder pausierten Aufnahme sind diese Einstellungen gesperrt. Jede Aufnahme ist eine einzelne RF64-<code>.wav</code>-Datei, auch bei Dateien über 4 GiB. Verwenden Sie ein Programm, das RF64 lesen kann. MixRelay teilt die Aufnahme nicht nach Dateigröße auf und bietet keine MP3-Aufnahme.</p><!-- TODO screenshot: Recorder Options, recording and paused states in both languages. -->
+</div></section>
+<section class="guide-section" id="pause" aria-labelledby="pause-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="pause-title">Eine Aufnahme pausieren und abschließen</h2>
+<p>Die Aktion Fortsetzen setzt die Aufnahme in derselben Datei fort. Eine Pause fügt keine Stille hinzu: Nehmen Sie 10 Sekunden auf, pausieren Sie 5 Sekunden und nehmen Sie weitere 10 Sekunden auf, um eine Datei mit 20 Sekunden zu erhalten. <code>Aufnahmedauer</code> zählt das in die Datei geschriebene Audio.</p><p>Die globale Aktion <code>Pausieren</code> pausiert auch aktive Rekorder. Die globale Aktion <code>Fortsetzen</code> startet keinen manuell pausierten oder bereits gestoppten Rekorder neu. Während einer globalen Pause können Sie mit <code>Stoppen</code> des Rekorders die Datei abschließen. Die Aktion Stoppen schließt den WAV-Header ab. Das Schließen des Editors lässt die Aufnahme weiterlaufen; das Beenden der Hintergrund-Audioverarbeitung schließt offene Aufnahmen ab.</p>
+</div></section>
+<section class="guide-section" id="limits" aria-labelledby="limits-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="limits-title">Kostenlose und technische Grenzen</h2>
+<p>Kostenlos verfügbar sind ein Rekorder, bis zu zwei Kanäle und zwei Stunden aufgenommenes Audio pro Aufnahme. Pausenzeit zählt nicht mit. Beim Erreichen der Grenze wird die Datei regulär abgeschlossen und das Audio-Routing läuft weiter. Eine pausierte Aufnahme belegt weiterhin das Rekorderkontingent.</p><p>Die lizenzierte Engine unterstützt 1–8 Kanäle pro Rekorder und bis zu 16 Aufnahmesitzungen. Die zulässige Dauer wird beim Start einer Aufnahme festgelegt. Eine spätere Aktivierung verlängert keine kostenlose Aufnahme. Der Ablauf einer Lizenz verkürzt keine Aufnahme, die mit kostenpflichtigem Zugriff begonnen wurde. Starten Sie eine neue Aufnahme, um das aktuelle Lizenzkontingent zu nutzen.</p><p>Erscheint <code>Aufnahmefehler</code>, prüfen Sie den gewählten Ordner, Schreibrechte und freien Speicherplatz. Stoppen Sie und prüfen Sie die gespeicherte Datei, bevor Sie eine weitere Aufnahme beginnen.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Kapitel des Handbuchs"><a rel="prev" href="app-capture.html">← Zurück: Audio von Anwendungen erfassen</a><a rel="next" href="effects.html">Weiter: Integrierte Effekte und Voreinstellungen →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Vorläufige Fassung vor Veröffentlichung · MixRelay 0.1.0</p><a href="../../index.html">Produktstartseite</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

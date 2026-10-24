@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Instale os efeitos com o instalador do fabricante e depois busque-os no MixRelay.">
+    <title>Plug-ins externos — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/plugins.html">
+    <link rel="alternate" hreflang="ko" href="../ko/plugins.html">
+    <link rel="alternate" hreflang="ja" href="../ja/plugins.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/plugins.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/plugins.html">
+    <link rel="alternate" hreflang="de" href="../de/plugins.html">
+    <link rel="alternate" hreflang="fr" href="../fr/plugins.html">
+    <link rel="alternate" hreflang="it" href="../it/plugins.html">
+    <link rel="alternate" hreflang="es" href="../es/plugins.html">
+    <link rel="alternate" hreflang="pt" href="../pt/plugins.html">
+    <link rel="alternate" hreflang="ru" href="../ru/plugins.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Pular para o conteúdo</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Página do produto"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Idioma"><a href="../en/plugins.html" lang="en" hreflang="en">English</a> <a href="../ko/plugins.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/plugins.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/plugins.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/plugins.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/plugins.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/plugins.html" lang="fr" hreflang="fr">Français</a> <a href="../it/plugins.html" lang="it" hreflang="it">Italiano</a> <a href="../es/plugins.html" lang="es" hreflang="es">Español</a> <a href="../pt/plugins.html" lang="pt" hreflang="pt" aria-current="page">Português</a> <a href="../ru/plugins.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Rascunho de pré-lançamento</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Capítulos do manual">
+        <a class="back-link" href="../../index.html">← Página do produto</a>
+        <a class="manual-mobile-index" href="index.html">Todos os capítulos</a>
+        <nav class="guide-nav" aria-label="Capítulos do manual"><a href="index.html">Visão geral do manual</a>
+<a href="installation.html">Requisitos do sistema e instalação</a>
+<a href="first-launch.html">Primeira execução e permissões</a>
+<a href="workspace.html">Espaço de trabalho de roteamento</a>
+<a href="devices.html">Dispositivos e conexões virtuais</a>
+<a href="app-capture.html">Captura de áudio de aplicativos</a>
+<a href="recording.html">Gravação</a>
+<a href="effects.html">Efeitos integrados e predefinições</a>
+<a href="plugins.html" aria-current="page">Plug-ins externos</a>
+<a href="stream-deck.html">Plug-in do Stream Deck</a>
+<a href="licensing.html">Versão gratuita e licenciamento</a>
+<a href="updates.html">Atualizações</a>
+<a href="uninstall.html">Desinstalação</a>
+<a href="troubleshooting.html">Solução de problemas e diagnóstico</a>
+<a href="support.html">Contato com o suporte</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Plug-ins externos</h1><p>Instale os efeitos com o instalador do fabricante e depois busque-os no MixRelay.</p><p class="guide-draft-note">Rascunho de pré-lançamento. Os downloads e as compras públicas ainda não estão disponíveis. Estas instruções descrevem a compilação atual do código-fonte; o comportamento após a instalação ainda precisa ser verificado nos ambientes indicados abaixo.</p></header>
+        <nav class="manual-toc" aria-label="Nesta página"><p class="sidebar-label">Nesta página</p><ul><li><a href="#formats">Formatos por plataforma</a></li><li><a href="#discovery">Buscar e usar um efeito</a></li><li><a href="#failures">Erros de busca, editor e formato</a></li></ul></nav>
+        <section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="formats-title">Formatos por plataforma</h2>
+<ul><li>macOS: VST3, CLAP, AU e AUv3.</li><li>Linux: VST3, CLAP e LV2.</li></ul><p>A lista contém efeitos de áudio que passam pelas verificações de detecção e configuração de canais. Não há fluxos de trabalho com instrumentos ou MIDI. Um formato compatível não garante que todos os plug-ins, arquiteturas ou configurações de canais funcionem. A versão gratuita permite duas instâncias de plug-ins externos, incluindo as desligadas. Não há limite de efeitos encontrados.</p>
+</div></section>
+<section class="guide-section" id="discovery" aria-labelledby="discovery-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="discovery-title">Buscar e usar um efeito</h2>
+<ol><li>Instale o plug-in para sua plataforma e arquitetura seguindo as instruções do fabricante.</li><li>Em <code>Adicionar nó → Processador</code>, escolha <code>Buscar efeitos de áudio novamente</code>. Para um local personalizado de VST3, CLAP ou LV2, escolha <code>Adicionar pasta de plug-ins…</code>.</li><li>Selecione um efeito encontrado diretamente no menu Processador. A descrição informa o formato e o fabricante. Confira <code>Configuração de canais</code> e conecte as portas principais, de cadeia lateral ou auxiliares necessárias.</li><li>Use <code>Opções</code> do nó para os parâmetros expostos. Um nó de plug-in novo abre uma vez o editor nativo, quando disponível. Use <code>Abrir</code> para reabri-lo.</li></ol><p>Os editores nativos no Linux exigem X11 ou XWayland. A ausência de um editor não cria uma janela nativa genérica. Use os parâmetros expostos quando disponíveis.</p><!-- TODO screenshot: actual effect list, Channel layout, parameter controls and a native editor. -->
+</div></section>
+<section class="guide-section" id="failures" aria-labelledby="failures-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="failures-title">Erros de busca, editor e formato</h2>
+<p>Se aparecer <code>Busca de efeitos incompleta</code>, abra <code>Problemas na busca</code> e <code>Detalhes técnicos</code>. Os efeitos disponíveis anteriormente continuam na lista quando uma etapa da busca falha. Corrija a instalação ou a pasta e use <code>Tentar novamente</code> ou faça uma nova busca.</p><p>Se um plug-in falhar, use <code>Tentar novamente o plug-in que falhou: …</code> quando essa opção aparecer. Se um editor estiver indisponível, leia o motivo específico, como a ausência de editor nativo ou de X11/XWayland. Algumas sessões com AU/VST/LV2 rejeitam mudanças de formato durante o funcionamento porque a transferência do estado de predefinições nativas não foi implementada. A sessão atual é mantida; não presuma que o formato solicitado foi aplicado.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Capítulos do manual"><a rel="prev" href="effects.html">← Anterior: Efeitos integrados e predefinições</a><a rel="next" href="stream-deck.html">Próximo: Plug-in do Stream Deck →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Rascunho de pré-lançamento · MixRelay 0.1.0</p><a href="../../index.html">Página do produto</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

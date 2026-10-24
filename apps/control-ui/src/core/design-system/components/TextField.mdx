@@ -1,0 +1,60 @@
+import { Meta, Canvas, ArgTypes } from '@storybook/addon-docs/blocks';
+import { DocsLayout } from '../DocsLayout';
+import { ComponentContract } from '../ComponentsReference';
+import * as Example from '../../ui/SystemControls.stories';
+import * as Api from '../../ui/TextField.stories';
+
+import * as States from '../../ui/ContractStates.stories';
+
+<Meta title="Design System/Components/TextField" />
+
+<DocsLayout>
+
+<ComponentContract name="TextField" />
+
+## Playground·API·주요 속성
+
+<a href="/?path=/story/core-controls-textfield--playground" target="_top">Playground 열기</a>에서 입력과 Controls의 value를 변경합니다. 입력 중에는 Storybook preview의 로컬 상태로 값을 보존하고 blur에서 args를 갱신합니다. Controls 변경은 입력에 바로 반영합니다. controlled 값은 input 이벤트를 상태에 돌려보내고, 초기값만 필요한 필드는 defaultValue를 사용합니다. 두 소유 방식을 함께 전달하지 않습니다.
+
+<Canvas of={Api.Playground} story={{ inline: false, height: 220 }} sourceState="hidden" />
+<ArgTypes of={Api.Playground} include={['label', 'value', 'description', 'error', 'type', 'disabled', 'readOnly', 'required', 'onChange']} />
+
+readOnly는 읽기·선택·복사를 허용하고 disabled는 현재 편집을 막습니다. 요청 실패는 작성한 값을 지우지 않고 오류를 입력과 연결합니다. 암호 표시 버튼은 값과 편집을 보존합니다.
+
+## 실제 사용례
+
+이 Canvas는 아래 계약을 소비하는 기존 스토리입니다. 여러 컴포넌트의 조합이면 해당 조합에서의 역할을 함께 확인합니다. 독립 컴포넌트 전용 예시나 실제 장치 실행으로 해석하지 않습니다.
+
+<Canvas of={Example.Interactive} story={{ inline: false, height: 560 }} />
+
+## 지원 상태·조합 검수
+
+기본값과 별도로 비활성·대기·오류·포커스 관계를 확인합니다. 이 예시에서 Tab/Shift+Tab, 실제 키 실행, hover·pressed를 조작합니다. 보조 기술의 실제 읽기와 설치본 실행은 별도 검증입니다.
+
+<Canvas of={States.Fields} story={{ inline: false, height: 640 }} />
+
+## 개별 상태 예제
+
+### Invalid
+
+<Canvas of={Api.Invalid} story={{ inline: false, height: 240 }} sourceState="hidden" />
+
+### ReadOnly
+
+<Canvas of={Api.ReadOnly} story={{ inline: false, height: 240 }} sourceState="hidden" />
+
+### Disabled
+
+<Canvas of={Api.Disabled} story={{ inline: false, height: 240 }} sourceState="hidden" />
+
+### Password
+
+<Canvas of={Api.Password} story={{ inline: false, height: 240 }} sourceState="hidden" />
+
+### Editing
+
+<Canvas of={Api.Editing} story={{ inline: false, height: 240, autoplay: true }} sourceState="hidden" />
+
+<a href="/?path=/docs/design-system-components--docs" target="_top">전체 컴포넌트와 사용 구분</a>
+
+</DocsLayout>

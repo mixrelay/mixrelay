@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Записывайте любой подключённый сигнал графа в файл RF64 WAV.">
+    <title>Запись — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/recording.html">
+    <link rel="alternate" hreflang="ko" href="../ko/recording.html">
+    <link rel="alternate" hreflang="ja" href="../ja/recording.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/recording.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/recording.html">
+    <link rel="alternate" hreflang="de" href="../de/recording.html">
+    <link rel="alternate" hreflang="fr" href="../fr/recording.html">
+    <link rel="alternate" hreflang="it" href="../it/recording.html">
+    <link rel="alternate" hreflang="es" href="../es/recording.html">
+    <link rel="alternate" hreflang="pt" href="../pt/recording.html">
+    <link rel="alternate" hreflang="ru" href="../ru/recording.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Перейти к содержимому</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Страница продукта"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Язык"><a href="../en/recording.html" lang="en" hreflang="en">English</a> <a href="../ko/recording.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/recording.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/recording.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/recording.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/recording.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/recording.html" lang="fr" hreflang="fr">Français</a> <a href="../it/recording.html" lang="it" hreflang="it">Italiano</a> <a href="../es/recording.html" lang="es" hreflang="es">Español</a> <a href="../pt/recording.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/recording.html" lang="ru" hreflang="ru" aria-current="page">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Предрелизный черновик</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Главы руководства">
+        <a class="back-link" href="../../index.html">← Страница продукта</a>
+        <a class="manual-mobile-index" href="index.html">Все главы</a>
+        <nav class="guide-nav" aria-label="Главы руководства"><a href="index.html">Обзор руководства</a>
+<a href="installation.html">Системные требования и установка</a>
+<a href="first-launch.html">Первый запуск и разрешения</a>
+<a href="workspace.html">Рабочее пространство маршрутизации</a>
+<a href="devices.html">Устройства и виртуальные подключения</a>
+<a href="app-capture.html">Захват аудио приложений</a>
+<a href="recording.html" aria-current="page">Запись</a>
+<a href="effects.html">Встроенные эффекты и пресеты</a>
+<a href="plugins.html">Внешние плагины</a>
+<a href="stream-deck.html">Плагин Stream Deck</a>
+<a href="licensing.html">Бесплатная версия и лицензирование</a>
+<a href="updates.html">Обновления</a>
+<a href="uninstall.html">Удаление</a>
+<a href="troubleshooting.html">Устранение неполадок и диагностика</a>
+<a href="support.html">Связь с поддержкой</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / РУКОВОДСТВО</p><h1>Запись</h1><p>Записывайте любой подключённый сигнал графа в файл RF64 WAV.</p><p class="guide-draft-note">Предрелизный черновик. Публичные загрузки и покупки пока недоступны. Эти инструкции описывают текущую сборку из исходного кода; поведение установленного продукта ещё предстоит проверить в указанных ниже средах.</p></header>
+        <nav class="manual-toc" aria-label="На этой странице"><p class="sidebar-label">На этой странице</p><ul><li><a href="#setup">Настройка и запись</a></li><li><a href="#pause">Пауза и завершение дубля</a></li><li><a href="#limits">Бесплатные и технические ограничения</a></li></ul></nav>
+        <section class="guide-section" id="setup" aria-labelledby="setup-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="setup-title">Настройка и запись</h2>
+<ol><li>Выберите <code>Добавить узел → Выход → Рекордер</code>. Подключите каналы, которые хотите записать.</li><li>Откройте <code>Параметры</code>. Задайте число каналов в поле <code>Каналы</code> и нажмите <code>Выбрать папку…</code>, чтобы выбрать папку для поля <code>Папка для записи</code>.</li><li>Задайте параметры <code>Частота дискретизации WAV</code> (значение <code>Частота входного сигнала</code> использует частоту входа при начале дубля) и <code>Разрядность</code>: PCM16, PCM24 или Float32.</li><li>Нажмите <code>Записать</code>. MixRelay создаёт имя файла дубля. Используйте <code>Пауза</code>, <code>Продолжить</code> и <code>Остановить</code> по необходимости.</li></ol><p>Остановите запись, прежде чем менять её настройки. Во время записи или паузы эти настройки заблокированы. Каждый дубль — один файл RF64 <code>.wav</code>, в том числе размером более 4 GiB. Используйте программу чтения с поддержкой RF64. MixRelay не разбивает дубль по размеру и не предлагает запись в MP3.</p><!-- TODO screenshot: Recorder Options, recording and paused states in both languages. -->
+</div></section>
+<section class="guide-section" id="pause" aria-labelledby="pause-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="pause-title">Пауза и завершение дубля</h2>
+<p>Продолжение записи идёт в тот же файл. Пауза не добавляет тишину: запишите 10 секунд, приостановите на 5 секунд, затем запишите ещё 10 секунд, чтобы получить файл длительностью 20 секунд. <code>Длительность записи</code> учитывает аудио, записанное в файл.</p><p>Глобальная команда <code>Приостановить</code> также приостанавливает активные рекордеры. Глобальная команда <code>Возобновить</code> не запускает рекордер, приостановленный вручную или уже остановленный. Во время глобальной паузы можно нажать <code>Остановить</code> рекордера, чтобы завершить файл. Остановка завершает заголовок WAV. При закрытии редактора запись продолжается; выход из фонового аудио завершает открытые записи.</p>
+</div></section>
+<section class="guide-section" id="limits" aria-labelledby="limits-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="limits-title">Бесплатные и технические ограничения</h2>
+<p>Бесплатная запись допускает один рекордер, до двух каналов и двух часов записанного аудио на дубль. Время паузы не учитывается. По достижении лимита файл корректно завершается, а маршрутизация аудио продолжается. Дубль на паузе продолжает занимать квоту рекордера.</p><p>Лицензированный движок поддерживает 1–8 каналов на рекордер и до 16 сессий записи. Допустимая длительность определяется при начале дубля. Последующая активация не продлевает бесплатный дубль; истечение лицензии не сокращает дубль, начатый с платным доступом. Чтобы использовать текущие лимиты лицензии, начните новый дубль.</p><p>Если появляется <code>Ошибка записи</code>, проверьте выбранную папку, права на запись и свободное место на диске. Остановите запись и проверьте сохранённый файл, прежде чем начинать новый дубль.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Главы руководства"><a rel="prev" href="app-capture.html">← Назад: Захват аудио приложений</a><a rel="next" href="effects.html">Далее: Встроенные эффекты и пресеты →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Предрелизный черновик · MixRelay 0.1.0</p><a href="../../index.html">Страница продукта</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

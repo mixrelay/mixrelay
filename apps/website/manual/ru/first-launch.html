@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Откройте MixRelay, дождитесь готовности аудиодвижка и выберите нужные источники.">
+    <title>Первый запуск и разрешения — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/first-launch.html">
+    <link rel="alternate" hreflang="ko" href="../ko/first-launch.html">
+    <link rel="alternate" hreflang="ja" href="../ja/first-launch.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/first-launch.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/first-launch.html">
+    <link rel="alternate" hreflang="de" href="../de/first-launch.html">
+    <link rel="alternate" hreflang="fr" href="../fr/first-launch.html">
+    <link rel="alternate" hreflang="it" href="../it/first-launch.html">
+    <link rel="alternate" hreflang="es" href="../es/first-launch.html">
+    <link rel="alternate" hreflang="pt" href="../pt/first-launch.html">
+    <link rel="alternate" hreflang="ru" href="../ru/first-launch.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Перейти к содержимому</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Страница продукта"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Язык"><a href="../en/first-launch.html" lang="en" hreflang="en">English</a> <a href="../ko/first-launch.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/first-launch.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/first-launch.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/first-launch.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/first-launch.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/first-launch.html" lang="fr" hreflang="fr">Français</a> <a href="../it/first-launch.html" lang="it" hreflang="it">Italiano</a> <a href="../es/first-launch.html" lang="es" hreflang="es">Español</a> <a href="../pt/first-launch.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/first-launch.html" lang="ru" hreflang="ru" aria-current="page">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Предрелизный черновик</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Главы руководства">
+        <a class="back-link" href="../../index.html">← Страница продукта</a>
+        <a class="manual-mobile-index" href="index.html">Все главы</a>
+        <nav class="guide-nav" aria-label="Главы руководства"><a href="index.html">Обзор руководства</a>
+<a href="installation.html">Системные требования и установка</a>
+<a href="first-launch.html" aria-current="page">Первый запуск и разрешения</a>
+<a href="workspace.html">Рабочее пространство маршрутизации</a>
+<a href="devices.html">Устройства и виртуальные подключения</a>
+<a href="app-capture.html">Захват аудио приложений</a>
+<a href="recording.html">Запись</a>
+<a href="effects.html">Встроенные эффекты и пресеты</a>
+<a href="plugins.html">Внешние плагины</a>
+<a href="stream-deck.html">Плагин Stream Deck</a>
+<a href="licensing.html">Бесплатная версия и лицензирование</a>
+<a href="updates.html">Обновления</a>
+<a href="uninstall.html">Удаление</a>
+<a href="troubleshooting.html">Устранение неполадок и диагностика</a>
+<a href="support.html">Связь с поддержкой</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / РУКОВОДСТВО</p><h1>Первый запуск и разрешения</h1><p>Откройте MixRelay, дождитесь готовности аудиодвижка и выберите нужные источники.</p><p class="guide-draft-note">Предрелизный черновик. Публичные загрузки и покупки пока недоступны. Эти инструкции описывают текущую сборку из исходного кода; поведение установленного продукта ещё предстоит проверить в указанных ниже средах.</p></header>
+        <nav class="manual-toc" aria-label="На этой странице"><p class="sidebar-label">На этой странице</p><ul><li><a href="#connection">Подключение к аудиодвижку</a></li><li><a href="#permissions">Захват аудио и микрофон в macOS</a></li><li><a href="#first-route">Создание первого маршрута</a></li></ul></nav>
+        <section class="guide-section" id="connection" aria-labelledby="connection-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="connection-title">Подключение к аудиодвижку</h2>
+<p>Во время подготовки аудио появляется <code>Подключение к MixRelay</code>. Если появляется <code>Требуется MixRelay</code>, установите продукт целиком. Если появляется <code>Обновите MixRelay</code>, обновите установленный продукт. При сообщении <code>Не удалось подключиться к MixRelay</code> проверьте установку и выберите <code>Повторить подключение</code>.</p><p>Для бесплатной версии не нужна активация покупки. Приложение использует первый поддерживаемый язык из настроек ОС, а если таких языков нет — английский. В разделе <code>Оформление</code> доступны <code>Система</code>, <code>Светлое</code> и <code>Тёмное</code>.</p>
+</div></section>
+<section class="guide-section" id="permissions" aria-labelledby="permissions-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="permissions-title">Захват аудио и микрофон в macOS</h2>
+<p>При первом использовании приложения как источника macOS может запросить разрешение на захват аудио приложений или системы. При использовании микрофона или другого физического аудиовхода macOS может запросить доступ к микрофону. Разрешите запрошенный доступ, если хотите использовать этот источник. Это разные разрешения; одного доступа к микрофону недостаточно для захвата приложений.</p><p>Если доступ был запрещён, откройте Системные настройки → Конфиденциальность и безопасность. Проверьте управление захватом аудио в разделе Запись экрана и системного аудио, а для физических входов — раздел Микрофон. Названия и запросы зависят от версии macOS. Разрешите доступ для той записи MixRelay, которая отвечает за запрос, и выполните указания macOS о перезапуске. Затем снова попробуйте использовать источник в MixRelay. См. <a href="https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/mac">руководство Apple по разрешениям на запись экрана и системного аудио</a>.</p><p>В Linux источники используют обычную сессию PipeWire. Запрос разрешения, подобный запросу macOS, в этот процесс не входит.</p><!-- TODO screenshot: actual installed capture and microphone requests and permission entries on supported macOS versions, both languages. -->
+</div></section>
+<section class="guide-section" id="first-route" aria-labelledby="first-route-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="first-route-title">Создание первого маршрута</h2>
+<ol><li>Выберите существующий граф или, если его нет, выберите <code>Новый граф</code>, введите <code>Имя графа</code> и нажмите <code>Создать</code>. Бесплатная версия позволяет использовать один граф.</li><li>Через <code>Добавить узел → Источник</code> выберите работающее приложение или аудиовход.</li><li>Через <code>Добавить узел → Выход</code> выберите аудиовыход. Подключите каждый выходной канал источника к входному каналу выходного узла.</li><li>Включите воспроизведение в приложении-источнике или подайте голос на вход. Проверьте индикаторы уровня и выходное устройство.</li></ol><p>Чтобы отправить микс в OBS или DAW, используйте <a href="devices.html#directions">MixRelay IO как виртуальный выход</a> и выберите его в качестве входа в принимающем приложении.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Главы руководства"><a rel="prev" href="installation.html">← Назад: Системные требования и установка</a><a rel="next" href="workspace.html">Далее: Рабочее пространство маршрутизации →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Предрелизный черновик · MixRelay 0.1.0</p><a href="../../index.html">Страница продукта</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

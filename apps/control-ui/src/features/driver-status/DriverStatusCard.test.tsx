@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { DriverState } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { DriverStatusCard } from './DriverStatusCard';
 
 describe('DriverStatusCard', () => {
@@ -13,11 +13,11 @@ describe('DriverStatusCard', () => {
     const onAction = vi.fn();
 
     render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <I18nextProvider i18n={i18n}>
           <DriverStatusCard onAction={onAction} state="restart_required" />
         </I18nextProvider>
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
 
     expect(screen.getByText('Restart required')).toBeInTheDocument();
@@ -33,6 +33,7 @@ describe('DriverStatusCard', () => {
       'restart_required',
       'installed_not_loaded',
       'blocked',
+      'unavailable',
       'invalid_permissions',
       'version_mismatch',
       'ready',
@@ -40,15 +41,29 @@ describe('DriverStatusCard', () => {
 
     for (const state of states) {
       const view = render(
-        <ToneNariProvider>
+        <MixRelayProvider>
           <I18nextProvider i18n={i18n}>
-            <DriverStatusCard state={state} />
+            <DriverStatusCard state={state} onAction={vi.fn()} />
           </I18nextProvider>
-        </ToneNariProvider>,
+        </MixRelayProvider>,
       );
       const button = screen.getByRole('button');
       expect(button).toHaveProperty('disabled', state === 'installing');
       view.unmount();
     }
   });
+});
+
+it('keeps a read-only diagnostic visible without inventing an actionable command', async () => {
+  await i18n.changeLanguage('en');
+  render(
+    <MixRelayProvider>
+      <DriverStatusCard state="ready">
+        <p>Device owner connected</p>
+      </DriverStatusCard>
+    </MixRelayProvider>,
+  );
+  expect(screen.getByText('Device owner connected')).toBeInTheDocument();
+  expect(screen.getByText(i18n.t('driver.states.ready'))).toBeInTheDocument();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });

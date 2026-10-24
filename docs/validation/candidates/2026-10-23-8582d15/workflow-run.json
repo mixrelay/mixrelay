@@ -1,0 +1,147 @@
+{
+  "conclusion": "failure",
+  "createdAt": "2026-10-23T11:21:39Z",
+  "databaseId": 39945522752,
+  "headSha": "96c1bc1840c46e214f20b668222394c44ec7d8eb",
+  "jobs": [
+    {
+      "completedAt": "2026-10-23T11:23:12Z",
+      "conclusion": "success",
+      "databaseId": 120387125578,
+      "name": "prepare",
+      "startedAt": "2026-10-23T11:22:50Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387125578"
+    },
+    {
+      "completedAt": "2026-10-23T11:32:39Z",
+      "conclusion": "failure",
+      "databaseId": 120387712755,
+      "name": "Installed E2E kali-rolling-x64",
+      "startedAt": "2026-10-23T11:23:29Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712755"
+    },
+    {
+      "completedAt": "2026-10-23T11:36:33Z",
+      "conclusion": "failure",
+      "databaseId": 120387712778,
+      "name": "Installed E2E debian-13-x64",
+      "startedAt": "2026-10-23T11:23:42Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712778"
+    },
+    {
+      "completedAt": "2026-10-23T11:26:14Z",
+      "conclusion": "failure",
+      "databaseId": 120387712791,
+      "name": "Installed E2E macos-15-arm64",
+      "startedAt": "2026-10-23T11:24:04Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712791"
+    },
+    {
+      "completedAt": "2026-10-23T11:53:06Z",
+      "conclusion": "failure",
+      "databaseId": 120387712803,
+      "name": "Installed E2E ubuntu-26-04-arm64",
+      "startedAt": "2026-10-23T11:23:32Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712803"
+    },
+    {
+      "completedAt": "2026-10-23T11:37:51Z",
+      "conclusion": "failure",
+      "databaseId": 120387712811,
+      "name": "Installed E2E debian-13-arm64",
+      "startedAt": "2026-10-23T11:23:17Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712811"
+    },
+    {
+      "completedAt": "2026-10-23T11:28:52Z",
+      "conclusion": "failure",
+      "databaseId": 120387712819,
+      "name": "Installed E2E ubuntu-26-04-x64",
+      "startedAt": "2026-10-23T11:23:41Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712819"
+    },
+    {
+      "completedAt": "2026-10-23T11:29:01Z",
+      "conclusion": "failure",
+      "databaseId": 120387712820,
+      "name": "Installed E2E macos-26-x64",
+      "startedAt": "2026-10-23T11:24:30Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712820"
+    },
+    {
+      "completedAt": "2026-10-23T11:26:00Z",
+      "conclusion": "failure",
+      "databaseId": 120387712821,
+      "name": "Installed E2E macos-26-arm64",
+      "startedAt": "2026-10-23T11:23:46Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712821"
+    },
+    {
+      "completedAt": "2026-10-23T11:54:30Z",
+      "conclusion": "failure",
+      "databaseId": 120387712837,
+      "name": "Installed E2E kali-rolling-arm64",
+      "startedAt": "2026-10-23T11:23:32Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712837"
+    },
+    {
+      "completedAt": "2026-10-23T11:25:58Z",
+      "conclusion": "failure",
+      "databaseId": 120387712867,
+      "name": "Installed E2E macos-14-arm64",
+      "startedAt": "2026-10-23T11:24:07Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712867"
+    },
+    {
+      "completedAt": "2026-10-23T11:36:25Z",
+      "conclusion": "failure",
+      "databaseId": 120387712911,
+      "name": "Installed E2E arch-rolling-x64",
+      "startedAt": "2026-10-23T11:23:36Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712911"
+    },
+    {
+      "completedAt": "2026-10-23T11:27:52Z",
+      "conclusion": "failure",
+      "databaseId": 120387712967,
+      "name": "Installed E2E macos-27-arm64",
+      "startedAt": "2026-10-23T11:26:00Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387712967"
+    },
+    {
+      "completedAt": "2026-10-23T11:26:57Z",
+      "conclusion": "failure",
+      "databaseId": 120387714070,
+      "name": "Installed E2E macos-15-x64",
+      "startedAt": "2026-10-23T11:23:31Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120387714070"
+    },
+    {
+      "completedAt": "2026-10-23T11:54:55Z",
+      "conclusion": "failure",
+      "databaseId": 120399910371,
+      "name": "inventory",
+      "startedAt": "2026-10-23T11:54:33Z",
+      "status": "completed",
+      "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752/job/120399910371"
+    }
+  ],
+  "status": "completed",
+  "updatedAt": "2026-10-23T11:54:56Z",
+  "url": "https://github.com/mixrelay/mixrelay/actions/runs/39945522752",
+  "workflowName": "Test installed candidate on hosted environments"
+}

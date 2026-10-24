@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Соберите граф из узлов источников, процессоров и выходов. Кабели передают аудио между отдельными каналами.">
+    <title>Рабочее пространство маршрутизации — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/workspace.html">
+    <link rel="alternate" hreflang="ko" href="../ko/workspace.html">
+    <link rel="alternate" hreflang="ja" href="../ja/workspace.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/workspace.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/workspace.html">
+    <link rel="alternate" hreflang="de" href="../de/workspace.html">
+    <link rel="alternate" hreflang="fr" href="../fr/workspace.html">
+    <link rel="alternate" hreflang="it" href="../it/workspace.html">
+    <link rel="alternate" hreflang="es" href="../es/workspace.html">
+    <link rel="alternate" hreflang="pt" href="../pt/workspace.html">
+    <link rel="alternate" hreflang="ru" href="../ru/workspace.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Перейти к содержимому</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Страница продукта"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Язык"><a href="../en/workspace.html" lang="en" hreflang="en">English</a> <a href="../ko/workspace.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/workspace.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/workspace.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/workspace.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/workspace.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/workspace.html" lang="fr" hreflang="fr">Français</a> <a href="../it/workspace.html" lang="it" hreflang="it">Italiano</a> <a href="../es/workspace.html" lang="es" hreflang="es">Español</a> <a href="../pt/workspace.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/workspace.html" lang="ru" hreflang="ru" aria-current="page">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Предрелизный черновик</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Главы руководства">
+        <a class="back-link" href="../../index.html">← Страница продукта</a>
+        <a class="manual-mobile-index" href="index.html">Все главы</a>
+        <nav class="guide-nav" aria-label="Главы руководства"><a href="index.html">Обзор руководства</a>
+<a href="installation.html">Системные требования и установка</a>
+<a href="first-launch.html">Первый запуск и разрешения</a>
+<a href="workspace.html" aria-current="page">Рабочее пространство маршрутизации</a>
+<a href="devices.html">Устройства и виртуальные подключения</a>
+<a href="app-capture.html">Захват аудио приложений</a>
+<a href="recording.html">Запись</a>
+<a href="effects.html">Встроенные эффекты и пресеты</a>
+<a href="plugins.html">Внешние плагины</a>
+<a href="stream-deck.html">Плагин Stream Deck</a>
+<a href="licensing.html">Бесплатная версия и лицензирование</a>
+<a href="updates.html">Обновления</a>
+<a href="uninstall.html">Удаление</a>
+<a href="troubleshooting.html">Устранение неполадок и диагностика</a>
+<a href="support.html">Связь с поддержкой</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / РУКОВОДСТВО</p><h1>Рабочее пространство маршрутизации</h1><p>Соберите граф из узлов источников, процессоров и выходов. Кабели передают аудио между отдельными каналами.</p><p class="guide-draft-note">Предрелизный черновик. Публичные загрузки и покупки пока недоступны. Эти инструкции описывают текущую сборку из исходного кода; поведение установленного продукта ещё предстоит проверить в указанных ниже средах.</p></header>
+        <nav class="manual-toc" aria-label="На этой странице"><p class="sidebar-label">На этой странице</p><ul><li><a href="#graphs">Графы, узлы и сохранение</a></li><li><a href="#connections">Подключение и маршрутизация каналов</a></li><li><a href="#keyboard">Подключение без перетаскивания</a></li><li><a href="#states">Выключение, отключение звука, обход, пауза и выход</a></li></ul></nav>
+        <section class="guide-section" id="graphs" aria-labelledby="graphs-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="graphs-title">Графы, узлы и сохранение</h2>
+<p>Используйте <code>Новый граф</code> для создания графа и <code>Добавить узел</code> для добавления узлов из разделов <code>Источник</code>, <code>Процессор</code> или <code>Выход</code>. Выберите граф в разделе <code>Графы</code>, чтобы редактировать его. Выбор не выключает другие графы. С лицензией графы могут работать одновременно.</p><p>Откройте <code>Параметры</code> узла для просмотра доступных параметров. Дважды нажмите на имя, нажмите <kbd>F2</kbd>, когда узел в фокусе, или выберите <code>Изменить отображаемое имя</code> в его меню. Отображаемое имя меняется только для этого узла. Очистите его, чтобы вернуть исходное имя.</p><p>Правки и расположение сохраняются автоматически. Предупреждение о сохранении означает, что они могут потеряться после перезапуска. Для переноса рабочего пространства используйте <code>Файл → Сохранить</code> или <code>Сохранить как…</code> и создайте файл <code>.mix</code>. <code>Новое рабочее пространство</code> и <code>Открыть…</code> запрашивают подтверждение перед заменой текущего содержимого. Файл рабочего пространства не устанавливает отсутствующие устройства или плагины.</p>
+</div></section>
+<section class="guide-section" id="connections" aria-labelledby="connections-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="connections-title">Подключение и маршрутизация каналов</h2>
+<p>Перетащите выходной порт на входной. Для стереопары подключите оба канала. Удерживая <kbd>Shift</kbd>, выберите дополнительные выходные каналы того же узла, затем перетащите выделение на первый канал назначения. Смещение каналов назначения сохраняется. Нажмите <kbd>Escape</kbd>, чтобы отменить действие и снять выделение каналов.</p><p>Нажмите правой кнопкой на кабель и выберите <code>Удалить кабель</code>. Меню порта предлагает <code>Отсоединить канал</code> или <code>Отсоединить выбранные каналы</code>. Выберите узел или кабель и нажмите <kbd>Delete</kbd> или <kbd>Backspace</kbd>, чтобы удалить его. <code>Показать весь граф</code> помещает граф в видимую область. Для отмены правок графа используйте <kbd>Command+Z</kbd> в macOS или <kbd>Ctrl+Z</kbd> в Linux; добавьте <kbd>Shift</kbd> для повтора.</p><p>Команда <code>Удалить граф</code> останавливает аудио и записи этого графа. Удаление графа нельзя отменить; сохранённые файлы рабочего пространства остаются.</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
+</div></section>
+<section class="guide-section" id="keyboard" aria-labelledby="keyboard-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="keyboard-title">Подключение без перетаскивания</h2>
+<ol><li>Используйте <kbd>Tab</kbd>, чтобы перевести фокус на исходный узел. <kbd>Enter</kbd> или <kbd>Space</kbd> выбирает его. Стрелки перемещают выбранный узел; удерживайте <kbd>Shift</kbd> для более крупных шагов.</li><li>Нажмите <kbd>Shift+F10</kbd> или клавишу контекстного меню и выберите <code>Соединить каналы…</code>.</li><li>Выберите <code>Первый выходной канал</code> и <code>Число каналов</code> либо оставьте существующее выделение каналов. Выберите <code>Назначение</code> и <code>Первый входной канал</code>.</li><li>Ознакомьтесь с разделом <code>Предпросмотр</code>, включая пропущенные соединения и причины пропуска. Нажмите <code>Соединить</code> или <code>Отмена</code>, чтобы оставить граф без изменений.</li></ol><p>Те же клавиши контекстного меню работают, когда в фокусе кабель или холст графа. Элементы управления внутри узла сохраняют собственное поведение клавиатуры. <kbd>Escape</kbd> закрывает меню и диалоги.</p>
+</div></section>
+<section class="guide-section" id="states" aria-labelledby="states-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="states-title">Выключение, отключение звука, обход, пауза и выход</h2>
+<ul><li>Когда питание узла выключено, его обработка отключена, а сигнал заблокирован.</li><li>Отключение звука сохраняет обработку и убирает звук на выходе узла.</li><li><code>Обход</code> эффекта пропускает необработанный звук, сохраняя настройки.</li><li>Команда <code>Приостановить</code> на нижней панели или в меню состояния приостанавливает все графы и активные записи. <code>Возобновить</code> использует текущий звук. Звук за время паузы отбрасывается. Виртуальные устройства сохраняют свои ID, имена и форматы.</li></ul><p>При закрытии редактора маршрутизация, эффекты, захват и запись продолжают работать в фоне. В macOS закрытие окна скрывает его; выход из редактора завершает процесс редактора. В Linux закрытие окна завершает этот процесс. Для возврата выберите <code>Открыть MixRelay</code> в меню состояния.</p><p>Команда <code>Выйти</code> в меню состояния фонового аудио останавливает устройства и loopback и завершает записи. При повторном открытии MixRelay восстанавливаются сохранённые устройства. Сохранённая глобальная пауза действует до возобновления; рекордеры, приостановленные вручную или остановленные, не запускаются просто от возобновления всего аудио.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Главы руководства"><a rel="prev" href="first-launch.html">← Назад: Первый запуск и разрешения</a><a rel="next" href="devices.html">Далее: Устройства и виртуальные подключения →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Предрелизный черновик · MixRelay 0.1.0</p><a href="../../index.html">Страница продукта</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

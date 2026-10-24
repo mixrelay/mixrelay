@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-audio-engine"
+name = "mixrelay-audio-engine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,4 +14,10 @@ workspace = true
 arc-swap.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true
-tonenari-audio-graph = { path = "../audio-graph" }
+mixrelay-audio-graph = { path = "../audio-graph" }
+mixrelay-audio-io.workspace = true
+mixrelay-audio-recorder = { path = "../audio-recorder" }
+
+[dev-dependencies]
+serde_json.workspace = true
+mixrelay-test-support = { path = "../test-support" }

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="MixRelay IO로 다른 앱과 오디오를 주고받으세요. 장치 형식과 녹음 파일 형식은 별개입니다.">
+    <title>장치와 가상 장치 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/devices.html">
+    <link rel="alternate" hreflang="ko" href="../ko/devices.html">
+    <link rel="alternate" hreflang="ja" href="../ja/devices.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/devices.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/devices.html">
+    <link rel="alternate" hreflang="de" href="../de/devices.html">
+    <link rel="alternate" hreflang="fr" href="../fr/devices.html">
+    <link rel="alternate" hreflang="it" href="../it/devices.html">
+    <link rel="alternate" hreflang="es" href="../es/devices.html">
+    <link rel="alternate" hreflang="pt" href="../pt/devices.html">
+    <link rel="alternate" hreflang="ru" href="../ru/devices.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="제품 소개"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="언어"><a href="../en/devices.html" lang="en" hreflang="en">English</a> <a href="../ko/devices.html" lang="ko" hreflang="ko" aria-current="page">한국어</a> <a href="../ja/devices.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/devices.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/devices.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/devices.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/devices.html" lang="fr" hreflang="fr">Français</a> <a href="../it/devices.html" lang="it" hreflang="it">Italiano</a> <a href="../es/devices.html" lang="es" hreflang="es">Español</a> <a href="../pt/devices.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/devices.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 사전 공개 초안</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="안내서 목차">
+        <a class="back-link" href="../../index.html">← 제품 소개</a>
+        <a class="manual-mobile-index" href="index.html">전체 목차</a>
+        <nav class="guide-nav" aria-label="안내서 목차"><a href="index.html">안내서 시작</a>
+<a href="installation.html">시스템 요구사항과 설치</a>
+<a href="first-launch.html">처음 실행과 권한</a>
+<a href="workspace.html">라우팅 작업 영역</a>
+<a href="devices.html" aria-current="page">장치와 가상 장치</a>
+<a href="app-capture.html">앱 오디오 캡처</a>
+<a href="recording.html">녹음</a>
+<a href="effects.html">내장 효과와 프리셋</a>
+<a href="plugins.html">외부 플러그인</a>
+<a href="stream-deck.html">Stream Deck 플러그인</a>
+<a href="licensing.html">무료 기능과 라이선스</a>
+<a href="updates.html">업데이트</a>
+<a href="uninstall.html">제거</a>
+<a href="troubleshooting.html">문제 해결과 진단</a>
+<a href="support.html">지원 문의</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>장치와 가상 장치</h1><p>MixRelay IO로 다른 앱과 오디오를 주고받으세요. 장치 형식과 녹음 파일 형식은 별개입니다.</p><p class="guide-draft-note">사전 공개 초안입니다. 공개 다운로드와 구매는 아직 제공하지 않습니다. 현재 소스 빌드를 기준으로 작성했으며 아래에 표시한 환경의 설치본 검증은 남아 있습니다.</p></header>
+        <nav class="manual-toc" aria-label="이 페이지 목차"><p class="sidebar-label">이 페이지 목차</p><ul><li><a href="#directions">오디오 방향 선택</a></li><li><a href="#formats">채널·샘플레이트·PCM</a></li><li><a href="#buffers">처리 버퍼와 지연</a></li></ul></nav>
+        <section class="guide-section" id="directions" aria-labelledby="directions-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="directions-title">오디오 방향 선택</h2>
+<p>기본 가상 장치는 <code>MixRelay IO</code>입니다. 다른 앱이 이 장치로 재생한 소리를 받으려면 <code>노드 추가 → 소스 → 가상 장치</code>에서 선택하세요. <code>장치 → 그래프</code> 방향입니다. OBS 같은 앱으로 그래프 믹스를 보내려면 <code>노드 추가 → 출력 → 가상 장치</code>에서 선택하세요. <code>그래프 → 장치</code> 방향입니다. OBS나 DAW의 오디오 입력으로 MixRelay IO를 선택하세요.</p><p>필요한 채널을 연결하세요. MixRelay는 시스템 기본 장치를 바꾸거나 하드웨어 모니터링 경로를 자동으로 추가하지 않습니다. 들으려면 물리 출력을 추가하고 믹스를 연결하세요. Driver는 편집 그래프 매핑 한도와 별개로 OS 재생에서 캡처로 전달하는 기본 루프백도 제공합니다.</p><p>그래프의 참조를 지워도 가상 장치는 남습니다. 유료 인증이 있으면 <code>새 가상 장치</code>로 장치를 만들 수 있습니다. 상태 메뉴에서 장치를 제거하면 저장된 장치 설정도 지워지며 다른 앱에서도 해당 장치를 사용할 수 없게 됩니다.</p>
+</div></section>
+<section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="formats-title">채널·샘플레이트·PCM</h2>
+<p>가상 노드의 <code>옵션</code>에서 <code>장치 이름</code>·<code>채널 수</code>·샘플레이트·<code>비트 심도</code>를 바꾸세요. 양방향에서 함께 지원하는 설정만 제공합니다. 이름 변경은 유료 기능입니다. 상태 메뉴의 채널 선택은 2·4·8·16·32·64이며 장치 자체는 방향별 1–64채널을 지원합니다.</p><p>macOS 샘플레이트는 44.1·48·88.2·96·176.4·192 kHz입니다. 장치 형식은 Float32·PCM16·packed PCM24·PCM32입니다. Linux는 PipeWire가 지원하는 조합을 제공합니다. 물리 장치는 해당 하드웨어의 지원 범위를 따릅니다. 내부 DSP는 Float32를 사용하며 장치 비트 심도를 바꿔도 WAV 녹음 형식은 바뀌지 않습니다.</p><p>형식 변경 중 오디오가 잠시 끊깁니다. 실패하면 메시지와 현재 값을 확인한 뒤 다시 시도하세요. 저장 실패는 장치를 변경했지만 새 설정을 저장하지 못했다는 뜻일 수 있습니다.</p><!-- TODO screenshot: virtual endpoint Options with supported format choices and status-menu device settings. -->
+</div></section>
+<section class="guide-section" id="buffers" aria-labelledby="buffers-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="buffers-title">처리 버퍼와 지연</h2>
+<p>하단의 <code>처리 버퍼</code>는 실행 중 변경을 지원할 때 엔진의 I/O 버퍼를 바꿉니다. 값을 선택하면 적용됩니다. 복구 가능한 오류가 있으면 <code>적용</code>으로 지원하는 설정을 다시 시도하세요. 버퍼를 줄이면 버퍼 지연이 줄어들 수 있지만 소리가 끊길 가능성은 높아질 수 있습니다. 소리가 끊기면 버퍼를 늘려 보세요.</p><p>가상 장치별 버퍼 선택기는 없습니다. 다른 앱은 자체 클라이언트 버퍼를 선택합니다. <code>버퍼 지연</code>은 처리 버퍼 한 개의 시간이며 전체 입출력 지연이 아닙니다. PipeWire 전체의 quantum을 보장하는 값도 아닙니다. 여러 물리 장치를 함께 사용하면 샘플레이트 변환과 클록 동기화가 필요할 수 있습니다.</p><p>현재 앱 캡처는 48 kHz에서 지원됩니다. 하단에는 버퍼 조작이 있으며 처리 샘플레이트 선택기는 없습니다. 가상 장치의 샘플레이트는 장치 설정에서 바꿉니다. 일부 네이티브 플러그인은 프리셋 상태 이전이 구현되지 않아 실행 중 형식 변경을 막습니다.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="안내서 목차"><a rel="prev" href="workspace.html">← 이전: 라우팅 작업 영역</a><a rel="next" href="app-capture.html">다음: 앱 오디오 캡처 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>사전 공개 초안 · MixRelay 0.1.0</p><a href="../../index.html">제품 소개</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="정책" lang="ko"><a href="../../legal/ko/terms.html">판매조건·환불</a><a href="../../legal/ko/privacy.html">개인정보 처리방침</a></nav></div>
+    </footer>
+  </body>
+</html>

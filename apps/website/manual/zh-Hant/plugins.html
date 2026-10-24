@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="使用廠商的安裝程式安裝效果器，再於 MixRelay 中掃描偵測。">
+    <title>外掛程式 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/plugins.html">
+    <link rel="alternate" hreflang="ko" href="../ko/plugins.html">
+    <link rel="alternate" hreflang="ja" href="../ja/plugins.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/plugins.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/plugins.html">
+    <link rel="alternate" hreflang="de" href="../de/plugins.html">
+    <link rel="alternate" hreflang="fr" href="../fr/plugins.html">
+    <link rel="alternate" hreflang="it" href="../it/plugins.html">
+    <link rel="alternate" hreflang="es" href="../es/plugins.html">
+    <link rel="alternate" hreflang="pt" href="../pt/plugins.html">
+    <link rel="alternate" hreflang="ru" href="../ru/plugins.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="產品首頁"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="語言"><a href="../en/plugins.html" lang="en" hreflang="en">English</a> <a href="../ko/plugins.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/plugins.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/plugins.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/plugins.html" lang="zh-Hant" hreflang="zh-Hant" aria-current="page">繁體中文</a> <a href="../de/plugins.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/plugins.html" lang="fr" hreflang="fr">Français</a> <a href="../it/plugins.html" lang="it" hreflang="it">Italiano</a> <a href="../es/plugins.html" lang="es" hreflang="es">Español</a> <a href="../pt/plugins.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/plugins.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 發佈前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手冊章節">
+        <a class="back-link" href="../../index.html">← 產品首頁</a>
+        <a class="manual-mobile-index" href="index.html">所有章節</a>
+        <nav class="guide-nav" aria-label="手冊章節"><a href="index.html">手冊總覽</a>
+<a href="installation.html">系統需求與安裝</a>
+<a href="first-launch.html">首次啟動與權限</a>
+<a href="workspace.html">路由工作區</a>
+<a href="devices.html">裝置與虛擬端點</a>
+<a href="app-capture.html">應用程式音訊擷取</a>
+<a href="recording.html">錄音</a>
+<a href="effects.html">內建效果與預設</a>
+<a href="plugins.html" aria-current="page">外掛程式</a>
+<a href="stream-deck.html">Stream Deck 外掛程式</a>
+<a href="licensing.html">免費版與授權</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html">解除安裝</a>
+<a href="troubleshooting.html">疑難排解與診斷</a>
+<a href="support.html">聯絡支援</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手冊</p><h1>外掛程式</h1><p>使用廠商的安裝程式安裝效果器，再於 MixRelay 中掃描偵測。</p><p class="guide-draft-note">發佈前草稿。目前尚未提供公開下載或購買。本手冊說明目前原始碼建置版本的行為；在下文所列環境中，仍須驗證安裝後的實際行為。</p></header>
+        <nav class="manual-toc" aria-label="本頁內容"><p class="sidebar-label">本頁內容</p><ul><li><a href="#formats">各平台支援的格式</a></li><li><a href="#discovery">尋找與使用效果器</a></li><li><a href="#failures">掃描、編輯器與格式錯誤</a></li></ul></nav>
+        <section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="formats-title">各平台支援的格式</h2>
+<ul><li>macOS：VST3、CLAP、AU 和 AUv3。</li><li>Linux：VST3、CLAP 和 LV2。</li></ul><p>清單包含通過偵測與配置檢查的音訊效果器，不提供樂器和 MIDI 工作流程。支援某種格式不代表每個外掛程式、架構或聲道配置都能正常運作。免費版允許兩個外掛程式實例，包括已關閉的實例。偵測到的效果器數量不受限制。</p>
+</div></section>
+<section class="guide-section" id="discovery" aria-labelledby="discovery-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="discovery-title">尋找與使用效果器</h2>
+<ol><li>依照廠商說明，安裝適用於您平台和架構的外掛程式。</li><li>在 <code>新增節點 → 處理器</code> 中選擇 <code>重新掃描音訊效果器</code>。如需使用自訂 VST3、CLAP 或 LV2 位置，請選擇 <code>新增外掛程式資料夾…</code>。</li><li>直接在處理器選單中選擇偵測到的效果器。其說明會標示格式和廠商。檢查 <code>聲道配置</code>，並連接所需的主輸入/輸出、側鏈或輔助連接埠。</li><li>使用節點的 <code>選項</code> 調整公開參數。新增外掛程式節點時，如有可用的原生編輯器，會自動開啟一次。之後可用 <code>開啟</code> 重新開啟。</li></ol><p>Linux 原生編輯器需要 X11 或 XWayland。缺少編輯器時不會建立通用原生視窗。如有公開參數，請使用這些參數。</p><!-- TODO screenshot: actual effect list, Channel layout, parameter controls and a native editor. -->
+</div></section>
+<section class="guide-section" id="failures" aria-labelledby="failures-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="failures-title">掃描、編輯器與格式錯誤</h2>
+<p>如果出現 <code>效果器搜尋尚未完成</code>，請開啟 <code>掃描問題（…）</code> 和 <code>技術資訊</code>。某個掃描階段失敗時，先前可用的效果器仍會保留在清單中。修正安裝或資料夾後，使用 <code>重試</code> 或重新掃描。</p><p>外掛程式當機時，如有 <code>重試已崩潰的外掛程式：…</code>，請使用該操作。如果編輯器無法使用，請查看具體原因，例如沒有原生編輯器或缺少 X11/XWayland。部分 AU/VST/LV2 工作階段因尚未實作原生預設狀態轉移，會拒絕運作中變更格式。目前工作階段會保留，請勿以為要求的格式已經套用。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="手冊章節"><a rel="prev" href="effects.html">← 上一章：內建效果與預設</a><a rel="next" href="stream-deck.html">下一章：Stream Deck 外掛程式 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>發佈前草稿 · MixRelay 0.1.0</p><a href="../../index.html">產品首頁</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

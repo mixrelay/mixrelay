@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="保存済みの作業を変更、削除する前に、現在のメッセージと信号経路を確認します。">
+    <title>トラブルシューティングと診断 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/troubleshooting.html">
+    <link rel="alternate" hreflang="ko" href="../ko/troubleshooting.html">
+    <link rel="alternate" hreflang="ja" href="../ja/troubleshooting.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/troubleshooting.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/troubleshooting.html">
+    <link rel="alternate" hreflang="de" href="../de/troubleshooting.html">
+    <link rel="alternate" hreflang="fr" href="../fr/troubleshooting.html">
+    <link rel="alternate" hreflang="it" href="../it/troubleshooting.html">
+    <link rel="alternate" hreflang="es" href="../es/troubleshooting.html">
+    <link rel="alternate" hreflang="pt" href="../pt/troubleshooting.html">
+    <link rel="alternate" hreflang="ru" href="../ru/troubleshooting.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">本文へスキップ</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="製品ホーム"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="言語"><a href="../en/troubleshooting.html" lang="en" hreflang="en">English</a> <a href="../ko/troubleshooting.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/troubleshooting.html" lang="ja" hreflang="ja" aria-current="page">日本語</a> <a href="../zh-Hans/troubleshooting.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/troubleshooting.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/troubleshooting.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/troubleshooting.html" lang="fr" hreflang="fr">Français</a> <a href="../it/troubleshooting.html" lang="it" hreflang="it">Italiano</a> <a href="../es/troubleshooting.html" lang="es" hreflang="es">Español</a> <a href="../pt/troubleshooting.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/troubleshooting.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 公開前の草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="マニュアルの章">
+        <a class="back-link" href="../../index.html">← 製品ホーム</a>
+        <a class="manual-mobile-index" href="index.html">すべての章</a>
+        <nav class="guide-nav" aria-label="マニュアルの章"><a href="index.html">マニュアル概要</a>
+<a href="installation.html">システム要件とインストール</a>
+<a href="first-launch.html">初回起動とアクセス許可</a>
+<a href="workspace.html">ルーティングワークスペース</a>
+<a href="devices.html">デバイスと仮想エンドポイント</a>
+<a href="app-capture.html">アプリの音声キャプチャ</a>
+<a href="recording.html">録音</a>
+<a href="effects.html">内蔵エフェクトとプリセット</a>
+<a href="plugins.html">外部プラグイン</a>
+<a href="stream-deck.html">Stream Deckプラグイン</a>
+<a href="licensing.html">無料版とライセンス</a>
+<a href="updates.html">アップデート</a>
+<a href="uninstall.html">アンインストール</a>
+<a href="troubleshooting.html" aria-current="page">トラブルシューティングと診断</a>
+<a href="support.html">サポート窓口</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / マニュアル</p><h1>トラブルシューティングと診断</h1><p>保存済みの作業を変更、削除する前に、現在のメッセージと信号経路を確認します。</p><p class="guide-draft-note">公開前の草稿です。一般向けのダウンロードと購入はまだ利用できません。本書は現在のソースからビルドした製品を説明しています。以下に記載する環境では、インストール後の動作確認が引き続き必要です。</p></header>
+        <nav class="manual-toc" aria-label="このページの内容"><p class="sidebar-label">このページの内容</p><ul><li><a href="#sound">無音、音の二重再生、音切れ</a></li><li><a href="#changes">変更が適用、保存されない</a></li><li><a href="#diagnostics">診断レポートを保存する</a></li></ul></nav>
+        <section class="guide-section" id="sound" aria-labelledby="sound-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="sound-title">無音、音の二重再生、音切れ</h2>
+<ol><li>全体の<code>一時停止</code>、ノードの電源、ミュート、接続したチャンネル番号を確認します。グラフの選択状態はオン、オフを示しません。</li><li>ソースから音声が出ているか確認します。必要に応じて<a href="first-launch.html#permissions">キャプチャまたはマイクのアクセス許可</a>と<a href="app-capture.html#unavailable">アプリの再選択</a>を確認します。</li><li>物理出力とハードウェア側の音量を確認します。OBSやDAWの場合は、そのアプリの入力にMixRelay IOを選び、MixRelayで<code>グラフ → デバイス</code>を接続します。</li><li>音が二重になる場合は、直接の再生とモニタールートを確認します。音切れがある場合は、アダプターが変更に対応していれば<code>処理バッファー</code>を大きくします。</li></ol><p>デバイスを利用できない場合は接続し直し、必要に応じて再選択してください。保存済みの形式が拒否された場合や、デバイスの設定を元に戻せなかった場合は、メッセージに従って対応する形式を再適用します。エンジンへの接続と音声処理は別です。エンジンに接続できても、音声が停止中または失敗と表示されることがあります。</p><p>エンジンの障害が繰り返されてMixRelayが一時停止した場合は、<code>再開</code>を選ぶ前に最近の変更を見直してください。Dockerを使う音声環境には対応していません。必要なバージョンのPipeWireとWirePlumberがある通常のLinuxユーザーセッションを使ってください。</p>
+</div></section>
+<section class="guide-section" id="changes" aria-labelledby="changes-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="changes-title">変更が適用、保存されない</h2>
+<p><code>未適用</code>は音声が動作中であることを示しません。編集内容が保持されたと表示された場合は、現在のエンジンの状態を確認し、準備ができたら<code>再試行</code>を使います。結果が不確かなコマンドを短時間に繰り返さないでください。競合が解消されず<code>この編集内容でエンジンのグラフを上書き</code>または<code>編集を破棄してエンジンのグラフを再読み込み</code>が表示された場合は、編集中の内容を適用するか破棄するかを選んでください。</p><p>音声の動作中でも保存の警告が表示されることがあります。可能であれば、閉じる前にワークスペースのコピーを保存します。配置だけを復旧する場合は、<code>現在の配置を保存</code>で現在の配置の保存を再試行できます。<code>保存済みの配置を読み込み</code>は現在の配置を保存済みの配置に置き換えます。エフェクトのエラーは<a href="plugins.html#failures">プラグインの復旧手順</a>を参照してください。ライセンスのエラーでは接続とデバイスの時計を確認します。アクティベーション結果が不確定な場合は、サポートによる対応が必要です。</p>
+</div></section>
+<section class="guide-section" id="diagnostics" aria-labelledby="diagnostics-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="diagnostics-title">診断レポートを保存する</h2>
+<ol><li>MixRelayのバックグラウンドのステータスメニューを開きます。</li><li><code>診断レポートを保存…</code>を選びます。</li><li><code>dump.json</code>の保存先を選びます。内容を確認し、求められた場合はサポートへのメールに添付してください。保存だけでアップロードされることはありません。</li></ol><p>レポートには、バージョン、OS、アーキテクチャ、デバイス形式、ランタイムの状態、数値カウンターの情報が所定の上限内で含まれます。音声、メモリダンプ、生ログ、認証情報、ユーザーパス、デバイスの名前とID、グラフ、アプリ一覧は含まれません。最大256 KiBで、デバイスの要約は最大64件です。取得できない情報は取得不可と記録されます。書き出しても、停止中の音声は開始されません。</p><p>書き出しは同時に1件だけ実行できます。キャンセルするとファイルは作成されません。既存のファイルを置き換える場合は、OSの上書き確認が必要です。保存に失敗したら、保存先を確認して再試行してください。他に添える情報は<a href="support.html">サポート窓口</a>を参照してください。</p><!-- TODO screenshot: status-menu diagnostic export and native save dialog, both languages. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="マニュアルの章"><a rel="prev" href="uninstall.html">← 前へ: アンインストール</a><a rel="next" href="support.html">次へ: サポート窓口 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

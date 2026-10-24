@@ -1,0 +1,591 @@
+use std::{collections::BTreeSet, path::PathBuf};
+
+use mixrelay_audio_io::{
+    ChannelLayout, NativeSampleFormat, NativeStreamFormat, StreamSpec, VirtualEndpointId,
+    VirtualEndpointSettings, VirtualEndpointSpec, formats::SAMPLE_RATES,
+};
+
+use crate::{
+    DriverBackend, DriverCommand, DriverDeviceConfig, DriverError, DriverSnapshot, DriverState,
+    NativeDirection, store,
+};
+
+/// Single non-real-time owner of Driver inventory, revisions and independent settings storage.
+pub struct DriverManager {
+    latency: crate::latency::LatencyAuthority,
+    backend: Box<dyn DriverBackend>,
+    path: PathBuf,
+    inventory: Vec<DriverDeviceConfig>,
+    revision: u64,
+    settings: VirtualEndpointSettings,
+    installed_version: Option<String>,
+    persistence_error: Option<String>,
+    initial_inventory_pending: bool,
+    active: bool,
+}
+
+impl DriverManager {
+    /// Applies an ephemeral runtime message without persisting or advancing inventory revision.
+    /// # Errors
+    /// Returns validation or native publication errors.
+    pub fn publish_latency(
+        &mut self,
+        command: crate::LatencyCommand,
+    ) -> Result<crate::LatencyReply, DriverError> {
+        self.latency
+            .command(command, std::time::Instant::now(), self.backend.as_mut())
+    }
+
+    /// Loads `path` and initializes the native inventory only when `backend` is ready.
+    /// An absent store gets the fixed duplex default; an existing empty store remains empty.
+    /// A non-ready backend never replaces devices or writes new defaults.
+    /// # Errors
+    /// Returns malformed store, invalid endpoint, native apply or readback errors. Save failures
+    /// after successful native apply are retained in the returned manager's snapshot.
+    pub fn open(
+        backend: impl DriverBackend + 'static,
+        path: impl Into<PathBuf>,
+    ) -> Result<Self, DriverError> {
+        let path = path.into();
+        let (revision, active, inventory) = store::load(&path)?.map_or_else(
+            || (0, true, vec![default_device()]),
+            |stored| (stored.revision, stored.active, stored.devices),
+        );
+        validate_inventory(&inventory)?;
+        let mut manager = Self {
+            backend: Box::new(backend),
+            path,
+            inventory,
+            revision,
+            settings: unavailable_settings(),
+            installed_version: None,
+            persistence_error: None,
+            initial_inventory_pending: true,
+            latency: crate::latency::LatencyAuthority::default(),
+            active,
+        };
+        manager.initialize()?;
+        Ok(manager)
+    }
+
+    /// Applies retained startup intent once native ownership becomes available.
+    /// Returns false while waiting, and true after native apply and readback.
+    /// # Errors
+    /// Returns native apply/readback errors without replacing or saving startup intent.
+    pub(crate) fn initialize(&mut self) -> Result<bool, DriverError> {
+        if !self.initial_inventory_pending {
+            return Ok(true);
+        }
+        if self.backend.state() != DriverState::Ready {
+            return Ok(false);
+        }
+        self.backend
+            .replace(if self.active { &self.inventory } else { &[] })?;
+        let settings = self.backend.settings()?;
+        let persisted = self.observe(settings, self.active)?;
+        self.initial_inventory_pending = false;
+        if !persisted {
+            self.persist();
+        }
+        Ok(true)
+    }
+
+    /// Advances startup or restores failed owners without requiring a GUI/API request.
+    /// Actual readback remains authoritative; recovery never fabricates saved formats.
+    /// # Errors
+    /// Returns initialization, recovery or actual readback errors while retaining inventory.
+    pub(crate) fn maintain(&mut self) -> Result<bool, DriverError> {
+        self.maintain_at(std::time::Instant::now())
+    }
+
+    fn maintain_at(&mut self, now: std::time::Instant) -> Result<bool, DriverError> {
+        // An engine that stopped publishing loses its reported latency even when nothing
+        // else reaches the service. A failed clear never holds up inventory recovery.
+        if let Err(error) = self.latency.expire(now, self.backend.as_mut()) {
+            tracing::warn!(%error, "expired input latency could not be cleared");
+        }
+        if self.initial_inventory_pending {
+            return self.initialize();
+        }
+        if !self.active {
+            return Ok(false);
+        }
+        let recovered = self.backend.recover(&self.inventory)?;
+        if recovered {
+            self.refresh()?;
+        }
+        Ok(recovered)
+    }
+
+    /// Sets the installed service release version; native readiness remains backend-owned.
+    pub fn set_installed_version(&mut self, version: Option<String>) {
+        self.installed_version = version;
+    }
+
+    /// Refreshes actual native state, including external OS format changes.
+    /// # Errors
+    /// Returns native readback or revision exhaustion errors. Non-ready snapshots disable native
+    /// controls when discovery fails rather than synthesizing formats from persisted settings.
+    pub fn snapshot(&mut self) -> Result<DriverSnapshot, DriverError> {
+        self.refresh()?;
+        Ok(self.current_snapshot())
+    }
+
+    /// Applies one revision-checked change, reads actual native state and then persists it.
+    /// Persistence failure is visible in a successful active-state snapshot, never fake rollback.
+    /// # Errors
+    /// Rejects stale revisions, missing identities, unavailable backends, invalid requests and
+    /// native apply/readback failures. Adapter apply errors preserve the active inventory.
+    pub fn mutate(&mut self, command: DriverCommand) -> Result<DriverSnapshot, DriverError> {
+        self.refresh()?;
+        if self.initial_inventory_pending {
+            return Err(DriverError::Unavailable(
+                "Driver inventory initialization is pending".into(),
+            ));
+        }
+        if self.backend.state() != DriverState::Ready {
+            return Err(DriverError::Unavailable(format!(
+                "{:?}",
+                self.backend.state()
+            )));
+        }
+        if command.expected_revision() != self.revision {
+            return Err(DriverError::RevisionMismatch {
+                expected: command.expected_revision(),
+                current: self.revision,
+            });
+        }
+        match command {
+            DriverCommand::Activate { .. } => return self.set_active(true),
+            DriverCommand::Deactivate { .. } => return self.set_active(false),
+            _ if !self.active => {
+                return Err(DriverError::Unavailable("Driver is stopped".into()));
+            }
+            _ => {}
+        }
+        let desired = self.desired(command)?;
+        validate_inventory(&desired)?;
+        let revision = next_revision(self.revision)?;
+        self.backend.replace(&desired)?;
+        // Native apply has committed. A readback/save failure cannot pretend it rolled back.
+        self.revision = revision;
+        self.inventory = desired;
+        self.settings = self.backend.settings().inspect_err(|error| {
+            self.persistence_error = Some(format!(
+                "Native change committed, but settings were not saved: {error}"
+            ));
+        })?;
+        self.inventory = observed_inventory(&self.settings);
+        self.persist();
+        Ok(self.current_snapshot())
+    }
+
+    fn set_active(&mut self, active: bool) -> Result<DriverSnapshot, DriverError> {
+        if active != self.active {
+            let revision = next_revision(self.revision)?;
+            self.backend
+                .replace(if active { &self.inventory } else { &[] })?;
+            // Keep desired settings independent of an intentionally empty native readback.
+            // A readback/save failure must not let maintenance revive stopped devices.
+            self.active = active;
+            self.revision = revision;
+        }
+        self.settings = self.backend.settings()?;
+        if active {
+            self.inventory = observed_inventory(&self.settings);
+        } else if !self.settings.devices.is_empty() {
+            return Err(DriverError::Backend("Driver devices did not stop".into()));
+        }
+        self.persist();
+        if let Some(error) = &self.persistence_error {
+            return Err(DriverError::Unavailable(format!(
+                "Driver run state was not saved: {error}"
+            )));
+        }
+        Ok(self.current_snapshot())
+    }
+
+    fn refresh(&mut self) -> Result<bool, DriverError> {
+        // Startup intent is authoritative until its first native ACK/readback.
+        // An empty observation before that point must never become a saved empty inventory.
+        if self.initial_inventory_pending {
+            return Ok(false);
+        }
+        let ready = self.backend.state() == DriverState::Ready;
+        let settings = match self.backend.settings() {
+            Ok(settings) => settings,
+            Err(_) if !ready => unavailable_settings(),
+            Err(error) => return Err(error),
+        };
+        self.observe(settings, ready && self.active)
+    }
+
+    fn observe(
+        &mut self,
+        settings: VirtualEndpointSettings,
+        ready: bool,
+    ) -> Result<bool, DriverError> {
+        if settings != self.settings {
+            self.revision = next_revision(self.revision)?;
+            self.settings = settings;
+        }
+        if ready {
+            let actual = observed_inventory(&self.settings);
+            if actual != self.inventory {
+                self.inventory = actual;
+                self.persist();
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn current_snapshot(&self) -> DriverSnapshot {
+        let native_state = self.backend.state();
+        let state = if self.initial_inventory_pending && native_state == DriverState::Ready {
+            DriverState::Unavailable
+        } else {
+            native_state
+        };
+        DriverSnapshot {
+            protocol_version: 1,
+            revision: self.revision,
+            state,
+            installed_version: self.installed_version.clone(),
+            owner_process_id: Some(std::process::id()),
+            settings: self.settings.clone(),
+            persistence_error: self.persistence_error.clone(),
+        }
+    }
+
+    fn persist(&mut self) {
+        self.persistence_error =
+            store::save(&self.path, self.revision, self.active, &self.inventory)
+                .err()
+                .map(|error| error.to_string());
+    }
+
+    fn desired(&self, command: DriverCommand) -> Result<Vec<DriverDeviceConfig>, DriverError> {
+        let mut desired = self.inventory.clone();
+        match command {
+            DriverCommand::Activate { .. } | DriverCommand::Deactivate { .. } => {
+                unreachable!("run-state commands are handled before inventory commands");
+            }
+            DriverCommand::Create { spec, .. } => {
+                if !self.settings.can_create {
+                    return Err(DriverError::Invalid(
+                        "native device creation is unsupported".into(),
+                    ));
+                }
+                if desired.iter().any(|device| device.spec.id == spec.id) {
+                    return Err(DriverError::Invalid("endpoint ID already exists".into()));
+                }
+                self.validate_geometry(&spec)?;
+                desired.push(DriverDeviceConfig {
+                    spec,
+                    render_format: None,
+                    capture_format: None,
+                });
+            }
+            DriverCommand::Configure { spec, .. } => {
+                let device = find_device(&mut desired, &spec.id)?;
+                if spec.display_name != device.spec.display_name && !self.settings.can_rename {
+                    return Err(DriverError::Invalid(
+                        "native renaming is unsupported".into(),
+                    ));
+                }
+                self.validate_geometry(&spec)?;
+                reconfigure(device, spec);
+            }
+            DriverCommand::Remove { endpoint_id, .. } => {
+                let index = desired
+                    .iter()
+                    .position(|device| device.spec.id == endpoint_id)
+                    .ok_or(DriverError::NotFound(endpoint_id))?;
+                desired.remove(index);
+            }
+            DriverCommand::SetFormat {
+                endpoint_id,
+                direction,
+                format,
+                ..
+            } => {
+                self.validate_format(&endpoint_id, direction, format)?;
+                let device = find_device(&mut desired, &endpoint_id)?;
+                set_format(device, direction, format)?;
+                self.validate_device_formats(device)?;
+            }
+            DriverCommand::SetSampleFormat {
+                endpoint_id,
+                sample_format,
+                ..
+            } => {
+                let device = find_device(&mut desired, &endpoint_id)?;
+                self.set_sample_format(device, sample_format)?;
+            }
+        }
+        Ok(desired)
+    }
+
+    fn set_sample_format(
+        &self,
+        device: &mut DriverDeviceConfig,
+        sample_format: NativeSampleFormat,
+    ) -> Result<(), DriverError> {
+        let actual = self
+            .settings
+            .devices
+            .iter()
+            .find(|actual| actual.spec.id == device.spec.id)
+            .ok_or_else(|| DriverError::NotFound(device.spec.id.clone()))?;
+        let mut formats = [None; 2];
+        for (index, (stream, native)) in [
+            (actual.spec.render, &actual.native_formats.render),
+            (actual.spec.capture, &actual.native_formats.capture),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if stream.is_none() {
+                continue;
+            }
+            let current = native.current.ok_or_else(|| {
+                DriverError::Invalid("current native format is unavailable".into())
+            })?;
+            let format = NativeStreamFormat {
+                sample_format,
+                ..current
+            };
+            if !native.supported.contains(&format) {
+                return Err(DriverError::Invalid(
+                    "native format tuple is unsupported".into(),
+                ));
+            }
+            formats[index] = Some(format);
+        }
+        device.render_format = formats[0];
+        device.capture_format = formats[1];
+        Ok(())
+    }
+
+    fn validate_geometry(&self, spec: &VirtualEndpointSpec) -> Result<(), DriverError> {
+        validate_spec(spec)?;
+        for (stream, supported) in [
+            (spec.render, &self.settings.render_channels),
+            (spec.capture, &self.settings.capture_channels),
+        ] {
+            if stream.is_some_and(|stream| !supported.contains(&stream.channels)) {
+                return Err(DriverError::Invalid(
+                    "unsupported directional channel count".into(),
+                ));
+            }
+        }
+        if let Some(template) = &self.settings.creation_template
+            && spec
+                .supported_sample_rates
+                .iter()
+                .any(|rate| !template.supported_sample_rates.contains(rate))
+        {
+            return Err(DriverError::Invalid(
+                "unsupported nominal sample rate".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_format(
+        &self,
+        id: &VirtualEndpointId,
+        direction: NativeDirection,
+        format: NativeStreamFormat,
+    ) -> Result<(), DriverError> {
+        let device = self
+            .settings
+            .devices
+            .iter()
+            .find(|device| &device.spec.id == id)
+            .ok_or_else(|| DriverError::NotFound(id.clone()))?;
+        let formats = match direction {
+            NativeDirection::Render => &device.native_formats.render,
+            NativeDirection::Capture => &device.native_formats.capture,
+        };
+        if !formats.supported.contains(&format) {
+            return Err(DriverError::Invalid(
+                "native format tuple is unsupported".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_device_formats(&self, device: &DriverDeviceConfig) -> Result<(), DriverError> {
+        for (direction, format) in [
+            (NativeDirection::Render, device.render_format),
+            (NativeDirection::Capture, device.capture_format),
+        ] {
+            if let Some(format) = format {
+                self.validate_format(&device.spec.id, direction, format)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn next_revision(revision: u64) -> Result<u64, DriverError> {
+    revision
+        .checked_add(1)
+        .ok_or_else(|| DriverError::Invalid("Driver revision exhausted".into()))
+}
+
+fn validate_spec(spec: &VirtualEndpointSpec) -> Result<(), DriverError> {
+    spec.validate_contract(64, 64)
+        .map_err(|error| DriverError::Invalid(error.to_string()))?;
+    if spec
+        .supported_sample_rates
+        .iter()
+        .any(|rate| !SAMPLE_RATES.contains(rate))
+    {
+        return Err(DriverError::Invalid(
+            "unsupported product sample rate".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_inventory(devices: &[DriverDeviceConfig]) -> Result<(), DriverError> {
+    let mut ids = BTreeSet::new();
+    for device in devices {
+        validate_spec(&device.spec)?;
+        if !ids.insert(&device.spec.id) {
+            return Err(DriverError::Invalid("duplicate endpoint ID".into()));
+        }
+        for (stream, format) in [
+            (device.spec.render, device.render_format),
+            (device.spec.capture, device.capture_format),
+        ] {
+            if let Some(format) = format
+                && !stream.is_some_and(|stream| {
+                    stream.channels == format.channels
+                        && device.spec.default_sample_rate == format.sample_rate
+                })
+            {
+                return Err(DriverError::Invalid(
+                    "native format disagrees with directional geometry or shared nominal rate"
+                        .into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn find_device<'a>(
+    devices: &'a mut [DriverDeviceConfig],
+    id: &VirtualEndpointId,
+) -> Result<&'a mut DriverDeviceConfig, DriverError> {
+    devices
+        .iter_mut()
+        .find(|device| &device.spec.id == id)
+        .ok_or_else(|| DriverError::NotFound(id.clone()))
+}
+
+fn reconfigure(device: &mut DriverDeviceConfig, spec: VirtualEndpointSpec) {
+    for (stream, format) in [
+        (spec.render, &mut device.render_format),
+        (spec.capture, &mut device.capture_format),
+    ] {
+        *format = stream.and_then(|stream| {
+            format.map(|format| NativeStreamFormat {
+                channels: stream.channels,
+                sample_rate: spec.default_sample_rate,
+                ..format
+            })
+        });
+    }
+    device.spec = spec;
+}
+
+fn set_format(
+    device: &mut DriverDeviceConfig,
+    direction: NativeDirection,
+    format: NativeStreamFormat,
+) -> Result<(), DriverError> {
+    let stream = match direction {
+        NativeDirection::Render => &mut device.spec.render,
+        NativeDirection::Capture => &mut device.spec.capture,
+    };
+    let stream = stream
+        .as_mut()
+        .ok_or_else(|| DriverError::Invalid("endpoint direction is absent".into()))?;
+    if stream.channels != format.channels {
+        stream.channel_layout = ChannelLayout::Discrete;
+    }
+    stream.channels = format.channels;
+    device.spec.default_sample_rate = format.sample_rate;
+    for present in [&mut device.render_format, &mut device.capture_format]
+        .into_iter()
+        .flatten()
+    {
+        present.sample_rate = format.sample_rate;
+    }
+    match direction {
+        NativeDirection::Render => device.render_format = Some(format),
+        NativeDirection::Capture => device.capture_format = Some(format),
+    }
+    Ok(())
+}
+
+fn observed_inventory(settings: &VirtualEndpointSettings) -> Vec<DriverDeviceConfig> {
+    settings
+        .devices
+        .iter()
+        .map(|device| {
+            let mut spec = device.spec.clone();
+            if let Some(rate) = device.observed_sample_rate {
+                spec.default_sample_rate = rate;
+            }
+            DriverDeviceConfig {
+                spec,
+                render_format: device.native_formats.render.current,
+                capture_format: device.native_formats.capture.current,
+            }
+        })
+        .collect()
+}
+
+fn unavailable_settings() -> VirtualEndpointSettings {
+    VirtualEndpointSettings {
+        can_create: false,
+        can_rename: false,
+        render_channels: Vec::new(),
+        capture_channels: Vec::new(),
+        creation_template: None,
+        devices: Vec::new(),
+    }
+}
+
+fn default_device() -> DriverDeviceConfig {
+    let stream = StreamSpec {
+        channels: 2,
+        channel_layout: ChannelLayout::Stereo,
+    };
+    let format = NativeStreamFormat {
+        sample_rate: 48_000,
+        channels: 2,
+        sample_format: NativeSampleFormat::Float32,
+    };
+    DriverDeviceConfig {
+        spec: VirtualEndpointSpec {
+            id: VirtualEndpointId::from("17e59d73-42c1-4f11-a8b4-6c2d913357e0"),
+            display_name: "MixRelay IO".into(),
+            render: Some(stream),
+            capture: Some(stream),
+            supported_sample_rates: SAMPLE_RATES.to_vec(),
+            default_sample_rate: 48_000,
+        },
+        render_format: Some(format),
+        capture_format: Some(format),
+    }
+}
+
+#[cfg(test)]
+mod tests;

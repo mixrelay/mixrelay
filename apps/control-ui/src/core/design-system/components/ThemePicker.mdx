@@ -1,0 +1,44 @@
+import { Meta, Canvas, ArgTypes } from '@storybook/addon-docs/blocks';
+import { DocsLayout } from '../DocsLayout';
+import { ComponentContract } from '../ComponentsReference';
+import * as Example from '../../../app/App.stories';
+
+import * as Api from "../playgrounds/ThemePicker.stories";
+
+<Meta title="Design System/Components/ThemePicker" />
+
+<DocsLayout>
+
+<ComponentContract name="ThemePicker" />
+
+## Playground·API·기본값
+
+<a href="/?path=/story/core-playgrounds-themepicker--playground" target="_top">ThemePicker Playground 열기</a>. 공개 props가 없는 컴포넌트입니다. Context·조합 계약과 실제 예제를 확인합니다.
+
+공개 props가 없습니다. 전역 toolbar·ThemeContext를 소비하며 메뉴 선택은 Storybook의 테마를 변경합니다.
+
+<Canvas of={Api.Playground} story={{ inline: false, height: 220 }} sourceState="hidden" />
+공개 props·구현 기본 props가 없습니다. 위 계약의 Context와 실제 조합을 사용합니다.
+
+Source에서 실제 호출 코드를 확인합니다. 기본값·상태는 이 컴포넌트가 소비하는 Context와 부모의 조합을 따릅니다.
+
+## 실제 사용례
+
+이 Canvas는 아래 계약을 소비하는 기존 스토리입니다. 여러 컴포넌트의 조합이면 해당 조합에서의 역할을 함께 확인합니다. 독립 컴포넌트 전용 예시나 실제 장치 실행으로 해석하지 않습니다.
+
+<Canvas of={Example.Light} story={{ inline: false, height: 560 }} />
+
+
+## 개별 상태 예제
+
+### Light
+
+<Canvas of={Api.Light} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Dark
+
+<Canvas of={Api.Dark} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+<a href="/?path=/docs/design-system-components--docs" target="_top">전체 컴포넌트와 사용 구분</a>
+
+</DocsLayout>

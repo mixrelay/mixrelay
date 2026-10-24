@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Capture a running application and route its audio through your graph.">
+    <title>App audio capture — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/app-capture.html">
+    <link rel="alternate" hreflang="ko" href="../ko/app-capture.html">
+    <link rel="alternate" hreflang="ja" href="../ja/app-capture.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/app-capture.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/app-capture.html">
+    <link rel="alternate" hreflang="de" href="../de/app-capture.html">
+    <link rel="alternate" hreflang="fr" href="../fr/app-capture.html">
+    <link rel="alternate" hreflang="it" href="../it/app-capture.html">
+    <link rel="alternate" hreflang="es" href="../es/app-capture.html">
+    <link rel="alternate" hreflang="pt" href="../pt/app-capture.html">
+    <link rel="alternate" hreflang="ru" href="../ru/app-capture.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Product home"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Language"><a href="../en/app-capture.html" lang="en" hreflang="en" aria-current="page">English</a> <a href="../ko/app-capture.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/app-capture.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/app-capture.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/app-capture.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/app-capture.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/app-capture.html" lang="fr" hreflang="fr">Français</a> <a href="../it/app-capture.html" lang="it" hreflang="it">Italiano</a> <a href="../es/app-capture.html" lang="es" hreflang="es">Español</a> <a href="../pt/app-capture.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/app-capture.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Prerelease draft</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Manual chapters">
+        <a class="back-link" href="../../index.html">← Product home</a>
+        <a class="manual-mobile-index" href="index.html">All chapters</a>
+        <nav class="guide-nav" aria-label="Manual chapters"><a href="index.html">Manual overview</a>
+<a href="installation.html">System requirements and installation</a>
+<a href="first-launch.html">First launch and permissions</a>
+<a href="workspace.html">Routing workspace</a>
+<a href="devices.html">Devices and virtual endpoints</a>
+<a href="app-capture.html" aria-current="page">App audio capture</a>
+<a href="recording.html">Recording</a>
+<a href="effects.html">Built-in effects and presets</a>
+<a href="plugins.html">External plug-ins</a>
+<a href="stream-deck.html">Stream Deck plug-in</a>
+<a href="licensing.html">Free edition and licensing</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Uninstalling</a>
+<a href="troubleshooting.html">Troubleshooting and diagnostics</a>
+<a href="support.html">Support contact</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>App audio capture</h1><p>Capture a running application and route its audio through your graph.</p><p class="guide-draft-note">Prerelease draft. Public downloads and purchases are not available yet. These instructions describe the current source build; installed behaviour still needs verification in the environments noted below.</p></header>
+        <nav class="manual-toc" aria-label="On this page"><p class="sidebar-label">On this page</p><ul><li><a href="#capture">Select an application</a></li><li><a href="#unavailable">Missing audio and source playback</a></li></ul></nav>
+        <section class="guide-section" id="capture" aria-labelledby="capture-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="capture-title">Select an application</h2>
+<ol><li>Open the source app and start playback so an audio source is available.</li><li>In MixRelay, choose <code>Add node → Source</code> and select the app under <code>Running applications</code>.</li><li>Connect its output channels to a processor, output or recorder. Adjust <code>Source gain</code> in <code>Options</code> as needed.</li></ol><p>The source list contains discovered apps, not individual browser tabs or windows. A display-name change does not change which app is captured. Physical input and individual app capture nodes share the free edition’s two-input limit.</p>
+</div></section>
+<section class="guide-section" id="unavailable" aria-labelledby="unavailable-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="unavailable-title">Missing audio and source playback</h2>
+<p>Capture requires 48 kHz and the relevant <a href="first-launch.html#permissions">macOS permission</a>. If a node is <code>Offline</code>, check that the app is running. If <code>Select the application again</code> appears, use the node’s application selection to choose the intended source. MixRelay does not choose a replacement when several sources match.</p><p>The app’s original playback and the MixRelay route can both affect what you hear. Check your monitoring routes if audio sounds doubled. MixRelay does not change the system default output. Source suppression, where used by the capture route, applies only to the path MixRelay owns; the current UI has no separate source-playback toggle.</p><!-- TODO screenshot: running application menu and offline/reselection states, both languages. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="Manual chapters"><a rel="prev" href="devices.html">← Previous: Devices and virtual endpoints</a><a rel="next" href="recording.html">Next: Recording →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Prerelease draft · MixRelay 0.1.0</p><a href="../../index.html">Product home</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

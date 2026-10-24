@@ -1,0 +1,81 @@
+import { Meta, Canvas } from '@storybook/addon-docs/blocks';
+import { DocsLayout } from './DocsLayout';
+import { ComponentsReference } from './ComponentsReference';
+import * as Catalog from '../ui/ComponentCatalog.stories';
+import * as System from '../ui/SystemControls.stories';
+import * as Frame from '../ui/NodeFrame.stories';
+import * as Parameter from '../ui/ParameterField.stories';
+import * as Transport from '../ui/TransportButton.stories';
+import * as Composition from '../ui/Composition.stories';
+import * as States from '../ui/ContractStates.stories';
+
+<Meta title="Design System/Components" />
+
+<DocsLayout>
+
+# 컴포넌트
+
+Core의 공개 표시·조작·배치 계약 57개와 환경·라이선스 계약 4개를 제공합니다. 앱과 문서 예시는 같은 TSX·토큰·테마를 소비합니다. 아래에서 용도나 상태를 검색하고 계약을 선택하세요. 사이드바의 개별 문서에서도 같은 계약을 확인할 수 있습니다.
+
+## 선택 기준
+
+| 과업 | 선택할 계약 | 구별할 것 |
+| --- | --- | --- |
+| 실행 명령 | ActionButton / IconActionButton | 명령, 선택, 상태를 구별합니다. |
+| 문구가 바뀌는 같은 행동 | StateButton | 현재 문구를 고르는 value와 실행 onClick은 별개입니다. |
+| 오디오 실행 | TransportButton / NodePowerButton / NodeMuteButton | 전체 Pause, 녹음 Pause, 노드 Off, Mute는 서로 다른 상태입니다. |
+| 문자·경로 | TextField / TitleField / PathField | 편집, 제목 편집, 읽기 전용 경로와 선택 행동을 구별합니다. |
+| 선택·확인 | SelectField / ToggleField / CheckboxField | 선택 목록, 즉시 설정, 명시적 확인을 구별합니다. |
+| 연속 오디오 값 | ParameterField / NumericValueControl / Knob / ValueSlider | 값 소유자는 하나이며 정밀 입력·키보드 경로를 제공합니다. |
+| 상태·실패·계측 | StatusBadge / InlineNotice / RetryAlert / Meter / DynamicsMeter | 설명, 발표, 복구, 읽기 전용 측정을 구별합니다. |
+| 떠 있는 화면 | Tooltip / InfoPopover / HierarchicalMenuButton / Dialog | 보완 설명, 정보, 명령 목록, 모달 작업을 구별합니다. |
+| 콘텐츠·명령 배치 | Stack / Inline / FormActions / ContentSection | 간격은 조합이 소유합니다. |
+| 노드·연결 | AudioNodeCard / AudioGraphCanvas | 그래프 외부 노드 하나가 선택 포커스를 소유하고 내부 조작은 독립입니다. |
+
+<ComponentsReference />
+
+## 실행 가능한 조합
+
+아래 예시는 실제 Core를 렌더합니다. 문서의 정적 그림이 아닙니다. Canvas에서 명령과 입력을 직접 조작하고, 원래 스토리의 toolbar에서 테마·언어·폭을 비교할 수 있습니다. 샘플 상태와 mock 명령은 실제 오디오 장치·엔진의 결과와 구별합니다.
+
+### 명령·입력·실패
+
+<Canvas of={System.Interactive} story={{ inline: false, height: 520 }} />
+
+### 전체 계약의 조합
+
+<Canvas of={Catalog.Overview} story={{ inline: false, height: 700 }} />
+
+### 노드와 실행 상태
+
+<Canvas of={Frame.Default} story={{ inline: false, height: 520 }} />
+
+### 연속값과 정밀 입력
+
+<Canvas of={Parameter.FrequencyKnob} story={{ inline: false, height: 320 }} />
+
+### Transport의 active와 disabled
+
+<Canvas of={Transport.ActiveDisabled} story={{ inline: false, height: 180 }} />
+
+### 폼의 실패·좁은 폭·긴 번역
+
+<Canvas of={Composition.NarrowLongTranslation} story={{ inline: false, height: 480 }} />
+
+## 독립 상태와 조작 검수
+
+한 기본 조합으로 지원 상태를 판단하지 않습니다. 아래 상태 예시에서 비활성·오류·대기·현재값을 비교하고 실제 키보드·포인터로 focus·hover·pressed를 확인합니다. CSS 상태를 속성으로 흉내 낸 그림은 검증 근거로 쓰지 않습니다.
+
+<Canvas of={States.Commands} story={{ inline: false, height: 520 }} />
+
+<Canvas of={States.Fields} story={{ inline: false, height: 700 }} />
+
+<Canvas of={States.Overlays} story={{ inline: false, height: 560 }} />
+
+## 변경 규칙
+
+공통 시각 값은 `core/theme/tokens.ts`, 공통 상태·표현은 해당 Core TSX/CSS에서 변경합니다. Feature와 Screen은 데이터·문구·명령과 공개 계약을 전달합니다. 임의 색·서체·모서리·크기·내부 선택자 덮어쓰기로 공통 규격을 우회하지 않습니다. 새로운 의미가 필요하면 Core 계약과 해당 Storybook 상태를 함께 추가합니다.
+
+등록된 검사 소스와 실행 통과는 구별합니다. 키보드 실행·포커스 복귀·좁은 폭·긴 번역·오류·비활성을 검수하고, 보조 기술의 실제 읽기와 설치된 앱의 장치·오디오 동작은 별도로 확인합니다.
+
+</DocsLayout>

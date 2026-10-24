@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="В бесплатной версии можно использовать встроенную обработку без ограничения числа экземпляров.">
+    <title>Встроенные эффекты и пресеты — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/effects.html">
+    <link rel="alternate" hreflang="ko" href="../ko/effects.html">
+    <link rel="alternate" hreflang="ja" href="../ja/effects.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/effects.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/effects.html">
+    <link rel="alternate" hreflang="de" href="../de/effects.html">
+    <link rel="alternate" hreflang="fr" href="../fr/effects.html">
+    <link rel="alternate" hreflang="it" href="../it/effects.html">
+    <link rel="alternate" hreflang="es" href="../es/effects.html">
+    <link rel="alternate" hreflang="pt" href="../pt/effects.html">
+    <link rel="alternate" hreflang="ru" href="../ru/effects.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Перейти к содержимому</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Страница продукта"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Язык"><a href="../en/effects.html" lang="en" hreflang="en">English</a> <a href="../ko/effects.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/effects.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/effects.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/effects.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/effects.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/effects.html" lang="fr" hreflang="fr">Français</a> <a href="../it/effects.html" lang="it" hreflang="it">Italiano</a> <a href="../es/effects.html" lang="es" hreflang="es">Español</a> <a href="../pt/effects.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/effects.html" lang="ru" hreflang="ru" aria-current="page">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Предрелизный черновик</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Главы руководства">
+        <a class="back-link" href="../../index.html">← Страница продукта</a>
+        <a class="manual-mobile-index" href="index.html">Все главы</a>
+        <nav class="guide-nav" aria-label="Главы руководства"><a href="index.html">Обзор руководства</a>
+<a href="installation.html">Системные требования и установка</a>
+<a href="first-launch.html">Первый запуск и разрешения</a>
+<a href="workspace.html">Рабочее пространство маршрутизации</a>
+<a href="devices.html">Устройства и виртуальные подключения</a>
+<a href="app-capture.html">Захват аудио приложений</a>
+<a href="recording.html">Запись</a>
+<a href="effects.html" aria-current="page">Встроенные эффекты и пресеты</a>
+<a href="plugins.html">Внешние плагины</a>
+<a href="stream-deck.html">Плагин Stream Deck</a>
+<a href="licensing.html">Бесплатная версия и лицензирование</a>
+<a href="updates.html">Обновления</a>
+<a href="uninstall.html">Удаление</a>
+<a href="troubleshooting.html">Устранение неполадок и диагностика</a>
+<a href="support.html">Связь с поддержкой</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / РУКОВОДСТВО</p><h1>Встроенные эффекты и пресеты</h1><p>В бесплатной версии можно использовать встроенную обработку без ограничения числа экземпляров.</p><p class="guide-draft-note">Предрелизный черновик. Публичные загрузки и покупки пока недоступны. Эти инструкции описывают текущую сборку из исходного кода; поведение установленного продукта ещё предстоит проверить в указанных ниже средах.</p></header>
+        <nav class="manual-toc" aria-label="На этой странице"><p class="sidebar-label">На этой странице</p><ul><li><a href="#processors">Добавление и настройка эффектов</a></li><li><a href="#presets">Пресеты и цепочки эффектов</a></li></ul></nav>
+        <section class="guide-section" id="processors" aria-labelledby="processors-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="processors-title">Добавление и настройка эффектов</h2>
+<p>Выберите <code>Добавить узел → Процессор</code>, выберите эффект и подключите его входные и выходные каналы. Параметры доступны в разделе <code>Параметры</code>. Доступные эффекты: Компрессор, Лимитер, Эквалайзер, Фильтр высоких частот, Фильтр низких частот, Гейт, Экспандер, Инструменты каналов, Моно панорама, Стереобаланс, Задержка, Приглушение, Реверберация и Хорус.</p><ul><li>Компрессор и Лимитер управляют динамикой и пиками. Их индикатор снижения усиления использует измерения движка; прочерк означает, что измерение недоступно.</li><li>Эквалайзер имеет три пиковые полосы. Перетаскивайте точку для изменения частоты и усиления или используйте поля Частота, Усиление и Q в разделе Параметры. Фильтр высоких частот и Фильтр низких частот удаляют низкие или высокие частоты.</li><li>Гейт и Экспандер ослабляют сигналы ниже порога. Инструменты каналов позволяют суммировать в моно, дублировать каналы, менять левый и правый местами и инвертировать полярность. Сумма в моно усредняет L и R.</li><li>Моно панорама размещает моносигнал в стереополе; Стереобаланс регулирует баланс между левым и правым каналами. Приглушение использует отдельный монофонический <code>Управляющий вход</code> для ослабления основного сигнала. Подключите управляющий источник отдельно; он не подмешивается к выходу.</li><li>Задержка добавляет эхо с заданными интервалами. Реверберация и Хорус добавляют пространство или модуляцию. Их конфигурации каналов различаются; подключайте те порты, которые доступны у эффекта.</li></ul><p><code>Обход</code> пропускает необработанный звук. Выключение узла блокирует его сигнал. Встроенное шумоподавление и измерение LUFS недоступны.</p>
+</div></section>
+<section class="guide-section" id="presets" aria-labelledby="presets-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="presets-title">Пресеты и цепочки эффектов</h2>
+<p>Используйте <code>Пресет</code> в разделе Параметры эффекта. Реверберация включает пресеты Малая комната, Студия, Зал, Караоке, Туннель и Аквариум. Задержка включает пресеты Короткое эхо, Слэпбэк, Вокальное эхо, Караоке, Длинное эхо и Пинг-понг. При изменении значений пресета выбирается <code>Пользовательский</code>.</p><p>Чтобы добавить несколько соединённых эффектов, выберите <code>Добавить узел → Процессор → Цепочки эффектов</code>, затем Караоке, Туннель, Аквариум, Радио или Двойной вокал. Цепочка добавляет свои узлы и соединения, не меняя существующие кабели. Подключите источник и выход к цепочке. Одно действие отмены удаляет вставку. Сохранённые рабочие пространства сохраняют фактические параметры и соединения. Устанавливать внешние импульсные отклики или сэмплы не требуется.</p><!-- TODO screenshot: Equalizer Options, Reverb preset menu and an inserted effect chain. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="Главы руководства"><a rel="prev" href="recording.html">← Назад: Запись</a><a rel="next" href="plugins.html">Далее: Внешние плагины →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Предрелизный черновик · MixRelay 0.1.0</p><a href="../../index.html">Страница продукта</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

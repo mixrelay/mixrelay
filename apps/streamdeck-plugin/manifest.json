@@ -1,0 +1,54 @@
+{
+  "UUID": "io.mixrelay.streamdeck",
+  "Name": "MixRelay",
+  "Description": "Control MixRelay nodes through a private local connection.",
+  "Author": "MixRelay",
+  "Version": "0.1.0.7",
+  "Icon": "images/app",
+  "Category": "MixRelay",
+  "CategoryIcon": "images/icon",
+  "CodePath": "bin/plugin.js",
+  "SDKVersion": 2,
+  "Software": { "MinimumVersion": "6.6" },
+  "OS": [{ "Platform": "mac", "MinimumVersion": "14.2" }],
+  "Nodejs": { "Version": "20" },
+  "Actions": [
+    {
+      "UUID": "io.mixrelay.streamdeck.node",
+      "Name": "Power",
+      "Tooltip": "Turn processing on or off for a selected node.",
+      "Icon": "images/power",
+      "Controllers": ["Keypad"],
+      "PropertyInspectorPath": "ui/index.html",
+      "States": [{ "Image": "images/key-power", "TitleAlignment": "bottom", "FontSize": 12 }]
+    },
+    {
+      "UUID": "io.mixrelay.streamdeck.mute",
+      "Name": "Mute",
+      "Tooltip": "Mute or unmute a selected node.",
+      "Icon": "images/mute",
+      "Controllers": ["Keypad"],
+      "PropertyInspectorPath": "ui/index.html",
+      "States": [{ "Image": "images/key-mute", "TitleAlignment": "bottom", "FontSize": 12 }]
+    },
+    {
+      "UUID": "io.mixrelay.streamdeck.volume",
+      "Name": "Volume",
+      "Tooltip": "Adjust volume with buttons or a dial.",
+      "Icon": "images/volume",
+      "Controllers": ["Keypad", "Encoder"],
+      "PropertyInspectorPath": "ui/index.html",
+      "States": [{ "Image": "images/key-volume", "TitleAlignment": "bottom", "FontSize": 12 }],
+      "Encoder": { "layout": "$B1", "TriggerDescription": { "Rotate": "Volume", "Push": "Mute" } }
+    },
+    {
+      "UUID": "io.mixrelay.streamdeck.recorder",
+      "Name": "Recording",
+      "Tooltip": "Record, pause or stop a recorder node.",
+      "Icon": "images/recording",
+      "Controllers": ["Keypad"],
+      "PropertyInspectorPath": "ui/index.html",
+      "States": [{ "Image": "images/key-recording", "TitleAlignment": "bottom", "FontSize": 12 }]
+    }
+  ]
+}

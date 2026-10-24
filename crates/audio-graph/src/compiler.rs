@@ -4,14 +4,15 @@ use std::{
     sync::Arc,
 };
 
+use mixrelay_audio_io::ApplicationCaptureRequest;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::{
-    AUDIO_PORT_ID, ApplicationSelector, AudioEndpoint, CURRENT_GRAPH_SCHEMA_VERSION,
-    ChannelMapping, ChannelRoute, CompiledEdge, CompiledNode, CompiledPort, DeviceSelector, EdgeId,
-    ExecutionPlan, GraphDocument, NodeConfig, NodeId, NodeSpec, PortDirection, PortId,
-    RenderFormat,
+    AUDIO_PORT_ID, AudioEndpoint, CURRENT_GRAPH_SCHEMA_VERSION, ChannelMapping, ChannelRoute,
+    CompiledEdge, CompiledNode, CompiledPort, DeviceSelector, EdgeId, ExecutionPlan,
+    FROM_OS_PORT_ID, GraphDocument, MixerConfig, NodeConfig, NodeId, NodeSpec, PortDirection,
+    PortId, RenderFormat, TO_OS_PORT_ID, VirtualEndpointConfig,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +26,9 @@ pub struct CompileLimits {
     pub max_nodes: usize,
     pub max_edges: usize,
     pub max_channels_per_port: u16,
+    pub max_sample_rate: u32,
+    pub max_block_frames: u32,
+    pub max_plan_bytes: usize,
 }
 
 impl Default for CompileLimits {
@@ -33,6 +37,9 @@ impl Default for CompileLimits {
             max_nodes: 256,
             max_edges: 1_024,
             max_channels_per_port: 64,
+            max_sample_rate: 384_000,
+            max_block_frames: 4_096,
+            max_plan_bytes: 8 * 1_024 * 1_024,
         }
     }
 }
@@ -75,17 +82,13 @@ impl NodeResolver for BuiltInNodeResolver {
         context: &CompileContext,
     ) -> Result<ResolvedNode, NodeResolutionError> {
         match &node.config {
-            NodeConfig::ApplicationCapture(config) => {
-                validate_application_selector(&config.selector)?;
-                validate_channels(config.output_channels, context.limits.max_channels_per_port)?;
-                Ok(ResolvedNode {
-                    inputs: vec![],
-                    outputs: vec![audio_port(PortDirection::Output, config.output_channels)],
-                })
-            }
+            NodeConfig::ApplicationCapture(config) => resolve_application_capture(config, context),
             NodeConfig::AudioDeviceInput(config) => {
                 validate_device_selector(&config.selector)?;
                 validate_channels(config.output_channels, context.limits.max_channels_per_port)?;
+                if !config.gain_db.is_finite() {
+                    return Err(invalid("gainDb must be finite"));
+                }
                 Ok(ResolvedNode {
                     inputs: vec![],
                     outputs: vec![audio_port(PortDirection::Output, config.output_channels)],
@@ -99,31 +102,31 @@ impl NodeResolver for BuiltInNodeResolver {
                     outputs: vec![],
                 })
             }
-            NodeConfig::Mixer(config) => {
-                validate_channels(config.channels, context.limits.max_channels_per_port)?;
-                if config.inputs.is_empty() {
-                    return Err(invalid("a mixer requires at least one input port"));
-                }
-
-                let mut unique_ports = BTreeSet::new();
-                let mut inputs = Vec::with_capacity(config.inputs.len());
-                for port_id in &config.inputs {
-                    validate_identifier("mixer input port", port_id.as_str())?;
-                    if !unique_ports.insert(port_id) {
-                        return Err(invalid(format!("duplicate mixer input port: {port_id}")));
-                    }
-                    inputs.push(CompiledPort::new(
-                        port_id.clone(),
-                        PortDirection::Input,
-                        config.channels,
-                    ));
-                }
-
+            NodeConfig::Recorder { channels } => {
+                validate_channels(
+                    *channels,
+                    context
+                        .limits
+                        .max_channels_per_port
+                        .min(mixrelay_audio_io::formats::MAX_RECORDING_CHANNELS),
+                )?;
                 Ok(ResolvedNode {
-                    inputs,
-                    outputs: vec![audio_port(PortDirection::Output, config.channels)],
+                    inputs: vec![audio_port(PortDirection::Input, *channels)],
+                    outputs: vec![],
                 })
             }
+            NodeConfig::Compressor(config) => {
+                validate_channels(config.channels, context.limits.max_channels_per_port)?;
+                validate_compressor(config)?;
+                Ok(audio_processor(config.channels))
+            }
+            NodeConfig::Limiter(config) => {
+                validate_channels(config.channels, context.limits.max_channels_per_port)?;
+                validate_limiter(config)?;
+                Ok(audio_processor(config.channels))
+            }
+            NodeConfig::Effect(config) => resolve_effect(config, context),
+            NodeConfig::Mixer(config) => resolve_mixer(config, context),
             NodeConfig::Gain(config) => {
                 validate_channels(config.channels, context.limits.max_channels_per_port)?;
                 if !config.gain_db.is_finite() {
@@ -134,20 +137,212 @@ impl NodeResolver for BuiltInNodeResolver {
                     outputs: vec![audio_port(PortDirection::Output, config.channels)],
                 })
             }
-            NodeConfig::VirtualDevice(config) => {
-                validate_identifier("virtual device UID", &config.persistent_uid)?;
-                validate_identifier("virtual device name", &config.name)?;
-                validate_channels(config.channels, context.limits.max_channels_per_port)?;
-                Ok(ResolvedNode {
-                    inputs: vec![audio_port(PortDirection::Input, config.channels)],
-                    outputs: vec![],
-                })
+            NodeConfig::VirtualEndpoint(config) => {
+                validate_virtual_endpoint_gain(config.gain_db)?;
+                resolve_virtual_endpoint(config, context)
+            }
+            NodeConfig::VirtualEndpointTransport(spec) => resolve_virtual_transport(spec, context),
+            NodeConfig::DeviceBus { channels } => {
+                validate_channels(*channels, context.limits.max_channels_per_port)?;
+                Ok(audio_processor(*channels))
             }
             NodeConfig::Provider(config) => Err(NodeResolutionError::CapabilityUnavailable {
                 reason: format!("node provider is unavailable: {}", config.type_id),
             }),
         }
     }
+}
+
+fn resolve_effect(
+    config: &crate::EffectConfig,
+    context: &CompileContext,
+) -> Result<ResolvedNode, NodeResolutionError> {
+    validate_channels(config.channels, context.limits.max_channels_per_port)?;
+    validate_channels(
+        config.output_channels(),
+        context.limits.max_channels_per_port,
+    )?;
+    config.validate().map_err(invalid)?;
+    let mut resolved = ResolvedNode {
+        inputs: vec![audio_port(PortDirection::Input, config.channels)],
+        outputs: vec![audio_port(PortDirection::Output, config.output_channels())],
+    };
+    if matches!(config.effect, crate::Effect::Ducking(_)) {
+        resolved.inputs.push(CompiledPort::new(
+            PortId::from(crate::SIDECHAIN_PORT_ID),
+            PortDirection::Input,
+            1,
+        ));
+    }
+    Ok(resolved)
+}
+
+/// Validates a virtual-device reference's gain in decibels before DSP lowering.
+/// Both direct endpoint nodes and composed references must use this contract;
+/// lowering to a generic gain processor must not bypass the endpoint's limits.
+///
+/// # Errors
+/// Returns an invalid-configuration error for non-finite values or values outside
+/// the inclusive -60 to +12 dB range.
+pub fn validate_virtual_endpoint_gain(gain_db: f32) -> Result<(), NodeResolutionError> {
+    validate_parameter("gainDb", gain_db, -60.0, 12.0)
+}
+
+fn audio_processor(channels: u16) -> ResolvedNode {
+    ResolvedNode {
+        inputs: vec![audio_port(PortDirection::Input, channels)],
+        outputs: vec![audio_port(PortDirection::Output, channels)],
+    }
+}
+
+fn validate_compressor(config: &crate::model::CompressorConfig) -> Result<(), NodeResolutionError> {
+    if config.version != 1 {
+        return Err(invalid("unsupported compressor parameter version"));
+    }
+    validate_parameter("thresholdDb", config.threshold_db, -60.0, 0.0)?;
+    validate_parameter("ratio", config.ratio, 1.0, 20.0)?;
+    validate_parameter("attackMs", config.attack_ms, 0.1, 200.0)?;
+    validate_parameter("releaseMs", config.release_ms, 5.0, 2_000.0)?;
+    validate_parameter("makeupGainDb", config.makeup_gain_db, 0.0, 24.0)
+}
+
+fn validate_limiter(config: &crate::model::LimiterConfig) -> Result<(), NodeResolutionError> {
+    if config.version != 1 {
+        return Err(invalid("unsupported limiter parameter version"));
+    }
+    validate_parameter("ceilingDb", config.ceiling_db, -24.0, 0.0)?;
+    validate_parameter("releaseMs", config.release_ms, 5.0, 2_000.0)
+}
+
+fn validate_parameter(
+    name: &str,
+    value: f32,
+    minimum: f32,
+    maximum: f32,
+) -> Result<(), NodeResolutionError> {
+    if !value.is_finite() || !(minimum..=maximum).contains(&value) {
+        return Err(invalid(format!(
+            "{name} must be finite and between {minimum} and {maximum}"
+        )));
+    }
+    Ok(())
+}
+
+fn resolve_application_capture(
+    config: &ApplicationCaptureRequest,
+    context: &CompileContext,
+) -> Result<ResolvedNode, NodeResolutionError> {
+    config
+        .validate_contract(context.limits.max_channels_per_port)
+        .map_err(|error| invalid(error.to_string()))?;
+    Ok(ResolvedNode {
+        inputs: vec![],
+        outputs: vec![audio_port(PortDirection::Output, config.stream.channels)],
+    })
+}
+
+fn resolve_mixer(
+    config: &MixerConfig,
+    context: &CompileContext,
+) -> Result<ResolvedNode, NodeResolutionError> {
+    validate_channels(config.channels, context.limits.max_channels_per_port)?;
+    if config.inputs.is_empty() {
+        return Err(invalid("a mixer requires at least one input port"));
+    }
+
+    let mut unique_ports = BTreeSet::new();
+    let mut inputs = Vec::with_capacity(config.inputs.len());
+    for port_id in &config.inputs {
+        validate_identifier("mixer input port", port_id.as_str())?;
+        if !unique_ports.insert(port_id) {
+            return Err(invalid(format!("duplicate mixer input port: {port_id}")));
+        }
+        inputs.push(CompiledPort::new(
+            port_id.clone(),
+            PortDirection::Input,
+            config.channels,
+        ));
+    }
+
+    Ok(ResolvedNode {
+        inputs,
+        outputs: vec![audio_port(PortDirection::Output, config.channels)],
+    })
+}
+
+fn resolve_virtual_endpoint(
+    config: &VirtualEndpointConfig,
+    context: &CompileContext,
+) -> Result<ResolvedNode, NodeResolutionError> {
+    let maximum = context.limits.max_channels_per_port;
+    config
+        .validate_contract(maximum, maximum)
+        .map_err(|error| invalid(error.to_string()))?;
+    let reference = config.reference;
+    if !reference.render && !reference.capture {
+        return Err(invalid(
+            "virtual endpoint reference must select a source or sink",
+        ));
+    }
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    if reference.capture {
+        let stream = config
+            .spec
+            .render
+            .ok_or_else(|| invalid("virtual endpoint sink requires a native render stream"))?;
+        inputs.push(CompiledPort::new(
+            PortId::from(TO_OS_PORT_ID),
+            PortDirection::Input,
+            stream.channels,
+        ));
+    }
+    if reference.render {
+        let channels = config
+            .spec
+            .capture
+            .ok_or_else(|| invalid("virtual endpoint source requires a native capture stream"))?
+            .channels;
+        outputs.push(CompiledPort::new(
+            PortId::from(FROM_OS_PORT_ID),
+            PortDirection::Output,
+            channels,
+        ));
+    }
+    Ok(ResolvedNode { inputs, outputs })
+}
+
+fn resolve_virtual_transport(
+    spec: &mixrelay_audio_io::VirtualEndpointSpec,
+    context: &CompileContext,
+) -> Result<ResolvedNode, NodeResolutionError> {
+    let maximum = context.limits.max_channels_per_port;
+    spec.validate_contract(maximum, maximum)
+        .map_err(|error| invalid(error.to_string()))?;
+    Ok(ResolvedNode {
+        inputs: spec
+            .render
+            .iter()
+            .map(|stream| {
+                CompiledPort::new(
+                    PortId::from(TO_OS_PORT_ID),
+                    PortDirection::Input,
+                    stream.channels,
+                )
+            })
+            .collect(),
+        outputs: spec
+            .capture
+            .iter()
+            .map(|stream| {
+                CompiledPort::new(
+                    PortId::from(FROM_OS_PORT_ID),
+                    PortDirection::Output,
+                    stream.channels,
+                )
+            })
+            .collect(),
+    })
 }
 
 fn audio_port(direction: PortDirection, channels: u16) -> CompiledPort {
@@ -168,25 +363,6 @@ fn validate_identifier(name: &str, value: &str) -> Result<(), NodeResolutionErro
         return Err(invalid(format!("{name} cannot be empty")));
     }
     Ok(())
-}
-
-fn validate_application_selector(
-    selector: &ApplicationSelector,
-) -> Result<(), NodeResolutionError> {
-    match selector {
-        ApplicationSelector::BundleId { bundle_id, .. } => {
-            validate_identifier("application bundle ID", bundle_id)
-        }
-        ApplicationSelector::ExecutablePath { path } => {
-            validate_identifier("application executable path", path)
-        }
-        ApplicationSelector::AllExcept { bundle_ids } => {
-            for bundle_id in bundle_ids {
-                validate_identifier("excluded application bundle ID", bundle_id)?;
-            }
-            Ok(())
-        }
-    }
 }
 
 fn validate_device_selector(selector: &DeviceSelector) -> Result<(), NodeResolutionError> {
@@ -247,12 +423,21 @@ impl GraphCompiler {
             .filter_map(|node_id| nodes.remove(&node_id))
             .collect();
 
-        Ok(ExecutionPlan::new(
+        let plan = ExecutionPlan::new(
             document.revision,
             context.format,
             compiled_nodes,
             compiled_edges,
-        ))
+        );
+        let actual_plan_bytes = plan.owned_memory_bytes();
+        if actual_plan_bytes > context.limits.max_plan_bytes {
+            return Err(CompileError::new(vec![GraphIssue::LimitExceeded {
+                resource: GraphResource::PlanBytes,
+                limit: context.limits.max_plan_bytes,
+                actual: actual_plan_bytes,
+            }]));
+        }
+        Ok(plan)
     }
 
     fn resolve_nodes(
@@ -283,13 +468,18 @@ impl GraphCompiler {
         nodes: &mut BTreeMap<NodeId, CompiledNode>,
         issues: &mut Vec<GraphIssue>,
     ) {
-        match self.resolver.resolve(node, context) {
+        match self
+            .resolver
+            .resolve(node, context)
+            .or_else(|error| resolve_dormant_provider(node, context, error))
+        {
             Ok(resolved) => {
                 nodes.insert(
                     node.id.clone(),
                     CompiledNode::new(
                         node.id.clone(),
-                        node.config.kind(),
+                        node.config.clone(),
+                        node.control,
                         resolved.inputs,
                         resolved.outputs,
                     ),
@@ -303,6 +493,49 @@ impl GraphCompiler {
     }
 }
 
+fn resolve_dormant_provider(
+    node: &NodeSpec,
+    context: &CompileContext,
+    error: NodeResolutionError,
+) -> Result<ResolvedNode, NodeResolutionError> {
+    if node.control.enabled || !matches!(error, NodeResolutionError::CapabilityUnavailable { .. }) {
+        return Err(error);
+    }
+    let NodeConfig::Provider(config) = &node.config else {
+        return Err(error);
+    };
+    let Some(ports) = &config.ports else {
+        // No native provider and no saved geometry: keep the dormant identity, but
+        // never invent connection ports or instantiate an unavailable processor.
+        return Ok(ResolvedNode {
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        });
+    };
+    ports
+        .validate()
+        .map_err(|error| invalid(error.to_string()))?;
+    let mut inputs = Vec::with_capacity(ports.inputs.len());
+    for bus in &ports.inputs {
+        validate_channels(bus.channels, context.limits.max_channels_per_port)?;
+        inputs.push(CompiledPort::new(
+            bus.id.clone(),
+            PortDirection::Input,
+            bus.channels,
+        ));
+    }
+    let mut outputs = Vec::with_capacity(ports.outputs.len());
+    for bus in &ports.outputs {
+        validate_channels(bus.channels, context.limits.max_channels_per_port)?;
+        outputs.push(CompiledPort::new(
+            bus.id.clone(),
+            PortDirection::Output,
+            bus.channels,
+        ));
+    }
+    Ok(ResolvedNode { inputs, outputs })
+}
+
 fn validate_document(document: &GraphDocument, context: &CompileContext) -> Vec<GraphIssue> {
     let mut issues = Vec::new();
     if document.schema_version != CURRENT_GRAPH_SCHEMA_VERSION {
@@ -311,7 +544,11 @@ fn validate_document(document: &GraphDocument, context: &CompileContext) -> Vec<
             found: document.schema_version,
         });
     }
-    if context.format.sample_rate == 0 || context.format.block_frames == 0 {
+    if context.format.sample_rate == 0
+        || context.format.sample_rate > context.limits.max_sample_rate
+        || context.format.block_frames == 0
+        || context.format.block_frames > context.limits.max_block_frames
+    {
         issues.push(GraphIssue::InvalidRenderFormat {
             sample_rate: context.format.sample_rate,
             block_frames: context.format.block_frames,
@@ -329,6 +566,21 @@ fn validate_document(document: &GraphDocument, context: &CompileContext) -> Vec<
         context.limits.max_edges,
         document.edges.len(),
     );
+    let mut endpoint_nodes = BTreeMap::<&str, &NodeId>::new();
+    for node in &document.nodes {
+        let NodeConfig::VirtualEndpointTransport(endpoint) = &node.config else {
+            continue;
+        };
+        if let Some(first_node_id) = endpoint_nodes.get(endpoint.id.as_str()) {
+            issues.push(GraphIssue::DuplicateVirtualEndpointId {
+                endpoint_id: endpoint.id.as_str().to_owned(),
+                first_node_id: (*first_node_id).clone(),
+                duplicate_node_id: node.id.clone(),
+            });
+        } else {
+            endpoint_nodes.insert(endpoint.id.as_str(), &node.id);
+        }
+    }
     issues
 }
 
@@ -362,7 +614,6 @@ fn compile_edges(
 struct EdgeCompilationState<'a> {
     nodes: &'a BTreeMap<NodeId, CompiledNode>,
     edge_ids: BTreeSet<EdgeId>,
-    connected_inputs: BTreeSet<AudioEndpoint>,
     edges: Vec<CompiledEdge>,
     dependencies: BTreeMap<NodeId, BTreeSet<NodeId>>,
 }
@@ -372,7 +623,6 @@ impl<'a> EdgeCompilationState<'a> {
         Self {
             nodes,
             edge_ids: BTreeSet::new(),
-            connected_inputs: BTreeSet::new(),
             edges: Vec::new(),
             dependencies: nodes
                 .keys()
@@ -401,11 +651,35 @@ impl<'a> EdgeCompilationState<'a> {
             PortDirection::Input,
             issues,
         );
-        let routes = self.resolve_routes(edge, source, destination, issues);
+        self.validate_self_connection(edge, issues);
+        let routes = Self::resolve_routes(edge, source, destination, issues);
         if issues.len() == issue_count
             && let Some(routes) = routes
         {
             self.push(edge, routes);
+        }
+    }
+
+    fn validate_self_connection(
+        &self,
+        edge: &crate::model::EdgeSpec,
+        issues: &mut Vec<GraphIssue>,
+    ) {
+        if edge.source.node_id != edge.destination.node_id {
+            return;
+        }
+        let is_native_pass_through = self.nodes.get(&edge.source.node_id).is_some_and(|node| {
+            matches!(
+                node.config(),
+                NodeConfig::VirtualEndpoint(_) | NodeConfig::VirtualEndpointTransport(_)
+            ) && edge.source.port_id.as_str() == FROM_OS_PORT_ID
+                && edge.destination.port_id.as_str() == TO_OS_PORT_ID
+        });
+        if !is_native_pass_through {
+            issues.push(GraphIssue::InvalidSelfConnection {
+                edge_id: edge.id.clone(),
+                node_id: edge.source.node_id.clone(),
+            });
         }
     }
 
@@ -424,7 +698,6 @@ impl<'a> EdgeCompilationState<'a> {
     }
 
     fn resolve_routes(
-        &mut self,
         edge: &crate::model::EdgeSpec,
         source: Option<&CompiledPort>,
         destination: Option<&CompiledPort>,
@@ -433,12 +706,6 @@ impl<'a> EdgeCompilationState<'a> {
         let (Some(source), Some(destination)) = (source, destination) else {
             return None;
         };
-        if !self.connected_inputs.insert(edge.destination.clone()) {
-            issues.push(GraphIssue::InputAlreadyConnected {
-                edge_id: edge.id.clone(),
-                endpoint: edge.destination.clone(),
-            });
-        }
         compile_channel_mapping(
             &edge.id,
             source.channels(),
@@ -449,16 +716,45 @@ impl<'a> EdgeCompilationState<'a> {
     }
 
     fn push(&mut self, edge: &crate::model::EdgeSpec, routes: Vec<ChannelRoute>) {
-        self.dependencies
-            .entry(edge.source.node_id.clone())
-            .or_default()
-            .insert(edge.destination.node_id.clone());
+        if edge.source.node_id != edge.destination.node_id && self.edge_orders_processing(edge) {
+            self.dependencies
+                .entry(edge.source.node_id.clone())
+                .or_default()
+                .insert(edge.destination.node_id.clone());
+        }
         self.edges.push(CompiledEdge::new(
             edge.id.clone(),
             edge.source.clone(),
             edge.destination.clone(),
             routes,
         ));
+    }
+
+    fn edge_orders_processing(&self, edge: &crate::model::EdgeSpec) -> bool {
+        let source_is_external = self.nodes.get(&edge.source.node_id).is_some_and(|node| {
+            matches!(
+                node.config(),
+                NodeConfig::ApplicationCapture(_)
+                    | NodeConfig::AudioDeviceInput(_)
+                    | NodeConfig::VirtualEndpointTransport(_)
+                    | NodeConfig::VirtualEndpoint(_)
+                    | NodeConfig::DeviceBus { .. }
+            )
+        });
+        let destination_is_external =
+            self.nodes
+                .get(&edge.destination.node_id)
+                .is_some_and(|node| {
+                    matches!(
+                        node.config(),
+                        NodeConfig::AudioDeviceOutput(_)
+                            | NodeConfig::Recorder { .. }
+                            | NodeConfig::VirtualEndpointTransport(_)
+                            | NodeConfig::VirtualEndpoint(_)
+                            | NodeConfig::DeviceBus { .. }
+                    )
+                });
+        !source_is_external && !destination_is_external
     }
 }
 
@@ -563,12 +859,8 @@ fn topological_order(
 ) -> Result<Vec<NodeId>, Vec<NodeId>> {
     let mut indegree: BTreeMap<NodeId, usize> =
         nodes.keys().cloned().map(|node_id| (node_id, 0)).collect();
-    for destinations in dependencies.values() {
-        for destination in destinations {
-            *indegree
-                .get_mut(destination)
-                .expect("dependencies only reference resolved nodes") += 1;
-        }
+    for destination in dependencies.values().flatten() {
+        *indegree.entry(destination.clone()).or_default() += 1;
     }
 
     let mut ready: BTreeSet<NodeId> = indegree
@@ -580,10 +872,11 @@ fn topological_order(
 
     while let Some(node_id) = ready.pop_first() {
         ordered.push(node_id.clone());
-        for destination in &dependencies[&node_id] {
-            let count = indegree
-                .get_mut(destination)
-                .expect("dependencies only reference resolved nodes");
+        for destination in dependencies.get(&node_id).into_iter().flatten() {
+            // The counting pass above inserted every dependency destination.
+            let Some(count) = indegree.get_mut(destination) else {
+                continue;
+            };
             *count -= 1;
             if *count == 0 {
                 ready.insert(destination.clone());
@@ -662,6 +955,15 @@ pub enum GraphIssue {
         source_channels: u16,
         destination_channels: u16,
     },
+    InvalidSelfConnection {
+        edge_id: EdgeId,
+        node_id: NodeId,
+    },
+    DuplicateVirtualEndpointId {
+        endpoint_id: String,
+        first_node_id: NodeId,
+        duplicate_node_id: NodeId,
+    },
     CycleDetected {
         node_ids: Vec<NodeId>,
     },
@@ -686,6 +988,8 @@ impl GraphIssue {
             Self::ChannelCountMismatch { .. } => GraphIssueCode::ChannelCountMismatch,
             Self::EmptyChannelMapping { .. } => GraphIssueCode::EmptyChannelMapping,
             Self::InvalidChannelRoute { .. } => GraphIssueCode::InvalidChannelRoute,
+            Self::InvalidSelfConnection { .. } => GraphIssueCode::InvalidSelfConnection,
+            Self::DuplicateVirtualEndpointId { .. } => GraphIssueCode::DuplicateVirtualEndpointId,
             Self::CycleDetected { .. } => GraphIssueCode::CycleDetected,
         }
     }
@@ -709,6 +1013,8 @@ pub enum GraphIssueCode {
     ChannelCountMismatch,
     EmptyChannelMapping,
     InvalidChannelRoute,
+    InvalidSelfConnection,
+    DuplicateVirtualEndpointId,
     CycleDetected,
 }
 
@@ -717,6 +1023,7 @@ pub enum GraphIssueCode {
 pub enum GraphResource {
     Nodes,
     Edges,
+    PlanBytes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

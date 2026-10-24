@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Built-in processing is available without an instance limit in the free edition.">
+    <title>Built-in effects and presets — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/effects.html">
+    <link rel="alternate" hreflang="ko" href="../ko/effects.html">
+    <link rel="alternate" hreflang="ja" href="../ja/effects.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/effects.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/effects.html">
+    <link rel="alternate" hreflang="de" href="../de/effects.html">
+    <link rel="alternate" hreflang="fr" href="../fr/effects.html">
+    <link rel="alternate" hreflang="it" href="../it/effects.html">
+    <link rel="alternate" hreflang="es" href="../es/effects.html">
+    <link rel="alternate" hreflang="pt" href="../pt/effects.html">
+    <link rel="alternate" hreflang="ru" href="../ru/effects.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Product home"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Language"><a href="../en/effects.html" lang="en" hreflang="en" aria-current="page">English</a> <a href="../ko/effects.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/effects.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/effects.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/effects.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/effects.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/effects.html" lang="fr" hreflang="fr">Français</a> <a href="../it/effects.html" lang="it" hreflang="it">Italiano</a> <a href="../es/effects.html" lang="es" hreflang="es">Español</a> <a href="../pt/effects.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/effects.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Prerelease draft</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Manual chapters">
+        <a class="back-link" href="../../index.html">← Product home</a>
+        <a class="manual-mobile-index" href="index.html">All chapters</a>
+        <nav class="guide-nav" aria-label="Manual chapters"><a href="index.html">Manual overview</a>
+<a href="installation.html">System requirements and installation</a>
+<a href="first-launch.html">First launch and permissions</a>
+<a href="workspace.html">Routing workspace</a>
+<a href="devices.html">Devices and virtual endpoints</a>
+<a href="app-capture.html">App audio capture</a>
+<a href="recording.html">Recording</a>
+<a href="effects.html" aria-current="page">Built-in effects and presets</a>
+<a href="plugins.html">External plug-ins</a>
+<a href="stream-deck.html">Stream Deck plug-in</a>
+<a href="licensing.html">Free edition and licensing</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Uninstalling</a>
+<a href="troubleshooting.html">Troubleshooting and diagnostics</a>
+<a href="support.html">Support contact</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Built-in effects and presets</h1><p>Built-in processing is available without an instance limit in the free edition.</p><p class="guide-draft-note">Prerelease draft. Public downloads and purchases are not available yet. These instructions describe the current source build; installed behaviour still needs verification in the environments noted below.</p></header>
+        <nav class="manual-toc" aria-label="On this page"><p class="sidebar-label">On this page</p><ul><li><a href="#processors">Add and adjust effects</a></li><li><a href="#presets">Presets and effect chains</a></li></ul></nav>
+        <section class="guide-section" id="processors" aria-labelledby="processors-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="processors-title">Add and adjust effects</h2>
+<p>Choose <code>Add node → Processor</code>, select an effect, then connect its input and output channels. Open <code>Options</code> for parameters. Available effects are Compressor, Limiter, Equalizer, High-pass, Low-pass, Gate, Expander, Channel utility, Mono pan, Stereo balance, Delay, Ducking, Reverb and Chorus.</p><ul><li>Compressor and Limiter control dynamics and peaks. Their gain reduction meter uses engine measurements; a dash means no measurement is available.</li><li>Equalizer has three peak bands. Drag a point to change frequency and gain, or use the Frequency, Gain and Q fields in Options. High-pass and Low-pass remove low or high frequencies.</li><li>Gate and Expander reduce signals below their threshold. Channel utility offers mono sum, channel duplication, left/right swap and polarity inversion. Mono sum averages L and R.</li><li>Mono pan places a mono signal in stereo; Stereo balance adjusts left/right balance. Ducking uses a separate mono <code>Control input</code> to reduce the main signal. Connect the control source separately; it is not mixed into the output.</li><li>Delay adds timed echoes. Reverb and Chorus add space or modulation. Their channel layouts differ; connect the ports actually offered.</li></ul><p><code>Bypass</code> passes dry audio. Turning a node off blocks its signal. Built-in noise suppression and LUFS measurement are not available.</p>
+</div></section>
+<section class="guide-section" id="presets" aria-labelledby="presets-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="presets-title">Presets and effect chains</h2>
+<p>Use <code>Preset</code> in an effect’s Options. Reverb includes Small room, Studio, Hall, Karaoke, Tunnel and Fishbowl. Delay includes Short echo, Slapback, Vocal echo, Karaoke, Long echo and Ping-pong. Editing a preset’s values changes it to <code>Custom</code>.</p><p>For several connected effects, choose <code>Add node → Processor → Effect chains</code>, then Karaoke, Tunnel, Fishbowl, Radio or Double vocal. A chain adds its own nodes and connections without rewiring existing cables. Connect your source and output to the chain. One Undo removes the insertion. Saved workspaces retain actual parameters and connections. No external impulse-response or sample installation is required.</p><!-- TODO screenshot: Equalizer Options, Reverb preset menu and an inserted effect chain. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="Manual chapters"><a rel="prev" href="recording.html">← Previous: Recording</a><a rel="next" href="plugins.html">Next: External plug-ins →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Prerelease draft · MixRelay 0.1.0</p><a href="../../index.html">Product home</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

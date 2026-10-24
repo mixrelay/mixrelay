@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="アンインストーラーまたはLinuxのパッケージマネージャーで製品一式を削除します。">
+    <title>アンインストール — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/uninstall.html">
+    <link rel="alternate" hreflang="ko" href="../ko/uninstall.html">
+    <link rel="alternate" hreflang="ja" href="../ja/uninstall.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/uninstall.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/uninstall.html">
+    <link rel="alternate" hreflang="de" href="../de/uninstall.html">
+    <link rel="alternate" hreflang="fr" href="../fr/uninstall.html">
+    <link rel="alternate" hreflang="it" href="../it/uninstall.html">
+    <link rel="alternate" hreflang="es" href="../es/uninstall.html">
+    <link rel="alternate" hreflang="pt" href="../pt/uninstall.html">
+    <link rel="alternate" hreflang="ru" href="../ru/uninstall.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">本文へスキップ</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="製品ホーム"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="言語"><a href="../en/uninstall.html" lang="en" hreflang="en">English</a> <a href="../ko/uninstall.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/uninstall.html" lang="ja" hreflang="ja" aria-current="page">日本語</a> <a href="../zh-Hans/uninstall.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/uninstall.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/uninstall.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/uninstall.html" lang="fr" hreflang="fr">Français</a> <a href="../it/uninstall.html" lang="it" hreflang="it">Italiano</a> <a href="../es/uninstall.html" lang="es" hreflang="es">Español</a> <a href="../pt/uninstall.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/uninstall.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 公開前の草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="マニュアルの章">
+        <a class="back-link" href="../../index.html">← 製品ホーム</a>
+        <a class="manual-mobile-index" href="index.html">すべての章</a>
+        <nav class="guide-nav" aria-label="マニュアルの章"><a href="index.html">マニュアル概要</a>
+<a href="installation.html">システム要件とインストール</a>
+<a href="first-launch.html">初回起動とアクセス許可</a>
+<a href="workspace.html">ルーティングワークスペース</a>
+<a href="devices.html">デバイスと仮想エンドポイント</a>
+<a href="app-capture.html">アプリの音声キャプチャ</a>
+<a href="recording.html">録音</a>
+<a href="effects.html">内蔵エフェクトとプリセット</a>
+<a href="plugins.html">外部プラグイン</a>
+<a href="stream-deck.html">Stream Deckプラグイン</a>
+<a href="licensing.html">無料版とライセンス</a>
+<a href="updates.html">アップデート</a>
+<a href="uninstall.html" aria-current="page">アンインストール</a>
+<a href="troubleshooting.html">トラブルシューティングと診断</a>
+<a href="support.html">サポート窓口</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / マニュアル</p><h1>アンインストール</h1><p>アンインストーラーまたはLinuxのパッケージマネージャーで製品一式を削除します。</p><p class="guide-draft-note">公開前の草稿です。一般向けのダウンロードと購入はまだ利用できません。本書は現在のソースからビルドした製品を説明しています。以下に記載する環境では、インストール後の動作確認が引き続き必要です。</p></header>
+        <nav class="manual-toc" aria-label="このページの内容"><p class="sidebar-label">このページの内容</p><ul><li><a href="#prepare">削除する前に</a></li><li><a href="#macos">macOSで削除する</a></li><li><a href="#linux">Linuxで削除する</a></li></ul></nav>
+        <section class="guide-section" id="prepare" aria-labelledby="prepare-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="prepare-title">削除する前に</h2>
+<p>必要な作業を<code>.mix</code>ファイルに保存してください。録音を停止し、通話アプリと録音アプリを終了します。このコンピューターの有料認証を解除する場合は、削除する前にオンラインで<a href="licensing.html#deactivate">このデバイスの認証を解除</a>を実行してください。アンインストールだけでは、サーバー側で認証が解除されたことは確認できません。</p>
+</div></section>
+<section class="guide-section" id="macos" aria-labelledby="macos-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="macos-title">macOSで削除する</h2>
+<ol><li><code>/Applications/MixRelay/Uninstall MixRelay.app</code>を開きます。</li><li>仮想デバイスの設定を保持するには、<code>保存済みのMixRelay設定を削除</code>をオフのままにします。</li><li><code>MixRelayを削除</code>を選び、macOSの管理者認証を承認します。現在の削除ダイアログにはこのようにDriverの名前が使われていますが、製品一式が削除されます。</li><li>完了が確認できるまで待ちます。削除によりデバイスとループバックが停止し、システムの音声が一時的に途切れます。</li></ol><p>任意の削除オプションが削除するのは、保存済みのデバイス設定だけです。macOSでは、グラフ、録音、書き出した作業、有料認証は残ります。エディターをゴミ箱に移動するだけでは、インストール済みの音声コンポーネントは削除されません。削除に失敗した場合は、メッセージを読み、現在のインストール状態を確認してから再試行してください。一部のコンポーネントはすでに削除されている場合があります。認証をキャンセルすると製品は変更されません。</p><!-- TODO screenshot: actual Uninstall MixRelay dialog including current Driver labels, checkbox, authorization and completion. -->
+</div></section>
+<section class="guide-section" id="linux" aria-labelledby="linux-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="linux-title">Linuxで削除する</h2>
+<p>エディターを終了し、バックグラウンドのステータスメニューで<code>終了</code>を選びます。通常のユーザーとして、インストール済みの<code>MixRelayをアンインストール</code>アプリを開きます。保存済みのグラフと設定を保持するには、それらを削除するオプションをオフのままにします。削除アプリは、セッションの通常のpolkit認証エージェントとパッケージマネージャーを使用します。削除に成功すると、ローカルの有料ライセンスのサインイン情報は消去されます。録音と書き出したプロジェクトは残ります。</p><p>代わりに<code>mix-relay</code>パッケージを直接削除することもできます。お使いのディストリビューションのコマンドだけを選んでください。パッケージマネージャーで直接削除すると、ユーザーごとの設定とローカルの認証情報は保持されます。</p><pre><code>sudo apt remove mix-relay
+sudo dnf remove mix-relay
+sudo pacman -R mix-relay</code></pre><p>認証画面を表示できない場合は、デスクトップセッションにpolkit認証エージェントがあるか確認します。アプリが削除された後に後処理が失敗した場合は、表示された復旧メッセージに従ってください。関係のない音声サービスやユーザーフォルダーは削除しないでください。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="マニュアルの章"><a rel="prev" href="updates.html">← 前へ: アップデート</a><a rel="next" href="troubleshooting.html">次へ: トラブルシューティングと診断 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

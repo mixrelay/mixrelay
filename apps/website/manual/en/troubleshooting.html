@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Check the current message and signal path before changing or removing saved work.">
+    <title>Troubleshooting and diagnostics — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/troubleshooting.html">
+    <link rel="alternate" hreflang="ko" href="../ko/troubleshooting.html">
+    <link rel="alternate" hreflang="ja" href="../ja/troubleshooting.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/troubleshooting.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/troubleshooting.html">
+    <link rel="alternate" hreflang="de" href="../de/troubleshooting.html">
+    <link rel="alternate" hreflang="fr" href="../fr/troubleshooting.html">
+    <link rel="alternate" hreflang="it" href="../it/troubleshooting.html">
+    <link rel="alternate" hreflang="es" href="../es/troubleshooting.html">
+    <link rel="alternate" hreflang="pt" href="../pt/troubleshooting.html">
+    <link rel="alternate" hreflang="ru" href="../ru/troubleshooting.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Product home"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Language"><a href="../en/troubleshooting.html" lang="en" hreflang="en" aria-current="page">English</a> <a href="../ko/troubleshooting.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/troubleshooting.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/troubleshooting.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/troubleshooting.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/troubleshooting.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/troubleshooting.html" lang="fr" hreflang="fr">Français</a> <a href="../it/troubleshooting.html" lang="it" hreflang="it">Italiano</a> <a href="../es/troubleshooting.html" lang="es" hreflang="es">Español</a> <a href="../pt/troubleshooting.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/troubleshooting.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Prerelease draft</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Manual chapters">
+        <a class="back-link" href="../../index.html">← Product home</a>
+        <a class="manual-mobile-index" href="index.html">All chapters</a>
+        <nav class="guide-nav" aria-label="Manual chapters"><a href="index.html">Manual overview</a>
+<a href="installation.html">System requirements and installation</a>
+<a href="first-launch.html">First launch and permissions</a>
+<a href="workspace.html">Routing workspace</a>
+<a href="devices.html">Devices and virtual endpoints</a>
+<a href="app-capture.html">App audio capture</a>
+<a href="recording.html">Recording</a>
+<a href="effects.html">Built-in effects and presets</a>
+<a href="plugins.html">External plug-ins</a>
+<a href="stream-deck.html">Stream Deck plug-in</a>
+<a href="licensing.html">Free edition and licensing</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Uninstalling</a>
+<a href="troubleshooting.html" aria-current="page">Troubleshooting and diagnostics</a>
+<a href="support.html">Support contact</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Troubleshooting and diagnostics</h1><p>Check the current message and signal path before changing or removing saved work.</p><p class="guide-draft-note">Prerelease draft. Public downloads and purchases are not available yet. These instructions describe the current source build; installed behaviour still needs verification in the environments noted below.</p></header>
+        <nav class="manual-toc" aria-label="On this page"><p class="sidebar-label">On this page</p><ul><li><a href="#sound">No sound, doubled audio or dropouts</a></li><li><a href="#changes">Changes not applied or saved</a></li><li><a href="#diagnostics">Save a diagnostic report</a></li></ul></nav>
+        <section class="guide-section" id="sound" aria-labelledby="sound-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="sound-title">No sound, doubled audio or dropouts</h2>
+<ol><li>Check global <code>Pause</code>, node power, Mute and the connected channel numbers. A selected graph is not an on/off indicator.</li><li>Confirm that the source is producing audio. Check <a href="first-launch.html#permissions">capture or microphone permissions</a> and <a href="app-capture.html#unavailable">application reselection</a> if needed.</li><li>Check the physical output and its hardware volume. For OBS or a DAW, choose MixRelay IO as that app’s input and connect <code>Graph → device</code> in MixRelay.</li><li>For doubled sound, check direct playback and monitoring routes. For dropouts, try a larger <code>Processing buffer</code> if the adapter supports changing it.</li></ol><p>If a device is unavailable, reconnect it and reselect it where necessary. If a saved format was rejected or device rollback failed, reapply a supported format as the message directs. Engine connection and audio processing are separate: a reachable engine can still report stopped or failed audio.</p><p>If MixRelay pauses after repeated engine failures, review recent changes before choosing <code>Resume</code>. Docker-backed audio is unsupported; use a normal Linux user session with the required PipeWire and WirePlumber versions.</p>
+</div></section>
+<section class="guide-section" id="changes" aria-labelledby="changes-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="changes-title">Changes not applied or saved</h2>
+<p><code>Not applied</code> is not confirmation of active audio. If the app reports that edits were preserved, review the current engine state and use <code>Retry</code> when ready. Do not repeat an uncertain command rapidly. If persistent conflicts offer <code>Overwrite engine with these edits</code> or <code>Discard edits and reload engine</code>, choose whether to apply your draft or discard it.</p><p>A save warning can appear while audio is active. Save a workspace copy if possible before closing. For layout-only recovery, <code>Save current layout</code> retries the current layout; <code>Load saved layout</code> replaces it with the saved layout. For effect errors, use the <a href="plugins.html#failures">plug-in recovery guidance</a>. For licence errors, check connectivity and the device clock; an uncertain activation requires support.</p>
+</div></section>
+<section class="guide-section" id="diagnostics" aria-labelledby="diagnostics-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="diagnostics-title">Save a diagnostic report</h2>
+<ol><li>Open the MixRelay background status menu.</li><li>Choose <code>Save Diagnostic Report…</code>.</li><li>Select where to save <code>dump.json</code>. Review it and attach it to a support email if requested. Saving does not upload it.</li></ol><p>The report contains bounded version, OS, architecture, device-format, runtime-state and numeric-counter information. It excludes audio, memory dumps, raw logs, authentication, user paths, device names and IDs, graphs and app lists. It is at most 256 KiB with up to 64 device summaries. Unavailable observations are marked unavailable. Export does not start stopped audio.</p><p>Only one export runs at a time. Cancelling creates no file. Replacing an existing file requires the OS overwrite confirmation. If saving fails, check the destination and retry. See <a href="support.html">support contact</a> for what else to include.</p><!-- TODO screenshot: status-menu diagnostic export and native save dialog, both languages. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="Manual chapters"><a rel="prev" href="uninstall.html">← Previous: Uninstalling</a><a rel="next" href="support.html">Next: Support contact →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Prerelease draft · MixRelay 0.1.0</p><a href="../../index.html">Product home</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

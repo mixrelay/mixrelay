@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Capturez une application en cours d’exécution et acheminez son audio dans votre graphe.">
+    <title>Capture audio des applications — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/app-capture.html">
+    <link rel="alternate" hreflang="ko" href="../ko/app-capture.html">
+    <link rel="alternate" hreflang="ja" href="../ja/app-capture.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/app-capture.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/app-capture.html">
+    <link rel="alternate" hreflang="de" href="../de/app-capture.html">
+    <link rel="alternate" hreflang="fr" href="../fr/app-capture.html">
+    <link rel="alternate" hreflang="it" href="../it/app-capture.html">
+    <link rel="alternate" hreflang="es" href="../es/app-capture.html">
+    <link rel="alternate" hreflang="pt" href="../pt/app-capture.html">
+    <link rel="alternate" hreflang="ru" href="../ru/app-capture.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Aller au contenu</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Accueil du produit"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Langue"><a href="../en/app-capture.html" lang="en" hreflang="en">English</a> <a href="../ko/app-capture.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/app-capture.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/app-capture.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/app-capture.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/app-capture.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/app-capture.html" lang="fr" hreflang="fr" aria-current="page">Français</a> <a href="../it/app-capture.html" lang="it" hreflang="it">Italiano</a> <a href="../es/app-capture.html" lang="es" hreflang="es">Español</a> <a href="../pt/app-capture.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/app-capture.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Version provisoire avant publication</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Chapitres du manuel">
+        <a class="back-link" href="../../index.html">← Accueil du produit</a>
+        <a class="manual-mobile-index" href="index.html">Tous les chapitres</a>
+        <nav class="guide-nav" aria-label="Chapitres du manuel"><a href="index.html">Vue d’ensemble du manuel</a>
+<a href="installation.html">Configuration requise et installation</a>
+<a href="first-launch.html">Premier lancement et autorisations</a>
+<a href="workspace.html">Espace de routage</a>
+<a href="devices.html">Périphériques et points de terminaison virtuels</a>
+<a href="app-capture.html" aria-current="page">Capture audio des applications</a>
+<a href="recording.html">Enregistrement</a>
+<a href="effects.html">Effets intégrés et préréglages</a>
+<a href="plugins.html">Plug-ins externes</a>
+<a href="stream-deck.html">Plug-in Stream Deck</a>
+<a href="licensing.html">Version gratuite et licences</a>
+<a href="updates.html">Mises à jour</a>
+<a href="uninstall.html">Désinstallation</a>
+<a href="troubleshooting.html">Dépannage et diagnostic</a>
+<a href="support.html">Contacter l’assistance</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUEL</p><h1>Capture audio des applications</h1><p>Capturez une application en cours d’exécution et acheminez son audio dans votre graphe.</p><p class="guide-draft-note">Version provisoire avant publication. Les téléchargements et les achats ne sont pas encore ouverts au public. Ces instructions décrivent la version actuelle compilée à partir du code source. Le comportement après installation reste à vérifier dans les environnements indiqués ci-dessous.</p></header>
+        <nav class="manual-toc" aria-label="Sur cette page"><p class="sidebar-label">Sur cette page</p><ul><li><a href="#capture">Sélectionner une application</a></li><li><a href="#unavailable">Audio absent et lecture de la source</a></li></ul></nav>
+        <section class="guide-section" id="capture" aria-labelledby="capture-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="capture-title">Sélectionner une application</h2>
+<ol><li>Ouvrez l’application source et lancez la lecture pour qu’une source audio soit disponible.</li><li>Dans MixRelay, choisissez <code>Ajouter un nœud → Source</code>, puis sélectionnez l’application sous <code>Applications en cours d’exécution</code>.</li><li>Connectez ses canaux de sortie à un processeur, une sortie ou un enregistreur. Réglez <code>Gain de la source</code> dans les <code>Options</code> si nécessaire.</li></ol><p>La liste des sources contient les applications détectées, pas les onglets ou fenêtres individuels d’un navigateur. Modifier le nom affiché ne change pas l’application capturée. Les nœuds d’entrée physique et de capture d’application individuelle partagent la limite de deux entrées de la version gratuite.</p>
+</div></section>
+<section class="guide-section" id="unavailable" aria-labelledby="unavailable-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="unavailable-title">Audio absent et lecture de la source</h2>
+<p>La capture nécessite 48 kHz et <a href="first-launch.html#permissions">l’autorisation macOS</a> correspondante. Si un nœud est <code>Hors ligne</code>, vérifiez que l’application fonctionne. Si <code>Sélectionner à nouveau l’application</code> apparaît, utilisez la sélection d’application du nœud pour choisir la source voulue. MixRelay ne choisit pas de remplacement lorsque plusieurs sources correspondent.</p><p>La lecture d’origine de l’application et le trajet MixRelay peuvent tous deux contribuer au son entendu. Vérifiez vos trajets d’écoute si le son est doublé. MixRelay ne modifie pas la sortie système par défaut. La suppression de la lecture source, lorsqu’elle est utilisée par le trajet de capture, s’applique uniquement au chemin contrôlé par MixRelay. L’interface actuelle ne propose pas de commande distincte pour activer ou désactiver la lecture de la source.</p><!-- TODO screenshot: running application menu and offline/reselection states, both languages. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="Chapitres du manuel"><a rel="prev" href="devices.html">← Précédent : Périphériques et points de terminaison virtuels</a><a rel="next" href="recording.html">Suivant : Enregistrement →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Version provisoire avant publication · MixRelay 0.1.0</p><a href="../../index.html">Accueil du produit</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

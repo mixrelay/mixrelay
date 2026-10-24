@@ -1,0 +1,71 @@
+MixRelay Driver
+Contrat de licence du logiciel
+Concédant et titulaire des droits d’auteur : Echo Vision Lab
+Version : 2026-10-10
+
+1. Utilisation du Driver
+Les présentes conditions régissent MixRelay Driver et ses composants de gestion des périphériques et de bouclage audio de base sur macOS et Linux. L’application MixRelay et le moteur de graphes relèvent séparément de LICENSE.txt, même lorsqu’ils sont inclus dans le même programme d’installation.
+
+Le contrat d’utilisation du logiciel est conclu lorsque vous acceptez ces conditions après leur présentation, avant l’installation ou l’utilisation. Si vous ne les acceptez pas, n’installez pas et n’utilisez pas les composants propriétaires du Driver de MixRelay. Une personne habilitée peut accepter au nom d’une organisation. L’acceptation ou le refus de ces conditions ne modifie pas les droits issus des licences de tiers.
+
+Echo Vision Lab vous accorde une autorisation non exclusive d’installer et d’exécuter gratuitement les fichiers binaires autorisés du Driver pour des travaux audio personnels ou professionnels, y compris l’enregistrement, la production et la diffusion à des fins commerciales. Vous pouvez conserver les copies de sauvegarde nécessaires à cette utilisation. La propriété du logiciel n’est pas transférée.
+
+2. Driver gratuit et application payante
+Les fonctions gratuites du Driver ne nécessitent ni achat de l’application payante ni authentification d’achat. Le Driver gratuit fournit un périphérique virtuel de base par défaut dont le nombre de canaux, la fréquence d’échantillonnage et le format PCM sont configurables gratuitement. Renommer un périphérique nécessite l’application payante. Les limites d’évaluation de l’application ne restreignent ni les canaux du Driver ni l’enregistrement des paramètres des périphériques.
+
+La création ou la suppression de plusieurs identités de périphériques virtuels (Create/Remove) nécessite l’application payante ; ni l’application gratuite ni le Driver autonome ne proposent ces opérations. Les périphériques virtuels déjà créés avec l’application payante restent disponibles après la fermeture de celle-ci.
+
+Les droits sur la version achetée, les conditions d’activation et d’authentification hors ligne de l’application payante ne limitent pas cette autorisation gratuite du Driver. Réinstaller le Driver ou modifier ses réglages de base ne nécessite pas d’activation payante. La fin, la désactivation ou le remboursement des droits payants ne supprime pas l’autorisation gratuite du Driver ni vos réglages, enregistrements ou projets.
+
+3. Redistribution, intégration et licences de tiers
+La gratuité de l’utilisation ne rend pas le code propriétaire de MixRelay open source et n’accorde aucun accès à son dépôt de code source privé. Ces conditions n’autorisent ni la publication de son propre code source, ni la modification de ses composants propriétaires, ni leur redistribution.
+
+L’utilisation OEM, l’inclusion dans une offre groupée, la revente, la distribution en marque blanche et la fourniture du Driver lui-même comme composant d’un produit ou service tiers nécessitent une autorisation écrite préalable et un contrat payant distinct. L’utilisation professionnelle courante du Driver comme outil audio installé ne constitue pas, à elle seule, une intégration à un produit. L’achat d’une application n’inclut pas de droits d’intégration ou de redistribution du Driver. Pour un contrat distinct, contactez support@rawsector.com.
+
+Ces restrictions ne prévalent pas sur les droits accordés par la loi applicable, notamment les actes de sauvegarde ou d’interopérabilité autorisés par la loi, ni sur les droits issus des licences de tiers.
+
+Les licences de tiers régissent les composants correspondants et prévalent sur les restrictions incompatibles des présentes conditions. Le code dérivé des exemples Apple conserve les droits prévus dans LICENSE.apple-null-audio.txt. Le code de fournisseurs sous licences MIT/Apache-2.0, ses modifications sous licence et les éventuels composants MPL-2.0 conservent leurs droits d’origine. Leurs droits sous licence d’accès au code source, de modification et de redistribution sont préservés ; les mentions de droit d’auteur, les textes de licence et les avis d’accès au code source requis doivent les accompagner.
+
+4. Vos données audio, paramètres et fichiers
+Vous conservez vos droits sur les données audio, enregistrements, projets et autres contenus créés ou traités avec le Driver. Ces conditions n’accordent à Echo Vision Lab aucun droit de propriété, de publication, de marketing ou d’entraînement sur ces contenus. Il vous appartient d’obtenir les autorisations nécessaires à l’enregistrement, au traitement ou à la diffusion de contenus de tiers.
+
+Sauvegardez vos paramètres de périphériques et travaux importants avant de modifier votre configuration. Utilisez les options de suppression des paramètres proposées lors de la désinstallation. L’arrêt de l’utilisation ou la fin de la licence du logiciel ne nous transfère pas vos travaux et ne vous oblige pas à supprimer les enregistrements ou projets que vous avez créés.
+
+5. Mises à jour, compatibilité et assistance
+Les mises à jour sont fournies par les canaux de distribution officiels selon les conditions indiquées pour la version publiée. Une mise à jour du Driver ne transforme pas, à elle seule, cette autorisation gratuite en licence de l’application payante. Vérifiez le système d’exploitation et la configuration des périphériques audio pris en charge avant la mise à jour. La compatibilité avec chaque application ou périphérique et un fonctionnement ininterrompu et sans erreur ne sont pas garantis.
+
+Adressez vos questions sur l’installation, les périphériques et la compatibilité à support@rawsector.com. Ces dispositions ne prévalent pas sur la description du produit, les conditions convenues ou les recours légaux concernant la qualité.
+
+Notre objectif est une première réponse sous deux jours ouvrables coréens, hors week-ends et jours fériés en Corée du Sud (Asia/Seoul). Il s’agit d’un objectif de réponse, pas d’un délai de résolution garanti ; il ne prolonge aucun délai légal de réponse ou remboursement.
+
+6. Connexions réseau et données personnelles
+Le Driver traite les données audio et les paramètres des périphériques localement et ne nécessite pas d’authentification de licence payante. La commande de vérification des mises à jour contacte https://appserver.rawsector.com par HTTPS en transmettant le produit, le système d’exploitation et l’architecture du processeur. Le service reçoit également les informations de connexion habituelles, notamment votre adresse IP. La requête de mise à jour ne transmet ni données audio, ni enregistrements, ni contenu de projets, ni graphes, ni noms de périphériques audio. Vous pouvez utiliser le Driver sans demander de vérification des mises à jour.
+
+L’ouverture d’un téléchargement utilise votre navigateur et l’hébergeur de téléchargement choisi. Lorsque vous contactez l’assistance, nous recevons les coordonnées, le message et les fichiers que vous choisissez d’envoyer. N’envoyez que les informations nécessaires à votre demande. Les applications et services tiers ont leurs propres pratiques de traitement des données.
+
+L’acceptation de ce contrat ne vaut pas consentement au marketing facultatif, à l’analyse facultative ou aux transferts internationaux. Vous pouvez adresser vos questions sur la confidentialité et vos demandes d’accès, de rectification, de suppression ou de limitation du traitement de vos données à privacy@dsub.io. Les exigences applicables de vérification d’identité et les obligations légales de conservation des documents restent en vigueur. L’utilisation courante du Driver ne nécessite ni paiement, ni activation payante, ni consentement au marketing.
+
+Lorsque vous choisissez d’activer ou de gérer les droits payants MixRelay, le processus de gestion du Driver traite les demandes de licence de l’application. Les données transmises, leur finalité et le stockage des identifiants sont décrits à la section 7 de LICENSE.txt. L’usage gratuit du Driver ne nécessite pas ces demandes.
+
+7. Désinstallation, résiliation et responsabilité
+Vous pouvez à tout moment cesser d’utiliser le Driver et le désinstaller. La désinstallation seule n’annule pas l’achat de l’application payante et ne confirme pas sa désactivation côté serveur.
+
+La désactivation ou le remboursement des droits de l’application payante ne met pas à lui seul fin à cette autorisation gratuite du Driver.
+
+Lorsqu’un manquement constitue un motif légal de restriction ou de résiliation, Echo Vision Lab précisera les motifs et respectera les exigences de notification et de possibilité de remédier au manquement prévues par la loi applicable. Ces conditions n’accordent aucun droit arbitraire de mettre fin à l’utilisation. En cas de résiliation légale, cessez d’utiliser les composants propriétaires dont l’autorisation a pris fin et supprimez les copies correspondantes, sous réserve de la loi applicable. Vos travaux, les droits issus des licences de tiers et vos droits de recours ne s’éteignent pas automatiquement.
+
+La responsabilité de chaque partie est déterminée par la loi applicable. Ces conditions n’excluent pas la responsabilité en cas de faute intentionnelle ou de négligence grave, n’imposent pas de plafond général d’indemnisation et ne vous font pas supporter de risques contraires aux règles impératives.
+
+8. Modifications et litiges
+Nous indiquons les modifications et la date d’entrée en vigueur d’une révision, vous en informons à l’avance et recueillons votre consentement lorsque la loi applicable l’exige. Le silence ou la poursuite de l’utilisation ne constitue pas, à lui seul, un accord pour renoncer à des droits impératifs. Les conditions convenues individuellement prévalent sur les conditions générales incompatibles dans la mesure prévue par la loi applicable.
+
+L’interprétation et les litiges restent soumis à la loi applicable et aux droits impératifs des consommateurs, y compris les règles de compétence juridictionnelle. Aucune juridiction exclusive ni clause générale de choix de loi n’est établie ici. Adressez les réclamations sur le produit à support@rawsector.com et les questions juridiques à legal@dsub.io. Ces contacts ne limitent pas l’accès aux tribunaux ou aux procédures légales de règlement des litiges.
+
+Informations sur l’entreprise
+Développeur, concédant et titulaire des droits d’auteur : Echo Vision Lab (에코 비전 랩), entreprise individuelle coréenne
+Numéro d’immatriculation de l’entreprise : 111-42-04359
+Adresse : Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul, Republic of Korea
+Téléphone : +82 10-6380-9646
+Assistance produit et intégration : support@rawsector.com
+Questions juridiques : legal@dsub.io
+Questions sur la confidentialité : privacy@dsub.io

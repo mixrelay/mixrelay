@@ -1,0 +1,23 @@
+{
+  "runId": "39945522752",
+  "runAttempt": "1",
+  "targetId": "kali-rolling-arm64",
+  "evidence": {
+    "file": "qualification/installed-target-kali-rolling-arm64/native-signal.f32",
+    "sha256": "e8e1bc6ec7cb5e142291ff295e5f623d2fc71ed64584df1dcc987e944da9da9b"
+  },
+  "expectedPeaks": [
+    0.125,
+    0.25
+  ],
+  "observed": {
+    "frames": 157696,
+    "active": 106965,
+    "peaks": [
+      0.25,
+      0.5
+    ]
+  },
+  "qualificationStatus": "failed",
+  "note": "Post-run analysis of preserved native PCM; does not replace the failed original case."
+}

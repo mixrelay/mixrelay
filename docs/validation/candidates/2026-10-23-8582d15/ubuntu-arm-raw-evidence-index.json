@@ -1,0 +1,83 @@
+{
+  "artifact": "installed-e2e-evidence",
+  "runId": "39949458383",
+  "runAttempt": "1",
+  "retentionDays": 90,
+  "files": [
+    {
+      "file": "inventory.md",
+      "size": 6760,
+      "sha256": "c2a7694122fad52f9e2ba3d513625589065dd59158bfb0110fc0c72a29c5ebc7"
+    },
+    {
+      "file": "candidate/MixRelay-Installer-0.1.0.pkg",
+      "size": 69259123,
+      "sha256": "926023b29a72a6b4e86386d32e1c7b21458cf41464eb01aa7f32c55dd40fea97"
+    },
+    {
+      "file": "candidate/MixRelay_0.1.0_amd64.deb",
+      "size": 31683186,
+      "sha256": "9b84bdaa85884576470fb87d94b2f6fc244819dd021d8cf0848822b329a20c4a"
+    },
+    {
+      "file": "candidate/MixRelay_0.1.0_arm64.deb",
+      "size": 30815318,
+      "sha256": "d46de76461f7f77677ef8ebf3baf84e3dce4ef836b6461865d0e484b1ccc1d12"
+    },
+    {
+      "file": "candidate/mix-relay-0.1.0-1-x86_64.pkg.tar.zst",
+      "size": 30405441,
+      "sha256": "03d02a54646802db21f6d4ea87444619a3533656cf9f3ba8cb5a11256386b02d"
+    },
+    {
+      "file": "candidate/mix-relay.candidate.json",
+      "size": 1035,
+      "sha256": "987a80de7566155a81882494f7ba71c298c9e9d716f2b1975c57637c9cba5db6"
+    },
+    {
+      "file": "candidate/selection.json",
+      "size": 287,
+      "sha256": "f22af3d446ad16638af474386fc013a0fac45076fc10275ca0ed69b118a04510"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/PKG-01.failure.json",
+      "size": 767,
+      "sha256": "5682f7c0d46d0ac472ff882c372397f513728bcd7a9cba8b99255262c2d46178"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/guest-bootstrap.log",
+      "size": 79160,
+      "sha256": "b7c3953411b2e2250ec7141a7fc87c545b2a75d0939633811955208dd9f644ae"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/guest-suite.log",
+      "size": 197,
+      "sha256": "1b175bccf0521b5ee4ea01f00381f6af394ef3fd4e7334846995ac6189ace17d"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/package-install.log",
+      "size": 187089,
+      "sha256": "e089ae0ee92799c10c059e6275bfe5fb511003dd5fffe6f0ce8f9c5615827709"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/qemu.log",
+      "size": 67,
+      "sha256": "595579382f4a43b7ca23f917038f2c8e81cdb9bd13588025960f0e3c15f8ad85"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/ubuntu-26-04-arm64.qualification.json",
+      "size": 2838,
+      "sha256": "bc9a3afce2860e5f1947fc584db11aab1da61a5a4fc39e520b03a2ca8508d7e1"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/vm-serial.log",
+      "size": 119483,
+      "sha256": "a3a15113caa6091c65fbd318d16c6272bb110b4038b718477e410fe7de134b09"
+    },
+    {
+      "file": "qualification/installed-target-ubuntu-26-04-arm64/vm-session.json",
+      "size": 681,
+      "sha256": "38373020cbf0b20d19352fc67be18b72f81bf3c86c6a2822defd443ec09882f3"
+    }
+  ]
+}

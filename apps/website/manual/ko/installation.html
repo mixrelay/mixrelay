@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="운영체제에 맞는 MixRelay 전체 설치 파일을 사용하세요. Driver를 따로 설치할 필요가 없습니다.">
+    <title>시스템 요구사항과 설치 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/installation.html">
+    <link rel="alternate" hreflang="ko" href="../ko/installation.html">
+    <link rel="alternate" hreflang="ja" href="../ja/installation.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/installation.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/installation.html">
+    <link rel="alternate" hreflang="de" href="../de/installation.html">
+    <link rel="alternate" hreflang="fr" href="../fr/installation.html">
+    <link rel="alternate" hreflang="it" href="../it/installation.html">
+    <link rel="alternate" hreflang="es" href="../es/installation.html">
+    <link rel="alternate" hreflang="pt" href="../pt/installation.html">
+    <link rel="alternate" hreflang="ru" href="../ru/installation.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="제품 소개"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="언어"><a href="../en/installation.html" lang="en" hreflang="en">English</a> <a href="../ko/installation.html" lang="ko" hreflang="ko" aria-current="page">한국어</a> <a href="../ja/installation.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/installation.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/installation.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/installation.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/installation.html" lang="fr" hreflang="fr">Français</a> <a href="../it/installation.html" lang="it" hreflang="it">Italiano</a> <a href="../es/installation.html" lang="es" hreflang="es">Español</a> <a href="../pt/installation.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/installation.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 사전 공개 초안</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="안내서 목차">
+        <a class="back-link" href="../../index.html">← 제품 소개</a>
+        <a class="manual-mobile-index" href="index.html">전체 목차</a>
+        <nav class="guide-nav" aria-label="안내서 목차"><a href="index.html">안내서 시작</a>
+<a href="installation.html" aria-current="page">시스템 요구사항과 설치</a>
+<a href="first-launch.html">처음 실행과 권한</a>
+<a href="workspace.html">라우팅 작업 영역</a>
+<a href="devices.html">장치와 가상 장치</a>
+<a href="app-capture.html">앱 오디오 캡처</a>
+<a href="recording.html">녹음</a>
+<a href="effects.html">내장 효과와 프리셋</a>
+<a href="plugins.html">외부 플러그인</a>
+<a href="stream-deck.html">Stream Deck 플러그인</a>
+<a href="licensing.html">무료 기능과 라이선스</a>
+<a href="updates.html">업데이트</a>
+<a href="uninstall.html">제거</a>
+<a href="troubleshooting.html">문제 해결과 진단</a>
+<a href="support.html">지원 문의</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>시스템 요구사항과 설치</h1><p>운영체제에 맞는 MixRelay 전체 설치 파일을 사용하세요. Driver를 따로 설치할 필요가 없습니다.</p><p class="guide-draft-note">사전 공개 초안입니다. 공개 다운로드와 구매는 아직 제공하지 않습니다. 현재 소스 빌드를 기준으로 작성했으며 아래에 표시한 환경의 설치본 검증은 남아 있습니다.</p></header>
+        <nav class="manual-toc" aria-label="이 페이지 목차"><p class="sidebar-label">이 페이지 목차</p><ul><li><a href="#requirements">지원 환경</a></li><li><a href="#macos">macOS 설치</a></li><li><a href="#gatekeeper">Gatekeeper 확인</a></li><li><a href="#linux">Linux 설치</a></li></ul></nav>
+        <section class="guide-section" id="requirements" aria-labelledby="requirements-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="requirements-title">지원 환경</h2>
+<ul><li>macOS 14.2 이상, Apple Silicon 또는 Intel. 설치 파일은 Universal 2입니다. 설치본으로 확인한 최신 주 버전은 macOS 27입니다.</li><li>Linux x86_64 또는 arm64. PipeWire 1.2 이상과 WirePlumber 0.5 이상이 실행되는 로그인한 사용자 세션이 필요합니다. 현재 패키지는 glibc 2.39를 요구합니다.</li></ul><p>Linux 빌드와 코드 검사는 두 아키텍처의 Debian 13·Ubuntu 26.04·Kali rolling 및 x86_64 Arch에서 수행합니다. 모든 배포판의 설치를 확인했다는 뜻은 아닙니다. 기본 Ubuntu 24.04 오디오 패키지는 버전이 낮습니다. 일반 Linux 가상 머신은 지원하며 Docker 오디오 환경은 지원하지 않습니다. Windows는 지원하지 않습니다.</p><p>지원하는 모든 macOS 버전의 검증이 끝난 것은 아닙니다. 14.8.7 VM에서는 설치·서비스·가상 장치를 확인했지만 권한 대화상자와 실제 캡처는 확인하지 않았습니다. 14.2–14.7·15·26의 설치본 확인도 남아 있습니다.</p>
+</div></section>
+<section class="guide-section" id="macos" aria-labelledby="macos-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="macos-title">macOS 설치</h2>
+<ol><li>공개 다운로드가 시작되면 공식 <code>MixRelay-Installer-VERSION.pkg</code>를 받으세요.</li><li>녹음·통화 앱을 종료하세요. 설치 중 시스템 오디오가 잠시 끊깁니다.</li><li>PKG를 여세요. App·Driver 구성요소 약관을 읽고 설치 프로그램의 계속·동의 단계를 따르세요. 요청 시 macOS 관리자 계정으로 설치를 승인하세요.</li><li>설치가 끝나면 <code>/Applications/MixRelay/MixRelay.app</code>을 여세요. 재부팅은 필요하지 않습니다.</li></ol><p>편집 앱·백그라운드 오디오·가상 장치·<code>Uninstall MixRelay.app</code>을 함께 설치합니다. 구성요소 선택 단계는 없습니다. 기존 장치·그래프·설정·녹음·인증은 보존합니다.</p><!-- TODO screenshot: signed macOS PKG agreement and successful installation, English and Korean. -->
+</div></section>
+<section class="guide-section" id="gatekeeper" aria-labelledby="gatekeeper-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="gatekeeper-title">Gatekeeper 확인</h2>
+<p>공개 macOS 패키지는 Developer ID 서명과 공증을 거쳐야 합니다. macOS가 다운로드한 소프트웨어를 열지 확인할 수 있습니다. 확인되지 않은 개발자·검증할 수 없는 패키지·손상·악성 소프트웨어 경고가 나타나면 중단하고 공식 패키지를 다시 받거나 지원팀에 문의하세요. 설치를 위해 Gatekeeper를 끄거나 격리 속성을 제거하지 마세요. <a href="https://support.apple.com/en-au/102445" hreflang="en" lang="en">Apple: Safely open apps on your Mac</a>에서 관련 안내를 확인할 수 있습니다.</p>
+</div></section>
+<section class="guide-section" id="linux" aria-labelledby="linux-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="linux-title">Linux 설치</h2>
+<p>배포판의 패키지 관리자로 의존성을 함께 설치하세요. 예시 파일명을 아키텍처에 맞게 다운로드한 패키지명으로 바꾸세요.</p><pre><code>sudo apt install ./MixRelay_VERSION_ARCH.deb
+sudo dnf install ./MixRelay-VERSION-1.ARCH.rpm
+sudo pacman -U ./mix-relay-VERSION-1-x86_64.pkg.tar.zst</code></pre><p>배포판에 맞는 명령 하나만 실행하세요. 패키지명은 <code>mix-relay</code>입니다. 일반 사용자로 앱 메뉴에서 MixRelay를 여세요. PipeWire 오디오는 root가 아닌 해당 사용자의 세션에서 실행됩니다. SDK나 수동 서비스 설정은 필요하지 않습니다. AppImage는 지원하는 설치·업데이트 경로가 아닙니다.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="안내서 목차"><a rel="prev" href="index.html">← 이전: 안내서 시작</a><a rel="next" href="first-launch.html">다음: 처음 실행과 권한 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>사전 공개 초안 · MixRelay 0.1.0</p><a href="../../index.html">제품 소개</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="정책" lang="ko"><a href="../../legal/ko/terms.html">판매조건·환불</a><a href="../../legal/ko/privacy.html">개인정보 처리방침</a></nav></div>
+    </footer>
+  </body>
+</html>

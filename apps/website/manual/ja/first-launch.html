@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="MixRelayを開き、オーディオエンジンの準備が整ったら、使用するソースを選びます。">
+    <title>初回起動とアクセス許可 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/first-launch.html">
+    <link rel="alternate" hreflang="ko" href="../ko/first-launch.html">
+    <link rel="alternate" hreflang="ja" href="../ja/first-launch.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/first-launch.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/first-launch.html">
+    <link rel="alternate" hreflang="de" href="../de/first-launch.html">
+    <link rel="alternate" hreflang="fr" href="../fr/first-launch.html">
+    <link rel="alternate" hreflang="it" href="../it/first-launch.html">
+    <link rel="alternate" hreflang="es" href="../es/first-launch.html">
+    <link rel="alternate" hreflang="pt" href="../pt/first-launch.html">
+    <link rel="alternate" hreflang="ru" href="../ru/first-launch.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">本文へスキップ</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="製品ホーム"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="言語"><a href="../en/first-launch.html" lang="en" hreflang="en">English</a> <a href="../ko/first-launch.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/first-launch.html" lang="ja" hreflang="ja" aria-current="page">日本語</a> <a href="../zh-Hans/first-launch.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/first-launch.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/first-launch.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/first-launch.html" lang="fr" hreflang="fr">Français</a> <a href="../it/first-launch.html" lang="it" hreflang="it">Italiano</a> <a href="../es/first-launch.html" lang="es" hreflang="es">Español</a> <a href="../pt/first-launch.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/first-launch.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 公開前の草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="マニュアルの章">
+        <a class="back-link" href="../../index.html">← 製品ホーム</a>
+        <a class="manual-mobile-index" href="index.html">すべての章</a>
+        <nav class="guide-nav" aria-label="マニュアルの章"><a href="index.html">マニュアル概要</a>
+<a href="installation.html">システム要件とインストール</a>
+<a href="first-launch.html" aria-current="page">初回起動とアクセス許可</a>
+<a href="workspace.html">ルーティングワークスペース</a>
+<a href="devices.html">デバイスと仮想エンドポイント</a>
+<a href="app-capture.html">アプリの音声キャプチャ</a>
+<a href="recording.html">録音</a>
+<a href="effects.html">内蔵エフェクトとプリセット</a>
+<a href="plugins.html">外部プラグイン</a>
+<a href="stream-deck.html">Stream Deckプラグイン</a>
+<a href="licensing.html">無料版とライセンス</a>
+<a href="updates.html">アップデート</a>
+<a href="uninstall.html">アンインストール</a>
+<a href="troubleshooting.html">トラブルシューティングと診断</a>
+<a href="support.html">サポート窓口</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / マニュアル</p><h1>初回起動とアクセス許可</h1><p>MixRelayを開き、オーディオエンジンの準備が整ったら、使用するソースを選びます。</p><p class="guide-draft-note">公開前の草稿です。一般向けのダウンロードと購入はまだ利用できません。本書は現在のソースからビルドした製品を説明しています。以下に記載する環境では、インストール後の動作確認が引き続き必要です。</p></header>
+        <nav class="manual-toc" aria-label="このページの内容"><p class="sidebar-label">このページの内容</p><ul><li><a href="#connection">オーディオエンジンに接続する</a></li><li><a href="#permissions">macOSの音声キャプチャとマイクの許可</a></li><li><a href="#first-route">最初のルートを作成する</a></li></ul></nav>
+        <section class="guide-section" id="connection" aria-labelledby="connection-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="connection-title">オーディオエンジンに接続する</h2>
+<p>音声の準備中は<code>MixRelayに接続中</code>と表示されます。<code>MixRelayが必要です</code>と表示された場合は、製品一式をインストールします。<code>MixRelayを更新してください</code>と表示された場合は、インストール済みの製品を更新します。<code>MixRelayに接続できません</code>の場合は、インストール状態を確認してから<code>再接続</code>を選びます。</p><p>無料版には購入ライセンスのアクティベーションは不要です。アプリはOSの優先言語から最初に対応する言語を使用し、該当する言語がなければ英語で表示します。<code>外観</code>では<code>システム</code>、<code>ライト</code>、<code>ダーク</code>を選べます。</p>
+</div></section>
+<section class="guide-section" id="permissions" aria-labelledby="permissions-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="permissions-title">macOSの音声キャプチャとマイクの許可</h2>
+<p>初めてアプリをソースにすると、macOSからアプリまたはシステムの音声をキャプチャする許可を求められることがあります。マイクなどの物理音声入力を使う場合は、マイクへのアクセス許可を求められることがあります。そのソースを使用するには、要求されたアクセスを許可してください。この2つは別々の許可です。マイクだけを許可しても、アプリの音声キャプチャは使えません。</p><p>アクセスを拒否した場合は、「システム設定」→「プライバシーとセキュリティ」を開きます。「画面収録とシステムオーディオ録音」で音声キャプチャの設定を、物理入力については「マイク」を確認してください。項目名とメッセージはmacOSのバージョンによって異なります。要求元のMixRelayの項目へのアクセスを有効にし、macOSから再起動の指示があれば従ってください。その後、MixRelayでソースを再試行します。<a href="https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/mac">画面とシステムオーディオのアクセス許可に関するAppleの案内</a>を参照してください。</p><p>Linuxのソースは通常のPipeWireセッションを使用します。この操作でmacOSのようなアクセス許可の画面は表示されません。</p><!-- TODO screenshot: actual installed capture and microphone requests and permission entries on supported macOS versions, both languages. -->
+</div></section>
+<section class="guide-section" id="first-route" aria-labelledby="first-route-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="first-route-title">最初のルートを作成する</h2>
+<ol><li>既存のグラフを選びます。グラフがなければ<code>新規グラフ</code>を選び、<code>グラフ名</code>を入力して<code>作成</code>を選びます。無料版ではグラフを1個使用できます。</li><li><code>ノードを追加 → ソース</code>から実行中のアプリまたは音声入力を選びます。</li><li><code>ノードを追加 → 出力</code>から音声出力を選びます。ソースの各出力チャンネルを、出力ノードの入力チャンネルに接続します。</li><li>ソースのアプリで音声を再生するか、入力に向かって話します。メーターと出力デバイスを確認します。</li></ol><p>ミックスをOBSやDAWに送るには、<a href="devices.html#directions">MixRelay IOを仮想出力として使用</a>し、受け取る側のアプリで入力として選びます。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="マニュアルの章"><a rel="prev" href="installation.html">← 前へ: システム要件とインストール</a><a rel="next" href="workspace.html">次へ: ルーティングワークスペース →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

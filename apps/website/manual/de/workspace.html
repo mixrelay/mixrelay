@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Erstellen Sie einen Graphen aus Quell-, Prozessor- und Ausgangsknoten. Kabel übertragen Audio zwischen einzelnen Kanälen.">
+    <title>Routing-Arbeitsbereich — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/workspace.html">
+    <link rel="alternate" hreflang="ko" href="../ko/workspace.html">
+    <link rel="alternate" hreflang="ja" href="../ja/workspace.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/workspace.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/workspace.html">
+    <link rel="alternate" hreflang="de" href="../de/workspace.html">
+    <link rel="alternate" hreflang="fr" href="../fr/workspace.html">
+    <link rel="alternate" hreflang="it" href="../it/workspace.html">
+    <link rel="alternate" hreflang="es" href="../es/workspace.html">
+    <link rel="alternate" hreflang="pt" href="../pt/workspace.html">
+    <link rel="alternate" hreflang="ru" href="../ru/workspace.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Zum Inhalt springen</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Produktstartseite"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Sprache"><a href="../en/workspace.html" lang="en" hreflang="en">English</a> <a href="../ko/workspace.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/workspace.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/workspace.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/workspace.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/workspace.html" lang="de" hreflang="de" aria-current="page">Deutsch</a> <a href="../fr/workspace.html" lang="fr" hreflang="fr">Français</a> <a href="../it/workspace.html" lang="it" hreflang="it">Italiano</a> <a href="../es/workspace.html" lang="es" hreflang="es">Español</a> <a href="../pt/workspace.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/workspace.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Vorläufige Fassung vor Veröffentlichung</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Kapitel des Handbuchs">
+        <a class="back-link" href="../../index.html">← Produktstartseite</a>
+        <a class="manual-mobile-index" href="index.html">Alle Kapitel</a>
+        <nav class="guide-nav" aria-label="Kapitel des Handbuchs"><a href="index.html">Handbuchübersicht</a>
+<a href="installation.html">Systemanforderungen und Installation</a>
+<a href="first-launch.html">Erster Start und Berechtigungen</a>
+<a href="workspace.html" aria-current="page">Routing-Arbeitsbereich</a>
+<a href="devices.html">Geräte und virtuelle Endpunkte</a>
+<a href="app-capture.html">Audio von Anwendungen erfassen</a>
+<a href="recording.html">Aufnahme</a>
+<a href="effects.html">Integrierte Effekte und Voreinstellungen</a>
+<a href="plugins.html">Externe Plug-ins</a>
+<a href="stream-deck.html">Stream Deck-Plug-in</a>
+<a href="licensing.html">Kostenlose Version und Lizenzierung</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Deinstallation</a>
+<a href="troubleshooting.html">Fehlerbehebung und Diagnose</a>
+<a href="support.html">Support kontaktieren</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / HANDBUCH</p><h1>Routing-Arbeitsbereich</h1><p>Erstellen Sie einen Graphen aus Quell-, Prozessor- und Ausgangsknoten. Kabel übertragen Audio zwischen einzelnen Kanälen.</p><p class="guide-draft-note">Vorläufige Fassung vor Veröffentlichung. Öffentliche Downloads und Käufe sind noch nicht verfügbar. Diese Anleitung beschreibt den aktuellen Build aus dem Quellcode. Das Verhalten nach der Installation muss in den unten genannten Umgebungen noch überprüft werden.</p></header>
+        <nav class="manual-toc" aria-label="Auf dieser Seite"><p class="sidebar-label">Auf dieser Seite</p><ul><li><a href="#graphs">Graphen, Knoten und Speichern</a></li><li><a href="#connections">Kanäle verbinden und zuordnen</a></li><li><a href="#keyboard">Ohne Ziehen verbinden</a></li><li><a href="#states">Aus, Stummschalten, Bypass, Pausieren und Beenden</a></li></ul></nav>
+        <section class="guide-section" id="graphs" aria-labelledby="graphs-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="graphs-title">Graphen, Knoten und Speichern</h2>
+<p>Erstellen Sie mit <code>Neuer Graph</code> einen Graphen und verwenden Sie <code>Knoten hinzufügen</code> für <code>Quelle</code>, <code>Prozessor</code> oder <code>Ausgang</code>. Wählen Sie unter <code>Graphen</code> einen Graphen zur Bearbeitung. Die Auswahl schaltet andere Graphen nicht aus. Mit einer Lizenz können mehrere Graphen gleichzeitig laufen.</p><p>Öffnen Sie die <code>Optionen</code> eines Knotens für dessen verfügbare Parameter. Doppelklicken Sie auf den Namen, drücken Sie <kbd>F2</kbd> bei fokussiertem Knoten oder wählen Sie <code>Anzeigenamen ändern</code> im Knotenmenü. Ein Anzeigename ändert nur diesen Knoten. Leeren Sie ihn, um den ursprünglichen Namen wiederherzustellen.</p><p>Änderungen und Layout werden automatisch gespeichert. Eine Speicherwarnung bedeutet, dass sie nach einem Neustart verloren gehen können. Für einen übertragbaren Arbeitsbereich schreiben Sie mit <code>Datei → Speichern</code> oder <code>Speichern unter…</code> eine <code>.mix</code>-Datei. <code>Neuer Arbeitsbereich</code> und <code>Öffnen…</code> fragen nach, bevor sie den aktuellen Inhalt ersetzen. Eine Arbeitsbereichsdatei installiert keine fehlenden Geräte oder Plug-ins.</p>
+</div></section>
+<section class="guide-section" id="connections" aria-labelledby="connections-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="connections-title">Kanäle verbinden und zuordnen</h2>
+<p>Ziehen Sie einen Ausgangsanschluss zu einem Eingangsanschluss. Verbinden Sie bei einem Stereopaar beide Kanäle. Halten Sie <kbd>Shift</kbd> gedrückt, um weitere Ausgangskanäle desselben Knotens auszuwählen, und ziehen Sie die Auswahl auf den ersten Zielkanal. Der Versatz der Zielkanäle bleibt erhalten. Drücken Sie <kbd>Escape</kbd>, um abzubrechen und die Kanalauswahl aufzuheben.</p><p>Klicken Sie mit der rechten Maustaste auf ein Kabel und wählen Sie <code>Kabel löschen</code>. Ein Anschlussmenü bietet <code>Kanal trennen</code> oder <code>Ausgewählte Kanäle trennen</code>. Wählen Sie einen Knoten oder ein Kabel und drücken Sie <kbd>Delete</kbd> oder <kbd>Backspace</kbd>, um ihn oder es zu entfernen. <code>Graph einpassen</code> bringt den Graphen ins Bild. Mit <kbd>Command+Z</kbd> unter macOS oder <kbd>Ctrl+Z</kbd> unter Linux machen Sie Graphänderungen rückgängig; mit zusätzlichem <kbd>Shift</kbd> stellen Sie sie wieder her.</p><p><code>Graph löschen</code> stoppt Audio und Aufnahmen dieses Graphen. Das Löschen eines Graphen kann nicht rückgängig gemacht werden; gespeicherte Arbeitsbereichsdateien bleiben erhalten.</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
+</div></section>
+<section class="guide-section" id="keyboard" aria-labelledby="keyboard-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="keyboard-title">Ohne Ziehen verbinden</h2>
+<ol><li>Fokussieren Sie den Quellknoten mit <kbd>Tab</kbd>. <kbd>Enter</kbd> oder <kbd>Space</kbd> wählt ihn aus. Pfeiltasten verschieben den ausgewählten Knoten; mit <kbd>Shift</kbd> sind die Schritte größer.</li><li>Drücken Sie <kbd>Shift+F10</kbd> oder die Kontextmenütaste und wählen Sie <code>Kanäle verbinden…</code>.</li><li>Wählen Sie <code>Erster Ausgangskanal</code> und <code>Anzahl der Kanäle</code> oder behalten Sie eine vorhandene Kanalauswahl. Wählen Sie <code>Ziel</code> und <code>Erster Eingangskanal</code>.</li><li>Lesen Sie die <code>Vorschau</code>, einschließlich übersprungener Verbindungen und ihrer Gründe. Wählen Sie <code>Verbinden</code> oder <code>Abbrechen</code>, um den Graphen unverändert zu lassen.</li></ol><p>Dieselben Kontextmenütasten funktionieren auch bei einem fokussierten Kabel oder der Arbeitsfläche. Steuerelemente innerhalb eines Knotens behalten ihr eigenes Tastaturverhalten. <kbd>Escape</kbd> schließt Menüs und Dialoge.</p>
+</div></section>
+<section class="guide-section" id="states" aria-labelledby="states-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="states-title">Aus, Stummschalten, Bypass, Pausieren und Beenden</h2>
+<ul><li>Der Ein-/Aus-Schalter eines Knotens deaktiviert im ausgeschalteten Zustand dessen Verarbeitung und blockiert sein Signal.</li><li>Stummschalten lässt die Verarbeitung weiterlaufen und schaltet den Knotenausgang stumm.</li><li><code>Bypass</code> eines Effekts leitet unbearbeitetes Audio durch und behält die Einstellungen bei.</li><li><code>Pausieren</code> in der Fußleiste oder im Statusmenü pausiert alle Graphen und aktiven Aufnahmen. <code>Fortsetzen</code> verwendet das aktuelle Audio. Während der Pause anfallendes Audio wird verworfen. Virtuelle Geräte behalten IDs, Namen und Formate.</li></ul><p>Nach dem Schließen des Editors laufen Routing, Effekte, Erfassung und Aufnahme im Hintergrund weiter. Unter macOS verbirgt das Schließen das Fenster; das Beenden des Editors beendet dessen Prozess. Unter Linux beendet das Schließen des Fensters den Editorprozess. Mit <code>MixRelay öffnen</code> im Statusmenü kehren Sie zurück.</p><p><code>Beenden</code> im Hintergrund-Statusmenü stoppt Geräte und Loopback und finalisiert Aufnahmen. Beim erneuten Öffnen von MixRelay werden gespeicherte Geräte wiederhergestellt. Eine gespeicherte globale Pause bleibt bestehen, bis Sie fortsetzen. Manuell pausierte oder gestoppte Rekorder starten niemals allein dadurch, dass Sie das gesamte Audio fortsetzen.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Kapitel des Handbuchs"><a rel="prev" href="first-launch.html">← Zurück: Erster Start und Berechtigungen</a><a rel="next" href="devices.html">Weiter: Geräte und virtuelle Endpunkte →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Vorläufige Fassung vor Veröffentlichung · MixRelay 0.1.0</p><a href="../../index.html">Produktstartseite</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

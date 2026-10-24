@@ -1,0 +1,90 @@
+MixRelay App
+Software-Lizenzvertrag
+Lizenzgeber und Urheberrechtsinhaber: Echo Vision Lab
+Version: 2026-10-10
+
+1. Nutzung der App
+Dieser Vertrag gilt für die kostenlose und kostenpflichtige MixRelay App und ihre Graph-Engine unter macOS und Linux. Für MixRelay Driver gilt gesondert LICENSE-Driver.txt, auch wenn er mit demselben Installationsprogramm bereitgestellt wird.
+
+Der Vertrag über die Softwarenutzung kommt zustande, wenn Sie diesen Bedingungen zustimmen, nachdem sie Ihnen vor der Installation oder Nutzung vorgelegt wurden. Wenn Sie nicht zustimmen, installieren oder verwenden Sie die proprietären App-Komponenten von MixRelay nicht. Eine dazu berechtigte Person kann im Namen einer Organisation zustimmen. Die Zustimmung zu oder Ablehnung dieser Bedingungen berührt keine Rechte aus Lizenzen Dritter.
+
+Echo Vision Lab erteilt Ihnen die nicht ausschließliche Erlaubnis, autorisierte App-Binärdateien für persönliche oder berufliche Audioarbeiten einschließlich kommerzieller Aufnahme, Produktion und Ausstrahlung zu installieren und auszuführen, im Rahmen der für Sie geltenden Funktionen und erworbenen Nutzungsrechte. Sie dürfen die für diese Nutzung erforderlichen Sicherungskopien aufbewahren. Das Eigentum an der Software wird nicht übertragen.
+
+2. Kostenlose Erprobung, Käufe und Updates
+Die kostenlose App ermöglicht eine zeitlich unbeschränkte Erprobung mit eingeschränkten Funktionen. Auch die kostenlose App kann einen Graphen und dessen Kanalzuordnungen speichern und laden. Driver-Einstellungen bleiben kostenlos. Für die Erprobung werden weder die Audioqualität vermindert noch Rauschen oder künstliche Verzögerungen hinzugefügt.
+
+Der kostenlose Driver stellt standardmäßig ein grundlegendes virtuelles Gerät bereit, dessen Kanalzahl, Abtastrate und PCM-Format kostenlos eingestellt werden können. Das Umbenennen eines Geräts erfordert die kostenpflichtige App. Das Erstellen oder Entfernen mehrerer virtueller Geräteidentitäten (Create/Remove) erfordert die kostenpflichtige App; weder die kostenlose App noch der eigenständige Driver bieten diese Vorgänge an. Bereits mit der kostenpflichtigen App erstellte virtuelle Geräte bleiben nach dem Beenden dieser App verfügbar. Etwaige Beschränkungen für Graphen, Knoten, Verarbeitungskanäle oder Aufnahmen werden in den Funktionsinformationen der verwendeten Version angegeben. Ein Kauf umfasst die in seinem Angebot beschriebenen Funktionen; diese Bedingungen erlauben keine unangekündigten Beschränkungen oder Kürzungen erworbener Funktionen.
+
+Die kostenpflichtige Lizenz gilt für die erworbene Hauptversion. Eine etwaige Aktivierungsgrenze wird vor der Zahlung im Angebot angegeben. Für diese Hauptversion bereitgestellte Updates sind enthalten. Wird eine andere Hauptversion angeboten, ist ihr Kauf freiwillig. Der Verzicht auf den Kauf einer anderen Version hebt die Nutzungsrechte an der erworbenen Version nicht auf.
+
+Es handelt sich nicht um ein monatliches Abonnement. Die Installation eines Updates hebt Ihre Rechte an der erworbenen Hauptversion nicht für sich genommen auf.
+
+3. Aktivierung und Gerätewechsel
+Die kostenpflichtige App erfordert eine Online-Kaufauthentifizierung. Die Offline-Authentifizierung gilt 30 Tage ab der letzten erfolgreichen Online-Prüfung. Die Bedingungen für erneute Online-Prüfungen werden vor der Zahlung angegeben. Dieser Zeitraum ist weder die Lizenzlaufzeit noch ein wiederkehrender Zahlungszeitraum. Ein Neustart oder eine fehlgeschlagene Prüfung verlängert ihn nicht. Ablauf oder Netzwerkfehler allein heben den Kauf nicht auf und unterbrechen laufendes Audio nicht abrupt.
+
+Zum Übertragen der Aktivierung deaktivieren Sie das bisherige Gerät online und aktivieren das neue gemäß den erworbenen Aktivierungsbedingungen. Die serverseitige Deaktivierung ist erst nach Bestätigung des Lizenzdienstes abgeschlossen. Ist das bisherige Gerät nicht zugänglich oder die Deaktivierung nicht möglich, kontaktieren Sie support@rawsector.com. Deinstallation, Neuinstallation oder das Löschen lokaler Zugangsdaten allein geben keine Serveraktivierung frei und heben den Kauf nicht auf.
+
+Nach Deaktivierung oder Entzug kostenpflichtiger Rechte kann das System die kostenlosen Funktionen der App und des Drivers weiter nutzen. Aufnahmen, Projekte und Geräteeinstellungen werden dadurch nicht gelöscht. Kostenpflichtige Vorgänge erfordern weiterhin gültige kostenpflichtige Rechte. Teilen Sie keine Schlüssel für unberechtigte Nutzung und umgehen Sie weder Kaufauthentifizierung noch Grenzen kostenloser Funktionen.
+
+4. Weiterverbreitung, Integration und Lizenzen Dritter
+Der eigene proprietäre Code von MixRelay bleibt nicht öffentlich. Kostenlose Verbreitung oder ein App-Kauf gewährt weder Zugang zum privaten Quellcode-Repository noch die Erlaubnis, diesen Quellcode zu veröffentlichen oder proprietäre Komponenten zu verändern oder weiterzuverbreiten.
+
+OEM, Bündelung, Weiterverkauf, White-Label-Vertrieb und die Bereitstellung von MixRelay selbst als Bestandteil eines Produkts oder Dienstes Dritter erfordern eine vorherige schriftliche Erlaubnis und einen gesonderten kostenpflichtigen Vertrag. Die gewöhnliche Nutzung als installiertes Audiowerkzeug für kommerzielle Arbeiten stellt für sich genommen keine Produktintegration dar. Ein App-Kauf umfasst diese Integrations- oder Weiterverbreitungsrechte nicht. Für einen gesonderten Vertrag wenden Sie sich an support@rawsector.com.
+
+Diese Beschränkungen setzen keine Rechte außer Kraft, die das anwendbare Recht, einschließlich rechtmäßiger Sicherungskopien oder Handlungen im Zusammenhang mit Interoperabilität, oder Lizenzen Dritter gewähren.
+
+Lizenzen Dritter gelten für die jeweiligen Komponenten und gehen widersprechenden Beschränkungen dieses Vertrags vor. Dazu gehören MIT/Apache-2.0-Code von Zulieferern und seine entsprechend lizenzierten Änderungen, einschließlich der von MixRelay verfassten LV2-Zustandsänderungen, enthaltene MPL-2.0-Komponenten sowie aus Apple-Beispielen abgeleiteter Code unter den ursprünglichen Lizenzen. Die lizenzierten Rechte am Quellcode, an Änderungen und an der Weiterverbreitung bleiben erhalten. Geltende Urheberrechtshinweise, Lizenztexte und erforderliche Hinweise zum Quellcodezugang müssen den jeweiligen Komponenten beiliegen.
+
+5. Ihre Arbeiten, Dateien und Plug-ins
+Sie behalten Ihre Rechte an Aufnahmen, Projekten und anderen mit MixRelay erstellten oder verarbeiteten Materialien. Diese Bedingungen gewähren Echo Vision Lab daran weder Eigentum noch Veröffentlichungs-, Marketing- oder Trainingsrechte. Sie sind dafür verantwortlich, erforderliche Erlaubnisse für die Aufnahme, Verarbeitung oder Ausstrahlung von Materialien Dritter einzuholen. Ein MixRelay-Kauf gewährt keine Lizenz für ein Plug-in Dritter.
+
+Bewahren Sie Kopien wichtiger Arbeiten auf, bevor Sie Ihre Konfiguration ändern. Das Einstellen der Nutzung oder das Ende der Softwarelizenz überträgt Ihre Arbeiten nicht an uns und verlangt nicht deren Löschung. Nutzen Sie für von der App verwaltete Dateien die bei der Deinstallation angebotenen Optionen zur Datenlöschung; Ihre externen Aufnahmen und Projekte sind nicht Gegenstand der Softwarelizenz.
+
+6. Käufe und Erstattungen
+Bei Käufen über Lemon Squeezy ist Lemon Squeezy der für die Transaktion verantwortliche Verkäufer (Merchant of Record) und bearbeitet Zahlungen, Verkaufssteuern, Erstattungen und Rückbuchungen nach seinen Transaktionsbedingungen. Echo Vision Lab bleibt Entwickler und Lizenzgeber der App und übernimmt den Produktsupport sowie die ihm nach diesen Bedingungen und dem anwendbaren Recht obliegenden Verpflichtungen.
+
+Verkäufer, Preis, Steuern, Lizenzumfang und geltende Erstattungsbedingungen werden vor der Zahlung angezeigt. Für eine Stornierung oder Erstattung wenden Sie sich mit Angaben zur Identifizierung des Kaufs und Ihrem Anliegen an support@rawsector.com oder an den auf Ihrem Beleg angegebenen Bestellsupport. Senden Sie keine Zahlungskartendaten oder Passwörter. Wir unterstützen bei produktbezogenen Ansprüchen; die Nutzung von Lemon Squeezy schließt keine Verantwortung aus, die Echo Vision Lab nach anwendbarem Recht trägt.
+
+Innerhalb von 30 Kalendertagen nach dem Kauf können Sie ohne Angabe von Gründen eine vollständige Erstattung beantragen. Senden Sie den Antrag an support@rawsector.com oder den Bestellsupport auf Ihrem Beleg mit Angaben zur Identifizierung des Kaufs. Ein fristgerecht abgesendeter Antrag bleibt berechtigt, auch wenn er später bearbeitet wird. Diese Regelung ergänzt zwingende Widerrufs-, Erstattungs- und Mängelrechte und beschränkt sie nicht. Das Herunterladen, Installieren oder Nutzen der App allein schließt diese 30-Tage-Erstattungsregelung nicht aus.
+
+Zwingende Rechte auf Widerruf, Erstattung und Abhilfe bei Mängeln bleiben bestehen. Soweit koreanisches Verbraucherschutzrecht für den elektronischen Handel gilt, beträgt die gewöhnliche Widerrufsfrist sieben Tage ab Erhalt der schriftlichen Vertragsinformationen oder ab Bereitstellung, wenn diese später erfolgt. Gesetzliche Verlängerungen gelten bei fehlenden erforderlichen Informationen oder Behinderung des Widerrufs. Der Beginn der Bereitstellung digitaler Inhalte kann den gewöhnlichen Widerruf nur einschränken, wenn die gesetzlichen Voraussetzungen einschließlich klarer Hinweise und erforderlicher Erprobungs- oder Prüfmaßnahmen erfüllt sind. Noch nicht bereitgestellte abtrennbare Teile unterliegen weiterhin dem Widerruf. Die Erprobung der kostenlosen App oder die Zustimmung zu diesen Bedingungen bedeutet für sich genommen keinen Verzicht auf Widerrufsrechte.
+
+Bei entgegen der Beschreibung oder dem Vertrag bereitgestellten Inhalten erlaubt koreanisches Recht einen Widerruf innerhalb von drei Monaten ab Bereitstellung oder innerhalb von 30 Tagen ab dem Zeitpunkt, zu dem die Abweichung bekannt war oder hätte bekannt sein können. Ein gesetzlicher Widerruf des Kaufs digitaler Inhalte erfordert die Erstattung innerhalb von drei Geschäftstagen ab Widerruf, Maßnahmen zur Aufhebung der Zahlung und einen etwaigen gesetzlichen Ausgleich bei Verzögerung. Eine Widerrufsstrafe wird nicht erhoben. Günstigere zwingende lokale Rechte und vereinbarte Erstattungsbedingungen bleiben unberührt. Ein erstattetes kostenpflichtiges Nutzungsrecht kann enden, die gesonderte Erlaubnis zur kostenlosen Nutzung des Drivers besteht jedoch fort.
+
+Nach vollständiger Erstattung werden die kostenpflichtigen Rechte entzogen, wenn eine Online-Antwort des Lizenzdienstes bestätigt, dass die erstattete kostenpflichtige Berechtigung nicht mehr gültig ist. Ein Verbindungsfehler allein ist keine solche Bestätigung. Wir verlangen keine erneute Internetverbindung allein zur Durchsetzung der Erstattung und erlauben die weitere Nutzung im Rahmen der bestehenden Offline-Berechtigung. Dies verlängert den geltenden Offline-Zeitraum nicht und erlaubt keine neue kostenpflichtige Aktivierung. Kostenlose App- und Driver-Funktionen bleiben verfügbar; die Erstattung löscht keine Aufnahmen, Projekte oder Geräteeinstellungen.
+
+7. Lizenzierung, Updates und personenbezogene Daten
+Bei der Online-Aktivierung werden Ihr Lizenzschlüssel und der gewählte Aktivierungsname über HTTPS direkt an Lemon Squeezy gesendet. Bei Validierung und Deaktivierung werden der Schlüssel und die Aktivierungskennung gesendet. Diese Anfragen authentifizieren Ihren Kauf und verwalten Geräteaktivierungen. Lokale Aktivierungsnachweise werden im Anmeldedatenspeicher des Betriebssystems gespeichert. Zahlungsinformationen werden auf der Zahlungsseite von Lemon Squeezy eingegeben, nicht im Lizenzschlüsselformular der App.
+
+Die App sucht beim Start, während des Betriebs alle 24 Stunden und auf Ihre Anforderung nach Updates. Dabei wird https://appserver.rawsector.com mit Angaben zu Produkt, Betriebssystem und Prozessorarchitektur kontaktiert. Der Dienst erhält außerdem übliche Verbindungsinformationen wie Ihre IP-Adresse. Lizenz- und Updateanfragen laden weder Ihr Audio, Ihre Aufnahmen, Projektinhalte, Graphen noch Audiogerätenamen hoch. Das Öffnen eines Downloads nutzt Ihren Browser und den ausgewählten Downloadhost. Plug-ins und Dienste Dritter haben eigene Verfahren zum Umgang mit Daten.
+
+Wenn Sie den Support kontaktieren, erhalten wir die Kontaktdaten, Nachricht und Dateien, die Sie uns senden möchten. Senden Sie nur die für Ihr Anliegen erforderlichen Informationen. Der Umgang von Lemon Squeezy mit Kauf- und Lizenzdaten, einschließlich der Verarbeitung außerhalb Ihres Landes, ist unter https://www.lemonsqueezy.com/privacy beschrieben.
+
+Die Zustimmung zu diesem Vertrag ist keine Einwilligung in optionales Marketing, optionale Analysen oder internationale Übermittlungen. Fragen zum Datenschutz und Anträge auf Zugang, Berichtigung, Löschung oder Einschränkung der Verarbeitung Ihrer Informationen können Sie an privacy@dsub.io senden. Anwendbare Anforderungen zur Identitätsprüfung und gesetzliche Aufbewahrungspflichten bleiben bestehen. Die Ablehnung optionaler Verarbeitung entzieht Ihnen weder die Softwarelizenz noch gesetzliche Rechte.
+
+8. Support, Kompatibilität und Verantwortung
+Verwenden Sie die für die veröffentlichte Version beschriebenen unterstützten Betriebssystem-, Geräte- und Plug-in-Konfigurationen. Fragen zu Support und Kompatibilität können an support@rawsector.com gerichtet werden. Kompatibilität mit jeder Konfiguration und ein unterbrechungs- oder fehlerfreier Betrieb werden nicht zugesagt. Diese Aussagen setzen weder die Produktbeschreibung, vereinbarte Kaufbedingungen noch gesetzliche Qualitätsansprüche außer Kraft.
+
+Unser Ziel ist eine erste Antwort innerhalb von zwei koreanischen Geschäftstagen, ohne Wochenenden und Feiertage in Südkorea (Asia/Seoul). Dies ist ein Antwortziel, keine garantierte Lösungsfrist, und verlängert keine gesetzlichen Antwort- oder Erstattungsfristen.
+
+Die Haftung jeder Partei richtet sich nach dem anwendbaren Recht. Diese Bedingungen schließen keine Haftung für Vorsatz oder grobe Fahrlässigkeit aus, legen keine pauschale Schadensersatzobergrenze fest und verlagern keine Risiken entgegen zwingendem Recht auf Sie.
+
+9. Deinstallation und Beendigung
+Sie können die Nutzung der App jederzeit einstellen und sie deinstallieren. Dies allein hebt keinen Kauf auf und stellt keinen Erstattungsantrag dar. Die Gerätedeaktivierung richtet sich nach Abschnitt 3.
+
+Die Deaktivierung eines Geräts oder die Erstattung kostenpflichtiger Rechte allein beendet nicht die Erlaubnis zur Nutzung der kostenlosen App oder des kostenlosen Drivers und erfordert weder deren Deinstallation noch das Löschen Ihrer Arbeit.
+
+Wenn ein Verstoß rechtmäßige Gründe für Einschränkung oder Beendigung liefert, benennt Echo Vision Lab diese und beachtet die Anforderungen des anwendbaren Rechts an Benachrichtigung und Gelegenheit zur Abhilfe. Diese Bedingungen gewähren kein Recht, eine kostenpflichtige Lizenz willkürlich zu widerrufen. Nach rechtmäßiger Beendigung stellen Sie die Nutzung proprietärer Komponenten ein, deren Erlaubnis erloschen ist, und entfernen die entsprechenden Kopien nach Maßgabe des anwendbaren Rechts. Ihre Arbeiten, Rechte aus Lizenzen Dritter, Erstattungs- oder Schadensersatzansprüche sowie die gesondert geregelten Driver-Rechte erlöschen nicht automatisch.
+
+10. Änderungen und Streitigkeiten
+Wir benennen die Änderungen und das Wirksamkeitsdatum einer Überarbeitung, informieren im Voraus und holen die Zustimmung ein, soweit das anwendbare Recht dies erfordert. Schweigen oder bloße Weiternutzung ist keine Zustimmung zur Einschränkung erworbener Rechte oder zum Verzicht auf zwingende Rechte. Eine individuell vereinbarte Kaufbedingung geht einer widersprechenden Standardbedingung vor, soweit das anwendbare Recht dies vorsieht.
+
+Auslegung und sämtliche Streitigkeiten unterliegen weiterhin dem anwendbaren Recht und zwingenden Verbraucherrechten einschließlich Zuständigkeitsregeln. Hier wird weder ein ausschließlicher Gerichtsstand noch eine pauschale Rechtswahl festgelegt. Bei Produkt- oder Kaufbeschwerden wenden Sie sich an support@rawsector.com, bei rechtlichen Fragen an legal@dsub.io. Diese Kontakte beschränken nicht den Zugang zu Gerichten oder gesetzlichen Streitbeilegungsverfahren.
+
+Unternehmensangaben
+Entwickler, Lizenzgeber und Urheberrechtsinhaber: Echo Vision Lab (에코 비전 랩), koreanisches Einzelunternehmen
+Unternehmensregistrierungsnummer: 111-42-04359
+Anschrift: Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul, Republic of Korea
+Telefon: +82 10-6380-9646
+Produktsupport und Integration: support@rawsector.com
+Kontakt für Recht und Datenschutz: legal@dsub.io / privacy@dsub.io
