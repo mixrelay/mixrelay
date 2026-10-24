@@ -160,19 +160,16 @@ impl MacDevices {
             });
             let device = match existing {
                 Some(device) => device,
-                None => Arc::new(
-                    Device::open_with_group(
-                        spec,
-                        format.sample_rate,
-                        selected,
-                        super::device::CallbackConfig {
-                            buffer_frames: format.block_frames,
-                            output_only,
-                        },
-                        self.host.clone(),
-                    )
-                    .map_err(backend_error)?,
-                ),
+                None => Arc::new(Device::open_with_group(
+                    spec,
+                    format.sample_rate,
+                    selected,
+                    super::device::CallbackConfig {
+                        buffer_frames: format.block_frames,
+                        output_only,
+                    },
+                    self.host.clone(),
+                )?),
             };
             devices.insert(id.clone(), device);
         }

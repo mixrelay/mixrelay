@@ -21,7 +21,7 @@ use mixrelay_macos_transport::{
     device_io::test_observation::{self as device_io, SimulatedHal},
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     ffi::{CStr, c_void},
     ptr::NonNull,
     sync::{
@@ -44,6 +44,10 @@ pub(crate) struct SimulatedHost {
     callbacks: Mutex<bool>,
     /// Progress polls of every control worker so far.
     polls: AtomicU64,
+    consent: Mutex<VecDeque<super::permission::InputPermission>>,
+    consent_requests: AtomicU64,
+    consent_observations: Mutex<Vec<bool>>,
+    permission_waiting: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -74,6 +78,21 @@ struct Timeline {
 impl SimulatedHost {
     pub(crate) fn new() -> Arc<Self> {
         Arc::default()
+    }
+
+    pub(crate) fn consent_decisions(
+        &self,
+        decisions: impl IntoIterator<Item = super::permission::InputPermission>,
+    ) {
+        *self.consent.lock().unwrap() = decisions.into_iter().collect();
+    }
+
+    pub(crate) fn consent_observations(&self) -> Vec<bool> {
+        self.consent_observations.lock().unwrap().clone()
+    }
+
+    pub(crate) fn consent_requests(&self) -> u64 {
+        self.consent_requests.load(Ordering::Relaxed)
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -238,6 +257,37 @@ impl Timeline {
 }
 
 impl Host for SimulatedHost {
+    fn set_permission_waiting(&self, waiting: bool) {
+        self.permission_waiting.store(waiting, Ordering::Relaxed);
+    }
+    fn permission_waiting(&self) -> bool {
+        self.permission_waiting.load(Ordering::Relaxed)
+    }
+    fn input_permission(&self) -> super::permission::InputPermission {
+        self.consent
+            .lock()
+            .unwrap()
+            .front()
+            .copied()
+            .unwrap_or(super::permission::InputPermission::Authorized)
+    }
+    fn request_input_permission(&self) {
+        self.consent_requests.fetch_add(1, Ordering::Relaxed);
+    }
+    fn poll_input_permission(&self) -> super::permission::InputPermission {
+        self.consent_observations
+            .lock()
+            .unwrap()
+            .push(self.permission_waiting());
+        let mut consent = self.consent.lock().unwrap();
+        if consent.len() > 1 {
+            consent.pop_front();
+        }
+        consent
+            .front()
+            .copied()
+            .unwrap_or(super::permission::InputPermission::Authorized)
+    }
     fn inventory(
         &self,
         selectors: &[&DeviceSelector],
@@ -305,7 +355,7 @@ impl Host for SimulatedHost {
         group: Option<&Aggregate>,
     ) -> Option<NonNull<c_void>> {
         // Allocation is the production one and makes no CoreAudio call.
-        let pointer = CoreAudio.create(spec, uid, rate, group)?;
+        let pointer = CoreAudio::default().create(spec, uid, rate, group)?;
         self.state()
             .owners
             .insert(pointer.as_ptr() as usize, spec.input);

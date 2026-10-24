@@ -474,6 +474,7 @@ export const zhHans = {
       unsupported: '不支持',
     },
     states: {
+      awaitingMicrophonePermission: '正在等待麦克风权限 — 请在 macOS 对话框中选择“允许”',
       active: '已启用',
       blocked: '未应用',
       applying: '正在应用',
@@ -483,6 +484,8 @@ export const zhHans = {
     },
     errors: {
       feature_limit: '此更改超出免费方案的上限。请减少连接或节点，或激活许可证。',
+      audio_permission_pending: '正在等待麦克风权限确认。请在 macOS 中允许访问，然后重试。',
+      audio_permission_denied: '麦克风访问被拒绝。请在 macOS 隐私与安全性中允许访问，然后重试。',
       audio_device_disconnected: '无法应用虚拟音频设备配置。',
       audio_source_unavailable: '应用音频采集不可用。请检查应用及音频采集权限。',
       control_unavailable: '本地音频引擎不可用。',

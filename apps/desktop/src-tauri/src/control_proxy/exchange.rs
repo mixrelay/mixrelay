@@ -21,9 +21,19 @@ pub(super) async fn request(
     origin: &str,
     method: Method,
     path: &str,
-    body: Option<Value>,
+    mut body: Option<Value>,
 ) -> Result<ControlProxyResponse, String> {
-    let requested = needs_operation(&method, path).then(new_operation_id);
+    let supplied = body
+        .as_mut()
+        .and_then(Value::as_object_mut)
+        .and_then(|body| body.remove("clientOperationId"))
+        .and_then(|id| id.as_str().map(str::to_owned))
+        .filter(|_| !path.ends_with("/preview"));
+    let requested =
+        needs_operation(&method, path).then(|| supplied.unwrap_or_else(new_operation_id));
+    if method == Method::GET && path.starts_with("/api/v1/operations/") {
+        return observe_operation(client, origin, path).await;
+    }
     let mut request = client
         .client
         .request(method, format!("{origin}{path}"))
@@ -82,6 +92,31 @@ pub(super) async fn request(
             }
         }
     }
+}
+
+// Read-only receipt observation does not consume or acknowledge the writer's result.
+async fn observe_operation(
+    client: &ControlProxyClient,
+    origin: &str,
+    path: &str,
+) -> Result<ControlProxyResponse, String> {
+    let response = client
+        .client
+        .get(format!("{origin}{path}"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let engine = observe_engine(client, &response);
+    let status = response.status().as_u16();
+    let body = response.json().await.map_err(|error| error.to_string())?;
+    Ok(ControlProxyResponse {
+        engine,
+        status,
+        body,
+        #[cfg(target_os = "macos")]
+        delivery: RequestDelivery::ServerResponse,
+    })
 }
 
 enum ExchangeError {

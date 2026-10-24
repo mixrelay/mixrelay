@@ -492,6 +492,8 @@ export const en = {
       unsupported: 'Unsupported',
     },
     states: {
+      awaitingMicrophonePermission:
+        'Waiting for microphone permission — choose Allow in the macOS dialog',
       active: 'Active',
       blocked: 'Not applied',
       applying: 'Applying',
@@ -503,6 +505,10 @@ export const en = {
     errors: {
       feature_limit:
         'This change exceeds the free plan. Reduce the connections or nodes, or activate a licence.',
+      audio_permission_pending:
+        'Waiting for microphone permission. Allow access in macOS, then try again.',
+      audio_permission_denied:
+        'Microphone access is denied. Enable it in macOS Privacy & Security, then try again.',
       audio_device_disconnected: 'The virtual audio device configuration could not be applied.',
       audio_source_unavailable:
         'Application audio capture is unavailable. Check the app and audio capture permission.',

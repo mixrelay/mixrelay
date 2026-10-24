@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 
 // Keep retries below the server's 60-second completed-receipt retention.
 const OPERATION_BUDGET_MS = 45000;
+// Native input can spend 120 seconds awaiting first-use consent plus readiness.
+const PREPARATION_BUDGET_MS = 130000;
 const engineHost = { host: 'mixrelay-engine' };
 
 export function engineOperations(io, prefix = 'lab') {
@@ -12,7 +14,8 @@ export function engineOperations(io, prefix = 'lab') {
     const receipt = `/api/v1/operations/${id}`;
     const headers = { ...engineHost, 'x-mixrelay-operation-request': id,
       ...(body === undefined ? {} : { 'content-type': 'application/json' }) };
-    const deadline = io.now() + OPERATION_BUDGET_MS;
+    let deadline = io.now() + OPERATION_BUDGET_MS;
+    const preparationDeadline = io.now() + PREPARATION_BUDGET_MS;
     let pending = false;
     while (io.now() < deadline) {
       let reply;
@@ -32,6 +35,15 @@ export function engineOperations(io, prefix = 'lab') {
         assert.equal(reply.status, 202, `${method} ${path}: pending operation must return HTTP 202`);
         assert.equal(resultId, undefined, `${method} ${path}: operation cannot be pending and complete`);
         pending = true;
+        // Ownership alone does not extend a slow or hung engine operation.
+        try {
+          const status = await io.request('/api/v1/graph/status', { headers: engineHost, timeoutMs: 5000 });
+          const reason = JSON.parse(status.body)?.pendingReason;
+          if (reason === 'awaiting_microphone_permission')
+            deadline = Math.min(preparationDeadline, io.now() + OPERATION_BUDGET_MS);
+        } catch {
+          // Missing permission observations keep the existing deadline.
+        }
         await io.delay(250);
         continue;
       }

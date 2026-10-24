@@ -504,6 +504,8 @@ export const es = {
       unsupported: 'No compatible',
     },
     states: {
+      awaitingMicrophonePermission:
+        'Esperando permiso del micrófono — elige Permitir en el diálogo de macOS',
       active: 'Activo',
       blocked: 'Sin aplicar',
       applying: 'Aplicando',
@@ -515,6 +517,10 @@ export const es = {
     errors: {
       feature_limit:
         'Este cambio supera los límites de la versión gratuita. Reduzca las conexiones o los nodos, o active una licencia.',
+      audio_permission_pending:
+        'Esperando el permiso del micrófono. Permite el acceso en macOS y vuelve a intentarlo.',
+      audio_permission_denied:
+        'Se ha denegado el acceso al micrófono. Permítelo en Privacidad y seguridad de macOS y vuelve a intentarlo.',
       audio_device_disconnected:
         'No se pudo aplicar la configuración del dispositivo de audio virtual.',
       audio_source_unavailable:

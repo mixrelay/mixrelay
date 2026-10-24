@@ -254,6 +254,9 @@ impl TapOwner {
             mute_while_captured: id.is_some(),
             ring_capacity_frames: 16_384,
             target_device_uid: uid.as_ref().map_or(ptr::null(), |uid| uid.as_ptr()),
+            system_audio: false,
+            excluded_bundle_ids: ptr::null(),
+            excluded_bundle_count: 0,
         };
         let mut error = TapError::default();
         // SAFETY: configuration and terminated strings remain live during creation;

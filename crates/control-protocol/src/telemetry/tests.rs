@@ -30,6 +30,7 @@ fn packet() -> ControlTelemetry {
             generation: 1,
             status: AppStatus::default(),
             graph: GraphRuntimeStatus {
+                pending_reason: None,
                 protocol_version: 1,
                 active_revision: 3,
                 submitted_revision: 3,

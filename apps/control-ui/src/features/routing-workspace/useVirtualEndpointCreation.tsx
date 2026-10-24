@@ -1,6 +1,7 @@
 import { type RefObject, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AudioGraphModel, AudioGraphPosition } from '../../core/audio-graph/model';
+import type { PlaceGraphNodes } from '../../core/audio-graph/nodePlacement';
 import type {
   ControlPort,
   VirtualEndpointSettings,
@@ -18,6 +19,7 @@ interface Creation {
   owner: ControlPort;
   side: VirtualNodeSide;
   position: AudioGraphPosition;
+  placeNodes?: PlaceGraphNodes;
 }
 
 function creationTemplate(settings: VirtualEndpointSettings | undefined) {
@@ -50,6 +52,10 @@ function creationIdentity(
   if (pendingIdentity.current?.creation !== creation)
     pendingIdentity.current = { creation, id: crypto.randomUUID() };
   return pendingIdentity.current.id;
+}
+
+function placeCreation(creation: Creation, next: AudioGraphModel) {
+  return creation.placeNodes?.(next) ?? next;
 }
 
 /** Identity is allocated only on confirmation; queue retries reuse the same graph snapshot. */
@@ -88,18 +94,19 @@ export function useVirtualEndpointCreation({
     setCreating(false);
   }, [owner]);
   const { t } = useTranslation();
-  const tryAdd = (itemId: string, position: AudioGraphPosition) => {
+  const tryAdd = (itemId: string, position: AudioGraphPosition, placeNodes?: PlaceGraphNodes) => {
     if (!itemId.startsWith('virtual')) return false;
     if (!enabled || !model || !settings) return true;
     const action = resolveVirtualEndpointAction(itemId, settings);
     if (!action) return true;
     if (action.kind === 'create') {
-      setCreation({ owner, side: action.side, position });
+      setCreation({ owner, side: action.side, position, placeNodes });
       setFailed(false);
     } else {
       const request = virtualEndpointNodeRequest(action.side, action.spec);
       if (!request) return true;
-      updateModel(addRoutingNode(model, request, position, presentation, settings));
+      const next = addRoutingNode(model, request, position, presentation, settings);
+      updateModel(placeNodes?.(next) ?? next);
     }
     return true;
   };
@@ -124,8 +131,10 @@ export function useVirtualEndpointCreation({
       return;
     }
     const latest = current.current.model;
-    if (latest)
-      updateModel(addRoutingNode(latest, request, creation.position, presentation, settings));
+    if (latest) {
+      const next = addRoutingNode(latest, request, creation.position, presentation, settings);
+      updateModel(placeCreation(creation, next));
+    }
     setCreating(false);
     setCreation(null);
   };

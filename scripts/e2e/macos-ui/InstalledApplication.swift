@@ -56,10 +56,10 @@ final class InstalledApplication {
     let root: InstalledElement
     let pid: pid_t
 
-    init(pid: pid_t) {
+    init(pid: pid_t, messagingTimeout: Float = 2) {
         self.pid = pid
         root = InstalledElement(raw: AXUIElementCreateApplication(pid))
-        AXUIElementSetMessagingTimeout(root.raw, 2)
+        AXUIElementSetMessagingTimeout(root.raw, messagingTimeout)
     }
 
     // The traversal is shared with synthetic trees in the unit tests. A broken AX
@@ -77,6 +77,26 @@ final class InstalledApplication {
 
     func find(_ label: String, roles: [String] = [], contains: Bool = false) -> InstalledElement? {
         Self.first(root: root, children: { $0.children }) { $0.matches(label, roles: roles, contains: contains) }
+    }
+
+    static func choice<Node>(root: Node, label: String, listLabel: String, children: (Node) -> [Node], role: (Node) -> String, labels: (Node) -> [String]) -> Node? {
+        guard let list = first(root: root, children: children, matches: {
+            role($0) == kAXListRole && labels($0).contains(listLabel)
+        }) else { return nil }
+        // Older WebKit exposes an ARIA option as AXStaticText, rather than AXCell.
+        // Restrict that fallback to the named list, never the graph's node titles.
+        return first(root: list, children: children, matches: {
+            [kAXStaticTextRole, kAXCellRole, kAXRowRole].contains(role($0)) && labels($0).contains(label)
+        })
+    }
+
+    func waitChoice(_ label: String, in listLabel: String, timeout: TimeInterval = 30) throws -> InstalledElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let option = Self.choice(root: root, label: label, listLabel: listLabel, children: { $0.children }, role: { $0.role }, labels: { $0.labels }) { return option }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+        throw Failure.control("Missing choice \(label) in list \(listLabel) in editor PID \(pid)")
     }
 
     func wait(_ label: String, roles: [String] = [], contains: Bool = false, timeout: TimeInterval = 30) throws -> InstalledElement {

@@ -223,6 +223,10 @@ impl PreparedGraphFormat for UnchangedGraphFormat {
 pub trait RuntimeStatusBackend: Send + Sync {
     fn status(&self, format: RenderFormat) -> AppStatus;
 
+    fn awaiting_microphone_permission(&self) -> bool {
+        false
+    }
+
     /// Quiesces processing at an audio boundary before a device transaction.
     /// The controller resumes after publication or a verified rollback.
     /// # Errors
@@ -896,6 +900,12 @@ impl ControlBackend for EngineGraphController {
     fn graph_status(&self) -> GraphRuntimeStatus {
         let revisions = self.exchange.revisions();
         GraphRuntimeStatus {
+            pending_reason: self
+                .runtime_status
+                .awaiting_microphone_permission()
+                .then_some(
+                    mixrelay_control_protocol::GraphPendingReason::AwaitingMicrophonePermission,
+                ),
             protocol_version: PROTOCOL_VERSION,
             active_revision: revisions.active,
             submitted_revision: revisions.submitted,
@@ -1916,6 +1926,18 @@ fn configuration_error(error: ProcessorConfigurationError<HostAudioBackendError>
         ProcessorConfigurationError::StaleRevision { current, proposed } => {
             exchange_error(ProcessorSubmitError::StaleRevision { current, proposed })
         }
+        ProcessorConfigurationError::Configuration(HostAudioBackendError::PermissionPending {
+            capability,
+        }) => ProtocolError {
+            code: ErrorCode::AudioPermissionPending,
+            parameters: serde_json::json!({ "capability": capability, "configurationOutcome": "not_applied" }),
+        },
+        ProcessorConfigurationError::Configuration(HostAudioBackendError::PermissionDenied {
+            capability,
+        }) => ProtocolError {
+            code: ErrorCode::AudioPermissionDenied,
+            parameters: serde_json::json!({ "capability": capability, "configurationOutcome": "not_applied" }),
+        },
         ProcessorConfigurationError::Configuration(error) => ProtocolError {
             code: ErrorCode::AudioDeviceDisconnected,
             parameters: serde_json::json!({ "reason": error.to_string() }),

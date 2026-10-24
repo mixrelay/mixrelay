@@ -370,6 +370,18 @@ pub(crate) async fn control_get_graph(
 }
 
 #[tauri::command]
+pub(crate) async fn control_get_operation(
+    client: tauri::State<'_, ControlProxyClient>,
+    operation_id: String,
+) -> Result<ControlProxyResponse, String> {
+    let mut url = reqwest::Url::parse(CONTROL_ORIGIN).map_err(|error| error.to_string())?;
+    url.path_segments_mut()
+        .map_err(|()| "invalid control origin")?
+        .extend(["api", "v1", "operations", &operation_id]);
+    client.request(Method::GET, url.path(), None).await
+}
+
+#[tauri::command]
 pub(crate) async fn control_get_graph_status(
     client: tauri::State<'_, ControlProxyClient>,
 ) -> Result<ControlProxyResponse, String> {
@@ -456,14 +468,16 @@ pub(crate) async fn control_get_processors(
 #[tauri::command]
 pub(crate) async fn control_retry_processor(
     client: tauri::State<'_, ControlProxyClient>,
-    request: ProcessorRetryRequest,
+    request: Value,
 ) -> Result<ControlProxyResponse, String> {
+    let parsed: ProcessorRetryRequest = serde_json::from_value(request.clone())
+        .map_err(|error| format!("invalid processor retry request: {error}"))?;
+    let mut body = processor_retry_body(&parsed)?;
+    if let Some(id) = request.get("clientOperationId") {
+        body["clientOperationId"] = id.clone();
+    }
     client
-        .request(
-            Method::PUT,
-            PROCESSOR_RETRY_ROUTE,
-            Some(processor_retry_body(&request)?),
-        )
+        .request(Method::PUT, PROCESSOR_RETRY_ROUTE, Some(body))
         .await
 }
 

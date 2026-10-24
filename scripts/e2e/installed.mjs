@@ -63,6 +63,31 @@ export function signalGraph(original, graphId, spec) {
   };
 }
 
+// The desktop has already collected the operation receipt. A pending graph
+// publication still needs its audio-thread acknowledgement before recording.
+export async function applyDesktopGraph(document, { invoke, active, api }) {
+  const response = await invoke('control_apply_graph', { document });
+  assert.ok([200, 202].includes(response.status), JSON.stringify(response));
+  assert.equal(response.body.protocolVersion, 1);
+  assert.equal(response.body.revision, document.revision);
+  assert.ok(['active', 'pending'].includes(response.body.state), JSON.stringify(response));
+  await active(document.revision);
+  const observed = await api('graph');
+  assert.equal(observed.revision, document.revision);
+  assert.deepEqual(observed.nodes, document.nodes);
+  assert.deepEqual(observed.edges, document.edges);
+  return observed;
+}
+
+// Native preparation owns first-use consent. Qualification submits one change and
+// collects its receipt; permission errors must fail instead of being replayed here.
+export async function applyNativeGraph(document, { operation }) {
+  const reply = await operation('PUT', '/api/v1/graph', JSON.stringify(document));
+  assert.ok(reply.status >= 200 && reply.status < 300, `Native graph: HTTP ${reply.status} ${reply.body}`);
+  assert.equal(reply.json.revision, document.revision);
+  assert.ok(['active', 'pending'].includes(reply.json.state), JSON.stringify(reply));
+}
+
 // This is the same suite for every contract target. Platform code owns only installation
 // and native signal generation. API evidence never substitutes for installed UI evidence.
 export async function qualifyMode({
@@ -156,7 +181,7 @@ export async function qualifyMode({
     );
   async function apply(document) {
     unconfirmedMutation = true;
-    await api('graph', document);
+    await applyNativeGraph(document, { operation });
     await active(document.revision);
     const observed = await api('graph');
     unconfirmedMutation = false;
@@ -427,10 +452,7 @@ export async function qualifyMode({
           output,
           apply: async (document) => {
             unconfirmedMutation = true;
-            const response = await invoke('control_apply_graph', { document });
-            assert.equal(response.status, 200, JSON.stringify(response));
-            await active(document.revision);
-            applied = await api('graph');
+            applied = await applyDesktopGraph(document, { invoke, active, api });
             unconfirmedMutation = false;
             return applied;
           },

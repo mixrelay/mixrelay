@@ -68,6 +68,7 @@ it('uses the same writer lock and displayed revision without optimistic UI state
   const f = fixture();
   const task = f.queue.setNodeControl('graph-a', 'processor', { enabled: true });
   expect(f.port.updateNodeControl).toHaveBeenCalledExactlyOnceWith('graph-a', 'processor', {
+    clientOperationId: expect.any(String),
     expectedRevision: 7,
     enabled: true,
   });
@@ -138,6 +139,7 @@ it('keeps a rejected deleted-node command recoverable without rewriting connecti
   });
   await f.queue.setNodeControl('graph-a', 'missing', { muted: true });
   expect(f.port.updateNodeControl).toHaveBeenLastCalledWith('graph-a', 'missing', {
+    clientOperationId: expect.any(String),
     expectedRevision: 8,
     muted: true,
   });
@@ -306,6 +308,7 @@ it.each([true, false])(
     expect(f.port.updateNodeControl).toHaveBeenCalledTimes(definite ? 2 : 1);
     if (definite)
       expect(f.port.updateNodeControl).toHaveBeenLastCalledWith('graph-a', 'missing', {
+        clientOperationId: expect.any(String),
         expectedRevision: 8,
         muted: true,
       });

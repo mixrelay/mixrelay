@@ -184,6 +184,7 @@ export interface NodeControlState {
 }
 
 export interface NodeControlRequest {
+  clientOperationId?: string;
   expectedRevision: number;
   enabled?: boolean;
   muted?: boolean;
@@ -233,6 +234,7 @@ export interface RuntimeGraphDocument {
 }
 
 export interface GraphRuntimeStatus {
+  pendingReason?: 'awaiting_microphone_permission';
   activeRevision: number;
   protocolVersion: 1;
   submittedRevision: number;
@@ -366,6 +368,7 @@ export interface GraphApplyResponse {
 }
 
 export interface ProcessorRetryRequest {
+  clientOperationId?: string;
   expectedCatalogRevision: number;
   expectedInstanceId: string;
   expectedRevision: number;
@@ -382,6 +385,7 @@ export interface ProcessorParameterChange {
 }
 
 export interface GraphApplyRequest extends RuntimeGraphDocument {
+  clientOperationId?: string;
   processorParameterChanges?: ProcessorParameterChange[];
   /** The graph this document was authored for; the engine rejects it once another is selected. */
   expectedGraphId?: string;
@@ -396,6 +400,8 @@ export type ProtocolErrorCode =
   | 'audio_session_processor_state_unavailable'
   | 'audio_session_reconfigure_failed'
   | 'audio_device_disconnected'
+  | 'audio_permission_pending'
+  | 'audio_permission_denied'
   | 'audio_source_unavailable'
   | 'control_unavailable'
   | 'control_request_failed'
@@ -462,6 +468,7 @@ export interface DeviceAppActivity {
 }
 
 export interface ControlPort {
+  isOperationPending?(operationId: string): Promise<boolean>;
   subscribeState?(listener: import('./telemetry').StateListener): () => void;
   /** A successful missing UID is observed empty; rejection means unavailable. */
   getVirtualDeviceAppActivity?(): Promise<Record<string, DeviceAppActivity[]>>;

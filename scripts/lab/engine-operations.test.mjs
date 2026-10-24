@@ -9,6 +9,7 @@ test('lost replies reuse the same mutation and reclaim bounded receipts across m
     now: () => time,
     async delay(ms) { time += ms; },
     async request(path, { method = 'GET', headers = {}, body } = {}) {
+      if (path === '/api/v1/graph/status') return { status: 200, headers: {}, body: '{}' };
       const polling = path.startsWith('/api/v1/operations/');
       const id = polling ? path.split('/').at(-1) : headers['x-mixrelay-operation-request'];
       if (method === 'DELETE') {
@@ -55,3 +56,27 @@ for (const header of ['x-mixrelay-operation', 'x-mixrelay-operation-result']) {
     assert.equal(requests, 1);
   });
 }
+
+test('live first-use consent receipts can outlast a minute without replay and still have an upper bound', async () => {
+  for (const [completion, permission] of [[60000, true], [Number.POSITIVE_INFINITY, true], [Number.POSITIVE_INFINITY, false]]) {
+    let time = 0, submissions = 0;
+    const client = engineOperations({
+      now: () => time,
+      async delay(ms) { time += ms; },
+      async request(path, { method = 'GET', headers = {} } = {}) {
+        if (method === 'DELETE') return { status: 204, headers: {}, body: '' };
+        if (path === '/api/v1/graph/status') return { status: 200, headers: {}, body: JSON.stringify(permission ? { pendingReason: 'awaiting_microphone_permission' } : {}) };
+        const polling = path.startsWith('/api/v1/operations/');
+        const id = polling ? path.split('/').at(-1) : headers['x-mixrelay-operation-request'];
+        if (!polling) submissions++;
+        return time >= completion
+          ? { status: 200, headers: { 'x-mixrelay-operation-result': id }, body: '{"revision":4}' }
+          : { status: 202, headers: { 'x-mixrelay-operation': id }, body: '{}' };
+      },
+    });
+    if (Number.isFinite(completion)) assert.deepEqual(await client.api('graph', { revision: 4 }), { revision: 4 });
+    else await assert.rejects(client.api('graph', { revision: 4 }), /did not finish/);
+    assert.equal(submissions, 1);
+    assert.ok(time <= (permission ? 130000 : 45000));
+  }
+});

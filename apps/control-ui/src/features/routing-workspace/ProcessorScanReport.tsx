@@ -1,6 +1,7 @@
 import type { TFunction } from 'i18next';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { PlaceGraphNodes } from '../../core/audio-graph/nodePlacement';
 
 import type { ExternalProcessorDiagnostic } from '../../core/control-port/types';
 import { ActionButton } from '../../core/ui/ActionButton';
@@ -15,13 +16,17 @@ import type { useProcessorCatalog } from './useProcessorCatalog';
 
 export function useProcessorScanReport(
   catalog: ReturnType<typeof useProcessorCatalog>,
-  addNode: (itemId: string, position: { x: number; y: number }) => void,
+  addNode: (
+    itemId: string,
+    position: { x: number; y: number },
+    placeNodes?: PlaceGraphNodes,
+  ) => void,
 ) {
   const [opened, setOpened] = useState(false);
   const onMenuAction = useCallback(
-    (itemId: string, position: { x: number; y: number }) => {
+    (itemId: string, position: { x: number; y: number }, placeNodes?: PlaceGraphNodes) => {
       if (itemId === PROCESSOR_SCAN_REPORT_ITEM_ID) setOpened(true);
-      else addNode(itemId, position);
+      else addNode(itemId, position, placeNodes);
     },
     [addNode],
   );

@@ -390,6 +390,7 @@ impl ControlBackend for UnavailableBackend {
 
     fn graph_status(&self) -> GraphRuntimeStatus {
         GraphRuntimeStatus {
+            pending_reason: None,
             protocol_version: PROTOCOL_VERSION,
             active_revision: 0,
             submitted_revision: 0,
@@ -1233,6 +1234,7 @@ mod tests {
 
         fn graph_status(&self) -> GraphRuntimeStatus {
             GraphRuntimeStatus {
+                pending_reason: None,
                 protocol_version: PROTOCOL_VERSION,
                 active_revision: 4,
                 submitted_revision: 5,

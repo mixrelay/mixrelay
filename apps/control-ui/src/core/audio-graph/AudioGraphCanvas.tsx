@@ -70,6 +70,7 @@ import {
 } from './channelConnections';
 import {
   focusGraphNode,
+  graphContextMenuAnchor,
   openContextMenuFromKeyboard,
   useChannelConnectionRequests,
 } from './graphKeyboard';
@@ -89,6 +90,7 @@ import {
   removeAudioGraphItems,
   resizeAudioGraphNode,
 } from './model';
+import type { PlaceGraphNodes } from './nodePlacement';
 import { PortSelectionFeedback } from './PortSelectionFeedback';
 import {
   type AudioFlowEdge,
@@ -103,6 +105,7 @@ import {
 import { graphNodeFaceMode, useAudioNodeLayout } from './useAudioNodeLayout';
 import { type SelectedAudioPort, useAudioPortSelection } from './useAudioPortSelection';
 import { type GraphContextMenuLabels, useGraphContextMenu } from './useGraphContextMenu';
+import { useNodeInsertion } from './useNodeInsertion';
 
 const nodeTypes = { audio: memo(AudioFlowNodeView) };
 const deleteKeyCode = ['Backspace', 'Delete'];
@@ -176,7 +179,7 @@ export interface AudioGraphCanvasProps {
   meterStore?: AudioMeterStore;
   model: AudioGraphModel;
   nodeMenuItems?: readonly AudioGraphNodeMenuItem[];
-  onAddNode?: (itemId: string, position: XYPosition) => void;
+  onAddNode?: (itemId: string, position: XYPosition, placeNodes?: PlaceGraphNodes) => void;
   onNodeMenuOpenedChange?: (opened: boolean) => void;
   onNodeRenameRequest?: (nodeId: string) => void;
   onModelChange: (model: AudioGraphModel, kind: AudioGraphChangeKind) => void;
@@ -194,7 +197,7 @@ export interface AudioGraphCanvasProps {
   processorEditorStatuses?: ReadonlyMap<string, ProcessorEditorStatus>;
   /** Initial or externally restored view; user movement remains locally interactive. */
   viewport?: AudioGraphViewport;
-  /** Reports completed user pan/zoom gestures, never programmatic restoration. */
+  /** Reports user pan/zoom and insertion reveals, never external viewport restoration. */
   onViewportChange?: (viewport: AudioGraphViewport) => void;
 }
 
@@ -295,13 +298,10 @@ function useCanvasViewActions(
   processorEditorStatuses: ReadonlyMap<string, ProcessorEditorStatus>,
   nodeMenu: ReturnType<typeof useNodeMenu>,
   clearPortSelection: () => void,
-  nodes: readonly AudioGraphNode[],
+  onReveal: AudioGraphCanvasProps['onViewportChange'],
 ) {
-  const addNode = useCallback(
-    (itemId: string) =>
-      onAddNode?.(itemId, unoccupiedPosition(nodeMenu.positionRef.current, nodes)),
-    [nodeMenu.positionRef, nodes, onAddNode],
-  );
+  const placeNodes = useNodeInsertion(nodeMenu, onReveal);
+  const addNode = (itemId: string) => onAddNode?.(itemId, nodeMenu.positionRef.current, placeNodes);
   const onPaneClick = useCallback(() => {
     nodeMenu.close();
     clearPortSelection();
@@ -317,23 +317,6 @@ function useCanvasViewActions(
     [onProcessorEditorRetry, processorEditorLabels, processorEditorStatuses],
   );
   return { addNode, editorContext, onPaneClick };
-}
-
-const ADD_NODE_CASCADE = 24;
-
-/** Repeated adds at one anchor cascade instead of hiding the previous node. */
-function unoccupiedPosition(position: XYPosition, nodes: readonly AudioGraphNode[]): XYPosition {
-  const occupied = (candidate: XYPosition) =>
-    nodes.some(
-      (node) =>
-        Math.abs(node.position.x - candidate.x) < ADD_NODE_CASCADE &&
-        Math.abs(node.position.y - candidate.y) < ADD_NODE_CASCADE,
-    );
-  let candidate = position;
-  // Candidates only move forward, so each node blocks at most two steps.
-  while (occupied(candidate))
-    candidate = { x: candidate.x + ADD_NODE_CASCADE, y: candidate.y + ADD_NODE_CASCADE };
-  return candidate;
 }
 
 function useNodeMenu(onOpenedChange?: (opened: boolean) => void) {
@@ -868,6 +851,7 @@ function GraphContextSurface({
 }) {
   return (
     <HierarchicalContextMenu
+      getAnchor={graphContextMenuAnchor}
       items={contextMenu.items}
       onOpenedChange={nodeMenu.setContextOpened}
       onSelect={(id) => {
@@ -893,7 +877,13 @@ function GraphContextSurface({
         ref={nodeMenu.rootRef}
         onContextMenu={(event) => {
           contextMenu.prepare(event);
-          nodeMenu.prepareContextPosition(event);
+          const point = graphContextMenuAnchor(event);
+          nodeMenu.prepareContextPosition({ clientX: point.x, clientY: point.y });
+          // React normalizes mouse events on text nodes to their parent Element.
+          const owner = (event.target as Element).closest<HTMLElement>(
+            '.react-flow__node, .react-flow__edge',
+          );
+          owner?.focus();
         }}
         onTouchStart={(event) => {
           // the context trigger's long-press opens without dispatching a contextmenu event.
@@ -1079,7 +1069,7 @@ export function AudioGraphCanvas({
     processorEditorStatuses,
     nodeMenu,
     portSelection.clear,
-    model.nodes,
+    onViewportChange,
   );
   const { renaming, connecting } = useNodeRequests(onNodeRenameRequest, nodeMenu.rootRef);
   const contextMenu = useGraphContextMenu({

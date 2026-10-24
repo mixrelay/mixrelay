@@ -1764,6 +1764,29 @@ it.each(['en', 'ko-KR', 'pseudo'])(
   },
 );
 
+it.each(['audio_permission_pending', 'audio_permission_denied'] as const)(
+  'preserves the draft and shows microphone recovery for %s',
+  async (code) => {
+    await i18n.changeLanguage('en');
+    const applyGraph = vi.fn().mockRejectedValue(
+      new ControlPortError(503, {
+        code,
+        parameters: { capability: 'microphone', configurationOutcome: 'not_applied' },
+      }),
+    );
+    renderWorkspace(port({ applyGraph }));
+    await screen.findByRole('region');
+    fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
+    expect(await screen.findByText(i18n.t(`routing.errors.${code}`))).toBeInTheDocument();
+    expectBlockedWorkspace();
+    expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
+    expect(applyGraph).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByText(i18n.t('routing.errors.audio_device_disconnected')),
+    ).not.toBeInTheDocument();
+  },
+);
+
 describe('RoutingWorkspace initial readiness', () => {
   it('exposes initial graph loading as a non-focusable status and removes it after success', async () => {
     await i18n.changeLanguage('en');

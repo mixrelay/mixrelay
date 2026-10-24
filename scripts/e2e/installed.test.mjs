@@ -1,6 +1,85 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { signalGraph } from './installed.mjs';
+import { applyDesktopGraph, applyNativeGraph, signalGraph } from './installed.mjs';
+
+const pendingConsent = { status: 503, json: { code: 'audio_permission_pending',
+  parameters: { capability: 'microphone', configurationOutcome: 'not_applied' } } };
+
+test('native input collects the original consent-waiting operation without another submission', async () => {
+  const document = { revision: 4, nodes: [], edges: [] };
+  let submissions = 0;
+  let approve;
+  const consent = new Promise(resolve => { approve = resolve; });
+  const result = applyNativeGraph(document, {
+    operation: async (method, path, body) => {
+      submissions++;
+      assert.equal(method, 'PUT'); assert.equal(path, '/api/v1/graph');
+      assert.deepEqual(JSON.parse(body), document);
+      await consent;
+      return { status: 202, json: { revision: 4, state: 'pending' } };
+    },
+  });
+  assert.equal(submissions, 1);
+  approve();
+  await result;
+  assert.equal(submissions, 1);
+});
+
+test('native input fails pending, denied and uncertain operations without replaying them', async () => {
+  const document = { revision: 4, nodes: [], edges: [] };
+  for (const reply of [pendingConsent,
+    { status: 503, json: { code: 'audio_permission_denied' } },
+    { status: 503, json: { code: 'control_request_failed' } },
+  ]) {
+    let submits = 0;
+    await assert.rejects(applyNativeGraph(document, {
+      operation: async () => { submits++; return reply; },
+    }));
+    assert.equal(submits, 1);
+  }
+});
+
+test('desktop pending graph publications are acknowledged before readback without resubmission', async () => {
+  const document = { revision: 10, nodes: [{ id: 'system' }], edges: [] };
+  for (const status of [200, 202]) {
+    const calls = [];
+    const result = await applyDesktopGraph(document, {
+      invoke: async (command, args) => {
+        calls.push(command);
+        assert.deepEqual(args, { document });
+        return { status, body: { protocolVersion: 1, revision: 10, state: status === 202 ? 'pending' : 'active' } };
+      },
+      active: async revision => { calls.push('active'); assert.equal(revision, 10); },
+      api: async path => { calls.push(path); return document; },
+    });
+    assert.deepEqual(result, document);
+    assert.deepEqual(calls, ['control_apply_graph', 'active', 'graph']);
+  }
+});
+
+test('desktop acceptance rejects failed, foreign and unacknowledged graph publications', async () => {
+  const document = { revision: 10, nodes: [], edges: [] };
+  for (const response of [
+    { status: 409, body: {} },
+    { status: 202, body: { protocolVersion: 1, revision: 9, state: 'pending' } },
+    { status: 202, body: { protocolVersion: 1, revision: 10, state: 'unknown' } },
+  ]) {
+    await assert.rejects(applyDesktopGraph(document, {
+      invoke: async () => response,
+      active: async () => assert.fail('must not await a rejected response'),
+    }));
+  }
+  await assert.rejects(applyDesktopGraph(document, {
+    invoke: async () => ({ status: 202, body: { protocolVersion: 1, revision: 10, state: 'pending' } }),
+    active: async () => { throw new Error('publication never activated'); },
+    api: async () => assert.fail('must not read an unacknowledged graph'),
+  }), /never activated/);
+  await assert.rejects(applyDesktopGraph(document, {
+    invoke: async () => ({ status: 200, body: { protocolVersion: 1, revision: 10, state: 'active' } }),
+    active: async () => {},
+    api: async () => ({ ...document, nodes: [{ id: 'foreign' }] }),
+  }));
+});
 
 test('unity-level acceptance records the Driver mix without adding a feedback return', () => {
   const original = { schemaVersion: 1, revision: 10, nodes: [], edges: [] };

@@ -89,12 +89,14 @@ export function HierarchicalContextMenu({
   children,
   disabled,
   items,
+  getAnchor,
   onOpenedChange,
   onSelect,
   opened,
 }: PropsWithChildren<
   MenuContentProps & {
     disabled?: boolean;
+    getAnchor?: (event: React.MouseEvent) => { x: number; y: number };
     onOpenedChange?: (opened: boolean) => void;
     opened?: boolean;
   }
@@ -130,7 +132,8 @@ export function HierarchicalContextMenu({
           child.props.onContextMenu?.(event);
           if (disabled) return;
           event.preventDefault();
-          open(event.clientX, event.clientY);
+          const point = getAnchor?.(event) ?? { x: event.clientX, y: event.clientY };
+          open(point.x, point.y);
         },
         onTouchStart: (event) => {
           child.props.onTouchStart?.(event);

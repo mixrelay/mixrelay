@@ -186,6 +186,19 @@ export class TauriControlPort implements ControlPort {
     return this.call('control_get_graph');
   }
 
+  public async isOperationPending(operationId: string): Promise<boolean> {
+    const response = await this.invokeCommand<ControlProxyResponse>('control_get_operation', {
+      operationId,
+    });
+    if (response.status !== 202) return false;
+    return (
+      typeof response.body === 'object' &&
+      response.body !== null &&
+      'operationId' in response.body &&
+      response.body.operationId === operationId
+    );
+  }
+
   public getGraphStatus(): Promise<GraphRuntimeStatus> {
     return this.call('control_get_graph_status');
   }

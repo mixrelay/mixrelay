@@ -565,3 +565,48 @@ async fn fully_received_invalid_json_is_not_recoverable_transport_failure() {
         matches!(result, Err(ExchangeError::Invalid(reason)) if reason.contains("response was invalid"))
     );
 }
+
+#[tokio::test]
+async fn receipt_observation_does_not_poll_or_acknowledge_the_writers_result() {
+    let (origin, client, server) = server(vec![(202, Some("ours"), r#"{"operationId":"ours"}"#)]);
+    let result = request(
+        &client,
+        &origin,
+        Method::GET,
+        "/api/v1/operations/ours",
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.status, 202);
+    assert_eq!(result.body["operationId"], "ours");
+    let requests = server.await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with("GET /api/v1/operations/ours "));
+}
+
+#[tokio::test]
+async fn ui_operation_identity_survives_native_preparation_without_reusing_the_preview_receipt() {
+    let (origin, client, server) = server(vec![
+        (200, Some("$complete"), "{}"),
+        (204, None, ""),
+        (200, Some("$complete"), "{}"),
+        (204, None, ""),
+    ]);
+    let body = Some(serde_json::json!({"clientOperationId":"ui-consent", "revision":2}));
+    request(
+        &client,
+        &origin,
+        Method::POST,
+        "/api/v1/application-capture/preview",
+        body.clone(),
+    )
+    .await
+    .unwrap();
+    request(&client, &origin, Method::PUT, "/api/v1/graph", body)
+        .await
+        .unwrap();
+    let requests = server.await.unwrap();
+    assert!(!requests[0].contains("x-mixrelay-operation-request: ui-consent"));
+    assert!(requests[2].contains("x-mixrelay-operation-request: ui-consent"));
+}

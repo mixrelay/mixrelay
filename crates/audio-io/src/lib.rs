@@ -643,6 +643,8 @@ pub enum HostAudioContractError {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum HostAudioBackendError {
+    #[error("host audio permission decision pending: {capability}")]
+    PermissionPending { capability: String },
     #[error("host audio permission denied: {capability}")]
     PermissionDenied { capability: String },
     #[error("host audio capability unavailable: {capability}")]
