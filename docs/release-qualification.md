@@ -160,9 +160,11 @@ The gate still requires `APP-01` to pass.
 graph against the engine. The macOS UI observer handles first-use audio consent and
 remains active through Quit and removal. macOS `AUDIO-11` exercises free whole-system
 capture. After recording the UI screenshot, accessibility tree and committed graph,
-macOS hides the editor and measures background native audio at 48kHz/128 frames;
+macOS minimizes the editor window and measures background native audio at 48kHz/128 frames;
 `installed-ui-audio-phase.json` records the editor state. The consent observer remains
 active. The system-capture graph is prepared before its two owned tone apps start.
+Recording starts after both channels produce live graph meters within 30 seconds.
+`whole-system-ready.json` preserves those observations, including a readiness failure.
 Their failures and missing evidence prevent qualification. API results alone
 do not establish rendered UI, launch-icon behaviour, Free-state display or permission
 recovery. The [950ff3ac hosted failure investigation](validation/macos-hosted-950ff3ac.md)
