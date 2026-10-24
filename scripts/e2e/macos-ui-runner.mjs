@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-function run(program, args) {
-  const result = spawnSync(program, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-  process.stdout.write(result.stdout ?? '');
+function run(program, args, { quiet = false } = {}) {
+  const result = spawnSync(program, args, { encoding: 'utf8', timeout: program === 'xcodebuild' ? 600000 : 30000,
+    maxBuffer: 16 * 1024 * 1024 });
+  if (!quiet) process.stdout.write(result.stdout ?? '');
   process.stderr.write(result.stderr ?? '');
   if (result.error || result.status !== 0) throw result.error ?? new Error(`${program} exited ${result.status}`);
   return result;
@@ -18,7 +19,12 @@ export function designatedRequirement({ stdout = '', stderr = '' }) {
   return matches[0][1].trim();
 }
 
-export function runMacosUi(output, tools, { runCommand = run, read = readFileSync, write = writeFileSync } = {}) {
+function servicePid(value) {
+  return value.match(/^\s*pid = ([1-9][0-9]*)\s*$/m)?.[1];
+}
+
+export function prepareMacosUiRunner(tools, { runCommand = run, read = readFileSync,
+  write = writeFileSync, list = readdirSync } = {}) {
   const build = ['-project', join(tools, 'MixRelayInstalledUI.xcodeproj'), '-scheme', 'InstalledUI',
     '-destination', 'platform=macOS', '-derivedDataPath', join(tools, 'DerivedData'),
     '-parallel-testing-enabled', 'NO', 'CODE_SIGNING_ALLOWED=NO'];
@@ -41,13 +47,54 @@ export function runMacosUi(output, tools, { runCommand = run, read = readFileSyn
      indirect_object_identifier_type,indirect_object_identifier,flags,last_modified)
     VALUES ('kTCCServiceAccessibility','${bundle}',0,2,4,1,X'${bytes}',0,'UNUSED',0,strftime('%s','now'));`;
   runCommand('sudo', ['-n', 'sqlite3', '/Library/Application Support/com.apple.TCC/TCC.db', sql]);
-  runCommand('sudo', ['-n', 'killall', '-u', 'root', 'tccd']);
-  write(join(output, 'installed-ui-runner-expected.json'), `${JSON.stringify({ bundle, path: runner, requirement }, null, 2)}\n`);
-  runCommand('xcodebuild', ['test-without-building', ...build, '-resultBundlePath', join(output, 'installed-ui.xcresult')]);
+  const service = 'system/com.apple.tccd.system';
+  const before = servicePid(runCommand('launchctl', ['print', service]).stdout);
+  runCommand('sudo', ['-n', 'launchctl', 'kickstart', '-k', '-p', service]);
+  const after = servicePid(runCommand('launchctl', ['print', service]).stdout);
+  assert.ok(after && after !== before, 'The hosted TCC daemon must restart before product installation');
+  write(join(tools, 'tcc-restart.json'), `${JSON.stringify({ before, after }, null, 2)}\n`);
+  const products = join(tools, 'DerivedData/Build/Products');
+  const templates = list(products).filter(name => name.endsWith('.xctestrun'));
+  assert.equal(templates.length, 1, 'One immutable XCTest configuration is required');
+  const prepared = { bundle, path: runner, requirement, template: join(products, templates[0]) };
+  write(join(tools, 'prepared-runner.json'), `${JSON.stringify(prepared, null, 2)}\n`);
+  return prepared;
+}
+
+export function setEvidenceDirectory(configuration, output) {
+  let changed = 0;
+  function visit(value) {
+    if (!value || typeof value !== 'object') return;
+    for (const [key, item] of Object.entries(value)) {
+      if (key === 'MIXRELAY_UI_EVIDENCE') { value[key] = output; changed++; }
+      else visit(item);
+    }
+  }
+  visit(configuration);
+  assert.ok(changed > 0, 'Prepared XCTest configuration lost its evidence environment');
+  return configuration;
+}
+
+export function runMacosUi(output, tools, { runCommand = run, read = readFileSync, write = writeFileSync } = {}) {
+  const prepared = JSON.parse(read(join(tools, 'prepared-runner.json'), 'utf8'));
+  assert.equal(prepared.bundle, 'io.mixrelay.qualification.ui.xctrunner');
+  assert.equal(prepared.path, join(tools, 'DerivedData/Build/Products/Debug/InstalledUITests-Runner.app'));
+  runCommand('codesign', ['--verify', '--deep', '--strict', prepared.path]);
+  runCommand('codesign', ['--verify', '--strict', '-R', join(tools, 'runner.csreq'), prepared.path]);
+  const template = JSON.parse(runCommand('plutil', ['-convert', 'json', '-o', '-', prepared.template], { quiet: true }).stdout);
+  const configuration = join(tools, 'DerivedData/Build/Products', `installed-${basename(output)}.xctestrun`);
+  write(configuration, `${JSON.stringify(setEvidenceDirectory(template, output))}\n`);
+  runCommand('plutil', ['-convert', 'xml1', configuration]);
+  write(join(output, 'installed-ui-runner-expected.json'), `${JSON.stringify(prepared, null, 2)}\n`);
+  // No build, re-signing, privacy grant or daemon restart while the product runs.
+  runCommand('xcodebuild', ['test-without-building', '-xctestrun', configuration,
+    '-destination', 'platform=macOS', '-parallel-testing-enabled', 'NO',
+    'CODE_SIGNING_ALLOWED=NO', '-resultBundlePath', join(output, 'installed-ui.xcresult')]);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   assert.equal(process.platform, 'darwin');
   assert.equal(process.env.GITHUB_ACTIONS, 'true', 'TCC setup requires a disposable hosted runner');
-  runMacosUi(resolve(process.argv[2]), resolve(process.argv[3]));
+  if (process.argv[2] === '--prepare') prepareMacosUiRunner(resolve(process.argv[3]));
+  else runMacosUi(resolve(process.argv[2]), resolve(process.argv[3]));
 }

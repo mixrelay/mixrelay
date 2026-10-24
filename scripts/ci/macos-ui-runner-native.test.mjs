@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runMacosUi } from '../e2e/macos-ui-runner.mjs';
+import { prepareMacosUiRunner } from '../e2e/macos-ui-runner.mjs';
 
 test('native ad-hoc cdhash requirement compiles to a blob that validates only the signed code',
   () => {
@@ -26,19 +26,22 @@ test('native ad-hoc cdhash requirement compiles to a blob that validates only th
 <plist version="1.0"><dict><key>CFBundleIdentifier</key><string>io.mixrelay.qualification.ui.xctrunner</string>
 <key>CFBundleExecutable</key><string>runner</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>`);
       let sql;
+      let pidReads = 0;
       // Run the production signing/requirement path on a local app fixture.
       // Xcode and TCC remain disposable-session boundaries; no host grant is written.
-      runMacosUi(directory, directory, {
+      prepareMacosUiRunner(directory, {
+        list: () => ['InstalledUI_macosx.xctestrun'],
         runCommand(program, args) {
           if (program === 'xcodebuild') return { stdout: '', stderr: '' };
           if (program === 'sudo') {
             if (args[1] === 'sqlite3') sql = args.at(-1);
             return { stdout: '', stderr: '' };
           }
+          if (program === 'launchctl') return { stdout: `pid = ${++pidReads}\n` };
           return command(program, args);
         },
       });
-      const { requirement } = JSON.parse(readFileSync(join(directory, 'installed-ui-runner-expected.json')));
+      const { requirement } = JSON.parse(readFileSync(join(directory, 'prepared-runner.json')));
       assert.match(requirement, /^cdhash H"[0-9a-f]+"(?: or cdhash H"[0-9a-f]+")*$/);
       const bytes = readFileSync(blob);
       assert.ok(bytes.length > 0);

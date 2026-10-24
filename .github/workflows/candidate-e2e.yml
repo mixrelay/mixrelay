@@ -131,9 +131,12 @@ jobs:
         run: |
           node scripts/e2e/prepare-macos-host.mjs macos-host
           node scripts/e2e/prepare-macos-ui.mjs
+          bash scripts/e2e/macos-ui.sh --prepare installed-ui-tools
+          zsh scripts/probe-macos-roundtrip.sh --self-test
       - name: Install and exercise final PKG on macOS
         env:
           TARGET: ${{ matrix.id }}
+          MIXRELAY_E2E_MACOS_UI_TOOLS: ${{ github.workspace }}/installed-ui-tools
         run: node scripts/e2e/installed.mjs --target "$TARGET" --directory candidate --candidate candidate/mix-relay.candidate.json --output evidence --disposable-environment
       - name: Preserve macOS failure diagnostics
         if: always()
@@ -146,6 +149,7 @@ jobs:
           path: |
             macos-host/*.json
             macos-host/*.log
+            installed-ui-tools/*.json
             evidence/*
             !evidence/**/payload/**
             !evidence/**/ui-tools/**
