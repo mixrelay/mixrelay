@@ -17,7 +17,7 @@ function run(program, args, options = {}) {
 function buildPolicy(t) {
   const directory = mkdtempSync(join(tmpdir(), 'mixrelay-dbus-link-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const source = readFileSync(new URL('../apps/desktop/src-tauri/build.rs', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../apps/desktop/src-tauri/build.rs', import.meta.url), 'utf8');
   const main = source.slice(0, source.indexOf('fn build_macos_audio('));
   assert.match(main, /fn main\(\)/);
   // Run the actual build-script entry point; the native macOS and Tauri hooks
@@ -31,7 +31,7 @@ mod tauri_build { pub fn build() {} }
     env: {
       ...process.env,
       CARGO_CFG_TARGET_OS: os,
-      CARGO_MANIFEST_DIR: fileURLToPath(new URL('../apps/desktop/src-tauri/', import.meta.url)),
+      CARGO_MANIFEST_DIR: fileURLToPath(new URL('../../apps/desktop/src-tauri/', import.meta.url)),
     },
   }).split('\n').filter((line) => line.startsWith('cargo:rustc-link-arg='))
     .map((line) => line.slice('cargo:rustc-link-arg='.length));
@@ -41,14 +41,13 @@ mod tauri_build { pub fn build() {} }
 test('desktop build isolates private D-Bus symbols only for ELF targets', (t) => {
   const policy = buildPolicy(t);
   assert.deepEqual(policy.args('linux'), [
-    `-Wl,--version-script=${fileURLToPath(new URL('../apps/desktop/src-tauri/dbus-symbols.map', import.meta.url))}`,
+    `-Wl,--version-script=${fileURLToPath(new URL('../../apps/desktop/src-tauri/dbus-symbols.map', import.meta.url))}`,
   ]);
   assert.deepEqual(policy.args('macos'), []);
 });
 
-test('private D-Bus cannot interpose a dynamically loaded accessibility library', {
-  skip: process.platform !== 'linux' && 'Requires the Linux ELF linker/loader; exercised on Linux CI',
-}, (t) => {
+test('private D-Bus cannot interpose a dynamically loaded accessibility library', (t) => {
+  assert.equal(process.platform, 'linux', 'Run the native ELF boundary on Linux');
   const { directory, args } = buildPolicy(t);
   writeFileSync(join(directory, 'private.c'), `
 int dbus_connection_get_unix_fd(void) { return 11; }
