@@ -69,6 +69,7 @@ typedef struct MRProbe {
     float *recorded;  // capacity * channels, interleaved
     _Atomic uint64_t recorded_frames;
     _Atomic uint32_t overflow;
+    _Atomic uint32_t latency_notifications;
     _Atomic double origin;  // first output sample time, NAN before the first output cycle
     MRSide out, in;
 } MRProbe;
@@ -1715,6 +1716,18 @@ static bool mr_disable_streams(AudioDeviceID device, AudioDeviceIOProcID proc,
     return status == noErr;
 }
 
+static OSStatus mr_latency_changed(AudioObjectID object, UInt32 count,
+                                    const AudioObjectPropertyAddress *addresses, void *context) {
+    (void)object;
+    MRProbe *probe = context;
+    for (UInt32 index = 0; index < count; ++index) {
+        if (addresses[index].mSelector == kAudioDevicePropertyLatency &&
+            addresses[index].mScope == kAudioObjectPropertyScopeInput)
+            atomic_fetch_add_explicit(&probe->latency_notifications, 1U, memory_order_relaxed);
+    }
+    return noErr;
+}
+
 /// Runs the devices for the signal and its tail. False when they could not start.
 static bool mr_run(MRProbe *probe) {
     const bool same = probe->output == probe->input;
@@ -1730,6 +1743,12 @@ static bool mr_run(MRProbe *probe) {
         fprintf(stderr, "could not limit the IO procedures to one direction each\n");
         return false;
     }
+    const AudioObjectPropertyAddress latency = {kAudioDevicePropertyLatency,
+        kAudioObjectPropertyScopeInput, kAudioObjectPropertyElementMain};
+    if (AudioObjectAddPropertyListener(probe->input, &latency, mr_latency_changed, probe) != noErr) {
+        fprintf(stderr, "could not observe input latency notifications\n");
+        return false;
+    }
     // The recorder starts first so the first played frames are captured.
     if ((!same && AudioDeviceStart(probe->input, in_proc) != noErr) ||
         AudioDeviceStart(probe->output, out_proc) != noErr) {
@@ -1741,6 +1760,7 @@ static bool mr_run(MRProbe *probe) {
     if (!same) stopped |= AudioDeviceStop(probe->input, in_proc);
     stopped |= AudioDeviceDestroyIOProcID(probe->output, out_proc);
     if (!same) stopped |= AudioDeviceDestroyIOProcID(probe->input, in_proc);
+    stopped |= AudioObjectRemovePropertyListener(probe->input, &latency, mr_latency_changed, probe);
     if (stopped != noErr) fprintf(stderr, "warning: stopping the devices reported an error\n");
     return true;
 }
@@ -1758,6 +1778,7 @@ int main(int argc, char **argv) {
     mr_describe("input", probe->input, kAudioObjectPropertyScopeInput, options.json);
     if (options.json) printf("\"channels\":%u,\"seconds\":%.1f,", probe->channels, options.seconds);
     if (!mr_run(probe)) return 1;
+    if (options.json) printf("\"inputLatencyNotifications\":%u,", atomic_load(&probe->latency_notifications));
     if (options.timing) {
         fprintf(stderr, "side,first,sampleTime,hostTime,frames,flags\n");
         const MRSide *sides[] = {&probe->out, &probe->in};
