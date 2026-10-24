@@ -54,6 +54,18 @@ static NSString *MRApplicationIconDataURL(NSImage *icon) {
     return [@"data:image/png;base64," stringByAppendingString:base64];
 }
 
+static NSImage *MRApplicationBundleIcon(NSURL *url) {
+    if (url == nil) return nil;
+    NSBundle *bundle = [NSBundle bundleWithURL:url];
+    id name = [bundle objectForInfoDictionaryKey:@"CFBundleIconFile"];
+    if (![name isKindOfClass:[NSString class]] || [name length] == 0 ||
+        ![name isEqualToString:[name lastPathComponent]]) return nil;
+    NSString *extension = [name pathExtension];
+    NSURL *resource = [bundle URLForResource:[name stringByDeletingPathExtension]
+        withExtension:extension.length == 0 ? @"icns" : extension];
+    return resource == nil ? nil : [[NSImage alloc] initWithContentsOfURL:resource];
+}
+
 MRProcessTapError mr_process_tap_visit_applications(
     MRProcessTapApplicationVisitor visitor,
     void *context
@@ -76,10 +88,9 @@ MRProcessTapError mr_process_tap_visit_applications(
         const char *display_name_utf8 = display_name.UTF8String;
         if (bundle_id_utf8 != NULL && bundle_id_utf8[0] != '\0' &&
             display_name_utf8 != NULL && display_name_utf8[0] != '\0') {
-            NSImage *icon = application.icon;
-            if (icon == nil && application_url != nil) {
-                icon = [[NSWorkspace sharedWorkspace] iconForFile:application_url.path];
-            }
+            // NSRunningApplication.icon and NSWorkspace.iconForFile can wait
+            // indefinitely for IconServices. Bundle image files need no daemon.
+            NSImage *icon = MRApplicationBundleIcon(application_url);
             NSString *icon_data_url = MRApplicationIconDataURL(icon);
             visitor(
                 context,

@@ -632,15 +632,21 @@ impl Registry {
         if !device.alive.load(Ordering::Acquire) {
             return NOT_FOUND;
         }
-        if stream == device.id + 1 {
-            device.input_active.store(active, Ordering::Release);
+        // AcqRel publishes the new usage and observes the previous value in one
+        // transition, so repeated host writes cannot create duplicate changes.
+        let previous = if stream == device.id + 1 {
+            device.input_active.swap(active, Ordering::AcqRel)
         } else if stream == device.id + 2 {
-            device.output_active.store(active, Ordering::Release);
+            device.output_active.swap(active, Ordering::AcqRel)
         } else {
             return INVALID;
-        }
+        };
         drop(device);
-        self.host.changed(stream, STREAM_ACTIVE);
+        // CoreAudio reapplies stream usage while registering an IOProc. Echoing
+        // an unchanged value back as a change reenters that reconciliation.
+        if previous != active {
+            self.host.changed(stream, STREAM_ACTIVE);
+        }
         OK
     }
 

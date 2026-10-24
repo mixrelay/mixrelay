@@ -6,6 +6,30 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { installedPaths, requireDisposableHost, spawnLogged } from './package.mjs';
 
+test('stapler failure preserves raw diagnostics and stops before extraction or installation', async (t) => {
+  const { installAndVerify } = await import('./package.mjs');
+  const output = mkdtempSync(join(tmpdir(), 'mr-stapler-'));
+  t.after(() => rmSync(output, { recursive: true, force: true }));
+  const calls = [];
+  const runCommand = (program, args) => {
+    calls.push([program, args]);
+    if (program === 'xcrun') {
+      throw Object.assign(new Error('stapler exited 65'), {
+        status: 65, stdout: 'The validate action failed!', stderr: 'Ticket signature is invalid',
+      });
+    }
+    return 'accepted';
+  };
+  assert.throws(() => installAndVerify({ file: 'candidate.pkg' }, {}, output, output, 'macos', {
+    runCommand,
+  }), /stapler exited 65\nThe validate action failed!\nTicket signature is invalid/);
+  assert.deepEqual(calls.map(([program]) => program), ['pkgutil', 'spctl', 'xcrun']);
+  const report = JSON.parse(readFileSync(join(output, 'package-verification.json')));
+  assert.equal(report[2].status, 65);
+  assert.equal(report[2].stderr, 'Ticket signature is invalid');
+  assert.equal(report[2].stdout, 'The validate action failed!');
+});
+
 test('installation refuses an unacknowledged host before any installer or privilege command runs', () => {
   assert.throws(() => requireDisposableHost('macos', false), /disposable-environment/);
   assert.throws(() => requireDisposableHost('linux', false), /disposable-environment/);

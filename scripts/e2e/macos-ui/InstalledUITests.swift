@@ -11,6 +11,15 @@ final class InstalledUITests: XCTestCase {
     }
 
     private func createGraph(in directory: URL) throws {
+        let expected = try JSONSerialization.jsonObject(with: Data(contentsOf:
+            directory.appendingPathComponent("installed-ui-runner-expected.json"))) as? [String: String]
+        let actual = ["bundle": Bundle.main.bundleIdentifier ?? "", "path": Bundle.main.bundleURL.path,
+                      "pid": String(ProcessInfo.processInfo.processIdentifier), "trusted": String(AXIsProcessTrusted())]
+        try JSONSerialization.data(withJSONObject: actual, options: [.prettyPrinted, .sortedKeys])
+            .write(to: directory.appendingPathComponent("installed-ui-runner-actual.json"))
+        guard actual["bundle"] == expected?["bundle"], actual["path"] == expected?["path"] else {
+            throw MissingControl(label: "Granted XCTest runner identity: \(actual)")
+        }
         guard AXIsProcessTrusted() else { throw MissingControl(label: "Accessibility access for installed UI runner") }
         let installed = URL(fileURLWithPath: "/Applications/MixRelay/MixRelay.app").standardizedFileURL
         let editors = NSRunningApplication.runningApplications(withBundleIdentifier: "io.mixrelay.desktop")

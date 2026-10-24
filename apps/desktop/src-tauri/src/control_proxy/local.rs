@@ -64,6 +64,7 @@ fn cancellable_read(name: &str, arguments: &Value) -> bool {
             | "control_get_recorder_status"
             | "recording_settings"
             | "workspace_path"
+            | "list_capturable_applications"
     ) || (name == "engine_request" && arguments["method"] == "GET")
 }
 
@@ -378,6 +379,10 @@ mod tests {
             ),
             (
                 json!({"type":"invoke","name":"control_get_graph_status","arguments":null}),
+                RequestKind::Read,
+            ),
+            (
+                json!({"type":"invoke","name":"list_capturable_applications","arguments":null}),
                 RequestKind::Read,
             ),
             (

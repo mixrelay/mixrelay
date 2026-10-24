@@ -91,9 +91,26 @@ export function installAndVerify(
     }
   };
   if (os === 'macos') {
-    run('pkgutil', ['--check-signature', archive]);
-    run('spctl', ['--assess', '--type', 'install', archive]);
-    run('xcrun', ['stapler', 'validate', archive]);
+    const verification = [];
+    const verify = (program, args) => {
+      const entry = { program, args };
+      verification.push(entry);
+      try {
+        entry.stdout = run(program, args);
+        entry.status = 0;
+      } catch (error) {
+        Object.assign(entry, {
+          stdout: String(error.stdout ?? ''), stderr: String(error.stderr ?? ''),
+          status: error.status ?? null, signal: error.signal ?? null, error: error.message,
+        });
+        throw new Error(`${error.message}\n${entry.stdout}\n${entry.stderr}`, { cause: error });
+      } finally {
+        writeFileSync(join(output, 'package-verification.json'), `${JSON.stringify(verification, null, 2)}\n`);
+      }
+    };
+    verify('pkgutil', ['--check-signature', archive]);
+    verify('spctl', ['--assess', '--type', 'install', archive]);
+    verify('xcrun', ['stapler', 'validate', archive]);
     run('pkgutil', ['--expand-full', archive, extracted]);
     install('sudo', ['-n', 'installer', '-pkg', archive, '-target', '/'], 300000);
   } else {

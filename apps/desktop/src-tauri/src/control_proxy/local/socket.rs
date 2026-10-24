@@ -344,7 +344,7 @@ mod tests {
 
     #[tokio::test]
     async fn quit_cancels_an_inflight_engine_read_but_waits_for_an_accepted_write() {
-        for method in ["GET", "PUT"] {
+        for method in ["GET", "PUT", "applications"] {
             let fixture = mixrelay_test_support::FixtureDir::new("ipc-quit").unwrap();
             let directory = fixture.join("control");
             let uid = std::fs::metadata(fixture.path()).unwrap().uid();
@@ -355,10 +355,15 @@ mod tests {
             let mut stream = UnixStream::connect(directory.join("control.sock"))
                 .await
                 .unwrap();
-            let request = serde_json::json!({"id":1,"command":{
+            let mut request = serde_json::json!({"id":1,"command":{
                 "type":"invoke","name":"engine_request",
                 "arguments":{"method":method,"path":"/api/v1/graph","body":null}
             }});
+            if method == "applications" {
+                request["command"] = serde_json::json!({
+                    "type":"invoke", "name":"list_capturable_applications", "arguments":null
+                });
+            }
             stream
                 .write_all(format!("{request}\n").as_bytes())
                 .await

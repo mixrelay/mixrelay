@@ -151,18 +151,60 @@ unsafe extern "C" fn io(
     true
 }
 
+#[test]
+fn stream_usage_reconciliation_notifies_only_actual_transitions() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    lock(&fixture.host.changes).clear();
+    fixture
+        .host
+        .reconcile_stream_usage
+        .store(true, Ordering::Release);
+    for stream in [id + 1, id + 2] {
+        assert_eq!(fixture.registry.set_stream_active(stream, true), OK);
+    }
+    assert!(lock(&fixture.host.changes).is_empty());
+    for stream in [id + 1, id + 2] {
+        assert_eq!(fixture.registry.set_stream_active(stream, false), OK);
+        assert_eq!(fixture.registry.set_stream_active(stream, false), OK);
+        assert_eq!(fixture.registry.set_stream_active(stream, true), OK);
+    }
+    assert_eq!(
+        &*lock(&fixture.host.changes),
+        &[
+            (id + 1, crate::abi::STREAM_ACTIVE),
+            (id + 1, crate::abi::STREAM_ACTIVE),
+            (id + 2, crate::abi::STREAM_ACTIVE),
+            (id + 2, crate::abi::STREAM_ACTIVE),
+        ]
+    );
+}
+
 struct Host {
     requests: Mutex<Vec<(u32, u64)>>,
     changes: Mutex<Vec<(u32, u32)>>,
     fail: AtomicBool,
     registry: AtomicPtr<Registry>,
     replace_during_request: AtomicBool,
+    reconcile_stream_usage: AtomicBool,
 }
 unsafe extern "C" fn changed(context: *mut c_void, object: u32, change: u32) {
     let host = unsafe { &*context.cast::<Host>() };
     lock(&host.changes).push((object, change));
     if let Some(registry) = unsafe { host.registry.load(Ordering::Acquire).as_ref() } {
         let _ = registry.devices();
+        if change == crate::abi::STREAM_ACTIVE
+            && host.reconcile_stream_usage.load(Ordering::Acquire)
+            && lock(&host.changes).len() < 8
+        {
+            let snapshot = registry.snapshot(object).unwrap();
+            let active = if object == snapshot.input_stream_id {
+                snapshot.input_active
+            } else {
+                snapshot.output_active
+            };
+            assert_eq!(registry.set_stream_active(object, active), OK);
+        }
         if change == crate::abi::INPUT_LATENCY {
             assert!(registry.inventory.try_lock().is_ok());
             assert!(registry.client_identity_gate.try_lock().is_ok());
@@ -215,6 +257,7 @@ impl Fixture {
             fail: AtomicBool::new(false),
             registry: AtomicPtr::default(),
             replace_during_request: AtomicBool::new(false),
+            reconcile_stream_usage: AtomicBool::new(false),
         });
         let ops = NativeOps {
             inspect,
