@@ -26,6 +26,10 @@ on:
         description: Optional comma-separated target IDs for diagnosis; empty tests all
         type: string
         default: ''
+      independent_audio_control:
+        description: Diagnose the host with a third-party loopback after candidate removal
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -141,6 +145,11 @@ jobs:
       - name: Preserve macOS failure diagnostics
         if: always()
         run: node scripts/e2e/collect-macos.mjs --output evidence
+      - name: Compare independent native audio after product removal
+        if: always() && inputs.independent_audio_control
+        env:
+          TARGET: ${{ matrix.id }}
+        run: node scripts/e2e/macos-audio-control.mjs evidence "$TARGET"
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
