@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "product": "mix-relay",
+  "version": "0.1.0",
+  "sourceRevision": "3c72c55c7dad5755d7dbf630e42db2afee6618dd",
+  "contractSha256": "ce58607aa1cc87b3d2ad4f2e86b3349cccd6f547f10be2a33be51c7504cc9833",
+  "artifacts": [
+    {
+      "id": "macos-universal-pkg",
+      "file": "MixRelay-Installer-0.1.0.pkg",
+      "sha256": "e21989692623ba38a9ba6922c9060e9e9343dd15a38c6efccdb02ed1aab9846f",
+      "size": 69400310
+    },
+    {
+      "id": "linux-x64-deb",
+      "file": "MixRelay_0.1.0_amd64.deb",
+      "sha256": "2a1db2f4117b75135c0626045b3fc5a0ae96ef9e0ca91b3dc76de45b970395c9",
+      "size": 31713478
+    },
+    {
+      "id": "linux-arm64-deb",
+      "file": "MixRelay_0.1.0_arm64.deb",
+      "sha256": "4421661b47a5b366a54fa6d74b603f31e6fa09f77debc1bdee16d8e82d4b83a6",
+      "size": 30806640
+    },
+    {
+      "id": "linux-x64-arch",
+      "file": "mix-relay-0.1.0-1-x86_64.pkg.tar.zst",
+      "sha256": "5a799175ce2b22c1a55682dbc1722d6732b065380ac4e0246dae91bc7445d72f",
+      "size": 30426873
+    }
+  ]
+}
