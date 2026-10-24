@@ -1571,12 +1571,13 @@ static void mr_usage(FILE *stream) {
             "usage: MRRoundTripProbe --list | --self-test\n"
             "       MRRoundTripProbe --transport DEVICE_UID\n"
             "       MRRoundTripProbe --latency DEVICE_UID (read-only device/stream/safety)\n"
-            "       MRRoundTripProbe [--json] [--impulse] [--seconds 1-120] [--channels 1-64] "
+            "       MRRoundTripProbe [--json] [--impulse] [--timing] [--seconds 1-120] [--channels 1-64] "
             "OUTPUT_UID [INPUT_UID]\n"
             "Plays a deterministic signal into OUTPUT_UID and records INPUT_UID (default: the\n"
             "same device). Reports latency (host time; also device frames on one device),\n"
             "received, missing and repeated signal frames, damaged samples, slips, channel\n"
             "order and the latency the devices report. Changes no default device or setting.\n"
+            "--timing writes the retained callback timeline to stderr after IO stops.\n"
             "--impulse measures paths that change samples (asynchronous clocks, sample-rate\n"
             "conversion): it plays pulses at irregular ~0.25 s spacing and finds the one delay\n"
             "that aligns their arrivals.\n"
@@ -1597,7 +1598,7 @@ static bool mr_parse_number(const char *text, double low, double high, double *v
 }
 
 typedef struct MROptions {
-    bool json, impulse;
+    bool json, impulse, timing;
     double seconds, channels;
     const char *uids[2];
     int found;
@@ -1619,6 +1620,8 @@ static int mr_options(int argc, char **argv, MROptions *options) {
             options->json = true;
         } else if (strcmp(argv[i], "--impulse") == 0) {
             options->impulse = true;
+        } else if (strcmp(argv[i], "--timing") == 0) {
+            options->timing = true;
         } else if (strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
             ok = mr_parse_number(argv[++i], 1.0, 120.0, &options->seconds);
         } else if (strcmp(argv[i], "--channels") == 0 && i + 1 < argc) {
@@ -1755,6 +1758,19 @@ int main(int argc, char **argv) {
     mr_describe("input", probe->input, kAudioObjectPropertyScopeInput, options.json);
     if (options.json) printf("\"channels\":%u,\"seconds\":%.1f,", probe->channels, options.seconds);
     if (!mr_run(probe)) return 1;
+    if (options.timing) {
+        fprintf(stderr, "side,first,sampleTime,hostTime,frames,flags\n");
+        const MRSide *sides[] = {&probe->out, &probe->in};
+        for (size_t side = 0; side < 2; ++side) {
+            const uint32_t count = atomic_load(&sides[side]->count);
+            for (uint32_t index = 0; index < count; ++index) {
+                const MRChunk *chunk = &sides[side]->chunks[index];
+                fprintf(stderr, "%s,%llu,%.17g,%llu,%u,%u\n", side == 0 ? "output" : "input",
+                    (unsigned long long)chunk->first, chunk->sample_time,
+                    (unsigned long long)chunk->host_time, chunk->frames, chunk->flags);
+            }
+        }
+    }
     if (probe->impulse) {
         const MRImpulses impulses = mr_analyse_impulses(probe);
         mr_report_impulses(probe, &impulses, &out_reported, &in_reported, options.json);
