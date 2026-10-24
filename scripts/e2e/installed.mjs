@@ -18,6 +18,7 @@ import { analyseRecording, nativeSignal } from './native-signal.mjs';
 import { installAndVerify, launchInstalled, requireDisposableHost } from './package.mjs';
 import { removeInstalled } from './removal.mjs';
 import { wholeSystemCapture } from './system-capture.mjs';
+import { controlRecorder } from './recorder-control.mjs';
 import {
   isolateFreshState,
   prepareUpgradeDriver,
@@ -184,6 +185,10 @@ export async function qualifyMode({
     upgradeState,
     packageInstalled = false,
     unconfirmedMutation = false;
+  const recorderAdmission = [];
+  const controlTake = request => controlRecorder(recorderPath, request, {
+    api, operation, graphId, observe: value => recorderAdmission.push(value),
+  });
   const active = (revision) =>
     eventually(
       () => api('graph/status'),
@@ -420,7 +425,7 @@ export async function qualifyMode({
     const recording = join(output, 'recording.wav');
     const start = await api(recorderPath);
     assert.equal(start.state, 'stopped');
-    await api(recorderPath, {
+    await controlTake({
       expectedRevision: applied.revision,
       expectedRecording: { state: start.state, path: start.path },
       request: { action: 'record', path: recording, sampleRate: 48000, encoding: 'float32' },
@@ -436,7 +441,7 @@ export async function qualifyMode({
     });
     await scenario('REC-02', async () => {
       const take = await api(recorderPath);
-      const stopped = await api(recorderPath, {
+      const stopped = await controlTake({
         expectedRevision: applied.revision,
         expectedRecording: { state: take.state, path: take.path },
         request: { action: 'stop' },
@@ -453,6 +458,7 @@ export async function qualifyMode({
       await scenario('AUDIO-11', async () => {
         await wholeSystemCapture({
           api,
+          operation,
           graphId,
           document: applied,
           device,
@@ -489,7 +495,7 @@ export async function qualifyMode({
         if (recorderPath) {
           const take = await api(recorderPath);
           if (['recording', 'paused'].includes(take.state))
-            await api(recorderPath, {
+            await controlTake({
               expectedRevision: applied.revision,
               expectedRecording: { state: take.state, path: take.path },
               request: { action: 'stop' },
@@ -584,6 +590,7 @@ export async function qualifyMode({
         ? 'passed'
         : 'failed';
     report.endedAt = new Date().toISOString();
+    writeFileSync(join(output, 'recorder-admission.json'), `${JSON.stringify(recorderAdmission, null, 2)}\n`, { flag: 'wx' });
     writeFileSync(join(output, `${targetId}.mode.json`), `${JSON.stringify(report, null, 2)}\n`, {
       flag: 'wx',
     });

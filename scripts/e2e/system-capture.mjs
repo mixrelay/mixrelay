@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { invoke } from '../lab/macos-installed-capture-acceptance.mjs';
 import { analyseRf64, stopSignalProcesses } from './native-signal.mjs';
+import { controlRecorder } from './recorder-control.mjs';
 
 export function analyseSystemMix(bytes) {
   const analysis = analyseRf64(bytes);
@@ -87,7 +88,7 @@ async function toneStatus(child) {
   return JSON.parse(bytes.toString());
 }
 
-export async function wholeSystemCapture({ api, apply, graphId, document, device, output }) {
+export async function wholeSystemCapture({ api, operation, apply, graphId, document, device, output }) {
   const access = await invoke('licensing_status', {});
   assert.equal(access.status, 'free', 'Whole-system acceptance requires actual free access');
   assert.equal(access.hasActivation, false);
@@ -97,6 +98,10 @@ export async function wholeSystemCapture({ api, apply, graphId, document, device
   let applied, recordingStarted = false;
   const path = join(resolve(output), 'whole-system.wav');
   const recorder = `graphs/${encodeURIComponent(graphId)}/recorders/qa-system-recorder`;
+  const recorderAdmission = [];
+  const controlTake = request => controlRecorder(recorder, request, {
+    api, operation, graphId, observe: value => recorderAdmission.push(value),
+  });
   try {
     applied = await apply(systemCaptureGraph(document, graphId));
     for (let index = 0; index < 2; index++) {
@@ -120,12 +125,12 @@ export async function wholeSystemCapture({ api, apply, graphId, document, device
       writeFileSync(join(output, 'whole-system-sources.json'), JSON.stringify(sources, null, 2) + '\n', { flag: 'wx' });
     }
     let take = await api(recorder);
-    await api(recorder, { expectedRevision: applied.revision, expectedRecording: { state: take.state, path: take.path },
+    await controlTake({ expectedRevision: applied.revision, expectedRecording: { state: take.state, path: take.path },
       request: { action: 'record', path, sampleRate: 48000, encoding: 'float32' } });
     recordingStarted = true;
     await delay(3000);
     take = await api(recorder);
-    const stopped = await api(recorder, { expectedRevision: applied.revision,
+    const stopped = await controlTake({ expectedRevision: applied.revision,
       expectedRecording: { state: take.state, path: take.path }, request: { action: 'stop' } });
     recordingStarted = false;
     assert.equal(stopped.state, 'stopped'); assert.equal(stopped.error, null);
@@ -137,13 +142,17 @@ export async function wholeSystemCapture({ api, apply, graphId, document, device
       if (applied) {
         if (recordingStarted) {
           const take = await api(recorder);
-          await api(recorder, { expectedRevision: applied.revision,
+          await controlTake({ expectedRevision: applied.revision,
             expectedRecording: { state: take.state, path: take.path }, request: { action: 'stop' } });
         }
         const current = await api('graph');
         assert.deepEqual(current, applied, 'External graph change during whole-system acceptance');
         await apply({ ...document, expectedGraphId: graphId, revision: current.revision + 1 });
       }
-    } finally { await stopSignalProcesses(children); }
+    } finally {
+      try {
+        writeFileSync(join(output, 'whole-system-recorder-admission.json'), JSON.stringify(recorderAdmission, null, 2) + '\n', { flag: 'wx' });
+      } finally { await stopSignalProcesses(children); }
+    }
   }
 }
