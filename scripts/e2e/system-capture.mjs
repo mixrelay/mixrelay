@@ -52,6 +52,18 @@ function compileTone(output, index) {
   return resolve(executable);
 }
 
+export function systemCaptureGraph(document, graphId) {
+  return { ...document, revision: document.revision + 1, expectedGraphId: graphId,
+    nodes: [{ id: 'qa-system', type: 'application_capture', label: null,
+      control: { enabled: true, muted: false }, config: {
+      selector: { match: 'all_except', bundle_ids: ['io.mixrelay.desktop', 'mixrelay-engine-service'] },
+      stream: { channels: 2, channelLayout: 'stereo' }, sourcePlayback: 'preserve', gainDb: 0,
+    } }, { id: 'qa-system-recorder', type: 'recorder', label: null,
+      control: { enabled: true, muted: false }, config: { channels: 2 } }],
+    edges: [{ id: 'qa-system-record', source: { nodeId: 'qa-system', portId: 'audio' },
+      destination: { nodeId: 'qa-system-recorder', portId: 'audio' }, channelMapping: { mode: 'auto' } }] };
+}
+
 export async function wholeSystemCapture({ api, apply, graphId, document, device, output }) {
   const access = await invoke('licensing_status', {});
   assert.equal(access.status, 'free', 'Whole-system acceptance requires actual free access');
@@ -70,13 +82,7 @@ export async function wholeSystemCapture({ api, apply, graphId, document, device
       const [ready] = await once(child.stdout, 'data', { signal: AbortSignal.timeout(15000) });
       assert.equal(ready.toString().trim(), `ready ${uid}`);
     }
-    applied = await apply({ ...document, revision: document.revision + 1, expectedGraphId: graphId,
-      nodes: [{ id: 'qa-system', type: 'application_capture', config: {
-        selector: { match: 'all_except', bundle_ids: ['io.mixrelay.desktop', 'mixrelay-engine-service'] },
-        stream: { channels: 2, channelLayout: 'stereo' }, sourcePlayback: 'preserve', gainDb: 0,
-      } }, { id: 'qa-system-recorder', type: 'recorder', config: { channels: 2 } }],
-      edges: [{ id: 'qa-system-record', source: { nodeId: 'qa-system', portId: 'audio' },
-        destination: { nodeId: 'qa-system-recorder', portId: 'audio' }, channelMapping: { mode: 'auto' } }] });
+    applied = await apply(systemCaptureGraph(document, graphId));
     let take = await api(recorder);
     await api(recorder, { expectedRevision: applied.revision, expectedRecording: { state: take.state, path: take.path },
       request: { action: 'record', path, sampleRate: 48000, encoding: 'float32' } });

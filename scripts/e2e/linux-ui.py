@@ -120,6 +120,23 @@ def click(label, contains=False, right=False):
     print(f"Activated installed UI control: {label} ({time.monotonic() - started:.2f}s)", flush=True)
 
 
+def open_submenu(label):
+    node = find(label)
+    component = node.queryComponent()
+    bounds = component.getExtents(pyatspi.DESKTOP_COORDS)
+    assert bounds.width > 0 and bounds.height > 0, f"Invisible UI control: {label}"
+    # A submenu trigger has no leaf action. Move off the previous hovered item,
+    # then use the menu's focus + Right Arrow keyboard contract.
+    pyatspi.Registry.generateMouseEvent(bounds.x + bounds.width // 2, bounds.y + bounds.height // 2, "abs")
+    assert component.grabFocus(), f"Installed submenu rejected focus: {label}"
+    deadline = time.monotonic() + 30
+    while not node.getState().contains(pyatspi.STATE_FOCUSED):
+        assert time.monotonic() < deadline, f"Installed submenu never received focus: {label}"
+        time.sleep(0.1)
+    pyatspi.Registry.generateKeyboardEvent(0xff53, None, pyatspi.KEY_SYM)
+    print(f"Opened installed submenu with Right Arrow: {label}", flush=True)
+
+
 def screenshot(path):
     import gi
     gi.require_version("Gdk", "3.0")
@@ -144,10 +161,10 @@ def screenshot(path):
 
 def main(output):
     click("Add node")
-    click("Processor")
+    open_submenu("Processor")
     click("Compressor")
     click("Add node")
-    click("Output")
+    open_submenu("Output")
     click("Recorder")
     click("Compressor", right=True)
     click("Connect channels…")

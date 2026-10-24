@@ -122,6 +122,26 @@ class InstalledEditorTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "no accessible action"):
             self.ui.click("Add node")
 
+    def test_submenu_receives_focus_and_right_arrow_instead_of_a_leaf_action(self):
+        self.desktop[:] = [self.editor]
+        self.atspi.DESKTOP_COORDS = 0
+        self.atspi.STATE_FOCUSED = 2
+        self.atspi.KEY_SYM = 3
+        events = []
+        self.atspi.Registry.generateMouseEvent = lambda *args: events.append(args)
+        self.atspi.Registry.generateKeyboardEvent = lambda *args: events.append(args)
+        component = types.SimpleNamespace(
+            getExtents=lambda coords: types.SimpleNamespace(x=10, y=20, width=30, height=40),
+            grabFocus=lambda: events.append("focus") or True)
+        self.add.queryComponent = lambda: component
+        self.ui.open_submenu("Add node")
+        self.assertEqual(events, [(25, 40, "abs"), "focus", (0xff53, None, 3)])
+        events.clear()
+        component.grabFocus = lambda: False
+        with self.assertRaisesRegex(AssertionError, "rejected focus"):
+            self.ui.open_submenu("Add node")
+        self.assertEqual(events, [(25, 40, "abs")])
+
 
 if __name__ == "__main__":
     unittest.main()
