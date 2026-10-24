@@ -127,30 +127,6 @@
   },
   "qualificationTargets": [
     {
-      "id": "macos-14-2-arm64",
-      "os": "macos",
-      "version": "14.2",
-      "versionMatch": "minor",
-      "arch": "arm64",
-      "artifact": "macos-universal-pkg",
-      "execution": {
-        "kind": "unavailable",
-        "reason": "GitHub-hosted runners cannot select macOS 14.2; macOS 14 Intel is also unavailable."
-      }
-    },
-    {
-      "id": "macos-14-2-x64",
-      "os": "macos",
-      "version": "14.2",
-      "versionMatch": "minor",
-      "arch": "x64",
-      "artifact": "macos-universal-pkg",
-      "execution": {
-        "kind": "unavailable",
-        "reason": "GitHub-hosted runners cannot select macOS 14.2; macOS 14 Intel is also unavailable."
-      }
-    },
-    {
       "id": "macos-14-arm64",
       "os": "macos",
       "version": "14",

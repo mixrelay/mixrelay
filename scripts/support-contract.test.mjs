@@ -18,7 +18,7 @@ test('duplicate environments, unknown artifacts and floating distro images fail 
     c => { c.qualificationTargets[0].artifact = 'missing'; },
     c => { c.codeChecks.linuxDistributions[0].image = 'debian:latest'; },
     c => { c.minimums.linux.glibc = "2.39'; false; '"; },
-    c => { c.qualificationTargets[0].version = '14'; },
+    c => { c.qualificationTargets[0].version = '14.2'; },
     c => { c.qualificationTargets[0].execution = { kind: 'self-hosted' }; },
     c => { c.qualificationImages['debian-x64'].digest = 'changed'; },
     c => { c.qualificationTargets.find(t => t.id === 'debian-13-arm64').execution.runner = 'ubuntu-24.04'; },
