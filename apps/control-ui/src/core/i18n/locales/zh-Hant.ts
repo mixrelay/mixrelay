@@ -475,6 +475,7 @@ export const zhHant = {
       unsupported: '不支援',
     },
     states: {
+      awaitingMicrophonePermission: '正在等待麥克風權限 — 請在 macOS 對話框中選擇「允許」',
       active: '已啟用',
       blocked: '尚未套用',
       applying: '正在套用',

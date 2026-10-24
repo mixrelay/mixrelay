@@ -364,7 +364,7 @@ fn installed_driver_pcm_soak() {
         ..output_spec.clone()
     };
     let statistics = Arc::new(Statistics::default());
-    let host: Arc<dyn Host> = Arc::new(CoreAudio);
+    let host: Arc<dyn Host> = Arc::new(CoreAudio::default());
     let output = Client::connect_with_sequence(&output_spec, &statistics, true, host.clone());
     let input = Client::connect_with_sequence(&input_spec, &statistics, true, host.clone());
     let other = Device::open(&input_spec, RATE, host).expect("ordinary graph capture client");

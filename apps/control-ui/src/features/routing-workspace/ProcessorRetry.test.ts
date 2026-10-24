@@ -159,6 +159,7 @@ describe('GraphApplicationQueue crashed processor retry', () => {
       code: 'graph_exchange_busy',
     });
     expect(f.port.retryProcessor).toHaveBeenCalledExactlyOnceWith({
+      clientOperationId: expect.any(String),
       ...target,
       expectedRevision: document.revision,
     });

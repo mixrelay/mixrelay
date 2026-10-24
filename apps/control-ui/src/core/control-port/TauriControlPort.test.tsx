@@ -421,3 +421,19 @@ it('reads device clients with a no-argument native invoke and preserves unavaila
   await expect(port.getVirtualDeviceAppActivity()).rejects.toThrow('unsupported');
   expect(new HttpControlPort()).not.toHaveProperty('getVirtualDeviceAppActivity');
 });
+
+it('observes only a matching pending receipt without consuming the mutation result', async () => {
+  const invoke = vi
+    .fn()
+    .mockResolvedValueOnce({ status: 202, body: { operationId: 'ours' } })
+    .mockResolvedValueOnce({ status: 404, body: {} })
+    .mockResolvedValueOnce({ status: 202, body: null })
+    .mockResolvedValueOnce({ status: 202, body: {} })
+    .mockResolvedValueOnce({ status: 202, body: { operationId: 'other' } })
+    .mockResolvedValueOnce({ status: 202, body: 3 });
+  const port = new TauriControlPort(invoke);
+  await expect(port.isOperationPending('ours')).resolves.toBe(true);
+  for (let index = 0; index < 5; index++)
+    await expect(port.isOperationPending('ours')).resolves.toBe(false);
+  expect(invoke).toHaveBeenCalledWith('control_get_operation', { operationId: 'ours' });
+});

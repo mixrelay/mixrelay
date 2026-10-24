@@ -1,4 +1,4 @@
-//! Classify native initialization failures using the process's microphone consent.
+//! Obtain first-use consent before preparing native input and classify readiness failures.
 use mixrelay_audio_io::HostAudioBackendError;
 use std::sync::mpsc::RecvTimeoutError;
 
@@ -21,6 +21,57 @@ pub(super) fn current() -> InputPermission {
         1 | 2 => InputPermission::Denied,
         3 => InputPermission::Authorized,
         _ => InputPermission::Unknown,
+    }
+}
+
+pub(super) fn request() {
+    unsafe extern "C" {
+        fn mr_microphone_request_authorization();
+    }
+    // SAFETY: the shim takes no pointers, retains no Rust state and requests access
+    // asynchronously through AVFoundation. The engine owns the input authorization.
+    unsafe { mr_microphone_request_authorization() };
+}
+
+// Two minutes lets a user read the system prompt while bounding graph preparation.
+// A control request returns an operation receipt while this decision is pending.
+const CONSENT_POLLS: usize = 1_200;
+pub(super) const CONSENT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
+pub(super) fn authorize(host: &dyn super::host::Host) -> Result<(), HostAudioBackendError> {
+    let initial = host.input_permission();
+    host.set_permission_waiting(initial == InputPermission::Pending);
+    let result = wait_for_decision(
+        initial,
+        || host.request_input_permission(),
+        || host.poll_input_permission(),
+    );
+    host.set_permission_waiting(false);
+    result
+}
+
+fn wait_for_decision(
+    mut permission: InputPermission,
+    request: impl FnOnce(),
+    mut observe: impl FnMut() -> InputPermission,
+) -> Result<(), HostAudioBackendError> {
+    if permission == InputPermission::Pending {
+        request();
+        for _ in 0..CONSENT_POLLS {
+            permission = observe();
+            if permission != InputPermission::Pending {
+                break;
+            }
+        }
+    }
+    match permission {
+        InputPermission::Pending => Err(HostAudioBackendError::PermissionPending {
+            capability: "microphone".into(),
+        }),
+        InputPermission::Denied => Err(HostAudioBackendError::PermissionDenied {
+            capability: "microphone".into(),
+        }),
+        InputPermission::Authorized | InputPermission::Unknown => Ok(()),
     }
 }
 

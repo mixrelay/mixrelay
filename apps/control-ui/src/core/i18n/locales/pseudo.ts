@@ -373,6 +373,8 @@ const overrides = {
       unsupported: '[!! Üñsüppörtéd !!]',
     },
     states: {
+      awaitingMicrophonePermission:
+        '[!! Waiting for microphone permission — choose Allow in the macOS dialog !!]',
       active: '[!! Åctïvé !!]',
       blocked: '[Not applied]',
       applying: '[!! Åpplÿïñg !!]',

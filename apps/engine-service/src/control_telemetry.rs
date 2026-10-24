@@ -94,6 +94,41 @@ mod tests {
     use super::*;
     use crate::GraphDocument;
 
+    #[test]
+    fn graph_status_exposes_permission_wait_without_taking_the_preparation_lock() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        struct PermissionStatus(AtomicBool);
+        impl crate::RuntimeStatusBackend for PermissionStatus {
+            fn status(&self, _: mixrelay_audio_graph::RenderFormat) -> AppStatus {
+                AppStatus::default()
+            }
+            fn awaiting_microphone_permission(&self) -> bool {
+                self.0.load(Ordering::Relaxed)
+            }
+        }
+        let backend = Arc::new(PermissionStatus(AtomicBool::new(false)));
+        let mut controller =
+            crate::endpoint_settings_tests::controller(GraphDocument::new(7, vec![], vec![]));
+        controller.runtime_status = backend.clone();
+        let _preparation = controller.mutation.lock();
+        assert_eq!(controller.graph_status().pending_reason, None);
+        backend.0.store(true, Ordering::Relaxed);
+        let waiting = controller.graph_status();
+        assert_eq!(
+            waiting.pending_reason,
+            Some(mixrelay_control_protocol::GraphPendingReason::AwaitingMicrophonePermission)
+        );
+        assert_eq!(
+            serde_json::to_value(waiting).unwrap()["pendingReason"],
+            "awaiting_microphone_permission"
+        );
+        backend.0.store(false, Ordering::Relaxed);
+        assert_eq!(controller.graph_status().pending_reason, None);
+    }
+
     struct DriverReadback {
         owner: parking_lot::Mutex<std::sync::Weak<EngineGraphController>>,
         change_revision: bool,

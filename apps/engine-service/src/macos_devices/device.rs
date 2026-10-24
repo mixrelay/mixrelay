@@ -78,6 +78,9 @@ impl Device {
         callback: CallbackConfig,
         host: Arc<dyn Host>,
     ) -> Result<Self, HostAudioBackendError> {
+        if spec.input {
+            super::permission::authorize(&*host)?;
+        }
         let permission = spec.input.then(|| host.input_permission());
         if let Some(permission) = permission {
             tracing::info!(?permission, "CoreAudio input consent before initialization");

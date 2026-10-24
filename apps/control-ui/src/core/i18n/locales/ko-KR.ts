@@ -491,6 +491,7 @@ export const koKR = {
       unsupported: '지원되지 않음',
     },
     states: {
+      awaitingMicrophonePermission: '마이크 권한 대기 중 — macOS 대화상자에서 허용을 선택하세요',
       active: '적용됨',
       blocked: '적용되지 않음',
       applying: '적용 중',

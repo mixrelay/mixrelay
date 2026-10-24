@@ -8,6 +8,22 @@ export function focusGraphNode(root: HTMLElement, nodeId: string) {
   owner?.focus();
 }
 
+/** AXShowMenu can dispatch contextmenu with no pointer coordinates. Anchor that
+ * invocation to its graph owner; real pointer and keyboard-generated points survive. */
+export function graphContextMenuAnchor(event: {
+  target: EventTarget | null;
+  clientX: number;
+  clientY: number;
+}) {
+  if (event.clientX !== 0 || event.clientY !== 0) return { x: event.clientX, y: event.clientY };
+  const target = event.target;
+  if (!(target instanceof Element)) return { x: 0, y: 0 };
+  const owner =
+    target.closest('[data-audio-port-id], .react-flow__node, .react-flow__edge') ?? target;
+  const box = owner.getBoundingClientRect();
+  return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+}
+
 /** Shift+F10 and the ContextMenu key open the same menu as a secondary click, for the
  * focused node, cable or the canvas itself. Controls inside a node keep their own keys. */
 export function openContextMenuFromKeyboard(event: KeyboardEvent<HTMLElement>): boolean {

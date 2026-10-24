@@ -59,6 +59,7 @@ fn cancellable_read(name: &str, arguments: &Value) -> bool {
         name,
         "control_get_graph_layout"
             | "control_get_graph_status"
+            | "control_get_operation"
             | "control_get_meters"
             | "control_get_node_controls"
             | "control_get_recorder_status"

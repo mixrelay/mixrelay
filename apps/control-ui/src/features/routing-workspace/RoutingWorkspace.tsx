@@ -17,6 +17,7 @@ import {
 } from '../../core/audio-graph/AudioGraphCanvas';
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
 import { audioGraphNodeTitle, normalizeAudioGraphNodeSize } from '../../core/audio-graph/model';
+import type { PlaceGraphNodes } from '../../core/audio-graph/nodePlacement';
 import type {
   AudioDeviceDescriptor,
   AudioSessionStatus,
@@ -32,6 +33,7 @@ import { ControlPortError } from '../../core/control-port/types';
 import { type HistoryStep, useUndoHistory } from '../../core/history/useUndoHistory';
 import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
 import type { EndpointControl } from '../../core/ui/AudioNodeEndpointOptions';
+import { InlineNotice } from '../../core/ui/InlineNotice';
 import { NodeMuteButton, NodePowerButton } from '../../core/ui/NodeSignalControls';
 import { hasPlatformModifier, isNativeTextEntryTarget } from '../../core/ui/platformShortcut';
 import { TitleField } from '../../core/ui/TitleField';
@@ -182,7 +184,11 @@ function useGraphPresentation(): GraphPresentation {
 }
 
 interface RoutingNodeCreationOptions {
-  tryVirtualAdd: (itemId: string, position: { x: number; y: number }) => boolean;
+  tryVirtualAdd: (
+    itemId: string,
+    position: { x: number; y: number },
+    placeNodes?: PlaceGraphNodes,
+  ) => boolean;
   audioSession?: AudioSessionStatus;
   applications: readonly CapturableApplication[];
   audioDevices: readonly AudioDeviceDescriptor[];
@@ -207,8 +213,8 @@ function useRoutingNodeCreation(options: RoutingNodeCreationOptions) {
     tryVirtualAdd,
   } = options;
   return useCallback(
-    (itemId: string, position: { x: number; y: number }) => {
-      if (tryVirtualAdd(itemId, position)) return;
+    (itemId: string, position: { x: number; y: number }, placeNodes?: PlaceGraphNodes) => {
+      if (tryVirtualAdd(itemId, position, placeNodes)) return;
       if (itemId === ADD_PROCESSOR_DIRECTORY_ITEM_ID) {
         refreshProcessors(true);
         return;
@@ -232,16 +238,14 @@ function useRoutingNodeCreation(options: RoutingNodeCreationOptions) {
             : null
           : routingNodeRequest(itemId, applications, audioDevices, processors);
       if (!model || !request) return;
-      updateModel(
-        addRoutingNode(
-          model,
-          request,
-          position,
-          presentation,
-          audioSession?.virtualEndpointSettings,
-        ),
-        'runtime',
+      const next = addRoutingNode(
+        model,
+        request,
+        position,
+        presentation,
+        audioSession?.virtualEndpointSettings,
       );
+      updateModel(placeNodes?.(next) ?? next, 'runtime');
     },
     [
       applications,
@@ -382,6 +386,7 @@ function useWorkspaceGraph(
   const [document, setDocument] = useState<RuntimeGraphDocument | null>(null);
   const [model, setModel] = useState<AudioGraphModel | null>(null);
   const [state, setState] = useState<WorkspaceState>('loading');
+  const [permissionWaiting, setPermissionWaiting] = useState(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const conversion = useRef({ presentation, processors });
@@ -439,6 +444,8 @@ function useWorkspaceGraph(
     graphId,
     document,
     errorCode,
+    permissionWaiting,
+    setPermissionWaiting,
     persistenceError,
     setPersistenceError,
     model,
@@ -540,6 +547,15 @@ function rebaseWorkspaceEdit(
   };
 }
 
+async function settleParametersForReload(whenIdle: ProcessorParameters['whenIdle']) {
+  try {
+    await whenIdle();
+  } catch (error: unknown) {
+    // Settled parameter failures remain visible until the explicit reload succeeds.
+    if (!(error instanceof ControlPortError)) throw error;
+  }
+}
+
 function useGraphApplication(
   controlPort: ControlPort,
   presentation: GraphPresentation,
@@ -576,15 +592,7 @@ function useGraphApplication(
               failed.instanceId === instanceId,
           ),
         beforeApply: parameters.whenIdle,
-        beforeReload: async () => {
-          try {
-            await parameters.whenIdle();
-          } catch (error: unknown) {
-            // The failure stays visible until restore succeeds. Only settled
-            // parameter failures permit an explicit authoritative reload.
-            if (!(error instanceof ControlPortError)) throw error;
-          }
-        },
+        beforeReload: () => settleParametersForReload(parameters.whenIdle),
         getReloadLayout: controlPort.getGraphLayout?.bind(controlPort),
         getDocument: () => latest.current.graph.document,
         getModel: () => currentModel.current,
@@ -592,6 +600,7 @@ function useGraphApplication(
         error: (code) => latest.current.graph.setErrorCode(code),
         persistenceWarning: (code) => latest.current.graph.setPersistenceError(code),
         state: (state) => latest.current.graph.setState(state),
+        permissionWaiting: (waiting) => latest.current.graph.setPermissionWaiting(waiting),
         rebase: (before, document, local) => {
           const current = latest.current;
           const model = rebaseWorkspaceEdit(
@@ -1002,6 +1011,7 @@ export function RoutingWorkspace({
     inventory,
     onNodeMenuOpenedChange: setMenuOpened,
     persistenceError: graph.persistenceError,
+    permissionWaiting: graph.permissionWaiting,
     model,
     processors,
     state: state === 'active' && parameters.failures.length > 0 ? ('blocked' as const) : state,
@@ -1104,6 +1114,7 @@ function useWorkspaceInventory(
 }
 
 interface WorkspaceViewProps {
+  permissionWaiting: boolean;
   documentRevision: number;
   headerActions?: ReactNode;
   notice?: ReactNode;
@@ -1124,7 +1135,7 @@ interface WorkspaceViewProps {
   application: GraphApplicationQueue;
   audioSession?: AudioSessionStatus;
   playbackPaused?: boolean;
-  addNode: (kind: string, position: { x: number; y: number }) => void;
+  addNode: (kind: string, position: { x: number; y: number }, placeNodes?: PlaceGraphNodes) => void;
   applications: readonly CapturableApplication[];
   audioDevices: readonly AudioDeviceDescriptor[];
   controlPort: ControlPort;
@@ -1322,6 +1333,13 @@ function routingContextLabels(t: TFunction) {
   };
 }
 
+function WorkspacePermissionNotice({ waiting }: { waiting: boolean }) {
+  const { t } = useTranslation();
+  return waiting ? (
+    <InlineNotice tone="warning">{t('routing.states.awaitingMicrophonePermission')}</InlineNotice>
+  ) : null;
+}
+
 function WorkspaceView(props: WorkspaceViewProps) {
   const { t } = useTranslation();
   const titleRef = useRef<HTMLInputElement>(null);
@@ -1363,6 +1381,7 @@ function WorkspaceView(props: WorkspaceViewProps) {
         headerActions={props.headerActions}
       />
       {props.notice}
+      <WorkspacePermissionNotice waiting={props.permissionWaiting} />
       <WorkspaceProblems
         target={props.problemsTarget}
         onChange={props.onProblemsChange}

@@ -56,6 +56,7 @@ fn build_macos_service() {
     cc::Build::new()
         .file(format!("{engine_root}/src/MRMicrophonePermission.m"))
         .flag("-fobjc-arc")
+        .flag("-fblocks")
         .flag("-mmacosx-version-min=14.2")
         .warnings_into_errors(true)
         .compile("mixrelay_microphone_permission");

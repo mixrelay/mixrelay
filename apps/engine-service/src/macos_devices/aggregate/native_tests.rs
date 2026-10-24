@@ -5,7 +5,7 @@ use mixrelay_audio_io::DeviceSelector;
 
 #[test]
 fn native_outputs_start_without_aggregate() {
-    let host: Arc<dyn Host> = Arc::new(CoreAudio);
+    let host: Arc<dyn Host> = Arc::new(CoreAudio::default());
     for uid in std::env::var("MIXRELAY_LAB_AGGREGATE_OUTPUT_UIDS")
         .unwrap()
         .lines()
@@ -45,7 +45,7 @@ fn native_aggregate_starts_each_member_and_retires_every_registration() {
         .map(str::to_owned)
         .collect();
     assert_eq!(members.len(), 2);
-    let host: Arc<dyn Host> = Arc::new(CoreAudio);
+    let host: Arc<dyn Host> = Arc::new(CoreAudio::default());
     let group = Aggregate::create(members.clone(), &host)
         .unwrap()
         .expect("the two selected devices must support a private group");

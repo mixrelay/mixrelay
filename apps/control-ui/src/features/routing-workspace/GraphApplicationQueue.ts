@@ -13,6 +13,7 @@ import {
 import { waitForPushedRevision } from '../../core/control-port/waitForPushedRevision';
 import { acknowledgedNodeControl } from './controlReconciliation';
 import { audioGraphToRuntimeGraph } from './model';
+import { waitForGraphRequest } from './waitForGraphRequest';
 
 export const GRAPH_APPLICATION_TIMEOUT_MS = 10_000;
 const POLL_MS = 200;
@@ -34,6 +35,7 @@ interface QueueCallbacks {
     local: AudioGraphModel,
   ) => AudioGraphModel;
   reconcile?: (before: RuntimeGraphDocument, after: RuntimeGraphDocument) => boolean;
+  permissionWaiting?: (waiting: boolean) => void;
   state: (state: 'active' | 'applying' | 'blocked') => void;
   error: (code: string | null) => void;
   persistenceWarning?: (code: string | null) => void;
@@ -187,6 +189,7 @@ export class GraphApplicationQueue {
       | 'retryProcessor'
       | 'updateNodeControl'
       | 'subscribeState'
+      | 'isOperationPending'
     >,
     private readonly callbacks: QueueCallbacks,
   ) {}
@@ -251,13 +254,15 @@ export class GraphApplicationQueue {
       signal.throwIfAborted();
       this.validateNodeControlSource(source, graphId, nodeId);
       sent = true;
-      const response = await bounded(
+      const clientOperationId = crypto.randomUUID();
+      const response = await this.waitForRequest(
         this.port.updateNodeControl(graphId, nodeId, {
+          clientOperationId,
           ...change,
           expectedRevision: source.revision,
         }),
         signal,
-        GRAPH_APPLICATION_TIMEOUT_MS,
+        clientOperationId,
       );
       accepted = true;
       await this.acceptNodeControl(source, { graphId, nodeId, change }, response, signal);
@@ -312,10 +317,11 @@ export class GraphApplicationQueue {
       ...target,
       expectedRevision: source.revision,
     };
-    const response = await bounded(
-      retryProcessor.call(this.port, request),
+    const clientOperationId = crypto.randomUUID();
+    const response = await this.waitForRequest(
+      retryProcessor.call(this.port, { ...request, clientOperationId }),
       signal,
-      GRAPH_APPLICATION_TIMEOUT_MS,
+      clientOperationId,
     );
     attempt.accepted = true;
     if (response.revision !== source.revision + 1) throw failure('graph_revision_stale');
@@ -507,6 +513,15 @@ export class GraphApplicationQueue {
     await this.recover(error, signal, graphId);
   }
 
+  private waitForRequest<T>(request: Promise<T>, signal: AbortSignal, operationId: string) {
+    return waitForGraphRequest(
+      request,
+      { port: this.port, operationId, signal, timeoutMs: GRAPH_APPLICATION_TIMEOUT_MS },
+      this.callbacks.permissionWaiting,
+      failure,
+    );
+  }
+
   private async waitForRevision(revision: number, signal: AbortSignal) {
     if (this.port.subscribeState)
       return waitForPushedRevision(
@@ -600,14 +615,16 @@ export class GraphApplicationQueue {
     );
     // Naming the graph keeps another client's selection change from redirecting this edit.
     const graphId = this.callbacks.getGraphId?.();
-    const response = await bounded(
+    const clientOperationId = crypto.randomUUID();
+    const response = await this.waitForRequest(
       this.port.applyGraph({
+        clientOperationId,
         ...document,
         ...(surviving.length ? { processorParameterChanges: surviving } : {}),
         ...(graphId === undefined ? {} : { expectedGraphId: graphId }),
       }),
       signal,
-      GRAPH_APPLICATION_TIMEOUT_MS,
+      clientOperationId,
     );
     if (response.revision !== document.revision) throw failure('graph_revision_stale');
     if (response.state !== 'active') await this.waitForRevision(response.revision, signal);

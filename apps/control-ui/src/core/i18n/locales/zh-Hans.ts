@@ -474,6 +474,7 @@ export const zhHans = {
       unsupported: '不支持',
     },
     states: {
+      awaitingMicrophonePermission: '正在等待麦克风权限 — 请在 macOS 对话框中选择“允许”',
       active: '已启用',
       blocked: '未应用',
       applying: '正在应用',

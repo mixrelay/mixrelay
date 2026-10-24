@@ -259,13 +259,19 @@ export const EditingLocked: Story = {
   },
 };
 
-function graphSubmissionFixture(mode: 'pending' | 'recovery' | 'automatic_merge') {
-  const state = structuredClone(controlState);
-  const port = new StorybookMockControlPort(state);
+function graphSubmissionFixture(mode: 'pending' | 'permission' | 'recovery' | 'automatic_merge') {
+  const state: StorybookControlState = structuredClone(controlState);
+  const port = Object.assign(new StorybookMockControlPort(state), {
+    isOperationPending: async () => mode === 'permission',
+  });
   const apply = port.applyGraph.bind(port);
   let firstRequest = true;
   let externalUpdates = 0;
   port.applyGraph = async (request) => {
+    if (mode === 'permission') {
+      state.graphStatus.pendingReason = 'awaiting_microphone_permission';
+      return new Promise<GraphApplyResponse>(() => {});
+    }
     if (mode === 'pending') return new Promise<GraphApplyResponse>(() => {});
     if (mode === 'automatic_merge' && externalUpdates < 2) {
       externalUpdates += 1;
@@ -314,7 +320,7 @@ export const SubmissionPending: Story = {
     docs: {
       description: {
         story:
-          '실제 Add node에서 녹음기를 추가하고 applyGraph 응답을 대기합니다. 제품의 10초 상한이 지나면 timeout 복구 상태로 전환합니다. 영구 loading fixture가 아닙니다.',
+          '실제 Add node에서 녹음기를 추가하고 applyGraph 응답을 대기합니다. 제품의 10초 요청 상한이 지나면 timeout 복구 상태로 전환합니다. 영구 loading fixture가 아닙니다.',
       },
     },
   },
@@ -323,6 +329,16 @@ export const SubmissionPending: Story = {
     await waitFor(() => {
       expect(canvasElement.querySelector('section[data-state="applying"]')).toBeVisible();
     });
+  },
+};
+
+export const MicrophonePermissionWaiting: Story = {
+  parameters: { graphSubmissionState: 'permission' },
+  play: async ({ canvasElement }) => {
+    await addRecorder(canvasElement);
+    await expect(
+      await within(canvasElement).findByText(i18n.t('routing.states.awaitingMicrophonePermission')),
+    ).toBeVisible();
   },
 };
 
@@ -673,5 +689,44 @@ export const PluginEditorIssue: Story = {
         node.getBoundingClientRect().bottom,
       ),
     );
+  },
+};
+
+export const SequentialInsertions: Story = {
+  loaders: [
+    () => ({
+      controlPort: new StorybookMockControlPort({
+        ...structuredClone(controlState),
+        graph: { ...graph, nodes: [] },
+      }),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const body = within(canvasElement.ownerDocument.body);
+    await userEvent.click(await canvas.findByRole('button', { name: i18n.t('routing.addNode') }));
+    await userEvent.hover(
+      await body.findByRole('menuitem', { name: i18n.t('routing.groups.processor') }),
+    );
+    await userEvent.click(
+      await body.findByRole('menuitem', { name: i18n.t('studioGraph.nodes.compressor.name') }),
+    );
+    const compressor = await canvas.findByRole('group', {
+      name: i18n.t('studioGraph.nodes.compressor.name'),
+    });
+    await addRecorder(canvasElement);
+    const recorder = await canvas.findByRole('group', { name: i18n.t('recorder.title') });
+    await waitFor(() => {
+      const a = compressor.getBoundingClientRect();
+      const b = recorder.getBoundingClientRect();
+      expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(
+        true,
+      );
+    });
+    compressor.focus();
+    await userEvent.keyboard('{Shift>}{F10}{/Shift}');
+    await expect(
+      body.findByRole('menuitem', { name: i18n.t('routing.nodeName.title') }),
+    ).resolves.toBeVisible();
   },
 };

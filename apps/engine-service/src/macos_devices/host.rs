@@ -17,8 +17,14 @@ use std::{
 };
 
 pub(super) trait Host: Send + Sync {
+    fn set_permission_waiting(&self, waiting: bool);
+    fn permission_waiting(&self) -> bool;
     /// Consent for this process, without presenting a new privacy prompt.
     fn input_permission(&self) -> super::permission::InputPermission;
+    /// Presents first-use consent without blocking the native worker.
+    fn request_input_permission(&self);
+    /// Waits one bounded control-side interval and observes the authorization decision.
+    fn poll_input_permission(&self) -> super::permission::InputPermission;
     /// Present devices for these selections; an absent selection is omitted, not an error.
     fn inventory(
         &self,
@@ -67,11 +73,26 @@ pub(super) trait Host: Send + Sync {
 }
 
 /// The process's `CoreAudio` HAL through the transport ABI.
-pub(super) struct CoreAudio;
+#[derive(Default)]
+pub(super) struct CoreAudio(std::sync::atomic::AtomicBool);
 
 impl Host for CoreAudio {
+    fn set_permission_waiting(&self, waiting: bool) {
+        // This flag publishes no other data; status readers only need the current reason.
+        self.0.store(waiting, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn permission_waiting(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
     fn input_permission(&self) -> super::permission::InputPermission {
         super::permission::current()
+    }
+    fn request_input_permission(&self) {
+        super::permission::request();
+    }
+    fn poll_input_permission(&self) -> super::permission::InputPermission {
+        std::thread::sleep(super::permission::CONSENT_POLL_INTERVAL);
+        self.input_permission()
     }
     fn inventory(
         &self,

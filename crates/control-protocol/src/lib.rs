@@ -323,6 +323,14 @@ pub struct GraphRuntimeStatus {
     pub protocol_version: u16,
     pub active_revision: u64,
     pub submitted_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_reason: Option<GraphPendingReason>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphPendingReason {
+    AwaitingMicrophonePermission,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -902,6 +910,7 @@ mod tests {
         assert!(json["bufferFrames"].is_null());
 
         let runtime = serde_json::to_value(GraphRuntimeStatus {
+            pending_reason: None,
             protocol_version: PROTOCOL_VERSION,
             active_revision: 4,
             submitted_revision: 5,

@@ -10,13 +10,6 @@ final class InstalledApplicationTests: XCTestCase {
             XCTAssertNil(InstalledApplication.choice(root: "app", label: "Compressor", listLabel: "Destination", children: { tree[$0] ?? [] }, role: { roles[$0] ?? "" }, labels: { labels[$0] ?? [] }))
         }
     }
-    func testContextMenuUsesNativeActionOrFocusAndKeyboardInsteadOfOccludedTitleBounds() throws {
-        var calls: [String] = []
-        try InstalledElement.openContextMenu(show: { true }, focus: { XCTFail("native menu needs no focus fallback"); return false }, keyboard: { XCTFail("native menu needs no key fallback") })
-        try InstalledElement.openContextMenu(show: { false }, focus: { calls.append("focus"); return true }, keyboard: { calls.append("Shift+F10") })
-        XCTAssertEqual(calls, ["focus", "Shift+F10"])
-        XCTAssertThrowsError(try InstalledElement.openContextMenu(show: { false }, focus: { false }, keyboard: { XCTFail("never send a key to the wrong owner") }))
-    }
     func testSearchStaysInsideSelectedEditorTree() {
         let trees = ["editor": ["MixRelay", "Add node"], "runtime": ["Quit"]]
         XCTAssertEqual(InstalledApplication.first(root: "editor", children: { trees[$0] ?? [] }, matches: { $0 == "Add node" }), "Add node")

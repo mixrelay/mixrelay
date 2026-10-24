@@ -505,6 +505,8 @@ export const pt = {
       unsupported: 'Incompatível',
     },
     states: {
+      awaitingMicrophonePermission:
+        'A aguardar permissão do microfone — escolha Permitir na caixa de diálogo do macOS',
       active: 'Ativo',
       blocked: 'Não aplicado',
       applying: 'Aplicando',

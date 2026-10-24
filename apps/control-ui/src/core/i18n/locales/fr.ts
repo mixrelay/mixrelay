@@ -504,6 +504,8 @@ export const fr = {
       unsupported: 'Non pris en charge',
     },
     states: {
+      awaitingMicrophonePermission:
+        'En attente de l’accès au microphone — choisissez Autoriser dans la boîte de dialogue macOS',
       active: 'Actif',
       blocked: 'Non appliqué',
       applying: 'Application en cours',

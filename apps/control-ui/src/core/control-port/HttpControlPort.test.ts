@@ -522,3 +522,25 @@ describe('HttpControlPort invalid pending receipts', () => {
     },
   );
 });
+
+it('uses the caller operation identity and observes its receipt without consuming it', async () => {
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ protocolVersion: 1, revision: 2, state: 'active' }))
+    .mockResolvedValueOnce(operationResponse({ operationId: 'ours' }, true, 202, 'ours'))
+    .mockResolvedValueOnce(response({}, false, 404))
+    .mockResolvedValueOnce(operationResponse({ operationId: 'foreign' }, true, 202, 'foreign'))
+    .mockResolvedValueOnce(response({ operationId: 'ours' }, true, 202));
+  const port = new HttpControlPort('http://control', request);
+  await port.applyGraph({ ...graph, clientOperationId: 'ours' });
+  const init = request.mock.calls[0]?.[1];
+  expect(new Headers(init?.headers).get('x-mixrelay-operation-request')).toBe('ours');
+  expect(JSON.parse(String(init?.body))).toEqual(graph);
+  await expect(port.isOperationPending('ours')).resolves.toBe(true);
+  await expect(port.isOperationPending('ours')).resolves.toBe(false);
+  await expect(port.isOperationPending('ours')).rejects.toThrow('identity');
+  await expect(port.isOperationPending('ours')).resolves.toBe(false);
+  expect(request.mock.calls.slice(1).every(([, options]) => options?.method !== 'DELETE')).toBe(
+    true,
+  );
+});

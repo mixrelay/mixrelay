@@ -496,6 +496,8 @@ export const ru = {
       unsupported: 'Не поддерживается',
     },
     states: {
+      awaitingMicrophonePermission:
+        'Ожидание доступа к микрофону — выберите «Разрешить» в диалоге macOS',
       active: 'Активно',
       blocked: 'Не применено',
       applying: 'Применение',

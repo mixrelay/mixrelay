@@ -166,6 +166,20 @@ export class HttpControlPort implements ControlPort {
     return this.json('/api/v1/graph');
   }
 
+  public async isOperationPending(operationId: string): Promise<boolean> {
+    const request = this.request;
+    const response = await request(
+      `${this.origin}/api/v1/operations/${encodeURIComponent(operationId)}`,
+      {
+        signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+      },
+    );
+    if (response.status !== 202) return false;
+    const body: unknown = await response.json();
+    validateOperationReceipt(body, operationId);
+    return pendingOperationId(response) === operationId;
+  }
+
   public getGraphStatus(): Promise<GraphRuntimeStatus> {
     return this.json('/api/v1/graph/status');
   }
@@ -243,6 +257,15 @@ export class HttpControlPort implements ControlPort {
     // Browser fetch is a Web IDL method, not an adapter method. Calling it with
     // this port as receiver throws before any HTTP request is sent in WebKit.
     const request = this.request;
+    if (typeof init?.body === 'string') {
+      const body = JSON.parse(init.body);
+      if (typeof body.clientOperationId === 'string') {
+        const headers = new Headers(init.headers);
+        headers.set('x-mixrelay-operation-request', body.clientOperationId);
+        delete body.clientOperationId;
+        init = { ...init, headers, body: JSON.stringify(body) };
+      }
+    }
     const response = await request(
       `${this.origin}${path}`,
       init ?? { signal: AbortSignal.timeout(READ_TIMEOUT_MS) },

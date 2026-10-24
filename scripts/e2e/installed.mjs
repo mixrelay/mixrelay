@@ -79,19 +79,10 @@ export async function applyDesktopGraph(document, { invoke, active, api }) {
   return observed;
 }
 
-// A permission-pending rejection did not publish the proposed graph. Only a
-// real consent action and an unchanged authoritative document permit resubmission.
-export async function applyWithMicrophoneConsent(document, { api, operation, waitForConsent }) {
-  const before = await api('graph');
-  const submit = () => operation('PUT', '/api/v1/graph', JSON.stringify(document));
-  let reply = await submit();
-  if (reply.status === 503 && reply.json?.code === 'audio_permission_pending' &&
-      reply.json.parameters?.capability === 'microphone' &&
-      reply.json.parameters?.configurationOutcome === 'not_applied') {
-    await waitForConsent();
-    assert.deepEqual(await api('graph'), before, 'Graph changed while microphone consent was pending');
-    reply = await submit();
-  }
+// Native preparation owns first-use consent. Qualification submits one change and
+// collects its receipt; permission errors must fail instead of being replayed here.
+export async function applyNativeGraph(document, { operation }) {
+  const reply = await operation('PUT', '/api/v1/graph', JSON.stringify(document));
   assert.ok(reply.status >= 200 && reply.status < 300, `Native graph: HTTP ${reply.status} ${reply.body}`);
   assert.equal(reply.json.revision, document.revision);
   assert.ok(['active', 'pending'].includes(reply.json.state), JSON.stringify(reply));
@@ -188,19 +179,9 @@ export async function qualifyMode({
       (status) => status.activeRevision === revision,
       'Graph did not activate',
     );
-  async function apply(document, microphoneConsent = false) {
+  async function apply(document) {
     unconfirmedMutation = true;
-    if (microphoneConsent) {
-      const actionsPath = join(output, 'audio-permission-actions.json');
-      const actions = () => existsSync(actionsPath) ? JSON.parse(readFileSync(actionsPath, 'utf8')) : [];
-      const previousCount = actions().length;
-      await applyWithMicrophoneConsent(document, { api, operation, waitForConsent: () => eventually(
-        actions,
-        entries => entries.slice(previousCount).some(entry => ['OK', 'Allow'].some(label => entry.action.split('/').includes(label)) &&
-          entry.subject?.some(text => text.toLowerCase().includes('mixrelay-engine-service'))),
-        'Installed UI did not approve the engine microphone prompt',
-      ) });
-    } else await api('graph', document);
+    await applyNativeGraph(document, { operation });
     await active(document.revision);
     const observed = await api('graph');
     unconfirmedMutation = false;
@@ -377,7 +358,7 @@ export async function qualifyMode({
     assert.equal(device.observedSampleRate, 48000);
     assert.ok(device.nativeDeviceIds.length > 0, 'Native device was not published');
     try {
-      applied = await apply(signalGraph(applied, graphId, spec), target.os === 'macos');
+      applied = await apply(signalGraph(applied, graphId, spec));
     } catch (error) {
       report.scenarios.push({
         id: 'AUDIO-01',

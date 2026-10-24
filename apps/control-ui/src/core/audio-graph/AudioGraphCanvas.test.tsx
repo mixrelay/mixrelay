@@ -62,6 +62,7 @@ function MockViewportActions({ props }: { props: Record<string, unknown> }) {
   const initialize = () => {
     const onInit = props.onInit as (instance: object) => void;
     onInit({
+      getNodes: () => props.nodes,
       getViewport: () => viewportHarness.current,
       setViewport: (viewport: AudioGraphViewport, options: unknown) => {
         viewportHarness.setViewport(viewport, options);
@@ -1392,10 +1393,14 @@ describe('AudioGraphCanvas add button placement', () => {
     expect(onAddNode).not.toHaveBeenCalled();
     await user.pointer({ target: add, keys: '[/MouseLeft]' });
     await user.click(item);
-    expect(onAddNode).toHaveBeenCalledExactlyOnceWith('source:new', { x: 132, y: 92 });
+    expect(onAddNode).toHaveBeenCalledExactlyOnceWith(
+      'source:new',
+      { x: 132, y: 92 },
+      expect.any(Function),
+    );
   });
 
-  it('cascades a repeated add instead of hiding the node at the anchor', async () => {
+  it('passes Core placement to the insertion owner for a repeated add', async () => {
     const placed: AudioGraphNode = {
       id: 'placed',
       position: { x: 132, y: 92 },
@@ -1408,7 +1413,11 @@ describe('AudioGraphCanvas add button placement', () => {
     fireEvent.keyDown(add, { key: 'Enter' });
     fireEvent.keyUp(add, { key: 'Enter' });
     fireEvent.click(await screen.findByRole('menuitem', { name: 'New source' }));
-    expect(onAddNode).toHaveBeenCalledExactlyOnceWith('source:new', { x: 156, y: 116 });
+    expect(onAddNode).toHaveBeenCalledExactlyOnceWith(
+      'source:new',
+      { x: 132, y: 92 },
+      expect.any(Function),
+    );
   });
 });
 
@@ -1662,7 +1671,11 @@ it('adds a node from the canvas context menu and fits the initialized viewport w
     clientY: 80,
   });
   fireEvent.click(await screen.findByRole('menuitem', { name: 'New source' }));
-  expect(onAddNode).toHaveBeenCalledExactlyOnceWith('source:new', { x: 120, y: 80 });
+  expect(onAddNode).toHaveBeenCalledExactlyOnceWith(
+    'source:new',
+    { x: 120, y: 80 },
+    expect.any(Function),
+  );
   fireEvent.contextMenu(screen.getByRole('button', { name: 'Graph background' }));
   fireEvent.click(await screen.findByRole('menuitem', { name: 'Fit graph' }));
   expect(viewportHarness.fitView).toHaveBeenCalledWith({ padding: 0.15, maxZoom: 1 });

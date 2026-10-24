@@ -106,6 +106,7 @@ fn state(generation: u64) -> mixrelay_control_protocol::ControlStateSnapshot {
         controls: None,
         editors: vec![],
         graph: mixrelay_control_protocol::GraphRuntimeStatus {
+            pending_reason: None,
             protocol_version: 1,
             active_revision: 1,
             submitted_revision: 1,

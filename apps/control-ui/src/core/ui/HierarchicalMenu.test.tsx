@@ -271,3 +271,22 @@ it('shows the reason a disabled menu leaf cannot be selected', async () => {
   fireEvent.click(item);
   expect(onSelect).not.toHaveBeenCalled();
 });
+
+it('uses the owner anchor supplied for a coordinate-less accessibility invocation', async () => {
+  render(
+    <MixRelayProvider>
+      <HierarchicalContextMenu
+        getAnchor={() => ({ x: 400, y: 250 })}
+        items={[{ id: 'rename', label: 'Rename display name' }]}
+        onSelect={vi.fn()}
+      >
+        <section aria-label="Graph">
+          <fieldset aria-label="Compressor" />
+        </section>
+      </HierarchicalContextMenu>
+    </MixRelayProvider>,
+  );
+  fireEvent.contextMenu(screen.getByRole('group', { name: 'Compressor' }));
+  const menu = await screen.findByRole('menu');
+  await waitFor(() => expect(menu.parentElement).toHaveStyle({ left: '400px', top: '252px' }));
+});

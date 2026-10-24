@@ -1,48 +1,41 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyDesktopGraph, applyWithMicrophoneConsent, signalGraph } from './installed.mjs';
+import { applyDesktopGraph, applyNativeGraph, signalGraph } from './installed.mjs';
 
 const pendingConsent = { status: 503, json: { code: 'audio_permission_pending',
   parameters: { capability: 'microphone', configurationOutcome: 'not_applied' } } };
 
-test('fresh native input waits for actual consent after a definite rejection and resubmits the same document once', async () => {
-  const before = { revision: 3, nodes: [], edges: [] }, document = { ...before, revision: 4 };
-  const calls = [];
+test('native input collects the original consent-waiting operation without another submission', async () => {
+  const document = { revision: 4, nodes: [], edges: [] };
   let submissions = 0;
-  await applyWithMicrophoneConsent(document, {
-    api: async path => { assert.equal(path, 'graph'); calls.push('read'); return before; },
+  let approve;
+  const consent = new Promise(resolve => { approve = resolve; });
+  const result = applyNativeGraph(document, {
     operation: async (method, path, body) => {
+      submissions++;
       assert.equal(method, 'PUT'); assert.equal(path, '/api/v1/graph');
-      assert.deepEqual(JSON.parse(body), document); calls.push('submit');
-      return ++submissions === 1 ? pendingConsent : { status: 202, json: { revision: 4, state: 'pending' } };
+      assert.deepEqual(JSON.parse(body), document);
+      await consent;
+      return { status: 202, json: { revision: 4, state: 'pending' } };
     },
-    waitForConsent: async () => { calls.push('consent'); },
   });
-  assert.deepEqual(calls, ['read', 'submit', 'consent', 'read', 'submit']);
+  assert.equal(submissions, 1);
+  approve();
+  await result;
+  assert.equal(submissions, 1);
 });
 
-test('native input never replays denied, uncertain, externally changed or still pending changes', async () => {
-  const before = { revision: 3, nodes: [], edges: [] }, document = { ...before, revision: 4 };
-  for (const reply of [
+test('native input fails pending, denied and uncertain operations without replaying them', async () => {
+  const document = { revision: 4, nodes: [], edges: [] };
+  for (const reply of [pendingConsent,
     { status: 503, json: { code: 'audio_permission_denied' } },
-    { status: 503, json: { code: 'audio_permission_pending', parameters: { capability: 'microphone' } } },
+    { status: 503, json: { code: 'control_request_failed' } },
   ]) {
     let submits = 0;
-    await assert.rejects(applyWithMicrophoneConsent(document, {
-      api: async () => before,
+    await assert.rejects(applyNativeGraph(document, {
       operation: async () => { submits++; return reply; },
-      waitForConsent: async () => assert.fail('unconfirmed/denied commands must not await consent'),
     }));
     assert.equal(submits, 1);
-  }
-  for (const failure of ['no consent', 'foreign edit', 'still pending']) {
-    let reads = 0, submits = 0;
-    await assert.rejects(applyWithMicrophoneConsent(document, {
-      api: async () => ++reads > 1 && failure === 'foreign edit' ? document : before,
-      operation: async () => { submits++; return pendingConsent; },
-      waitForConsent: async () => { if (failure === 'no consent') throw new Error('no consent'); },
-    }));
-    assert.equal(submits, failure === 'still pending' ? 2 : 1);
   }
 });
 

@@ -1,4 +1,5 @@
 import { ProblemsTarget } from '../../test-support/ProblemsTarget';
+import { GRAPH_APPLICATION_TIMEOUT_MS } from './GraphApplicationQueue';
 import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -503,6 +504,7 @@ it('retries only the crashed processor instance through the authoritative graph 
   fireEvent.click(await screen.findByRole('button', { name: 'Retry crashed plug-in: Effect' }));
   await waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
   expect(retry).toHaveBeenCalledWith({
+    clientOperationId: expect.any(String),
     graphId: failed.graphId,
     nodeId: failed.nodeId,
     expectedCatalogRevision: 1,
@@ -689,7 +691,7 @@ it('shows a bounded graph-apply timeout with the recoverable draft preserved', a
   await ready();
   vi.useFakeTimers();
   await act(async () => canvas().onAddNode?.('limiter', { x: 0, y: 0 }));
-  await act(async () => vi.advanceTimersByTimeAsync(10_000));
+  await act(async () => vi.advanceTimersByTimeAsync(GRAPH_APPLICATION_TIMEOUT_MS));
   expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
   expect(
     screen.queryByRole('button', { name: 'Overwrite engine with these edits' }),
@@ -911,4 +913,35 @@ it('preserves a user focus move during an asynchronous layout retry', async () =
   await act(async () => pending.resolve(saved));
   expect(elsewhere).toHaveFocus();
   expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+});
+
+it('shows microphone consent guidance for an accepted operation and ends promptly on denial', async () => {
+  const native = Object.assign(port(), { isOperationPending: vi.fn().mockResolvedValue(true) });
+  const pending = Promise.withResolvers<GraphApplyResponse>();
+  vi.spyOn(native, 'applyGraph').mockReturnValueOnce(pending.promise);
+  vi.spyOn(native, 'getGraphStatus').mockResolvedValue({
+    protocolVersion: 1,
+    activeRevision: 1,
+    submittedRevision: 1,
+    pendingReason: 'awaiting_microphone_permission',
+  });
+  const rendered = render(view(native));
+  await ready();
+  vi.useFakeTimers();
+  await act(async () => canvas().onAddNode?.('limiter', { x: 0, y: 0 }));
+  await act(async () => vi.advanceTimersByTimeAsync(20_000));
+  expect(screen.getByRole('status')).toHaveTextContent(
+    i18n.t('routing.states.awaitingMicrophonePermission'),
+  );
+  await act(async () =>
+    pending.reject(new ControlPortError(403, { code: 'audio_permission_denied', parameters: {} })),
+  );
+  expect(
+    screen.queryByText(i18n.t('routing.states.awaitingMicrophonePermission')),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    i18n.t('routing.errors.audio_permission_denied'),
+  );
+  expect(canvas().model.nodes).toHaveLength(1);
+  rendered.unmount();
 });

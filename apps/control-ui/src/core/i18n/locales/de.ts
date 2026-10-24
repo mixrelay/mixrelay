@@ -511,6 +511,8 @@ export const de = {
       unsupported: 'Nicht unterstützt',
     },
     states: {
+      awaitingMicrophonePermission:
+        'Warten auf Mikrofonzugriff — im macOS-Dialog „Erlauben“ wählen',
       active: 'Aktiv',
       blocked: 'Nicht angewendet',
       applying: 'Wird angewendet',

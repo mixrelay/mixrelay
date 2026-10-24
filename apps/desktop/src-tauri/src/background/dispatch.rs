@@ -14,6 +14,7 @@ pub(crate) fn is_service_command(name: &str) -> bool {
             | "control_get_graph"
             | "control_set_virtual_endpoint_sample_rate"
             | "control_get_graph_status"
+            | "control_get_operation"
             | "control_get_graph_catalog"
             | "control_mutate_graph_catalog"
             | "control_get_meters"
@@ -153,6 +154,13 @@ pub(crate) async fn dispatch(
         "control_get_graph" => {
             response(crate::control_proxy::control_get_graph(app.state(), app.state()).await)
         }
+        "control_get_operation" => response(
+            crate::control_proxy::control_get_operation(
+                app.state(),
+                argument(&arguments, "operationId")?,
+            )
+            .await,
+        ),
         "control_get_graph_status" => {
             response(crate::control_proxy::control_get_graph_status(app.state()).await)
         }

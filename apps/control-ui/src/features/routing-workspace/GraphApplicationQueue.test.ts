@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   ControlPortError,
+  type GraphApplyRequest,
   type GraphApplyResponse,
   type RuntimeGraphDocument,
 } from '../../core/control-port/types';
@@ -17,12 +18,13 @@ function fixture(beforeReload?: () => Promise<void>) {
     { x: 20, y: 30 },
   );
   const port = {
+    isOperationPending: vi.fn().mockResolvedValue(false),
     getGraph: vi.fn().mockResolvedValue(empty),
     getGraphStatus: vi
       .fn()
       .mockResolvedValue({ activeRevision: 1, submittedRevision: 1, protocolVersion: 1 }),
     applyGraph: vi.fn(
-      async (document: RuntimeGraphDocument): Promise<GraphApplyResponse> => ({
+      async (document: GraphApplyRequest): Promise<GraphApplyResponse> => ({
         protocolVersion: 1,
         revision: document.revision,
         state: 'active',
@@ -38,6 +40,7 @@ function fixture(beforeReload?: () => Promise<void>) {
     state: vi.fn(),
     error: vi.fn(),
     persistenceWarning: vi.fn(),
+    permissionWaiting: vi.fn(),
   };
   const queue = new GraphApplicationQueue(port, callbacks);
   return {
@@ -291,4 +294,33 @@ it('does not discard edits made while a reload is in flight', async () => {
   expect(f.callbacks.restore).not.toHaveBeenCalled();
   expect(f.port.applyGraph).not.toHaveBeenCalled();
   expect(f.callbacks.error).toHaveBeenLastCalledWith('graph_draft_changed');
+});
+
+it('follows the accepted first-use operation through consent and applies approval without replay', async () => {
+  const f = fixture();
+  f.port.isOperationPending.mockResolvedValue(true);
+  f.port.getGraphStatus.mockResolvedValue({
+    protocolVersion: 1,
+    activeRevision: 1,
+    submittedRevision: 1,
+    pendingReason: 'awaiting_microphone_permission',
+  });
+  const consent = Promise.withResolvers<GraphApplyResponse>();
+  f.port.applyGraph.mockReturnValueOnce(consent.promise);
+  f.queue.submit(f.draft);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(f.callbacks.state).toHaveBeenLastCalledWith('applying');
+  expect(f.callbacks.permissionWaiting).toHaveBeenLastCalledWith(true);
+  expect(f.callbacks.document).not.toHaveBeenCalled();
+  expect(f.callbacks.restore).not.toHaveBeenCalled();
+  expect(f.port.applyGraph).toHaveBeenCalledTimes(1);
+  expect(f.port.isOperationPending).toHaveBeenCalledWith(
+    f.port.applyGraph.mock.calls[0]?.[0].clientOperationId,
+  );
+  consent.resolve({ protocolVersion: 1, revision: 2, state: 'active' });
+  await flush();
+  expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
+  expect(f.callbacks.document).toHaveBeenCalledWith(expect.objectContaining({ revision: 2 }));
+  expect(f.port.applyGraph).toHaveBeenCalledTimes(1);
+  expect(f.callbacks.error).toHaveBeenLastCalledWith(null);
 });

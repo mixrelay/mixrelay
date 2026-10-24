@@ -68,6 +68,7 @@ impl ControlBackend for BlockingPowerBackend {
 
     fn graph_status(&self) -> mixrelay_control_protocol::GraphRuntimeStatus {
         mixrelay_control_protocol::GraphRuntimeStatus {
+            pending_reason: None,
             protocol_version: mixrelay_control_protocol::PROTOCOL_VERSION,
             active_revision: 0,
             submitted_revision: 0,

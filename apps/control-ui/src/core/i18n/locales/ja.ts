@@ -503,6 +503,8 @@ export const ja = {
       unsupported: '非対応',
     },
     states: {
+      awaitingMicrophonePermission:
+        'マイクの許可を待っています — macOSのダイアログで「許可」を選んでください',
       active: '動作中',
       blocked: '未適用',
       applying: '適用中',

@@ -492,6 +492,8 @@ export const en = {
       unsupported: 'Unsupported',
     },
     states: {
+      awaitingMicrophonePermission:
+        'Waiting for microphone permission — choose Allow in the macOS dialog',
       active: 'Active',
       blocked: 'Not applied',
       applying: 'Applying',

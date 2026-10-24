@@ -40,7 +40,7 @@ final class InstalledUITests: XCTestCase {
         try press("Output")
         try press("Recorder")
         _ = try app.wait("Recorder", roles: [kAXGroupRole])
-        try app.wait("Compressor", roles: [kAXGroupRole]).showContextMenu()
+        try app.wait("Compressor", roles: [kAXStaticTextRole]).click(right: true)
         try press("Connect channels…")
         try app.wait("Destination", roles: [kAXButtonRole, kAXPopUpButtonRole], contains: true, timeout: 10).click()
         try app.waitChoice("Recorder", in: "Destination").click()

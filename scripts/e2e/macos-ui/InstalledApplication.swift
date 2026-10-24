@@ -27,33 +27,6 @@ struct InstalledElement {
         }
     }
 
-    func showContextMenu() throws {
-        try Self.openContextMenu(
-            show: { AXUIElementPerformAction(raw, kAXShowMenuAction as CFString) == .success },
-            focus: {
-                AXUIElementSetAttributeValue(raw, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success
-                    && (attribute(kAXFocusedAttribute) as? Bool == true)
-            },
-            keyboard: {
-                // kVK_F10 = 109. Use the product's documented Shift+F10 path on
-                // the node group, independent of overlapping title coordinates.
-                for down in [true, false] {
-                    guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 109, keyDown: down) else {
-                        throw InstalledApplication.Failure.control("Could not create context-menu key")
-                    }
-                    event.flags = .maskShift
-                    event.post(tap: .cghidEventTap)
-                }
-            }
-        )
-    }
-
-    static func openContextMenu(show: () -> Bool, focus: () -> Bool, keyboard: () throws -> Void) throws {
-        if show() { return }
-        guard focus() else { throw InstalledApplication.Failure.control("Could not focus context-menu owner") }
-        try keyboard()
-    }
-
     func click(right: Bool = false) throws {
         if !right && AXUIElementPerformAction(raw, kAXPressAction as CFString) == .success { return }
         guard let position = attribute(kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),

@@ -352,7 +352,12 @@ impl MacDevices {
         self.handoff.has_pending()
     }
     pub(super) fn new(status: Arc<AdapterRuntimeStatus>, rate: u32, buffer_frames: u32) -> Self {
-        Self::with_host(status, rate, buffer_frames, Arc::new(host::CoreAudio))
+        Self::with_host(
+            status,
+            rate,
+            buffer_frames,
+            Arc::new(host::CoreAudio::default()),
+        )
     }
     /// A coordinator over a simulated `CoreAudio` that publishes no device, for tests that
     /// exercise coordination without devices. Nothing reaches the machine's HAL.
@@ -629,6 +634,9 @@ impl RuntimeStatusBackend for MacDevices {
             return Ok(());
         }
         self.status.adopt_external_format(requested)
+    }
+    fn awaiting_microphone_permission(&self) -> bool {
+        self.host.permission_waiting()
     }
     fn status(&self, format: RenderFormat) -> mixrelay_control_protocol::AppStatus {
         self.status
