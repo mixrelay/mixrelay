@@ -150,18 +150,17 @@ def open_menu(label):
     node = find(label)
     node.queryComponent().grabFocus()
     deadline = time.monotonic() + observation_timeout()
-    for flag, description in [(pyatspi.STATE_FOCUSED, "receive focus"),
-                              (pyatspi.STATE_EXPANDED, "expand")]:
-        while True:
-            node.clearCache()
-            if node.getState().contains(flag):
-                break
-            if time.monotonic() >= deadline:
-                raise AssertionError(f"Installed menu trigger did not {description}: {label}")
-            time.sleep(0.1)
-        if flag == pyatspi.STATE_FOCUSED:
-            # One Return opens the focused trigger; never toggle an uncertain result.
-            pyatspi.Registry.generateKeyboardEvent(0xff0d, None, pyatspi.KEY_SYM)
+    while True:
+        node.clearCache()
+        if node.getState().contains(pyatspi.STATE_FOCUSED):
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"Installed menu trigger did not receive focus: {label}")
+        time.sleep(0.1)
+    # WebKitGTK exposes the open menu but omits EXPANDED on this trigger.
+    # One Return opens it; observing the named menu never toggles it again.
+    pyatspi.Registry.generateKeyboardEvent(0xff0d, None, pyatspi.KEY_SYM)
+    find(label, interactive=False, roles=("menu",), deadline=deadline)
     print(f"Observed installed menu expansion: {label}", flush=True)
 
 

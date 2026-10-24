@@ -24,20 +24,25 @@ export function prepareHostedMacos(output, { command = spawnSync, env = process.
     const version = run('os-version', 'sw_vers', ['-productVersion']);
     success(version, 'Cannot identify the hosted macOS version');
     report.version = version.stdout.trim();
-    const volume = '/System/Volumes/Data';
-    const indexingDisabled = text => /Indexing(?: and searching)? disabled\.|Spotlight server is disabled/i.test(text);
-    const indexingBefore = run('spotlight-before', 'mdutil', ['-s', volume]);
-    success(indexingBefore, 'Cannot inspect indexing on the disposable data volume');
-    const wasDisabled = indexingDisabled(indexingBefore.stdout ?? '');
-    assert.ok(wasDisabled || /Indexing enabled\./.test(indexingBefore.stdout ?? ''), 'Unrecognized Spotlight state');
-    report.spotlight = { volume, changed: !wasDisabled, indexingBefore: wasDisabled ? 'disabled' : 'enabled' };
-    if (!wasDisabled) {
-      success(run('spotlight-disable', 'sudo', ['-n', 'mdutil', '-i', 'off', volume]), 'Cannot pause disposable-host indexing');
-      const after = run('spotlight-after', 'mdutil', ['-s', volume]);
-      success(after, 'Cannot verify disposable-host indexing');
-      assert.ok(indexingDisabled(after.stdout ?? ''), 'Spotlight indexing must be disabled before the audio session');
+    const activityDisabled = text => /Indexing and searching disabled\.|Spotlight server is disabled/i.test(text);
+    report.spotlight = { volumes: [] };
+    for (const [index, volume] of ['/', '/System/Volumes/Data'].entries()) {
+      const before = run(`spotlight-${index}-before`, 'mdutil', ['-s', volume]);
+      success(before, 'Cannot inspect Spotlight on the disposable host');
+      const text = before.stdout ?? '';
+      const wasDisabled = activityDisabled(text);
+      const indexingOnly = /Indexing disabled\./.test(text);
+      assert.ok(wasDisabled || indexingOnly || /Indexing enabled\./.test(text), 'Unrecognized Spotlight state');
+      const observed = { volume, changed: !wasDisabled, activityBefore: wasDisabled ? 'disabled' : indexingOnly ? 'indexing-disabled' : 'enabled' };
+      report.spotlight.volumes.push(observed);
+      if (!wasDisabled) {
+        success(run(`spotlight-${index}-disable`, 'sudo', ['-n', 'mdutil', '-d', volume]), 'Cannot pause disposable-host Spotlight activity');
+        const after = run(`spotlight-${index}-after`, 'mdutil', ['-s', volume]);
+        success(after, 'Cannot verify disposable-host Spotlight activity');
+        assert.ok(activityDisabled(after.stdout ?? ''), 'Spotlight activity must be disabled before the audio session');
+      }
+      observed.activityAfter = 'disabled';
     }
-    report.spotlight.indexingAfter = 'disabled';
     if (arch !== 'x64' || !/^26\./.test(report.version)) return report;
     const target = `gui/${uid}/com.apple.iconservices.iconservicesagent`;
     const before = run('icon-agent-before', 'launchctl', ['print', target]);

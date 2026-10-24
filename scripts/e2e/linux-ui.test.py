@@ -208,36 +208,41 @@ class InstalledEditorTest(unittest.TestCase):
                 self.ui.open_submenu("Add node")
         self.assertEqual(events, [(25, 40, "abs")])
 
-    def test_menu_trigger_requires_observed_focus_and_expansion_after_one_key(self):
+    def test_menu_trigger_requires_focus_and_a_visible_menu_without_a_trigger_expanded_flag(self):
         self.desktop[:] = [self.editor]
         self.atspi.STATE_FOCUSED = 2
         self.atspi.STATE_EXPANDED = 4
         self.atspi.KEY_SYM = 3
-        state = {"focused": False, "expanded": False}
+        state = {"focused": False}
         observed = state.copy()
+        menu = Node("Add node", "menu", [Node("Processor", "menu item")])
         keys = []
         self.add.clearCache = lambda: observed.update(state)
         self.add.getState = lambda: types.SimpleNamespace(contains=lambda flag:
             self.add.showing if flag == self.atspi.STATE_SHOWING else
-            observed["focused"] if flag == self.atspi.STATE_FOCUSED else observed["expanded"])
+            observed["focused"] if flag == self.atspi.STATE_FOCUSED else False)
         self.add.queryComponent = lambda: types.SimpleNamespace(
             grabFocus=lambda: state.update(focused=True))
         def submit(*args):
             self.assertTrue(observed["focused"], "The trigger must own keyboard focus")
             keys.append(args)
-            state["expanded"] = True
+            self.editor[0].append(menu)
         self.atspi.Registry.generateKeyboardEvent = submit
-        self.ui.open_menu("Add node")
-        self.assertTrue(observed["expanded"])
-        self.assertEqual(keys, [(0xff0d, None, 3)])
-
-        state.update(focused=False, expanded=False)
-        observed.update(state)
-        keys.clear()
         elapsed = 0
         def pause(seconds):
             nonlocal elapsed
             elapsed += 1
+        with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
+                patch.object(self.ui.time, "sleep", side_effect=pause):
+            self.ui.open_menu("Add node")
+        self.assertIs(self.ui.find("Add node", interactive=False, roles=("menu",)), menu)
+        self.assertEqual(keys, [(0xff0d, None, 3)])
+        self.editor[0].remove(menu)
+
+        state.update(focused=False)
+        observed.update(state)
+        keys.clear()
+        elapsed = 0
         self.add.queryComponent = lambda: types.SimpleNamespace(grabFocus=lambda: False)
         with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
                 patch.object(self.ui.time, "sleep", side_effect=pause):
@@ -251,7 +256,7 @@ class InstalledEditorTest(unittest.TestCase):
         self.atspi.Registry.generateKeyboardEvent = lambda *args: keys.append(args)
         with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
                 patch.object(self.ui.time, "sleep", side_effect=pause):
-            with self.assertRaisesRegex(AssertionError, "did not expand"):
+            with self.assertRaisesRegex(AssertionError, "Missing installed UI control"):
                 self.ui.open_menu("Add node")
         self.assertEqual(keys, [(0xff0d, None, 3)], "An unacknowledged opening must not toggle the menu again")
 
