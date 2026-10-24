@@ -11,6 +11,7 @@
 // position directly, each channel carries independent content (a mix of channels never
 // reproduces another channel), and any recorded channel can locate the signal.
 #include <CoreAudio/CoreAudio.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_time.h>
 
 #include <errno.h>
@@ -33,6 +34,37 @@ static const uint32_t MR_UNMAPPED = UINT32_MAX;
 static const double MR_LEAD_SECONDS = 0.1;  // silence before the signal
 static const double MR_TAIL_SECONDS = 1.5;  // recording after the signal, for slow paths
 static const double MR_TIMING_SECONDS = 0.1;
+
+extern long mr_microphone_authorization_status(void);
+extern void mr_microphone_request_authorization(void);
+typedef struct MRInputAuthorization {
+    long initial, final;
+    bool requested;
+} MRInputAuthorization;
+
+// Finish the probe's own recording consent before any device or signal starts.
+static bool mr_authorize_input(double timeout, MRInputAuthorization *result) {
+    result->initial = result->final = mr_microphone_authorization_status();
+    result->requested = result->initial == 0;
+    if (result->requested) {
+        mach_timebase_info_data_t timebase;
+        mach_timebase_info(&timebase);
+        const uint64_t start = mach_absolute_time();
+        mr_microphone_request_authorization();
+        for (;;) {
+            result->final = mr_microphone_authorization_status();
+            if (result->final != 0) break;
+            const double elapsed = (double)(mach_absolute_time() - start) *
+                (double)timebase.numer / (double)timebase.denom / 1e9;
+            if (elapsed >= timeout) break;
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+        }
+    }
+    if (result->final == 3) return true;
+    fprintf(stderr, "input recording authorization was not granted before I/O (initial %ld, final %ld)\n",
+            result->initial, result->final);
+    return false;
+}
 // Impulse mode measures paths that change samples (asynchronous clocks, sample-rate
 // conversion, gain), where no exact copy exists. It plays 32-frame pulses whose spacing
 // varies pseudo-randomly around 0.25 s, finds each arrival at half its own received peak,
@@ -1582,7 +1614,8 @@ static void mr_usage(FILE *stream) {
             "--impulse measures paths that change samples (asynchronous clocks, sample-rate\n"
             "conversion): it plays pulses at irregular ~0.25 s spacing and finds the one delay\n"
             "that aligns their arrivals.\n"
-            "Exit status: 0 measured, 1 usage or device error, 3 no exact copy of the signal\n"
+            "Exit status: 0 measured, 1 device error, 2 usage or recording permission error,\n"
+            "3 no exact copy of the signal\n"
             "(with --impulse: no single delay aligned most pulses), 4 (--impulse) the\n"
             "recording overflowed, dropped chunks or saw inconsistent buffers.\n");
 }
@@ -1769,11 +1802,16 @@ int main(int argc, char **argv) {
     MROptions options = {.seconds = 5.0, .channels = MR_MAX_CHANNELS};
     const int status = mr_options(argc, argv, &options);
     if (status >= 0) return status;
+    MRInputAuthorization authorization = {0};
+    if (!mr_authorize_input(30.0, &authorization)) return 2;
     MRProbe *probe = mr_prepare(&options);
     if (probe == NULL) return 1;
     const MRReported out_reported = mr_reported(probe->output, kAudioObjectPropertyScopeOutput);
     const MRReported in_reported = mr_reported(probe->input, kAudioObjectPropertyScopeInput);
     if (options.json) printf("{");
+    if (options.json) printf("\"inputAuthorization\":{\"initial\":%ld,\"final\":%ld,\"requested\":%s},",
+                             authorization.initial, authorization.final,
+                             authorization.requested ? "true" : "false");
     mr_describe("output", probe->output, kAudioObjectPropertyScopeOutput, options.json);
     mr_describe("input", probe->input, kAudioObjectPropertyScopeInput, options.json);
     if (options.json) printf("\"channels\":%u,\"seconds\":%.1f,", probe->channels, options.seconds);

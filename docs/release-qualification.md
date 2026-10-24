@@ -166,6 +166,14 @@ signed code and uses `test-without-building` with signing disabled. The syntheti
 probe self-test also compiles before installation. The audio scenarios retain their first
 native I/O and full PCM checks.
 
+The measurement probe completes its own microphone authorization before preparing any
+device or starting I/O. This follows [Apple's capture authorization procedure](https://developer.apple.com/documentation/avfoundation/requesting-authorization-to-capture-and-save-media).
+Denied, restricted, nongraphical or unresolved authorization fails measurement. The probe
+records its initial and final status and whether it requested consent in `inputAuthorization`.
+MixRelay's first-use microphone and system-audio dialogs continue through the UI observer.
+The signal still starts with its original first frame and runs for the complete requested
+duration; the probe performs no preliminary audio run.
+
 For a hosted diagnostic job, prepare these tools before invoking the installed runner:
 
 ```sh

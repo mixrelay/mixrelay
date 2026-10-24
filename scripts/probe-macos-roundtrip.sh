@@ -11,8 +11,8 @@
 #   pnpm probe:macos-roundtrip --self-test
 #   pnpm probe:macos-roundtrip --prepare-bundle BUNDLE_ID
 #     (prints a signed probe app path for a LaunchServices permission test)
-# Recording needs microphone permission for the terminal that runs it; without it every
-# input reads as silence and the probe exits with status 3.
+# Recording requests microphone permission for its responsible app before opening devices.
+# Denied, restricted or unresolved permission exits with status 2; read-only modes need none.
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -21,12 +21,14 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 repo_root="${0:A:h:h}"
 source_file="$repo_root/native/macos/hal-driver/tests/MRRoundTripProbe.c"
+permission_source="$repo_root/native/macos/engine-service/src/MRMicrophonePermission.m"
 binary="$repo_root/target/macos-probes/MRRoundTripProbe"
-if [[ ! -x "$binary" || "$source_file" -nt "$binary" ]]; then
+if [[ ! -x "$binary" || "$source_file" -nt "$binary" || "$permission_source" -nt "$binary" ]]; then
   mkdir -p "${binary:h}"
   clang -std=c17 -O2 -mmacosx-version-min=14.2 \
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Werror \
-    "$source_file" -framework CoreAudio -framework CoreFoundation -o "$binary"
+    -fblocks "$source_file" "$permission_source" -framework CoreAudio -framework CoreFoundation \
+    -framework AVFoundation -framework Security -framework Foundation -o "$binary"
 fi
 prepare_bundle=false
 if [[ "${1:-}" == "--prepare-bundle" ]]; then

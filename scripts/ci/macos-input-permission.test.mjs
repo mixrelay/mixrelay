@@ -53,3 +53,54 @@ int main(void) {
     '-framework', 'AVFoundation', '-framework', 'Security', '-framework', 'Foundation', '-o', executable]);
   execFileSync(executable, [], { timeout: 10000 });
 });
+
+test('measurement consent completes before device preparation and denial or timeout never starts a probe', t => {
+  assert.equal(process.platform, 'darwin');
+  const directory = mkdtempSync(join(tmpdir(), 'mr-probe-consent-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const source = fileURLToPath(new URL('../../native/macos/hal-driver/tests/MRRoundTripProbe.c', import.meta.url));
+  const fixture = join(directory, 'probe-consent.c');
+  writeFileSync(fixture, `
+#define main mr_probe_measurement_main
+#include ${JSON.stringify(source)}
+#undef main
+#include <assert.h>
+static long current, decision;
+static unsigned queries, requests;
+long mr_microphone_authorization_status(void) { queries++; return current; }
+void mr_microphone_request_authorization(void) { requests++; if (decision >= 0) current = decision; }
+static bool authorize(long initial, long answer, MRInputAuthorization *result) {
+    current = initial; decision = answer; queries = requests = 0;
+    return mr_authorize_input(0, result);
+}
+int main(void) {
+    MRInputAuthorization result;
+    assert(authorize(3, -1, &result));
+    assert(queries == 1 && requests == 0 && !result.requested);
+    for (long refused = 1; refused <= 4; refused++) {
+        if (refused == 3) continue;
+        assert(!authorize(refused, -1, &result));
+        assert(requests == 0 && result.final == refused);
+    }
+    assert(authorize(0, 3, &result));
+    assert(queries == 2 && requests == 1 && result.requested && result.initial == 0 && result.final == 3);
+    assert(!authorize(0, 2, &result));
+    assert(requests == 1 && result.final == 2);
+    assert(!authorize(0, -1, &result));
+    assert(requests == 1 && result.final == 0);
+    current = 2; requests = queries = 0;
+    char *arguments[] = {"probe", "io.mixrelay.test-device-must-not-be-opened"};
+    assert(mr_probe_measurement_main(2, arguments) == 2);
+    assert(queries == 1 && requests == 0);
+    MROptions options = {0};
+    char *help[] = {"probe", "--help"};
+    assert(mr_options(2, help, &options) == 0);
+    assert(queries == 1 && requests == 0);
+}
+`);
+  const executable = join(directory, 'probe-consent');
+  execFileSync('xcrun', ['clang', '-std=c17', '-O2', '-mmacosx-version-min=14.2',
+    '-Wall', '-Wextra', '-Wpedantic', '-Wconversion', '-Wsign-conversion', '-Wshadow', '-Werror',
+    fixture, '-framework', 'CoreAudio', '-framework', 'CoreFoundation', '-o', executable]);
+  execFileSync(executable, [], { timeout: 10000 });
+});

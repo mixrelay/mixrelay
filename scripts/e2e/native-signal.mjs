@@ -163,6 +163,7 @@ export async function nativeSignal(device, directory, os) {
     catch (error) { if (error.status !== 1) throw error; }
   }
   const measured = JSON.parse(readFileSync(stdout, 'utf8'));
+  assert.equal(measured.inputAuthorization?.final, 3, 'Probe recording consent must precede native I/O');
   assert.equal(measured.complete, true);
   assert.equal(measured.channelOrder, true);
   for (const field of ['missingFrames', 'repeatedFrames', 'corruptFrames', 'nonfiniteSamples']) assert.equal(measured[field], 0, field);
