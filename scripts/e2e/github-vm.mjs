@@ -21,7 +21,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadContract } from '../support-contract.mjs';
 
-export function cloudConfig(publicKey, { repairEfiMount = false } = {}) {
+export function cloudConfig(publicKey, { repairEfiMount = false, recoverColdplug = false } = {}) {
   assert.match(publicKey, /^ssh-ed25519 [A-Za-z0-9+/=]+(?: [^\n]*)?$/);
   return (
     '#cloud-config\n' +
@@ -29,6 +29,13 @@ export function cloudConfig(publicKey, { repairEfiMount = false } = {}) {
       {
         hostname: 'mixrelay-qa',
         disable_root: true,
+        ...(recoverColdplug
+          ? {
+              bootcmd: [
+                ['bash', '-c', readFileSync(new URL('./guest-boot-recovery.sh', import.meta.url), 'utf8')],
+              ],
+            }
+          : {}),
         ...(repairEfiMount
           ? {
               bootcmd: [
@@ -288,10 +295,11 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     // The pinned Kali ARM image has a stale EFI PARTUUID in fstab. Preserve the
     // image entry and repair only that mount in the disposable guest overlay.
     const repairEfiMount = targetId === 'kali-rolling-arm64';
-    session.provisioning = { repairEfiMount, needrestartKernelHints: false };
+    const recoverColdplug = targetId === 'ubuntu-26-04-arm64';
+    session.provisioning = { repairEfiMount, recoverColdplug, needrestartKernelHints: false };
     writeFileSync(
       join(state, 'user-data'),
-      cloudConfig(readFileSync(`${key}.pub`, 'utf8').trim(), { repairEfiMount }),
+      cloudConfig(readFileSync(`${key}.pub`, 'utf8').trim(), { repairEfiMount, recoverColdplug }),
     );
     writeFileSync(
       join(state, 'meta-data'),

@@ -18,6 +18,62 @@ test('cloud overlays preserve large disks with trailing boot partitions and grow
   assert.throws(() => guestDiskSize({ 'virtual-size': -1 }));
 });
 
+function bootRecovery(environment = {}) {
+  const config = JSON.parse(
+    cloudConfig('ssh-ed25519 AAAA test', { recoverColdplug: true }).split('\n').slice(1).join('\n'),
+  );
+  assert.equal(config.bootcmd.length, 1);
+  return execFileSync(
+    'bash',
+    [
+      '-c',
+      `
+systemctl() {
+  printf 'systemctl %s\\n' "$*"
+  if [[ "$*" == '--quiet is-active emergency.target' ]]; then
+    return "\${BOOT_EMERGENCY:-0}"
+  fi
+  if [[ "$*" == 'start boot.mount boot-efi.mount' ]]; then
+    return "\${BOOT_MOUNT_FAILURE:-0}"
+  fi
+}
+udevadm() { printf 'udevadm %s\\n' "$*"; }
+blkid() { printf '/dev/%s\\n' "$2"; }
+findmnt() { printf 'findmnt %s\\n' "$*"; }
+export -f systemctl udevadm blkid findmnt
+"$@"
+`,
+      '--',
+      ...config.bootcmd[0],
+    ],
+    { encoding: 'utf8', env: { ...process.env, ...environment } },
+  );
+}
+
+test('emergency boot waits for coldplug and retries both original mount units before default', () => {
+  const output = bootRecovery();
+  assert.ok(output.includes('BOOT: /dev/BOOT'));
+  assert.ok(output.includes('UEFI: /dev/UEFI'));
+  assert.ok(output.indexOf('udevadm settle') < output.indexOf('systemctl start boot.mount'));
+  assert.ok(output.indexOf('findmnt --mountpoint /boot/efi') < output.indexOf('start default.target'));
+  assert.ok(output.includes('systemctl start boot.mount boot-efi.mount'));
+});
+
+test('healthy boot needs no mount recovery and a failed mount never starts default', () => {
+  const healthy = bootRecovery({ BOOT_EMERGENCY: '3' });
+  assert.equal(healthy.trim(), 'systemctl --quiet is-active emergency.target');
+  assert.throws(
+    () => bootRecovery({ BOOT_MOUNT_FAILURE: '73' }),
+    (error) => {
+      assert.equal(error.status, 73);
+      assert.ok(!error.stdout.includes('start default.target'));
+      return true;
+    },
+  );
+  const ordinary = JSON.parse(cloudConfig('ssh-ed25519 AAAA test').split('\n').slice(1).join('\n'));
+  assert.equal(ordinary.bootcmd, undefined);
+});
+
 test('disposable guests disable only needrestart kernel-image scanning before apt runs', () => {
   const config = JSON.parse(cloudConfig('ssh-ed25519 AAAA test').split('\n').slice(1).join('\n'));
   const file = config.write_files.find(
