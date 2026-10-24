@@ -192,6 +192,14 @@ signed code and uses `test-without-building` with signing disabled. The syntheti
 probe self-test also compiles before installation. The audio scenarios retain their first
 native I/O and full PCM checks.
 
+The observer disables XCTest's automatic capture and selects the screenshot format.
+Its generated XCTest configuration must report `PreferredScreenCaptureFormat=screenshots`
+and `SystemAttachmentLifetime=keepNever` before installation and execution;
+`capture-policy.json` records the observed values. This prevents the default continuous
+test video from competing with native audio. The observer still writes the required
+`installed-ui.png` and failure screenshot explicitly and performs every UI and consent
+check. `native-probe-processes.txt` records process CPU after the signal has stopped.
+
 The GUI measurement probe completes its own microphone authorization before preparing any
 device or starting I/O. This follows [Apple's capture authorization procedure](https://developer.apple.com/documentation/avfoundation/requesting-authorization-to-capture-and-save-media).
 Denied, restricted or unresolved authorization fails measurement. A nongraphical CLI keeps

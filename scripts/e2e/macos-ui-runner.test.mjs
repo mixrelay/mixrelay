@@ -1,8 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { designatedRequirement, prepareMacosUiRunner, runMacosUi, setEvidenceDirectory } from './macos-ui-runner.mjs';
+import { designatedRequirement, manualScreenCapturePolicy, prepareMacosUiRunner, runMacosUi, setEvidenceDirectory } from './macos-ui-runner.mjs';
 
 const hostedRequirement = '# designated => cdhash H"32ba2e5952d60363e6b223f989834320e067bc61"\n';
+const capture = { BlueprintName: 'InstalledUITests', IsUITestBundle: true,
+  PreferredScreenCaptureFormat: 'screenshots', SystemAttachmentLifetime: 'keepNever' };
+
+test('the native XCTest default video policy is rejected before the audio session', () => {
+  assert.throws(() => manualScreenCapturePolicy({ InstalledUITests: { ...capture,
+    PreferredScreenCaptureFormat: 'screenRecording', SystemAttachmentLifetime: 'deleteOnSuccess' } }), /video must be disabled/);
+  assert.throws(() => manualScreenCapturePolicy({ InstalledUITests: { ...capture,
+    SystemAttachmentLifetime: 'deleteOnSuccess' } }), /Automatic XCTest capture must be disabled/);
+  assert.equal(manualScreenCapturePolicy({ InstalledUITests: capture }).targets.length, 1);
+  assert.throws(() => manualScreenCapturePolicy({}), /actual UI test target/);
+});
 
 test('real hosted ad-hoc output is accepted on either codesign output stream', () => {
   for (const stream of ['stdout', 'stderr']) {
@@ -19,7 +30,8 @@ test('the signed runner and Accessibility grant are prepared before installing t
   prepareMacosUiRunner('/tools', {
     runCommand(program, args) {
       calls.push([program, args]);
-      if (program === 'plutil') return { stdout: 'io.mixrelay.qualification.ui.xctrunner\n' };
+      if (program === 'plutil') return { stdout: args.includes('json')
+        ? JSON.stringify({ InstalledUITests: capture }) : 'io.mixrelay.qualification.ui.xctrunner\n' };
       if (program === 'codesign' && args[0] === '-d') return { stdout: hostedRequirement, stderr: 'Executable=/runner\n' };
       if (program === 'launchctl') return { stdout: `state = running\n pid = ${++reads}\n` };
       return { stdout: '', stderr: '' };
@@ -44,6 +56,7 @@ test('the signed runner and Accessibility grant are prepared before installing t
   const expected = JSON.parse(files.get('/tools/prepared-runner.json'));
   assert.equal(expected.path, calls[sign][1].at(-1));
   assert.equal(expected.bundle, 'io.mixrelay.qualification.ui.xctrunner');
+  assert.equal(JSON.parse(files.get('/tools/capture-policy.json')).targets[0].preferredScreenCaptureFormat, 'screenshots');
   assert.ok(expected.requirement.includes('cdhash'));
   assert.deepEqual(calls.filter(([p]) => p === 'xcodebuild').map(([, args]) => args[0]),
     ['build-for-testing']);
@@ -58,7 +71,7 @@ test('both installed modes reuse the same signed code and change only the XCTest
   const prepared = { bundle: 'io.mixrelay.qualification.ui.xctrunner',
     path: '/tools/DerivedData/Build/Products/Debug/InstalledUITests-Runner.app',
     template: '/tools/DerivedData/Build/Products/InstalledUI_macosx.xctestrun', requirement: 'cdhash H"abc"' };
-  const template = { TestConfigurations: [{ TestTargets: [{ EnvironmentVariables: { MIXRELAY_UI_EVIDENCE: '/unused', OTHER: 'retained' },
+  const template = { TestConfigurations: [{ TestTargets: [{ ...capture, EnvironmentVariables: { MIXRELAY_UI_EVIDENCE: '/unused', OTHER: 'retained' },
     TestHostPath: '__TESTROOT__/Debug/InstalledUITests-Runner.app' }] }], __xctestrun_metadata__: { FormatVersion: 2 } };
   for (const mode of ['fresh', 'upgrade']) runMacosUi(`/evidence/${mode}`, '/tools', {
     read: () => JSON.stringify(prepared),

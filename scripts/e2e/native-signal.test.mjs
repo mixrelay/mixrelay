@@ -110,12 +110,13 @@ test('failed Mac PCM keeps the original verdict and collects host load only afte
       if (program === 'zsh') return '/probe.app';
       if (program === 'open') writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
     },
+    snapshot() { phases.push('snapshot'); },
     diagnostics(output) {
-      assert.deepEqual(phases, ['zsh', 'open', 'pkill']);
+      assert.deepEqual(phases, ['zsh', 'open', 'pkill', 'snapshot']);
       assert.deepEqual(JSON.parse(readFileSync(join(output, 'native-probe.stdout.json'))), measured);
       phases.push('diagnostics');
       throw new Error('diagnostic collection unavailable');
     },
   }), /missingFrames/);
-  assert.deepEqual(phases, ['zsh', 'open', 'pkill', 'diagnostics']);
+  assert.deepEqual(phases, ['zsh', 'open', 'pkill', 'snapshot', 'diagnostics']);
 });

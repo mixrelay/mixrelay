@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { rawPcmArgs } from '../lab/pipewire-cli.mjs';
-import { collectMacosLoad } from './collect-macos.mjs';
+import { collectMacosLoad, snapshotMacosProcesses } from './collect-macos.mjs';
 
 export function analyseStereo(bytes) {
   assert.equal(bytes.length % 8, 0, 'Incomplete stereo Float32 frames');
@@ -147,9 +147,10 @@ async function linuxSignal(device, directory) {
   writeFileSync(join(directory, 'native-signal.json'), JSON.stringify(measured, null, 2) + '\n', { flag: 'wx' });
 }
 
-export async function nativeSignal(device, directory, os, { execute = execFileSync, diagnostics = collectMacosLoad } = {}) {
+export async function nativeSignal(device, directory, os, { execute = execFileSync, diagnostics = collectMacosLoad,
+  snapshot = snapshotMacosProcesses } = {}) {
   if (os === 'linux') return linuxSignal(device, directory);
-  try { return macosSignal(device, directory, execute); }
+  try { return macosSignal(device, directory, execute, snapshot); }
   catch (error) {
     try { diagnostics(directory); }
     catch (diagnosticError) { console.error(`Native PCM failure diagnostics: ${diagnosticError.message}`); }
@@ -157,7 +158,7 @@ export async function nativeSignal(device, directory, os, { execute = execFileSy
   }
 }
 
-function macosSignal(device, directory, execFileSync) {
+function macosSignal(device, directory, execFileSync, snapshot) {
   const uid = device.nativeDeviceIds.find(id => id.startsWith('io.mixrelay.audio.endpoint.'));
   assert.ok(uid, 'Missing canonical CoreAudio device identity');
   const bundle = execFileSync('zsh', ['scripts/probe-macos-roundtrip.sh', '--prepare-bundle', 'io.mixrelay.qualification.probe'],
@@ -173,6 +174,8 @@ function macosSignal(device, directory, execFileSync) {
     catch (error) { if (error.status !== 1) throw error; }
   }
   const measured = JSON.parse(readFileSync(stdout, 'utf8'));
+  try { snapshot(directory); }
+  catch (error) { console.error(`Native post-signal process snapshot: ${error.message}`); }
   assert.equal(measured.inputAuthorization?.final, 3, 'Probe recording consent must precede native I/O');
   assert.equal(measured.activityProtection, true, 'Finite measurement must retain its native activity');
   assert.equal(measured.complete, true);

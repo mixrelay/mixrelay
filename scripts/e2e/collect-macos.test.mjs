@@ -4,7 +4,19 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { collectCoreaudioLog, collectCoreaudioServers, collectMacosLoad } from './collect-macos.mjs';
+import { collectCoreaudioLog, collectCoreaudioServers, collectMacosLoad, snapshotMacosProcesses } from './collect-macos.mjs';
+
+test('post-signal evidence records process CPU without command arguments or changing host services', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-post-signal-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  snapshotMacosProcesses(directory, (program, args, options) => {
+    assert.equal(program, 'ps');
+    assert.ok(args.at(-1).endsWith('comm='));
+    assert.ok(options.timeout <= 10000);
+    return { status: 0, stdout: '13563 1 Ss 96.0 433016 /System/Library/VTEncoderXPCService\n' };
+  });
+  assert.match(readFileSync(join(directory, 'native-probe-processes.txt'), 'utf8'), /VTEncoderXPCService\n\n.*exit=0/s);
+});
 
 test('immediate failed-PCM collection preserves bounded hardware and CPU diagnostics even if one command fails', t => {
   const directory = mkdtempSync(join(tmpdir(), 'mr-native-load-'));

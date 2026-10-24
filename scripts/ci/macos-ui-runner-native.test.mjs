@@ -33,6 +33,9 @@ test('native ad-hoc cdhash requirement compiles to a blob that validates only th
         list: () => ['InstalledUI_macosx.xctestrun'],
         runCommand(program, args) {
           if (program === 'xcodebuild') return { stdout: '', stderr: '' };
+          if (program === 'plutil' && args.includes('json')) return { stdout: JSON.stringify({ InstalledUITests: {
+            IsUITestBundle: true, PreferredScreenCaptureFormat: 'screenshots', SystemAttachmentLifetime: 'keepNever',
+          } }) };
           if (program === 'sudo') {
             if (args[1] === 'sqlite3') sql = args.at(-1);
             return { stdout: '', stderr: '' };

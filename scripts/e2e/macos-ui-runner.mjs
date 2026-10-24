@@ -23,6 +23,23 @@ function servicePid(value) {
   return value.match(/^\s*pid = ([1-9][0-9]*)\s*$/m)?.[1];
 }
 
+export function manualScreenCapturePolicy(configuration) {
+  const targets = [];
+  function visit(value) {
+    if (!value || typeof value !== 'object') return;
+    if (value.IsUITestBundle === true) {
+      assert.equal(value.PreferredScreenCaptureFormat, 'screenshots', 'Continuous XCTest video must be disabled');
+      assert.equal(value.SystemAttachmentLifetime, 'keepNever', 'Automatic XCTest capture must be disabled');
+      targets.push({ name: value.BlueprintName, preferredScreenCaptureFormat: value.PreferredScreenCaptureFormat,
+        systemAttachmentLifetime: value.SystemAttachmentLifetime });
+    }
+    for (const item of Object.values(value)) visit(item);
+  }
+  visit(configuration);
+  assert.ok(targets.length > 0, 'An actual UI test target is required');
+  return { targets };
+}
+
 export function prepareMacosUiRunner(tools, { runCommand = run, read = readFileSync,
   write = writeFileSync, list = readdirSync } = {}) {
   const build = ['-project', join(tools, 'MixRelayInstalledUI.xcodeproj'), '-scheme', 'InstalledUI',
@@ -57,6 +74,8 @@ export function prepareMacosUiRunner(tools, { runCommand = run, read = readFileS
   const templates = list(products).filter(name => name.endsWith('.xctestrun'));
   assert.equal(templates.length, 1, 'One immutable XCTest configuration is required');
   const prepared = { bundle, path: runner, requirement, template: join(products, templates[0]) };
+  const configuration = JSON.parse(runCommand('plutil', ['-convert', 'json', '-o', '-', prepared.template], { quiet: true }).stdout);
+  write(join(tools, 'capture-policy.json'), `${JSON.stringify(manualScreenCapturePolicy(configuration), null, 2)}\n`);
   write(join(tools, 'prepared-runner.json'), `${JSON.stringify(prepared, null, 2)}\n`);
   return prepared;
 }
@@ -82,6 +101,7 @@ export function runMacosUi(output, tools, { runCommand = run, read = readFileSyn
   runCommand('codesign', ['--verify', '--deep', '--strict', prepared.path]);
   runCommand('codesign', ['--verify', '--strict', '-R', join(tools, 'runner.csreq'), prepared.path]);
   const template = JSON.parse(runCommand('plutil', ['-convert', 'json', '-o', '-', prepared.template], { quiet: true }).stdout);
+  manualScreenCapturePolicy(template);
   const configuration = join(tools, 'DerivedData/Build/Products', `installed-${basename(output)}.xctestrun`);
   write(configuration, `${JSON.stringify(setEvidenceDirectory(template, output))}\n`);
   runCommand('plutil', ['-convert', 'xml1', configuration]);
