@@ -10,7 +10,7 @@ import { driverSocket, engineSocket, socketRequest } from '../local-socket.mjs';
 import { artifactBytes, validateCandidate } from '../qualification.mjs';
 import { digest, loadContract, requiredScenarios } from '../support-contract.mjs';
 import { validateBaseline } from './baseline.mjs';
-import { collectLinux } from './collect-linux.mjs';
+import { collectLinux, collectLinuxUiProblems } from './collect-linux.mjs';
 import { collectMacos } from './collect-macos.mjs';
 import { observeEnvironment, validateEnvironment } from './environment.mjs';
 import { finishAfterCleanup, startInstalledUi } from './installed-ui.mjs';
@@ -159,6 +159,12 @@ export async function qualifyMode({
         evidence: [evidence(`${id}.failure.json`, { message: error.message, stack: error.stack })],
       });
       console.log(`${targetId}: ${id}: failed: ${error.message.slice(0, 500)}`);
+      if (id === 'GRAPH-01' && target.os === 'linux') {
+        try { collectLinuxUiProblems(output); }
+        catch (diagnosticError) {
+          evidence('installed-ui-problems-error.json', { message: diagnosticError.message });
+        }
+      }
       return false;
     }
   }

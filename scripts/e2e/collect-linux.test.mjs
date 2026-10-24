@@ -5,7 +5,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { collectDesktopLogs } from './collect-linux.mjs';
+import { collectDesktopLogs, collectLinuxUiProblems } from './collect-linux.mjs';
+
+test('a failed UI graph captures its visible problems without retrying the graph or losing command failure', t => {
+  const output = mkdtempSync(join(tmpdir(), 'mr-ui-problems-'));
+  t.after(() => rmSync(output, { recursive: true, force: true }));
+  const calls = [];
+  collectLinuxUiProblems(output, (program, args) => {
+    calls.push({ program, args });
+    return { stdout: 'Diagnostics opened', stderr: 'AT-SPI timed out', status: 1 };
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].program, 'python3');
+  assert.deepEqual(calls[0].args.slice(1), [output, '--diagnostics']);
+  assert.match(readFileSync(join(output, 'installed-ui-problems-command.log'), 'utf8'), /AT-SPI timed out\nexit=1/);
+});
 
 test('Linux diagnostics preserve private editor and runtime startup logs without following links or overwriting evidence', t => {
   const home = mkdtempSync(join(tmpdir(), 'mr-logs-'));

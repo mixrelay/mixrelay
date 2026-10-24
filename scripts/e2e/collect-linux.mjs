@@ -4,6 +4,15 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+export function collectLinuxUiProblems(output, run = spawnSync) {
+  const result = run('python3', [fileURLToPath(new URL('./linux-ui.py', import.meta.url)), output, '--diagnostics'], {
+    encoding: 'utf8', timeout: process.env.MIXRELAY_E2E_VM_ACCELERATOR === 'tcg' ? 240000 : 60000,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  writeFileSync(join(output, 'installed-ui-problems-command.log'),
+    `${result.stdout ?? ''}\n${result.stderr ?? ''}\nexit=${result.status}; error=${result.error?.message ?? ''}\n`, { flag: 'wx' });
+}
+
 export function collectDesktopLogs(output, home = homedir()) {
   const directory = join(home, '.local/state/mixrelay/logs');
   if (!existsSync(directory)) return;

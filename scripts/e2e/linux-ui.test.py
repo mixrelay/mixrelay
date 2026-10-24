@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import types
 import unittest
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 
@@ -195,6 +196,26 @@ class InstalledEditorTest(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "never received focus"):
                 self.ui.open_submenu("Add node")
         self.assertEqual(events, [(25, 40, "abs")])
+
+    def test_problem_capture_reads_the_dialog_and_always_dismisses_it_without_a_write(self):
+        self.atspi.KEY_SYM = 3
+        events = []
+        self.atspi.Registry.generateKeyboardEvent = lambda *args: events.append(args)
+        with TemporaryDirectory() as directory:
+            output = Path(directory)
+            with patch.object(self.ui, "click") as click, \
+                    patch.object(self.ui, "find") as find, \
+                    patch.object(self.ui, "application", return_value=self.editor), \
+                    patch.object(self.ui, "tree_text", return_value="graph_apply_timeout"), \
+                    patch.object(self.ui, "screenshot"):
+                self.ui.capture_problems(output)
+                click.assert_called_once_with("Diagnostics", contains=True)
+                find.assert_called_once_with("Current problems", interactive=False, text=True)
+                self.assertEqual((output / "installed-ui-problems.txt").read_text(), "graph_apply_timeout")
+                find.side_effect = RuntimeError("dialog unavailable")
+                with self.assertRaisesRegex(RuntimeError, "dialog unavailable"):
+                    self.ui.capture_problems(output)
+        self.assertEqual(events, [(0xff1b, None, 3), (0xff1b, None, 3)])
 
 
 if __name__ == "__main__":

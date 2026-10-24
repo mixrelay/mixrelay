@@ -191,6 +191,17 @@ def screenshot(path):
     raise AssertionError("Installed screen did not settle after the UI action")
 
 
+def capture_problems(output):
+    # Read the blocked editor before later API fixtures replace its graph.
+    click("Diagnostics", contains=True)
+    try:
+        find("Current problems", interactive=False, text=True)
+        (output / "installed-ui-problems.txt").write_text(tree_text(application()), encoding="utf-8")
+        screenshot(output / "installed-ui-problems.png")
+    finally:
+        pyatspi.Registry.generateKeyboardEvent(0xff1b, None, pyatspi.KEY_SYM)
+
+
 def main(output):
     from gi.repository import Atspi
     # Keep native queries below the registry's three-second keyboard budget.
@@ -220,7 +231,13 @@ def main(output):
 if __name__ == "__main__":
     folder = Path(sys.argv[1]).resolve()
     try:
-        main(folder)
+        if sys.argv[2:] == ["--diagnostics"]:
+            from gi.repository import Atspi
+            Atspi.set_timeout(2000, 15000)
+            capture_problems(folder)
+        else:
+            assert not sys.argv[2:], "Unexpected installed UI arguments"
+            main(folder)
     except Exception:
         traceback.print_exc()
         try:
