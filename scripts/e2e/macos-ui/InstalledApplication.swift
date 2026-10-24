@@ -96,6 +96,10 @@ struct InstalledElement {
         guard role == kAXMenuItemRole else {
             throw InstalledApplication.Failure.control("Expected a menu item: \(labels)")
         }
+        try activate()
+    }
+
+    func activate() throws {
         try focus()
         try sendKey(Self.returnKey)
     }

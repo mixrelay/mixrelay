@@ -9,9 +9,9 @@ final class InstalledUITests: XCTestCase {
 
     private func press(_ label: String) throws {
         let app = try XCTUnwrap(app)
-        let control = try app.wait(label, roles: [kAXButtonRole, kAXPopUpButtonRole, kAXMenuItemRole, kAXCellRole])
+        let control = try app.wait(label, roles: [kAXButtonRole, kAXPopUpButtonRole, kAXMenuItemRole, kAXCellRole], enabled: true)
         if control.role == kAXMenuItemRole { try control.chooseMenuItem() }
-        else { try control.click() }
+        else { try control.activate() }
     }
 
     private func createGraph(in directory: URL) throws {
@@ -56,7 +56,7 @@ final class InstalledUITests: XCTestCase {
         _ = try app.wait("Recorder", roles: [kAXGroupRole])
         try app.wait("Compressor", roles: [kAXGroupRole]).openContextMenu()
         try press("Connect channels…")
-        try app.wait("Destination", roles: [kAXButtonRole, kAXPopUpButtonRole], contains: true, timeout: 10).click()
+        try app.wait("Destination", roles: [kAXButtonRole, kAXPopUpButtonRole], contains: true, enabled: true, timeout: 10).activate()
         try app.waitChoice("Recorder", in: "Destination").click()
         try press("Connect")
         _ = try app.wait("Compressor CH 1 → Recorder CH 1")
