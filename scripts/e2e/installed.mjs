@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { engineOperations } from '../lab/engine-operations.mjs';
 import { invoke } from '../lab/macos-installed-capture-acceptance.mjs';
-import { driverSocket, engineSocket, socketJson, socketRequest } from '../local-socket.mjs';
+import { driverSocket, engineSocket, socketRequest } from '../local-socket.mjs';
 import { artifactBytes, validateCandidate } from '../qualification.mjs';
 import { digest, loadContract, requiredScenarios } from '../support-contract.mjs';
 import { validateBaseline } from './baseline.mjs';
@@ -15,6 +15,7 @@ import { collectMacos } from './collect-macos.mjs';
 import { observeEnvironment, validateEnvironment } from './environment.mjs';
 import { finishAfterCleanup, startInstalledUi } from './installed-ui.mjs';
 import { analyseRecording, nativeSignal } from './native-signal.mjs';
+import { driverOperations } from './driver-operations.mjs';
 import { installAndVerify, launchInstalled, requireDisposableHost } from './package.mjs';
 import { removeInstalled } from './removal.mjs';
 import { wholeSystemCapture } from './system-capture.mjs';
@@ -169,13 +170,11 @@ export async function qualifyMode({
     },
     'qualification',
   );
-  const driver = (command) =>
-    socketJson(driverSocket(), '/api/v1/driver', {
-      method: command ? 'PUT' : 'GET',
-      json: command,
-      headers: { host: 'mixrelay-driver' },
-      timeoutMs: 15000,
-    });
+  const driverAdmission = [];
+  const driver = driverOperations({
+    observe: value => driverAdmission.push(value),
+    request: (path, options) => socketRequest(driverSocket(), path, options),
+  });
   let stop,
     ui,
     original,
@@ -603,6 +602,7 @@ export async function qualifyMode({
         ? 'passed'
         : 'failed';
     report.endedAt = new Date().toISOString();
+    writeFileSync(join(output, 'driver-admission.json'), `${JSON.stringify(driverAdmission, null, 2)}\n`, { flag: 'wx' });
     writeFileSync(join(output, 'recorder-admission.json'), `${JSON.stringify(recorderAdmission, null, 2)}\n`, { flag: 'wx' });
     writeFileSync(join(output, `${targetId}.mode.json`), `${JSON.stringify(report, null, 2)}\n`, {
       flag: 'wx',
