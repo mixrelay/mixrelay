@@ -412,6 +412,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
         return `${name}=${value}`;
       },
     );
+    identity.push(`MIXRELAY_E2E_VM_ACCELERATOR=${session.accelerator}`);
     phase(
       smoke
         ? 'Checking the actual OS and desktop audio prerequisites'

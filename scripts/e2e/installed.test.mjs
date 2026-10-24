@@ -1,6 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyDesktopGraph, applyNativeGraph, signalGraph } from './installed.mjs';
+import { applyDesktopGraph, applyNativeGraph, signalGraph, installedReadyStatus } from './installed.mjs';
+
+test('emulated guest startup waits for actual Driver readiness without accepting a missing observation', async () => {
+  for (const accelerator of ['kvm', 'tcg']) {
+    let elapsed = 0;
+    const ready = installedReadyStatus(async path => {
+      assert.equal(path, 'status');
+      return { driverState: elapsed >= 35000 ? 'ready' : 'installed_not_loaded' };
+    }, { accelerator, now: () => elapsed, wait: async () => { elapsed += 5000; } });
+    if (accelerator === 'tcg') assert.equal((await ready).driverState, 'ready');
+    else await assert.rejects(ready, /Installed engine\/Driver not ready/);
+  }
+  let elapsed = 0;
+  await assert.rejects(installedReadyStatus(async () => ({ driverState: 'installed_not_loaded' }),
+    { accelerator: 'tcg', now: () => elapsed, wait: async () => { elapsed += 5000; } }), /not ready/);
+});
 
 const pendingConsent = { status: 503, json: { code: 'audio_permission_pending',
   parameters: { capability: 'microphone', configurationOutcome: 'not_applied' } } };

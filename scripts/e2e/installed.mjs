@@ -29,19 +29,27 @@ import {
   verifyPreservedState,
 } from './upgrade-state.mjs';
 
-async function eventually(read, predicate, description) {
-  const deadline = Date.now() + 30000;
+async function eventually(read, predicate, description, { timeoutMs = 30000, now = Date.now, wait = delay } = {}) {
+  const deadline = now() + timeoutMs;
   let last;
-  while (Date.now() < deadline) {
+  while (now() < deadline) {
     try {
       last = await read();
       if (predicate(last)) return last;
     } catch (error) {
       last = error.message;
     }
-    await delay(200);
+    await wait(200);
   }
   throw new Error(`${description}: ${JSON.stringify(last)}`);
+}
+
+export function installedReadyStatus(api, { accelerator = process.env.MIXRELAY_E2E_VM_ACCELERATOR,
+  now = Date.now, wait = delay } = {}) {
+  // TCG guest startup exceeded 30s while the independent Driver already answered.
+  // Require the same ready observation, with a bounded emulated-CPU budget.
+  return eventually(() => api('status'), value => value.driverState === 'ready',
+    'Installed engine/Driver not ready', { timeoutMs: accelerator === 'tcg' ? 120000 : 30000, now, wait });
 }
 
 export function signalGraph(original, graphId, spec) {
@@ -254,11 +262,7 @@ export async function qualifyMode({
     if (!installed) throw new Error('Installation or installed artifact identity failed');
     stop = await launchInstalled(target.os, output);
     const ready = await scenario('APP-01', async () => {
-      const status = await eventually(
-        () => api('status'),
-        (value) => value.driverState === 'ready',
-        'Installed engine/Driver not ready',
-      );
+      const status = await installedReadyStatus(api);
       const snapshot = await driver();
       assert.equal(snapshot.state, 'ready');
       assert.equal(snapshot.installedVersion, candidate.version);
