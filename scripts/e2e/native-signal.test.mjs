@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { analyseStereo, analyseRf64, stopSignalProcesses } from './native-signal.mjs';
+import { analyseStereo, analyseRf64, stopSignalProcesses, waitForSignalBoundary } from './native-signal.mjs';
 import { analyseSystemMix } from './system-capture.mjs';
 
 function recording() {
@@ -69,4 +69,28 @@ test('native probe cleanup reaps both owners when the first ignores termination'
   await assert.rejects(stopSignalProcesses(children, 100), /SIGKILL/);
   assert.equal(children[0].signalCode, 'SIGKILL');
   assert.ok(children.every(child => child.exitCode !== null || child.signalCode !== null), 'Both native probe owners must be reaped');
+});
+
+test('slow stream startup and drain are observed before analysing the same finite signal', async () => {
+  let now = 0, frames = 0, played = false;
+  await waitForSignalBoundary(() => played, 'playback drain', {
+    timeoutMs: 1000, now: () => now,
+    wait: async milliseconds => {
+      now += milliseconds;
+      if (now >= 400) { frames = 48000; played = true; }
+    },
+  });
+  assert.equal(frames, 48000);
+  assert.equal(now, 400, 'Do not return on a fixed startup or capture sleep');
+});
+
+test('a stalled stream fails within its bound and a process failure is never retried', async () => {
+  let now = 0;
+  await assert.rejects(waitForSignalBoundary(() => false, 'capture readiness', {
+    timeoutMs: 100, now: () => now, wait: async milliseconds => { now += milliseconds; },
+  }), /capture readiness.*deadline/);
+  assert.equal(now, 100);
+  let reads = 0;
+  await assert.rejects(waitForSignalBoundary(() => { reads++; throw new Error('player exited 1'); }, 'playback drain'), /player exited 1/);
+  assert.equal(reads, 1);
 });
