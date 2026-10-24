@@ -1,7 +1,8 @@
 # 설치본 검증: c5259184
 
-제품 소스는 `c52591847b587fb555feec8b55282a41da4617cc`, 시험 코드는
-`bcdd4a781b16fa8b1413393e372e694beca1bb89`다. 이후 변경은 설치 시험·러너 준비·진단과 CI 구성에
+제품 소스는 `c52591847b587fb555feec8b55282a41da4617cc`, 전체 설치 시험 코드는
+`c1d0d642ddb0cac6186f861b6ede04d98337a42c`이며, 별도 자동 녹화 진단은
+`a09066ae9ca338e38d375ea539205e5dcc464213`를 사용한다. 이후 변경은 설치 시험·러너 준비·진단과 CI 구성에
 한정하며 제품 실행 파일을 바꾸지 않는다. macOS 서명 시험은 macOS 전용 CI 단계에서 실제로 실행한다.
 동일한 Universal PKG, CPU별 DEB와 같은 x64 실행 파일을 담은 Arch 패키지를 설치한다.
 
@@ -12,7 +13,7 @@
 | PKG SHA-256 | `462fefec1d579a5d9affbbd6794d28d6c67bced0a6f6ac7b268395bad4e29b4a` |
 | PKG 크기 | 69,380,291바이트 |
 | Apple 공증 제출 | `1c83510c-ef9e-4694-bc63-2a3f8ea6cae1` |
-| 13개 환경의 fresh·upgrade·제거 | [40072198505](https://github.com/mixrelay/mixrelay/actions/runs/40072198505) |
+| 13개 환경의 fresh·upgrade·제거 | [40080917787](https://github.com/mixrelay/mixrelay/actions/runs/40080917787), 진행 중 |
 | Native CI 13개 대상 | [40070065316](https://github.com/mixrelay/mixrelay/actions/runs/40070065316), 소스 `dd7166b9`, 모두 통과 |
 | Linux VM 부팅 7개 대상 | [40070065304](https://github.com/mixrelay/mixrelay/actions/runs/40070065304), 소스 `dd7166b9`, 모두 통과 |
 | UI CI | [40070065293](https://github.com/mixrelay/mixrelay/actions/runs/40070065293), 소스 `dd7166b9`, 통과 |
@@ -49,6 +50,65 @@
 콜백 시각 진단은 I/O 종료 뒤에 출력하며 PCM 판정이나 실시간 경로를 바꾸지 않는다.
 
 ## 설치 시험에서 확인한 후속 실패
+
+현재 전체 실행은 진행 중이며 후보 전체를 수락하지 않는다.
+[앞선 전체 실행 40077859659](https://github.com/mixrelay/mixrelay/actions/runs/40077859659)의
+macOS 14·26 ARM과 Linux x64 네 대상, Debian·Kali ARM은 새 설치·업그레이드·제거를 통과했다.
+Debian·Kali ARM에서 실제 guest CPU 4개를 확인했으며 Debian의 종료 관찰은 각 구간 857~2,160ms였다.
+macOS 15 ARM의 업그레이드는 1,908프레임 누락·손상, Intel의 새 설치는 2,124프레임 누락으로 실패했다.
+두 CPU의 Apple 검증과 임시 네트워크 규칙 해제는 통과했다.
+[이전 전체 실행 40076781600](https://github.com/mixrelay/mixrelay/actions/runs/40076781600)의
+macOS 14 ARM과 Linux x64 네 대상은 새 설치·업그레이드·제거를 통과했다.
+macOS 14 ARM에서 관찰자의 실제 접근성·화면 캡처
+권한을 확인했고 노드·연결·무료 상태가 렌더링된 스크린샷을 직접 확인했다.
+
+[측정 권한 진단 40074890715](https://github.com/mixrelay/mixrelay/actions/runs/40074890715)에서
+macOS 15 ARM은 두 설치 모드와 제거를 통과했다. 새 설치의 측정 프로그램은 입력 권한 0에서
+3으로 승인된 뒤 첫 I/O를 시작했고, 업그레이드는 기존 승인 3을 확인했다. 양쪽 PCM 누락·반복·손상은 0이다.
+제품의 첫 동의 검사는 그대로 실행하며, 사전 오디오 재생·PCM 구간 제거·실패 후 재측정은 하지 않는다.
+
+시험 도구는 제품 설치 전에 XCTest 관찰자를 한 번 빌드·서명하고 같은 코드 요구사항에 접근성·화면 캡처
+권한을 준비한다. TCC 데몬의 교체 PID를 확인한 뒤 제품을 설치하며, 제품 실행 중에는 이 준비를 반복하지 않는다.
+Linux 메뉴는 최신 접근성 상태에서 펼침을 확인한 뒤 하위 항목을 한 번 클릭한다.
+TCG guest는 호스트에 배정된 CPU 범위에서 최대 4개를 사용하고 실제 호스트·guest CPU 수를 기록한다.
+ARM 그래프 적용과 Ubuntu 종료의 실검증은 해당 대상의 최종 결과로 판단한다.
+Linux 종료 관찰은 macOS Quit 명령과 같은 150초 한도에서 실제 편집기·controller 종료를 확인하고
+걸린 시간과 남은 프로세스를 기록한다. 제품은 수락한 작업과 오디오 마무리를 기다린 뒤 종료하며
+5초 종료 계약은 없다. 신호를 반복하거나 강제 종료해 통과시키지 않는다.
+
+[GitHub가 재현한 macOS 15 Intel의 HTTP/3 전송 단절](https://github.com/actions/runner-images/issues/14924)은
+Apple 공증 확인의 연결 단절(-1005)과 일치한다. 이전 전체 실행의 macOS 15 ARM에서도
+새 설치 전체 통과 후 baseline PKG 검증의 세 번 모두 같은 연결 단절이 발생했다.
+따라서 hosted macOS 15의 양쪽 CPU에 같은 TCP 경로를 적용한다.
+검증 구간에만 전용 packet-filter anchor로 UDP 443을 차단해
+HTTPS/TCP를 사용하고, 원래 규칙은 보존한다. 추출 전에 임시 규칙과 자신이 연 enable 참조를 해제하며
+원시 명령·해제 결과를 보존한다. 서명·Gatekeeper·Apple ticket 검증과 해제 성공은 계속 필수다.
+[실제 Intel 진단 40077145475](https://github.com/mixrelay/mixrelay/actions/runs/40077145475)은
+새 설치·baseline·업그레이드의 Apple 검증과 임시 규칙 해제를 모두 통과했다.
+다만 새 설치 26,312프레임, 업그레이드 18,548프레임 누락으로 오디오 연속성은 실패했다.
+양쪽 시스템 캡처·녹음·UI·제거는 통과했다. PCM 변환 단계 계측은 최대 0.134097ms였으나,
+별도 직접 렌더링 계측에서는 새 설치 구간의 시간 예산 초과가 두 번 기록됐다.
+같은 구간 CoreAudio의 마감시간 초과와 입력·출력 콜백 시각 단절도 기록됐다.
+백그라운드 GUI 측정 프로그램은 유한 I/O 구간에만 지연에 민감한 활동임을 OS에 알리도록 보완한다.
+활동 토큰은 I/O 종료 후 해제하며 신호 길이·PCM 판정은 유지한다. App Nap이 누락의 원인인지는
+이 기록만으로 확정하지 않는다.
+[후속 진단 40078730846](https://github.com/mixrelay/mixrelay/actions/runs/40078730846)은
+활동 보호를 기록했지만 Intel의 새 설치·업그레이드 오디오가 계속 실패했다.
+새 설치 실패 직후 4코어 호스트에서 영상 인코더 `VTEncoderXPCService`의 CPU 사용률 96%와
+전체 유휴 CPU 0~1.6%를 관찰했다. 생성된 XCTest 설정의 기본값도 연속 화면 녹화였다.
+시험 도구는 자동 캡처를 끄고 screenshot 형식을 선택하며, 생성된 설정에서
+`screenshots`·`keepNever`를 확인한다. 수동 UI 이미지·첫 동의·전체 오디오 검사는 유지한다.
+[자동 녹화 제거 진단 40080312147](https://github.com/mixrelay/mixrelay/actions/runs/40080312147)의
+Intel은 새 설치·업그레이드의 모든 필수 시나리오와 제거를 통과했다.
+양쪽 PCM 누락·반복·손상·비유한 값과 입력·출력 콜백 시각 단절은 0이었다.
+신호 종료 직후 프로세스 목록에는 영상 인코더가 없었다. 이 진단을 전체 수락에 합치지 않는다.
+
+macOS 27은 실제 화면 캡처 권한이 승인돼도 기존 XCTest 이미지의 앱 본문이 단색이었다.
+현재 시험은 ScreenCaptureKit으로 설치된 편집기의 PID·제목이 일치하는 창 하나를 촬영하고
+단색 본문을 실패로 판정한다. 실제 27의 빈 이미지 거부와 15의 정상 이미지 수락,
+커서·창 테두리를 렌더링으로 오인하지 않는 native 검사와 XCTest 빌드를 확인했다.
+실제 새 캡처 결과와 시각 확인은 현재 전체 실행에서 확인한다.
+40076781600은 네트워크 실패로 수락할 수 없어 중복 작업을 종료했다. 완료된 원시는 보존한다.
 
 [첫 전체 실행 40069992849](https://github.com/mixrelay/mixrelay/actions/runs/40069992849)의 실패 원시를 보존한다.
 Debian·Ubuntu·Kali x64와 Arch는 두 설치 모드와 제거를 통과했다. macOS 15 ARM의 새 설치는
@@ -98,3 +158,5 @@ macOS 최소 지원 버전은 process tap API에 따른 14.2다. 정확한 14.2�
 초기 후보 기록 갱신의 보존 검사는 제품 문서 3개, 검증 현황 2개, 플랫폼 인벤토리 2개 오류로 실패했다.
 후보 식별자·링크·상태표 갱신이 원인이며, 확인한 빌드와 실행에 대조해 변경 범위를 검토했다.
 이 결과를 기계적 보존 검사 통과로 표시하지 않는다.
+이번 후속 기록의 보존 검사도 표·시험 커밋·실행 링크 갱신에 따른 3개 오류로 실패했다.
+갱신한 값은 각 실행의 실제 소스와 결과에 대조했다.
