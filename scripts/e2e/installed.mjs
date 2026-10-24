@@ -305,13 +305,24 @@ export async function qualifyMode({
       );
       await restoreUpgradeDriver(driver, upgradeState.defaultDevices);
       graphId = reopened.activeId;
-      await apply({
+      const empty = await apply({
         ...reopened.document,
         nodes: [],
         edges: [],
         expectedGraphId: graphId,
         revision: reopened.document.revision + 1,
       });
+      await stop();
+      stop = undefined;
+      const uiSession = join(output, 'ui-session');
+      mkdirSync(uiSession);
+      stop = await launchInstalled(target.os, uiSession);
+      await installedReadyStatus(api, { os: target.os });
+      const restarted = await api('graphs');
+      assert.equal(restarted.activeId, graphId);
+      assert.deepEqual(restarted.document.nodes, empty.nodes);
+      assert.deepEqual(restarted.document.edges, empty.edges);
+      evidence('upgrade-ui-start.json', { beforeRestart: empty, afterRestart: restarted.document });
     }
     const catalog = await api('graphs');
     original = catalog.document;
