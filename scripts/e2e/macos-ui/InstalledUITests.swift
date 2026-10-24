@@ -49,13 +49,17 @@ final class InstalledUITests: XCTestCase {
         let shot = XCUIScreen.main.screenshot()
         try shot.pngRepresentation.write(to: directory.appendingPathComponent("installed-ui.png"))
         try app.debugDescription.write(to: directory.appendingPathComponent("installed-ui-tree.txt"), atomically: true, encoding: .utf8)
-        guard editor.hide() else { throw MissingControl(label: "Background audio phase: hide the installed editor") }
+        let window = try XCTUnwrap(app.editorWindow)
+        let acknowledgement = AXUIElementSetAttributeValue(window.raw, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
         let deadline = Date().addingTimeInterval(20)
-        while !editor.isHidden && Date() < deadline {
+        while window.attribute(kAXMinimizedAttribute) as? Bool != true && Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
-        guard editor.isHidden else { throw MissingControl(label: "Installed editor did not enter the background") }
-        try JSONSerialization.data(withJSONObject: ["editorPid": editor.processIdentifier, "editorHidden": true], options: [.prettyPrinted, .sortedKeys])
+        guard window.attribute(kAXMinimizedAttribute) as? Bool == true else {
+            throw MissingControl(label: "Installed editor window did not minimize: acknowledgement \(acknowledgement.rawValue)")
+        }
+        try JSONSerialization.data(withJSONObject: ["editorPid": editor.processIdentifier, "editorMinimized": true,
+            "acknowledgement": acknowledgement.rawValue], options: [.prettyPrinted, .sortedKeys])
             .write(to: directory.appendingPathComponent("installed-ui-audio-phase.json"))
     }
 
