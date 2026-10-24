@@ -157,16 +157,35 @@ def open_submenu(label):
     except Exception as error:
         print(f"Submenu focus acknowledgement unavailable: {label}: {error}", flush=True)
     deadline = time.monotonic() + observation_timeout()
-    while True:
+    keys = 0
+    next_key = 0
+    focuses = 1
+    next_focus = time.monotonic() + 1
+    last = None
+    while time.monotonic() < deadline:
         try:
-            if node.getState().contains(pyatspi.STATE_FOCUSED):
-                break
-        except Exception:
-            pass
-        assert time.monotonic() < deadline, f"Installed submenu never received focus: {label}"
+            node.clearCache()
+            state = node.getState()
+            if state.contains(pyatspi.STATE_EXPANDED):
+                print(f"Observed installed submenu expansion: {label} ({keys} Right Arrow submissions)", flush=True)
+                return
+            if not state.contains(pyatspi.STATE_FOCUSED) and focuses < 3 and time.monotonic() >= next_focus:
+                focuses += 1
+                next_focus = time.monotonic() + 1
+                node.queryComponent().grabFocus()
+            if state.contains(pyatspi.STATE_FOCUSED) and keys < 3 and time.monotonic() >= next_key:
+                # Right Arrow only navigates this submenu; leaf actions remain single clicks.
+                keys += 1
+                next_key = time.monotonic() + 1
+                pyatspi.Registry.generateKeyboardEvent(0xff53, None, pyatspi.KEY_SYM)
+        except Exception as error:
+            last = error
+            try:
+                node = find(label, deadline=deadline)
+            except Exception as error:
+                last = error
         time.sleep(0.1)
-    pyatspi.Registry.generateKeyboardEvent(0xff53, None, pyatspi.KEY_SYM)
-    print(f"Opened installed submenu with Right Arrow: {label}", flush=True)
+    raise AssertionError(f"Installed submenu did not expand: {label}; Right Arrow submissions={keys}; {last}")
 
 
 def screenshot(path):

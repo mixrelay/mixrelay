@@ -24,6 +24,9 @@ class Node(list):
     def getState(self):
         return types.SimpleNamespace(contains=lambda state: self.showing)
 
+    def clearCache(self):
+        pass
+
 
 class InstalledEditorTest(unittest.TestCase):
     def setUp(self):
@@ -174,10 +177,18 @@ class InstalledEditorTest(unittest.TestCase):
         self.desktop[:] = [self.editor]
         self.atspi.DESKTOP_COORDS = 0
         self.atspi.STATE_FOCUSED = 2
+        self.atspi.STATE_EXPANDED = 4
         self.atspi.KEY_SYM = 3
         events = []
         self.atspi.Registry.generateMouseEvent = lambda *args: events.append(args)
-        self.atspi.Registry.generateKeyboardEvent = lambda *args: events.append(args)
+        expanded = False
+        def key(*args):
+            nonlocal expanded
+            events.append(args)
+            expanded = True
+        self.atspi.Registry.generateKeyboardEvent = key
+        self.add.getState = lambda: types.SimpleNamespace(contains=lambda state:
+            expanded if state == self.atspi.STATE_EXPANDED else True)
         component = types.SimpleNamespace(
             getExtents=lambda coords: types.SimpleNamespace(x=10, y=20, width=30, height=40),
             grabFocus=lambda: events.append("focus") or True)
@@ -193,7 +204,7 @@ class InstalledEditorTest(unittest.TestCase):
             elapsed += 31
         with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
                 patch.object(self.ui.time, "sleep", side_effect=pause):
-            with self.assertRaisesRegex(AssertionError, "never received focus"):
+            with self.assertRaisesRegex(AssertionError, "did not expand"):
                 self.ui.open_submenu("Add node")
         self.assertEqual(events, [(25, 40, "abs")])
 
@@ -216,6 +227,54 @@ class InstalledEditorTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "dialog unavailable"):
                     self.ui.capture_problems(output)
         self.assertEqual(events, [(0xff1b, None, 3), (0xff1b, None, 3)])
+
+    def test_collapsed_submenu_must_acknowledge_navigation_before_a_leaf_can_be_selected(self):
+        self.desktop[:] = [self.editor]
+        self.atspi.DESKTOP_COORDS = 0
+        self.atspi.STATE_FOCUSED = 2
+        self.atspi.STATE_EXPANDED = 4
+        self.atspi.KEY_SYM = 3
+        state = {"expanded": False, "keys": 0, "fresh": 0}
+        self.add.clearCache = lambda: state.update(fresh=state["fresh"] + 1)
+        self.add.queryComponent = lambda: types.SimpleNamespace(
+            getExtents=lambda coords: types.SimpleNamespace(x=10, y=20, width=30, height=40),
+            grabFocus=lambda: True)
+        self.add.getState = lambda: types.SimpleNamespace(contains=lambda flag:
+            state["expanded"] if flag == self.atspi.STATE_EXPANDED else True)
+        self.atspi.Registry.generateMouseEvent = lambda *args: None
+        def key(*args):
+            self.assertEqual(args, (0xff53, None, 3))
+            state["keys"] += 1
+            state["expanded"] = state["keys"] == 2
+        self.atspi.Registry.generateKeyboardEvent = key
+        elapsed = 0
+        def pause(seconds):
+            nonlocal elapsed
+            elapsed += 0.5
+        with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
+                patch.object(self.ui.time, "sleep", side_effect=pause):
+            self.ui.open_submenu("Add node")
+        self.assertTrue(state["expanded"], "Posting a key is not proof that the submenu opened")
+        self.assertEqual(state["keys"], 2)
+        self.assertGreater(state["fresh"], 0)
+        state.update(expanded=False, keys=0)
+        elapsed = 0
+        self.atspi.Registry.generateKeyboardEvent = lambda *args: state.update(keys=state["keys"] + 1)
+        with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
+                patch.object(self.ui.time, "sleep", side_effect=pause):
+            with self.assertRaisesRegex(AssertionError, "did not expand"):
+                self.ui.open_submenu("Add node")
+        self.assertEqual(state["keys"], 3)
+        state.update(expanded=False, keys=0)
+        elapsed = 0
+        def delivered_without_acknowledgement(*args):
+            state.update(expanded=True, keys=state["keys"] + 1)
+            raise RuntimeError("Keyboard acknowledgement was lost after delivery")
+        self.atspi.Registry.generateKeyboardEvent = delivered_without_acknowledgement
+        with patch.object(self.ui.time, "monotonic", side_effect=lambda: elapsed), \
+                patch.object(self.ui.time, "sleep", side_effect=pause):
+            self.ui.open_submenu("Add node")
+        self.assertEqual(state["keys"], 1)
 
 
 if __name__ == "__main__":
