@@ -290,17 +290,21 @@ pub(crate) fn spawn_editor(executable: &std::path::Path) -> std::io::Result<()> 
 }
 
 fn forward_transport_error(name: &str, reason: String) -> Result<Value, Value> {
-    if name == "control_get_graph_catalog"
-        && matches!(
-            reason.as_str(),
-            "background connection timed out"
-                | "background connection closed"
-                | "background connection unavailable"
-                | "background disconnected; command was not replayed"
-                | "background response is uncertain; command was not replayed"
-                | "background controller unavailable"
-        )
-    {
+    let failure = match reason.as_str() {
+        "background connection timed out" => "connect_timeout",
+        "background connection closed" => "closed_before_admission",
+        "background connection unavailable" => "send_failed",
+        "background disconnected; command was not replayed" => "disconnected_after_admission",
+        "background response is uncertain; command was not replayed" => "response_timeout",
+        "background controller unavailable" => "controller_unavailable",
+        _ => "other",
+    };
+    tracing::warn!(
+        command = name,
+        failure,
+        "background command transport failed"
+    );
+    if name == "control_get_graph_catalog" && failure != "other" {
         Ok(
             json!({"status":503,"body":{"code":"control_unavailable","parameters":{"reason":reason}}}),
         )

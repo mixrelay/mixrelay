@@ -241,7 +241,7 @@ impl<C: Dispatch> Requests<C> {
                 let control = Arc::clone(&self.control);
                 let outbound = Arc::clone(&self.outbound);
                 self.mutations.spawn(async move {
-                    dispatch_mutation(id, &outbound, control.dispatch(request), HEARTBEAT_INTERVAL)
+                    dispatch_pending(id, &outbound, control.dispatch(request), HEARTBEAT_INTERVAL)
                         .await;
                 });
             }
@@ -253,7 +253,7 @@ impl<C: Dispatch> Requests<C> {
                     tokio::select! {
                         biased;
                         _ = stop.changed() => {}
-                        response = control.dispatch(request) => outbound.reply(response),
+                        () = dispatch_pending(id, &outbound, control.dispatch(request), HEARTBEAT_INTERVAL) => {},
                     }
                 });
             }
@@ -274,9 +274,9 @@ where
         .map_err(|_| io::Error::from(io::ErrorKind::TimedOut))?
 }
 
-/// Runs an accepted mutation to completion, sending a pending frame each interval so the
-/// editor knows it is alive. A gone editor never cancels it.
-async fn dispatch_mutation<F>(
+/// Reports liveness while an accepted request waits for its terminal result. The caller
+/// cancels reads on shutdown or disconnect; accepted mutations continue to completion.
+async fn dispatch_pending<F>(
     request_id: u64,
     outbound: &Outbound,
     dispatch: F,
@@ -340,6 +340,48 @@ mod tests {
         fn operation_liveness(&self) -> Arc<tokio::sync::Notify> {
             Arc::default()
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_live_slow_read_reports_pending_before_the_editor_liveness_deadline() {
+        let fixture = mixrelay_test_support::FixtureDir::new("ipc-read").unwrap();
+        let directory = fixture.join("control");
+        let uid = std::fs::metadata(fixture.path()).unwrap().uid();
+        let control = Arc::new(HeldControl::default());
+        let service = LocalSocket::start_with_dispatch(&directory, uid, Arc::clone(&control))
+            .await
+            .unwrap();
+        let mut stream = UnixStream::connect(directory.join("control.sock"))
+            .await
+            .unwrap();
+        stream
+            .write_all(b"{\"id\":7,\"command\":{\"type\":\"invoke\",\"name\":\"engine_request\",\"arguments\":{\"method\":\"GET\",\"path\":\"/api/v1/graph\",\"body\":null}}}\n")
+            .await
+            .unwrap();
+        control.started.notified().await;
+        let mut reader = BufReader::new(stream);
+        for _ in 0..4 {
+            let mut frame = String::new();
+            tokio::time::timeout(Duration::from_secs(3), reader.read_line(&mut frame))
+                .await
+                .expect("a live accepted read must answer before the editor declares it silent")
+                .unwrap();
+            let frame: Value = serde_json::from_str(&frame).unwrap();
+            assert_eq!(
+                (frame["id"].as_u64(), frame["status"].as_u64()),
+                (Some(7), Some(102))
+            );
+            assert!(!control.completed.load(std::sync::atomic::Ordering::Acquire));
+        }
+        control.release.notify_one();
+        let mut frame = String::new();
+        reader.read_line(&mut frame).await.unwrap();
+        let frame: Value = serde_json::from_str(&frame).unwrap();
+        assert_eq!(
+            (frame["id"].as_u64(), frame["status"].as_u64()),
+            (Some(7), Some(200))
+        );
+        service.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -428,7 +470,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(25)).await;
             serde_json::json!({"id": 7, "status": 200, "body": {"accepted": true}})
         };
-        dispatch_mutation(7, &outbound, dispatch, Duration::from_millis(5)).await;
+        dispatch_pending(7, &outbound, dispatch, Duration::from_millis(5)).await;
         outbound.finish();
         let (mut runtime, mut peer) = tokio::io::duplex(4096);
         outbound
@@ -465,7 +507,7 @@ mod tests {
             let _ = completed.send(());
             serde_json::json!({"id": 8, "status": 200, "body": {}})
         };
-        dispatch_mutation(8, &outbound, dispatch, Duration::from_millis(5)).await;
+        dispatch_pending(8, &outbound, dispatch, Duration::from_millis(5)).await;
         tokio::time::timeout(Duration::from_millis(100), received)
             .await
             .expect("mutation completion")

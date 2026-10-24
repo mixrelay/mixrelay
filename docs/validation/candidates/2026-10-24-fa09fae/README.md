@@ -12,9 +12,9 @@
 | PKG SHA-256 | `8b04364f2e3e917b5a3070c2fdcb84d304c29185af612420c1a671a730ea16d5` |
 | PKG 크기 | 69,408,014바이트 |
 | Apple 공증 제출 | `a63c99f8-df22-42b3-b37f-e65b0b907c00` |
-| 13개 환경의 fresh·upgrade·제거 | [40095387842](https://github.com/mixrelay/mixrelay/actions/runs/40095387842), 진행 중 |
-| Native CI 13개 대상 | [40094407865](https://github.com/mixrelay/mixrelay/actions/runs/40094407865), 제품 소스 `fa09faed`, 진행 중 |
-| Linux VM 부팅 7개 대상 | [40094407862](https://github.com/mixrelay/mixrelay/actions/runs/40094407862), 제품 소스 `fa09faed`, 진행 중 |
+| 13개 환경의 fresh·upgrade·제거 | [40095387842](https://github.com/mixrelay/mixrelay/actions/runs/40095387842), 8개 통과·5개 실패, 미실행 0개 |
+| Native CI 13개 대상 | [40094407865](https://github.com/mixrelay/mixrelay/actions/runs/40094407865), 제품 소스 `fa09faed`, 모두 통과 |
+| Linux VM 부팅 7개 대상 | [40094407862](https://github.com/mixrelay/mixrelay/actions/runs/40094407862), 제품 소스 `fa09faed`, 모두 통과 |
 | UI CI | [40094407888](https://github.com/mixrelay/mixrelay/actions/runs/40094407888), 제품 소스 `fa09faed`, 통과 |
 | 이전 설치본 | 소스 `f7575aa4a8e2f0d97104033023bde12bf7b6d083`, Linux `40054217962`, macOS draft `qa-install-f7575aa` |
 
@@ -22,10 +22,21 @@
 통과했는지로 판단한다. 실패·미실행·skip은 수락할 수 없다. 개별 진단의 통과를 합치지 않으며,
 후보는 draft로 보관한다. 제품과 업데이트 카탈로그는 공개하지 않았다.
 
-진행 중인 전체 실행의 macOS 15 ARM은 두 모드 모두 그래프 조작·녹음·시스템 캡처·제거를 통과했지만,
-새 설치에서 488프레임, 업그레이드에서 1,056프레임이 누락·손상돼 AUDIO-01이 실패했다.
-두 측정기의 타임스탬프 불연속은 0이었고, 엔진의 native 콜백 클럭은 건너뛴 기록이 있다.
-이 후보의 전체 수락은 막힌 상태다. 나머지 대상은 같은 실행에서 계속 검사한다.
+최종 [inventory 원본](inventory.md)에서 모든 13개 대상이 실행됐으며, 8개 통과·5개 실패다.
+macOS 14 ARM·26 ARM과 Ubuntu ARM 외의 Linux 6개 대상은 두 모드와 정리를 모두 통과했다.
+macOS 15 ARM·Intel, 26 Intel, 27 ARM은 AUDIO-01의 PCM 누락으로 실패했으며,
+이 네 대상의 나머지 시나리오와 정리는 통과했다.
+
+| 실패 대상 | 새 설치의 누락 프레임 | 업그레이드의 누락 프레임 |
+| --- | --- | --- |
+| macOS 15 ARM | 488 | 1,056 |
+| macOS 15 Intel | 832 | 0, 나머지 검사도 통과 |
+| macOS 26 Intel | 3,640 | 10,232 |
+| macOS 27 ARM | 1,412 | 896 |
+
+Ubuntu ARM은 두 모드의 부팅·API·오디오·녹음·제거를 통과했다. 새 설치의 GRAPH-01은
+Recorder가 준비되지 않아 실패했다. 실패 화면의 진단에는 로컬 엔진 연결·목록 갱신·레이아웃 오류가
+표시됐다. 업그레이드는 전체 시나리오를 통과했다. 이 후보의 전체 수락은 막힌 상태다.
 
 ## 수정과 확인 범위
 
@@ -47,7 +58,8 @@ Ubuntu ARM 부팅은 통과했지만 메뉴 조작·Recorder 준비 확인과 ma
 Linux 관찰자는 활성 상태와 실제 포커스를 확인한 뒤 leaf control에 Return을 한 번 보낸다.
 노드 컨텍스트 메뉴는 바깥 canvas panel에 포커스를 둔 뒤 ContextMenu 키로 연다.
 메뉴·연결·Recorder 준비 확인은 유지한다. 18개 격리 Python 시험과 Node wrapper가 통과했으며,
-Ubuntu ARM의 실제 설치본 결과는 위 실행에서 확인한다.
+Ubuntu ARM의 새 설치는 키 입력과 연결 생성 뒤 Recorder 준비 확인에서 실패했고,
+업그레이드의 UI 검사는 통과했다. 키 입력 수정만으로 새 설치의 연결 실패가 해결되지는 않았다.
 
 로컬 데스크톱 시험 234개(ignored 0), 엄격 clippy, 공통 스크립트 560개(skip 0),
 전체 UI 검사(UI 2,236개·접근성 243개)와 UI 품질 검사가 통과했다.
