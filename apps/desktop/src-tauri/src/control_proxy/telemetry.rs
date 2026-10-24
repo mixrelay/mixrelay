@@ -13,7 +13,7 @@ use std::{
 
 use mixrelay_control_protocol::{ControlTelemetry, TelemetryEncoder};
 use tauri::Manager as _;
-use tokio::sync::{Notify, Semaphore};
+use tokio::sync::{Notify, Semaphore, watch};
 
 /// The engine publishes a window every 50 ms; this much silence means the stream is dead.
 pub(crate) const SILENCE_LIMIT: Duration = Duration::from_secs(2);
@@ -21,6 +21,9 @@ pub(crate) const SILENCE_LIMIT: Duration = Duration::from_secs(2);
 const CREDITS: usize = 2;
 /// A webview that returns no credit for this long has stopped consuming.
 const CREDIT_LIMIT: Duration = Duration::from_secs(10);
+// A hidden editor needs state/liveness, while its meters are not displayed. Stay
+// below the two-second UI watchdog; restoring visibility bypasses this interval.
+const HIDDEN_INTERVAL: Duration = Duration::from_secs(1);
 
 /// One reader's undelivered window. Newer windows fold into it, so a slow reader costs a
 /// single window of memory and still sees every peak since its last delivery.
@@ -87,6 +90,7 @@ pub(crate) struct TelemetrySubscriptions {
 struct Subscriber {
     task: tauri::async_runtime::JoinHandle<()>,
     credit: Arc<Semaphore>,
+    visible: watch::Sender<bool>,
 }
 
 impl TelemetrySubscriptions {
@@ -115,6 +119,7 @@ pub(crate) async fn control_subscribe_telemetry(
     let subscriptions = app.state::<TelemetrySubscriptions>();
     let id = subscriptions.next.fetch_add(1, Ordering::Relaxed) + 1;
     let credit = Arc::new(Semaphore::new(CREDITS));
+    let (visible, mut visibility) = watch::channel(true);
     // Spawn under the lock so the task's own removal always follows its insertion.
     let mut live = subscriptions.live();
     let task = tauri::async_runtime::spawn({
@@ -131,12 +136,20 @@ pub(crate) async fn control_subscribe_telemetry(
                         .is_ok()
                 },
                 &credit,
+                &mut visibility,
             )
             .await;
             app.state::<TelemetrySubscriptions>().live().remove(&id);
         }
     });
-    live.insert(id, Subscriber { task, credit });
+    live.insert(
+        id,
+        Subscriber {
+            task,
+            credit,
+            visible,
+        },
+    );
     Ok(id)
 }
 
@@ -176,6 +189,22 @@ pub(crate) fn control_telemetry_credit(
     }
 }
 
+/// Changes only this editor's delivery cadence; the engine and shared reader continue.
+#[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Tauri injects State by value; a borrowed State is not a command argument"
+)]
+pub(crate) fn control_telemetry_visibility(
+    subscriptions: tauri::State<'_, TelemetrySubscriptions>,
+    id: u64,
+    visible: bool,
+) {
+    if let Some(subscriber) = subscriptions.live().get(&id) {
+        subscriber.visible.send_replace(visible);
+    }
+}
+
 /// Ends a subscription; its runtime connection closes and the runtime drops its mailbox.
 #[tauri::command]
 #[allow(
@@ -209,6 +238,7 @@ pub(crate) async fn forward(
     windows: &mut impl Windows,
     mut send: impl FnMut(Delivery) -> bool,
     credit: &Semaphore,
+    visibility: &mut watch::Receiver<bool>,
 ) {
     let mailbox = Mailbox::default();
     let receive = async {
@@ -219,17 +249,33 @@ pub(crate) async fn forward(
         std::future::pending::<()>().await;
     };
     let deliver = async {
+        let mut next_hidden = None;
         loop {
             let Ok(Ok(permit)) = tokio::time::timeout(CREDIT_LIMIT, credit.acquire()).await else {
                 // Best effort: a webview that resumes learns to resubscribe.
                 send(Delivery::Ended);
                 return;
             };
+            let visible = *visibility.borrow_and_update();
+            if !visible && let Some(deadline) = next_hidden {
+                tokio::select! {
+                    () = tokio::time::sleep_until(deadline) => {},
+                    changed = visibility.changed() => {
+                        if changed.is_err() {
+                            send(Delivery::Ended);
+                            return;
+                        }
+                        continue;
+                    }
+                }
+            }
             let Ok(window) = mailbox.take().await else {
                 send(Delivery::Ended);
                 return;
             };
             permit.forget();
+            next_hidden =
+                (!*visibility.borrow()).then(|| tokio::time::Instant::now() + HIDDEN_INTERVAL);
             if !send(Delivery::Window(Box::new(window))) {
                 return;
             }
@@ -345,7 +391,18 @@ mod tests {
                     dynamics: None,
                 }],
             },
-            state: None,
+            state: Some(mixrelay_control_protocol::ControlStateSnapshot {
+                generation: sequence,
+                status: mixrelay_control_protocol::AppStatus::default(),
+                graph: mixrelay_control_protocol::GraphRuntimeStatus {
+                    protocol_version: 1,
+                    active_revision: sequence,
+                    submitted_revision: sequence,
+                    pending_reason: None,
+                },
+                controls: None,
+                editors: Vec::new(),
+            }),
         }
     }
 
@@ -415,14 +472,82 @@ mod tests {
         }
     }
 
+    struct Controlled(tokio::sync::mpsc::Receiver<ControlTelemetry>);
+
+    impl Windows for Controlled {
+        async fn next(&mut self) -> Option<ControlTelemetry> {
+            self.0.recv().await
+        }
+    }
+
     #[tokio::test(start_paused = true)]
-    async fn forwarding_stops_when_the_webview_returns_no_credit() {
-        let credit = Semaphore::new(1);
+    async fn hidden_windows_coalesce_peaks_and_resume_immediately_with_latest_state() {
+        let (windows, receiver) = tokio::sync::mpsc::channel(4);
+        let (visible, mut visibility) = watch::channel(false);
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let delivered = Arc::clone(&sent);
+        let task = tokio::spawn(async move {
+            let credit = Semaphore::new(CREDITS);
+            forward(
+                &mut Controlled(receiver),
+                |delivery| {
+                    delivered.lock().unwrap().push(delivery);
+                    credit.add_permits(1);
+                    true
+                },
+                &credit,
+                &mut visibility,
+            )
+            .await;
+        });
+        windows.send(window(1, 0.2)).await.unwrap();
+        tokio::task::yield_now().await;
+        assert_eq!(sent.lock().unwrap().len(), 1);
+        windows.send(window(2, 0.9)).await.unwrap();
+        windows.send(window(3, 0.1)).await.unwrap();
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(999)).await;
+        assert_eq!(sent.lock().unwrap().len(), 1);
+        tokio::time::advance(Duration::from_millis(1)).await;
+        tokio::task::yield_now().await;
+        {
+            let messages = sent.lock().unwrap();
+            assert_eq!(messages.len(), 2);
+            let Delivery::Window(packet) = &messages[1] else {
+                panic!("hidden editor must receive its current telemetry");
+            };
+            assert_eq!(packet.sequence, 3);
+            assert_eq!(packet.meters.nodes[0].peaks, [0.9]);
+            assert_eq!(packet.state.as_ref().unwrap().graph.active_revision, 3);
+        }
+        windows.send(window(4, 0.3)).await.unwrap();
+        tokio::task::yield_now().await;
+        assert_eq!(sent.lock().unwrap().len(), 2);
+        visible.send(true).unwrap();
+        tokio::task::yield_now().await;
+        assert_eq!(sent.lock().unwrap().len(), 3);
+        {
+            let messages = sent.lock().unwrap();
+            let Delivery::Window(packet) = &messages[2] else {
+                panic!("restored editor must receive its latest state immediately");
+            };
+            assert_eq!(packet.state.as_ref().unwrap().graph.active_revision, 4);
+        }
+        drop(windows);
+        task.await.unwrap();
+        assert_eq!(sent.lock().unwrap().last(), Some(&Delivery::Ended));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn losing_a_hidden_editors_visibility_owner_ends_delivery() {
+        let (visible, mut visibility) = watch::channel(false);
         let mut windows = Prepared {
-            windows: vec![window(2, 0.1), window(1, 0.8)],
-            then_silent: false,
+            windows: vec![window(1, 0.5)],
+            then_silent: true,
         };
+        let credit = Semaphore::new(CREDITS);
         let mut sent = Vec::new();
+        drop(visible);
         forward(
             &mut windows,
             |message| {
@@ -430,12 +555,40 @@ mod tests {
                 true
             },
             &credit,
+            &mut visibility,
         )
         .await;
-        // One credit: a single window, then the end once credit never returns.
         assert_eq!(sent.len(), 2);
-        assert!(matches!(sent[0], Delivery::Window(_)));
         assert_eq!(sent[1], Delivery::Ended);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn forwarding_stops_when_the_webview_returns_no_credit() {
+        for visible in [true, false] {
+            let credit = Semaphore::new(1);
+            let (_owner, mut visibility) = watch::channel(visible);
+            let mut windows = Prepared {
+                windows: vec![window(2, 0.1), window(1, 0.8)],
+                then_silent: false,
+            };
+            let mut sent = Vec::new();
+            let started = tokio::time::Instant::now();
+            forward(
+                &mut windows,
+                |message| {
+                    sent.push(message);
+                    true
+                },
+                &credit,
+                &mut visibility,
+            )
+            .await;
+            // One credit: a single window, then the end once credit never returns.
+            assert_eq!(sent.len(), 2);
+            assert!(matches!(sent[0], Delivery::Window(_)));
+            assert_eq!(sent[1], Delivery::Ended);
+            assert_eq!(started.elapsed(), Duration::from_secs(10));
+        }
     }
 
     #[tokio::test(start_paused = true)]
@@ -452,6 +605,7 @@ mod tests {
                 true
             },
             &credit,
+            &mut watch::channel(true).1,
         )
         .await;
         assert_eq!(sent, [Delivery::Ended]);
@@ -466,6 +620,7 @@ mod tests {
                 false
             },
             &credit,
+            &mut watch::channel(true).1,
         )
         .await;
         assert_eq!(attempts, 1);

@@ -158,6 +158,25 @@ export async function nativeSignal(device, directory, os, { execute = execFileSy
   }
 }
 
+// Recorder finalization precedes diagnostic tools that suspend threads or consume CPU.
+export async function runNativeAudioCases({ measure, finalize, directory,
+  snapshot = snapshotMacosProcesses, diagnostics = collectMacosLoad }) {
+  let snapshotPending = false, failurePending = false;
+  try {
+    await measure({ snapshot: () => { snapshotPending = true; },
+      diagnostics: () => { failurePending = true; } });
+  } finally {
+    try { await finalize(); }
+    finally {
+      for (const [pending, collect] of [[snapshotPending, snapshot], [failurePending, diagnostics]]) {
+        if (!pending) continue;
+        try { collect(directory); }
+        catch (error) { console.error(`Native post-recording diagnostics: ${error.message}`); }
+      }
+    }
+  }
+}
+
 function macosSignal(device, directory, execFileSync, snapshot) {
   const uid = device.nativeDeviceIds.find(id => id.startsWith('io.mixrelay.audio.endpoint.'));
   assert.ok(uid, 'Missing canonical CoreAudio device identity');

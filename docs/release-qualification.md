@@ -208,11 +208,12 @@ and `SystemAttachmentLifetime=keepNever` before installation and execution;
 `capture-policy.json` records the observed values. This prevents the default continuous
 test video from competing with native audio. The observer still writes the required
 `installed-ui.png` and failure screenshot explicitly and performs every UI and consent
-check. `native-probe-processes.txt` records process CPU after the signal has stopped.
+check. `native-probe-processes.txt` records process CPU after the recording finalizes.
 
-Hosted preparation disables Spotlight indexing on the disposable data volume before
+Hosted preparation disables Spotlight activity on the disposable root and Data volumes before
 building the UI observer or installing the product. `host-preparation.json` records
-the observed indexing states; an unknown state or unsuccessful change fails preparation.
+the states before and after `mdutil -d`; an unknown state or unsuccessful change fails preparation.
+Disabled indexing alone does not establish that Spotlight activity is disabled.
 This reduces metadata work triggered by builds and installation during native audio.
 PCM duration, the 128-frame engine quantum and every signal assertion remain
 unchanged. macOS menu items receive native focus before one Return key submission;
@@ -252,8 +253,9 @@ classifies the background GUI probe's recording work; the token ends when the I/
 routine returns, including failed measurements. It does not guarantee a virtual host's scheduling.
 The probe saves every captured interleaved native Float32 frame to `native-signal.f32`
 after I/O stops, including silence and damage. Its retained callback timeline includes
-entry/exit host ticks and their timebase. Failed PCM also collects bounded host CPU,
-process snapshots and WebContent samples after the signal ends.
+entry/exit host ticks and their timebase. Process snapshots and failed-PCM host CPU
+and WebContent samples run after `REC-02` finalizes the recording. Diagnostic tools
+must not suspend threads or consume CPU while that recording is still being measured.
 Collection preserves the PCM failure and never repeats the signal.
 
 For a hosted diagnostic job, prepare these tools before invoking the installed runner:

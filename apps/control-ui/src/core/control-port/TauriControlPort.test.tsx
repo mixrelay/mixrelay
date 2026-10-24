@@ -409,6 +409,50 @@ describe('pushed meters', () => {
   });
 });
 
+describe('telemetry visibility', () => {
+  it('reports hidden and restored visibility and removes the observer when unsubscribed', async (context) => {
+    const visible = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    context.onTestFinished(() => visible.mockRestore());
+    const invoke = vi.fn().mockResolvedValue(7);
+    const port = new TauriControlPort(invoke, () => ({ onmessage: () => undefined }));
+    const unsubscribe = await port.subscribeMeters({ window: vi.fn(), ended: vi.fn() });
+    expect(invoke).toHaveBeenLastCalledWith('control_telemetry_visibility', {
+      id: 7,
+      visible: false,
+    });
+    visible.mockReturnValue('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(invoke).toHaveBeenLastCalledWith('control_telemetry_visibility', {
+      id: 7,
+      visible: true,
+    });
+    invoke.mockRejectedValueOnce(new Error('subscription already ended'));
+    visible.mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await Promise.resolve();
+    unsubscribe();
+    const calls = invoke.mock.calls.length;
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(invoke).toHaveBeenCalledTimes(calls);
+  });
+
+  it('does not report visibility for a stream that ended before its id arrived', async (context) => {
+    const visible = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    context.onTestFinished(() => visible.mockRestore());
+    const pending = Promise.withResolvers<number>();
+    const invoke = vi.fn((command: string) =>
+      command === 'control_subscribe_telemetry' ? pending.promise : Promise.resolve(),
+    );
+    const channel = { onmessage: (_message: unknown) => {} };
+    const port = new TauriControlPort(invoke as never, () => channel);
+    const subscribing = port.subscribeMeters({ window: vi.fn(), ended: vi.fn() });
+    channel.onmessage({ ended: true });
+    pending.resolve(7);
+    await expect(subscribing).rejects.toThrow('telemetry attempt ended');
+    expect(invoke).not.toHaveBeenCalledWith('control_telemetry_visibility', expect.anything());
+  });
+});
+
 it('reads device clients with a no-argument native invoke and preserves unavailable failures', async () => {
   const activity = {
     native: [{ bundleId: 'app', displayName: 'App', processId: 1, playing: true, recording: true }],

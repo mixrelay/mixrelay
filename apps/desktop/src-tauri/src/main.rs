@@ -287,6 +287,7 @@ fn graph_builder(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::W
             control_proxy::control_get_meters,
             control_proxy::telemetry::control_subscribe_telemetry,
             control_proxy::telemetry::control_telemetry_credit,
+            control_proxy::telemetry::control_telemetry_visibility,
             control_proxy::telemetry::control_unsubscribe_telemetry,
             control_proxy::control_get_processors,
             control_proxy::control_retry_processor,

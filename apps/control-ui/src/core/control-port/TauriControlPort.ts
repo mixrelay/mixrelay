@@ -237,8 +237,19 @@ export class TauriControlPort implements ControlPort {
     };
     id = await this.invokeCommand<number>('control_subscribe_telemetry', { channel });
     for (; owed > 0; owed -= 1) credit();
+    const page = typeof document === 'undefined' ? undefined : document;
+    const visibility = () => {
+      if (active)
+        void this.invokeCommand('control_telemetry_visibility', {
+          id,
+          visible: page?.visibilityState !== 'hidden',
+        }).catch(() => undefined);
+    };
+    page?.addEventListener('visibilitychange', visibility);
+    if (page?.visibilityState === 'hidden') visibility();
     return () => {
       active = false;
+      page?.removeEventListener('visibilitychange', visibility);
       void this.invokeCommand('control_unsubscribe_telemetry', { id }).catch(() => undefined);
     };
   }

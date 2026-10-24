@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { analyseStereo, analyseRf64, nativeSignal, stopSignalProcesses, waitForSignalBoundary } from './native-signal.mjs';
+import { analyseStereo, analyseRf64, nativeSignal, runNativeAudioCases, stopSignalProcesses, waitForSignalBoundary } from './native-signal.mjs';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -122,4 +122,46 @@ test('failed Mac PCM keeps the original verdict and collects host load only afte
     },
   }), /missingFrames/);
   assert.deepEqual(phases, ['zsh', 'open', 'pkill', 'snapshot', 'diagnostics']);
+});
+
+test('installed audio stops recording before post-signal observers, retaining the original PCM failure', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-audio-order-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const measured = { inputAuthorization: { final: 3 }, activityProtection: true, complete: true,
+    channelOrder: true, missingFrames: 636, repeatedFrames: 0, corruptFrames: 636, nonfiniteSamples: 0, receivedFrames: 143364 };
+  let recording = true;
+  const phases = [], verdicts = [];
+  await runNativeAudioCases({ directory,
+    async measure(observers) {
+      try {
+        await nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
+          ...observers,
+          execute(program) {
+            if (program === 'zsh') return '/probe.app';
+            if (program === 'open') {
+              phases.push('finite signal');
+              writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
+            }
+          },
+        });
+      } catch (error) { verdicts.push(error.message); }
+    },
+    async finalize() { phases.push('recorder stopped'); recording = false; },
+    snapshot() { phases.push('process snapshot'); assert.equal(recording, false); },
+    diagnostics() { phases.push('thread samples'); assert.equal(recording, false); },
+  });
+  assert.deepEqual(phases, ['finite signal', 'recorder stopped', 'process snapshot', 'thread samples']);
+  assert.equal(verdicts.length, 1);
+  assert.match(verdicts[0], /missingFrames/);
+});
+
+test('unexpected measurement failure still finalizes recording before collecting requested diagnostics', async () => {
+  const phases = [];
+  await assert.rejects(runNativeAudioCases({ directory: '/unused',
+    async measure(observers) { observers.snapshot(); throw new Error('measurement failed'); },
+    async finalize() { phases.push('recorder stopped'); },
+    snapshot() { phases.push('snapshot'); },
+    diagnostics() { assert.fail('Successful or unrequested diagnostics must not run'); },
+  }), /measurement failed/);
+  assert.deepEqual(phases, ['recorder stopped', 'snapshot']);
 });

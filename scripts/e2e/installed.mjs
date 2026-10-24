@@ -14,7 +14,7 @@ import { collectLinux, collectLinuxUiProblems } from './collect-linux.mjs';
 import { collectMacos } from './collect-macos.mjs';
 import { observeEnvironment, validateEnvironment } from './environment.mjs';
 import { finishAfterCleanup, startInstalledUi } from './installed-ui.mjs';
-import { analyseRecording, nativeSignal } from './native-signal.mjs';
+import { analyseRecording, nativeSignal, runNativeAudioCases } from './native-signal.mjs';
 import { driverOperations } from './driver-operations.mjs';
 import { installAndVerify, launchInstalled, requireDisposableHost } from './package.mjs';
 import { removeInstalled } from './removal.mjs';
@@ -446,29 +446,32 @@ export async function qualifyMode({
       expectedRecording: { state: start.state, path: start.path },
       request: { action: 'record', path: recording, sampleRate: 48000, encoding: 'float32' },
     });
-    await scenario('AUDIO-01', async () => {
-      await nativeSignal(device, output, target.os);
-      return [
-        {
-          file: 'native-signal.json',
-          sha256: digest(readFileSync(join(output, 'native-signal.json'))),
-        },
-      ];
-    });
-    await scenario('REC-02', async () => {
-      const take = await api(recorderPath);
-      const stopped = await controlTake({
-        expectedRevision: applied.revision,
-        expectedRecording: { state: take.state, path: take.path },
-        request: { action: 'stop' },
-      });
-      assert.equal(stopped.state, 'stopped');
-      assert.equal(stopped.error, null);
-      const analysis = analyseRecording(recording);
-      return [
-        evidence('recording-analysis.json', { stopped, analysis }),
-        { file: 'recording.wav', sha256: digest(readFileSync(recording)) },
-      ];
+    await runNativeAudioCases({
+      directory: output,
+      measure: (diagnostics) => scenario('AUDIO-01', async () => {
+        await nativeSignal(device, output, target.os, diagnostics);
+        return [
+          {
+            file: 'native-signal.json',
+            sha256: digest(readFileSync(join(output, 'native-signal.json'))),
+          },
+        ];
+      }),
+      finalize: () => scenario('REC-02', async () => {
+        const take = await api(recorderPath);
+        const stopped = await controlTake({
+          expectedRevision: applied.revision,
+          expectedRecording: { state: take.state, path: take.path },
+          request: { action: 'stop' },
+        });
+        assert.equal(stopped.state, 'stopped');
+        assert.equal(stopped.error, null);
+        const analysis = analyseRecording(recording);
+        return [
+          evidence('recording-analysis.json', { stopped, analysis }),
+          { file: 'recording.wav', sha256: digest(readFileSync(recording)) },
+        ];
+      }),
     });
     if (target.os === 'macos')
       await scenario('AUDIO-11', async () => {
