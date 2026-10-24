@@ -121,7 +121,9 @@ jobs:
         run: bash scripts/e2e/github-vm-tools.sh "$TARGET_ARCH"
       - name: Prepare native macOS UI test tools
         if: matrix.os == 'macos'
-        run: node scripts/e2e/prepare-macos-ui.mjs
+        run: |
+          node scripts/e2e/prepare-macos-host.mjs macos-host
+          node scripts/e2e/prepare-macos-ui.mjs
       - name: Install and exercise final PKG on macOS
         if: matrix.os == 'macos'
         env:
@@ -141,6 +143,8 @@ jobs:
           overwrite: true
           name: installed-target-${{ matrix.id }}
           path: |
+            macos-host/*.json
+            macos-host/*.log
             evidence/*
             !evidence/**/payload/**
             !evidence/**/ui-tools/**
