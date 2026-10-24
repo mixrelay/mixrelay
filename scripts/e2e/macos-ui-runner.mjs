@@ -42,10 +42,10 @@ export function prepareMacosUiRunner(tools, { runCommand = run, read = readFileS
   assert.match(bytes, /^(?:[0-9a-f]{2})+$/);
   // This grant is confined to the disposable hosted session and to the exact
   // generated runner's code requirement. test-without-building preserves it.
-  const sql = `INSERT OR REPLACE INTO access
+  const sql = ['kTCCServiceAccessibility', 'kTCCServiceScreenCapture'].map(service => `INSERT OR REPLACE INTO access
     (service,client,client_type,auth_value,auth_reason,auth_version,csreq,
      indirect_object_identifier_type,indirect_object_identifier,flags,last_modified)
-    VALUES ('kTCCServiceAccessibility','${bundle}',0,2,4,1,X'${bytes}',0,'UNUSED',0,strftime('%s','now'));`;
+    VALUES ('${service}','${bundle}',0,2,4,1,X'${bytes}',0,'UNUSED',0,strftime('%s','now'));`).join('\n');
   runCommand('sudo', ['-n', 'sqlite3', '/Library/Application Support/com.apple.TCC/TCC.db', sql]);
   const service = 'system/com.apple.tccd.system';
   const before = servicePid(runCommand('launchctl', ['print', service]).stdout);

@@ -31,7 +31,11 @@ suite 결과는 수정한 실행 파일의 검증이 아니다.
 
 Build the Universal macOS PKG from the same source commit with the existing signing
 workflow: first `pnpm signing:check`, then `pnpm release:macos --output EMPTY_DIRECTORY`.
-Use the notarized, stapled final PKG. Both CPUs and every macOS target install this
+Use the notarized, stapled final PKG. Installed verification requires `stapler validate`
+to succeed. Only its observed exit 68 with `NSURLErrorDomain Code=-1005` permits a retry:
+three attempts with 30- and 60-second waits, recorded in `package-verification.json`.
+Invalid tickets and exhausted transport failures stop before extraction or installation.
+Both CPUs and every macOS target install this
 same file on the CPUs supported by each macOS release. macOS 27 has only an arm64
 target because [Apple's compatibility list](https://support.apple.com/en-us/127255)
 contains Apple silicon models; Intel targets end at macOS 26. Finish signing and
@@ -111,8 +115,10 @@ Kali and Arch image URLs and checksums. The adapter checks the download before b
 uses a fresh disk overlay and SSH key, forwards only public workflow identity, then
 collects evidence and deletes the VM. KVM is used when available; otherwise the same
 guest CPU architecture runs with TCG. `vm-session.json` records the accelerator;
-ARM TCG uses the Cortex-A72 model. TCG results are functional evidence and do not
-establish hardware latency.
+ARM TCG uses the Cortex-A72 model. TCG guests use up to four of the host's allocated
+CPUs, while KVM guests use up to two; neither allocation exceeds the available host
+count. `vm-session.json` records `hostCpuCount` and `guestCpuCount`. TCG results are
+functional evidence and do not establish hardware latency.
 
 폐기할 guest는 고정된 커널을 그대로 사용하므로 cloud-init에서 needrestart의
 커널 이미지 검사만 끈다(`kernelhints = 0`). Ubuntu ARM에서 제품 설정을 마친 뒤에도
@@ -157,10 +163,18 @@ ready at the candidate version and the engine reports the expected protocol, ena
 power and native backend. `readiness-disagreement.json` preserves both responses.
 The gate still requires `APP-01` to pass.
 `GRAPH-01` uses the installed editor to create and connect nodes and checks the committed
-graph against the engine. Both hosted workflows build and sign one XCTest observer before
-installing the product. Preparation grants Accessibility to that exact code requirement,
+graph against the engine. Linux submenu navigation refreshes native accessibility state
+and requires an observed expansion before selecting a leaf. Each submenu permits at most
+three focus requests and three Right Arrow submissions; each leaf receives one pointer click.
+An unexpanded menu or an uncommitted graph fails the case.
+
+Both hosted workflows build and sign one XCTest observer before
+installing the product. Preparation grants Accessibility and Screen Capture to that exact code requirement,
 restarts the disposable runner's system TCC daemon and confirms its replacement PID.
-Fresh and upgrade reuse the prepared observer; each XCTest configuration keeps its original
+The observer records and requires its actual Accessibility and Screen Capture access before
+interacting with the installed editor. Product Microphone and Audio Capture consent still
+uses the first-use dialogs. Fresh and upgrade reuse the prepared observer; each XCTest
+configuration keeps its original
 product paths and changes only `MIXRELAY_UI_EVIDENCE`. The installed phase verifies the
 signed code and uses `test-without-building` with signing disabled. The synthetic native
 probe self-test also compiles before installation. The audio scenarios retain their first

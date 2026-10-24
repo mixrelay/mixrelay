@@ -46,6 +46,9 @@ test('native ad-hoc cdhash requirement compiles to a blob that validates only th
       const bytes = readFileSync(blob);
       assert.ok(bytes.length > 0);
       assert.ok(sql.includes(`'io.mixrelay.qualification.ui.xctrunner',0,2,4,1,X'${bytes.toString('hex')}'`));
+      assert.match(sql, /'kTCCServiceAccessibility'/);
+      assert.match(sql, /'kTCCServiceScreenCapture'/);
+      assert.doesNotMatch(sql, /kTCCServiceMicrophone|kTCCServiceAudioCapture/);
       command('codesign', ['--verify', '--strict', '-R', blob, runner]);
       // Replacing the code must invalidate the exact blob used for the grant.
       copyFileSync('/usr/bin/false', executable);

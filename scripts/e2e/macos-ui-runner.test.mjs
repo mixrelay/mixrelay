@@ -38,6 +38,9 @@ test('the signed runner and Accessibility grant are prepared before installing t
   assert.ok(compile + 1 < grant);
   const sql = calls[grant][1].at(-1);
   assert.match(sql, /'io\.mixrelay\.qualification\.ui\.xctrunner',0,2,4,1,X'fade'/);
+  assert.match(sql, /'kTCCServiceAccessibility'/);
+  assert.match(sql, /'kTCCServiceScreenCapture'/);
+  assert.doesNotMatch(sql, /kTCCServiceMicrophone|kTCCServiceAudioCapture/);
   const expected = JSON.parse(files.get('/tools/prepared-runner.json'));
   assert.equal(expected.path, calls[sign][1].at(-1));
   assert.equal(expected.bundle, 'io.mixrelay.qualification.ui.xctrunner');
