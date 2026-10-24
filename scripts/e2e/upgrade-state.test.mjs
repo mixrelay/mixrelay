@@ -424,6 +424,7 @@ test('workspace save/open supplies current concurrency revisions and waits for t
     return { document: { revision: 9 }, catalogRevision: 12 };
   };
   const operation = async (...args) => {
+    assert.deepEqual(activated, [9], 'workspace save must wait for the submitted graph');
     operations.push(args);
     return { status: 200, json: { document: { revision: 10 } } };
   };
@@ -445,12 +446,12 @@ test('workspace save/open supplies current concurrency revisions and waits for t
       }),
     ],
   ]);
-  assert.deepEqual(activated, [10]);
+  assert.deepEqual(activated, [9, 10]);
   await assert.rejects(
     saveWorkspace(
       api,
       async () => ({ status: 409, body: 'conflict' }),
-      async () => assert.fail('must not activate'),
+      async (revision) => assert.equal(revision, 9, 'rejection cannot activate a new revision'),
       'open',
       '/session.mix',
     ),

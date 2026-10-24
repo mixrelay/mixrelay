@@ -17,14 +17,36 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
   *) instruction='Stop all audio from the MixRelay status menu, close the MixRelay editor and MixRelay, then retry.' ;;
 esac
 
+# Ask installed editors and controllers to drain through their normal exit path.
+# Never kill an engine: its controller lease closes after accepted work is drained.
 for executable in /proc/[0-9]*/exe; do
   target=$(readlink "$executable" 2>/dev/null) || continue
   case "$target" in
-    /usr/bin/mixrelay-desktop|'/usr/bin/mixrelay-desktop (deleted)'|\
-    /usr/bin/mixrelay-engine-service|'/usr/bin/mixrelay-engine-service (deleted)')
-      printf '%s\n' "$instruction" >&2
-      exit 1 ;;
+    /usr/bin/mixrelay-desktop|'/usr/bin/mixrelay-desktop (deleted)') ;;
+    *) continue ;;
   esac
+  process=${executable%/exe}
+  uid=$(stat -c %u "$process")
+  [ "$uid" -ne 0 ] || { printf '%s\n' 'MixRelay is incorrectly running as root.' >&2; exit 1; }
+  /bin/kill -TERM "${process##*/}" 2>/dev/null || [ ! -e "$executable" ]
+done
+
+# Allow acknowledged engine/recorder finalization, retaining files on failure.
+# Thirty seconds bounds the package transaction; expiration never escalates to KILL.
+attempts=0
+while :; do
+  running=false
+  for executable in /proc/[0-9]*/exe; do
+    target=$(readlink "$executable" 2>/dev/null) || continue
+    case "$target" in
+      /usr/bin/mixrelay-desktop|'/usr/bin/mixrelay-desktop (deleted)'|\
+      /usr/bin/mixrelay-engine-service|'/usr/bin/mixrelay-engine-service (deleted)') running=true ;;
+    esac
+  done
+  [ "$running" = true ] || break
+  attempts=$((attempts + 1))
+  [ "$attempts" -lt 300 ] || { printf '%s\n' "$instruction" >&2; exit 1; }
+  sleep 0.1
 done
 
 # Resolve only actual installed Driver processes. Audio remains in their user session.

@@ -187,42 +187,60 @@ test('Linux product builds select package-manager formats and register lifecycle
     for (const path of uninstallFiles) assert.ok(config.bundle.linux[format].files[`/${path}`]);
   }
 });
-test('package lifecycle refuses active installed editor and engine without touching user files', t => {
+test('package replacement drains running installed apps before the Driver and preserves user files', t => {
   mkdirSync(new URL('../target/', import.meta.url), { recursive: true });
   const directory = mkdtempSync(new URL('../target/linux-package-hook-', import.meta.url));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const proc = join(directory, 'proc');
-  mkdirSync(join(proc, '123'), { recursive: true });
+  const proc = join(directory, 'proc'), calls = join(directory, 'calls');
+  for (const pid of ['123', '124', '125']) mkdirSync(join(proc, pid), { recursive: true });
+  mkdirSync(join(directory, 'runtime'));
   const userFile = join(directory, 'saved-graph.json');
   writeFileSync(userFile, '{"preserved":true}');
-  const runHook = (name, args) => {
+  const commands = {
+    stat: 'printf "%s\\n" "${FIXTURE_UID:-1000}"',
+    getent: 'printf "qa:x:1000:1000:QA:/home/qa:/bin/sh\\n"',
+    sleep: ':',
+    signal: `printf '%s %s\\n' "$1" "$2" >> '${calls}'
+[ "$1" = -TERM ] || exit 99
+[ "$FIXTURE_STUCK" != 1 ] || exit 0
+rm -f '${proc}/123/exe' '${proc}/124/exe'`,
+    runuser: `[ ! -L '${proc}/123/exe' ] && [ ! -L '${proc}/124/exe' ] || exit 98
+printf 'driver-stop\\n' >> '${calls}'
+rm -f '${proc}/125/exe'`,
+  };
+  for (const [name, source] of Object.entries(commands))
+    writeFileSync(join(directory, name), `#!/bin/sh\n${source}\n`, { mode: 0o755 });
+  const runHook = (name, args, environment = {}) => {
     const source = readFileSync(new URL(`../packaging/linux/${name}`, import.meta.url), 'utf8');
-    // Only the fixture copy sees the fake proc tree; the shipped hook has no
-    // environment override that could bypass its installed-process check.
     const fixtureHook = join(directory, name);
     writeFileSync(fixtureHook, source.replaceAll('/proc/[0-9]*/exe', `${proc}/[0-9]*/exe`)
-      .replace('/usr/lib/mixrelay-driver/before-change.sh', join(directory, 'driver-before-change.sh')));
-    return spawnSync('sh', [fixtureHook, ...args], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
+      .replace('/usr/lib/mixrelay-driver/before-change.sh', join(directory, 'driver-before-change.sh'))
+      .replace('/bin/kill', join(directory, 'signal')).replace('/run/user/$uid', join(directory, 'runtime')));
+    return spawnSync('sh', [fixtureHook, ...args], { encoding: 'utf8',
+      env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, LC_ALL: 'C', ...environment } });
   };
-  // driver-before-change.sh is written first, so the delegating removal hooks run the fixture copy.
-  for (const target of ['/usr/bin/mixrelay-desktop', '/usr/bin/mixrelay-engine-service',
-    '/usr/bin/mixrelay-engine-service (deleted)']) {
-    const executable = join(proc, '123/exe');
-    symlinkSync(target, executable);
-    for (const args of [['install'], ['upgrade', '0.1.0', '0.2.0'], ['remove']]) {
-      const result = runHook('driver-before-change.sh', args);
-      assert.equal(result.status, 1);
-      assert.match(result.stderr, /Stop all audio.*close the MixRelay editor/);
-    }
-    assert.equal(runHook('driver-pre-remove.sh', ['remove']).status, 1);
-    assert.equal(runHook('driver-pre-remove.sh', ['upgrade']).status, 0);
-    assert.equal(runHook('driver-rpm-pre-remove.sh', ['0']).status, 1);
-    assert.equal(runHook('driver-rpm-pre-remove.sh', ['1']).status, 0);
-    rmSync(executable);
+  for (const deleted of ['', ' (deleted)']) {
+    symlinkSync(`/usr/bin/mixrelay-desktop${deleted}`, join(proc, '123/exe'));
+    symlinkSync(`/usr/bin/mixrelay-engine-service${deleted}`, join(proc, '124/exe'));
+    symlinkSync(`/usr/bin/mixrelay-driver-service${deleted}`, join(proc, '125/exe'));
+    writeFileSync(calls, '');
+    const result = runHook('driver-before-change.sh', ['upgrade']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(calls, 'utf8'), '-TERM 123\ndriver-stop\n');
   }
-  symlinkSync('/home/test/development/mixrelay-engine-service', join(proc, '123/exe'));
+  symlinkSync('/usr/bin/mixrelay-desktop', join(proc, '123/exe'));
+  assert.equal(runHook('driver-before-change.sh', ['upgrade'], { FIXTURE_UID: '0' }).status, 1);
+  assert.equal(runHook('driver-pre-remove.sh', ['upgrade']).status, 0);
+  assert.equal(runHook('driver-rpm-pre-remove.sh', ['1']).status, 0);
+  for (const hook of ['driver-before-change.sh', 'driver-pre-remove.sh', 'driver-rpm-pre-remove.sh']) {
+    const result = runHook(hook, [hook.includes('rpm') ? '0' : 'remove'], { FIXTURE_STUCK: '1' });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Stop all audio.*close the MixRelay editor/);
+    assert.ok(readFileSync(calls, 'utf8').split('\n').every(line => !line.includes('KILL')));
+  }
+  rmSync(join(proc, '123/exe'));
+  symlinkSync('/home/test/development/mixrelay-engine-service', join(proc, '124/exe'));
   assert.equal(runHook('driver-before-change.sh', ['upgrade']).status, 0);
-  assert.equal(runHook('driver-rpm-pre-remove.sh', ['0']).status, 0);
   assert.equal(readFileSync(userFile, 'utf8'), '{"preserved":true}');
 });
 test('graphical uninstall deletes only selected app data after successful package removal', t => {

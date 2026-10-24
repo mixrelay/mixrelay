@@ -201,6 +201,7 @@ export function verifyPreservedState(before, catalog, driver) {
 
 export async function saveWorkspace(api, operation, active, action, path) {
   const current = await api('graphs');
+  await active(current.document.revision);
   const reply = await operation(
     'POST',
     '/api/v1/workspace',

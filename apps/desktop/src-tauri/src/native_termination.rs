@@ -10,31 +10,6 @@ use objc2_app_kit::{NSApplication, NSApplicationTerminateReply};
 
 static APPLICATION: Mutex<Option<tauri::AppHandle>> = Mutex::new(None);
 
-/// Exec-launched helpers may receive SIGTERM instead of an `AppKit` Quit event.
-/// Do not perform native control work inside a signal handler: route it through
-/// the same acknowledged lifecycle on the application thread.
-pub(crate) fn observe_background_stop(app: &tauri::AppHandle) -> std::io::Result<()> {
-    let mut terminate = background_stop_signal()?;
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        while terminate.recv().await.is_some() {
-            let target = app.clone();
-            if let Err(error) = app.run_on_main_thread(move || target.exit(0)) {
-                tracing::error!(%error, "could not dispatch system background stop");
-            }
-        }
-    });
-    Ok(())
-}
-
-fn background_stop_signal() -> std::io::Result<tokio::signal::unix::Signal> {
-    // AppKit setup runs outside Tokio. Registration needs the same reactor
-    // that will poll the signal, before setup admits any background work.
-    let runtime = tauri::async_runtime::handle();
-    let _entered = runtime.inner().enter();
-    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-}
-
 type QuitMethod = extern "C-unwind" fn(&AnyObject, Sel, &AnyObject) -> NSApplicationTerminateReply;
 
 #[link(name = "objc")]
@@ -134,14 +109,6 @@ mod tests {
         ClassType, Encode, msg_send,
         runtime::{ClassBuilder, NSObject},
     };
-
-    #[test]
-    fn background_stop_registration_works_outside_tokio() {
-        assert!(tokio::runtime::Handle::try_current().is_err());
-        let signal = background_stop_signal().unwrap();
-        drop(signal);
-        assert!(tokio::runtime::Handle::try_current().is_err());
-    }
 
     #[test]
     fn native_method_cancels_immediate_exit_and_refuses_replacement() {

@@ -2,8 +2,43 @@
 from pathlib import Path
 import sys
 import time
+import traceback
 
 import pyatspi
+
+
+def children(node):
+    if node is None:
+        return
+    try:
+        count = node.childCount
+    except Exception:
+        return
+    for index in range(count):
+        try:
+            child = node[index]
+        except Exception:
+            continue
+        if child is not None:
+            yield child
+
+
+def describe(node):
+    try:
+        return node.getRoleName(), node.name or "", node.getState().contains(pyatspi.STATE_SHOWING)
+    except Exception:
+        # AT-SPI proxies can disappear between enumeration and inspection.
+        return None
+
+
+def tree_text(root):
+    lines = []
+    for node, depth in descendants(root):
+        description = describe(node)
+        if description is not None:
+            role, name, _ = description
+            lines.append(f"{' ' * depth}{role} {name}")
+    return "\n".join(lines)
 
 
 def descendants(root):
@@ -11,26 +46,30 @@ def descendants(root):
     count = 0
     while queue:
         node, depth = queue.pop()
+        if node is None:
+            continue
         count += 1
         if count > 20000:
             raise RuntimeError("Installed accessibility tree exceeded its bound")
         yield node, depth
         if depth < 60:
-            try:
-                queue.extend((node[index], depth + 1) for index in reversed(range(node.childCount)))
-            except Exception:
-                continue
+            queue.extend((child, depth + 1) for child in reversed(list(children(node))))
 
 
 def application():
-    for app in pyatspi.Registry.getDesktop(0):
-        if "mixrelay" not in (app.name or "").lower():
+    for app in children(pyatspi.Registry.getDesktop(0)):
+        description = describe(app)
+        if description is None or "mixrelay" not in description[1].lower():
             continue
         # The editor and headless runtime have the same AT-SPI application name.
         # Registration order depends on startup timing; select the visible editor.
-        for window in app:
-            if (window.getRoleName() == "frame" and window.name == "MixRelay"
-                    and window.getState().contains(pyatspi.STATE_SHOWING)):
+        for window in children(app):
+            description = describe(window)
+            if description is None:
+                continue
+            role, name, showing = description
+            if (role == "frame" and name == "MixRelay"
+                    and showing):
                 return app
     raise LookupError("Installed MixRelay has no visible accessibility editor")
 
@@ -40,10 +79,13 @@ def find(label, contains=False, interactive=True):
     while time.monotonic() < deadline:
         try:
             for node, _ in descendants(application()):
-                role = node.getRoleName()
-                matched = label in node.name if contains else node.name == label
+                description = describe(node)
+                if description is None:
+                    continue
+                role, name, showing = description
+                matched = label in name if contains else name == label
                 if matched and (not interactive or role in ("button", "push button", "menu item", "combo box", "list item")):
-                    if node.getState().contains(pyatspi.STATE_SHOWING):
+                    if showing:
                         return node
         except (LookupError, RuntimeError):
             pass
@@ -94,8 +136,7 @@ def main(output):
     click("Recorder")
     click("Connect")
     find("Compressor CH 1 → Recorder CH 1", interactive=False)
-    tree = [f"{' ' * depth}{node.getRoleName()} {node.name}" for node, depth in descendants(application())]
-    (output / "installed-ui-tree.txt").write_text("\n".join(tree), encoding="utf-8")
+    (output / "installed-ui-tree.txt").write_text(tree_text(application()), encoding="utf-8")
     screenshot(output / "installed-ui.png")
     (output / "installed-ui.ready").write_text("ready\n", encoding="utf-8")
 
@@ -105,9 +146,11 @@ if __name__ == "__main__":
     try:
         main(folder)
     except Exception:
+        traceback.print_exc()
         try:
-            tree = [f"{' ' * depth}{node.getRoleName()} {node.name}" for node, depth in descendants(pyatspi.Registry.getDesktop(0))]
-            (folder / "installed-ui-failure.txt").write_text("\n".join(tree), encoding="utf-8")
+            (folder / "installed-ui-failure.txt").write_text(
+                tree_text(pyatspi.Registry.getDesktop(0)), encoding="utf-8")
             screenshot(folder / "installed-ui-failure.png")
-        finally:
-            raise
+        except Exception:
+            traceback.print_exc()
+        sys.exit(1)

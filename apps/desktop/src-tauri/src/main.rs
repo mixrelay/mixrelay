@@ -14,6 +14,7 @@ mod native_text;
 mod processor_dialog;
 mod recording_dialog;
 mod status_menu;
+mod system_stop;
 mod updates;
 mod workspace_menu;
 
@@ -44,6 +45,8 @@ use macos_audio as platform_audio;
 fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
     app.manage(native_termination::install(app.handle())?);
+    #[cfg(target_os = "linux")]
+    system_stop::observe_background_stop(app.handle())?;
     if *app.state::<app_mode::AppMode>() == app_mode::AppMode::Graph {
         start_audio(app.handle())?;
         workspace_menu::install(app)?;
@@ -76,7 +79,7 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     install_local_controls(app.handle())?;
     status_menu::install(app)?;
     #[cfg(target_os = "macos")]
-    native_termination::observe_background_stop(app.handle())?;
+    system_stop::observe_background_stop(app.handle())?;
     licensing::start_automatic_check(app.handle());
     background::restore_driver(app.handle());
     restore_captures(app.handle());
