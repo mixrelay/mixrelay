@@ -87,6 +87,7 @@ const logs = join(homedir(), 'Library/Logs/MixRelay');
 if (existsSync(logs)) for (const file of readdirSync(logs).filter(name => /^[A-Za-z0-9_.-]+\.log$/.test(name))) {
   copyFileSync(join(logs, file), path(`app-log-${file}`));
 }
+capture('installer.log', 'sudo', ['-n', 'tail', '-n', '600', '/var/log/install.log']);
 const systemLog = collectCoreaudioLog(path('coreaudio-system.log'));
 collectCoreaudioServers(capture, path, systemLog);
 const brokers = capture('permission-broker-processes.txt', 'pgrep', ['-fl', 'tccd|UserNotificationCenter|SecurityAgent|CoreServicesUIAgent|iconservicesagent|iconservicesd']);

@@ -52,8 +52,9 @@ impl Request {
     }
 }
 
-// Capture-aware reads may reconcile native owners and remain mutations. Only
-// observation commands without that work can be cancelled with their connection.
+// Capture-aware reads may reconcile native owners and remain mutations. Linux
+// discovery owns bounded child processes and must join them before shutdown.
+// Only observation commands without that work can be cancelled with their connection.
 fn cancellable_read(name: &str, arguments: &Value) -> bool {
     matches!(
         name,
@@ -65,8 +66,8 @@ fn cancellable_read(name: &str, arguments: &Value) -> bool {
             | "control_get_recorder_status"
             | "recording_settings"
             | "workspace_path"
-            | "list_capturable_applications"
-    ) || (name == "engine_request" && arguments["method"] == "GET")
+    ) || (cfg!(target_os = "macos") && name == "list_capturable_applications")
+        || (name == "engine_request" && arguments["method"] == "GET")
 }
 
 #[derive(Debug, Deserialize)]
@@ -384,7 +385,11 @@ mod tests {
             ),
             (
                 json!({"type":"invoke","name":"list_capturable_applications","arguments":null}),
-                RequestKind::Read,
+                if cfg!(target_os = "linux") {
+                    RequestKind::Mutation
+                } else {
+                    RequestKind::Read
+                },
             ),
             (
                 json!({"type":"invoke","name":"control_get_graph_catalog","arguments":null}),

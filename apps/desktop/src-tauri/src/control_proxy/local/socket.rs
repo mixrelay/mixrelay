@@ -385,8 +385,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn quit_cancels_an_inflight_engine_read_but_waits_for_an_accepted_write() {
+    async fn quit_cancels_async_reads_but_joins_accepted_writes_and_native_discovery() {
         for method in ["GET", "PUT", "applications"] {
+            let must_complete =
+                method == "PUT" || (method == "applications" && cfg!(target_os = "linux"));
             let fixture = mixrelay_test_support::FixtureDir::new("ipc-quit").unwrap();
             let directory = fixture.join("control");
             let uid = std::fs::metadata(fixture.path()).unwrap().uid();
@@ -412,8 +414,8 @@ mod tests {
                 .unwrap();
             control.started.notified().await;
             let shutdown = tokio::spawn(async move { service.shutdown().await });
-            if method == "PUT" {
-                // The runtime cannot finish an accepted mutation by dropping its future.
+            if must_complete {
+                // An accepted write or owned native query must finish before shutdown.
                 tokio::task::yield_now().await;
                 assert!(!shutdown.is_finished());
                 assert!(!control.completed.load(std::sync::atomic::Ordering::Acquire));
@@ -421,12 +423,12 @@ mod tests {
             }
             tokio::time::timeout(Duration::from_secs(1), shutdown)
                 .await
-                .expect("Quit must not wait for observation reads")
+                .expect("shutdown must finish after asynchronous reads are cancelled and owned work completes")
                 .unwrap()
                 .unwrap();
             assert_eq!(
                 control.completed.load(std::sync::atomic::Ordering::Acquire),
-                method == "PUT"
+                must_complete
             );
             assert!(!directory.join("control.sock").exists());
         }

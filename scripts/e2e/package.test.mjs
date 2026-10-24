@@ -204,7 +204,7 @@ test('a macOS postinstall rejection is fatal and preserves installer stderr', as
   );
   assert.deepEqual(commands.at(-1), [
     'sudo',
-    ['-n', 'installer', '-pkg', join(root, 'signed.pkg'), '-target', '/'],
+    ['-n', 'installer', '-dumplog', '-pkg', join(root, 'signed.pkg'), '-target', '/'],
   ]);
   assert.match(
     readFileSync(join(output, 'package-install.log'), 'utf8'),

@@ -60,6 +60,21 @@ fn response<T: Serialize, E: Into<tauri::ipc::InvokeError>>(
     })
 }
 
+#[cfg(any(target_os = "linux", test))]
+async fn discover<T, E>(
+    query: impl FnOnce() -> Result<T, E> + Send + 'static,
+) -> Result<Value, Value>
+where
+    T: Serialize + Send + 'static,
+    E: Into<tauri::ipc::InvokeError> + Send + 'static,
+{
+    // PipeWire discovery owns bounded child processes. The caller awaits their
+    // completion while the async runtime continues serving commands and liveness.
+    tokio::task::spawn_blocking(move || response(query()))
+        .await
+        .map_err(|error| Value::String(error.to_string()))?
+}
+
 // Keep the closed command boundary explicit so native authority can be audited in one place.
 #[allow(clippy::too_many_lines)]
 pub(crate) async fn dispatch(
@@ -360,10 +375,13 @@ pub(crate) async fn dispatch(
         "stop_capture_probe" => response(crate::macos_audio::stop_capture_probe(app.state())),
         #[cfg(target_os = "linux")]
         "list_capturable_applications" => {
-            response(crate::linux_audio::list_capturable_applications())
+            discover(crate::linux_audio::list_capturable_applications).await
         }
         #[cfg(target_os = "linux")]
-        "list_audio_devices" => response(crate::linux_audio::list_audio_devices()),
+        "list_audio_devices" => discover(crate::linux_audio::list_audio_devices).await,
         _ => Err(Value::String("unsupported background command".into())),
     }
 }
+
+#[cfg(test)]
+mod tests;

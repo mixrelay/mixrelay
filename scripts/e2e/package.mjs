@@ -129,7 +129,7 @@ export function installAndVerify(
     verify('spctl', ['--assess', '--type', 'install', archive]);
     ticketTransport(output, () => verify('xcrun', ['stapler', 'validate', archive]));
     run('pkgutil', ['--expand-full', archive, extracted]);
-    install('sudo', ['-n', 'installer', '-pkg', archive, '-target', '/'], 300000);
+    install('sudo', ['-n', 'installer', '-dumplog', '-pkg', archive, '-target', '/'], 300000);
   } else {
     mkdirSync(extracted);
     if (definition.format === 'deb') {
