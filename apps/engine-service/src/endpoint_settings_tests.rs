@@ -313,11 +313,7 @@ fn partial_reference_removal_never_changes_shared_device_stream_configuration() 
         processor.plan().source_bindings()[0].port_id().as_str(),
         FROM_OS_PORT_ID
     );
-    assert_eq!(processor.plan().sink_bindings()[0].channels(), 64);
-    assert_eq!(
-        processor.plan().sink_bindings()[0].port_id().as_str(),
-        TO_OS_PORT_ID
-    );
+    assert!(processor.plan().sink_bindings().is_empty());
     assert_eq!(settings(&controller).devices, expected);
     let graph = controller.graph();
     let NodeConfig::VirtualEndpoint(config) = &graph.nodes[0].config else {

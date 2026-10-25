@@ -7,6 +7,12 @@ use super::{
     reference_node_id, runtime_node_id, source_node_id, source_shape, validate_id,
 };
 
+#[derive(Default)]
+struct ClientDirections {
+    read: bool,
+    write: bool,
+}
+
 pub(super) struct Builder<'a> {
     registry: &'a DeviceRegistry,
     context: CompileContext,
@@ -39,25 +45,29 @@ impl<'a> Builder<'a> {
             outputs: BTreeMap::new(),
             playback_intents: Vec::new(),
         };
-        let mut referenced: BTreeSet<_> = graphs
-            .iter()
-            .flat_map(|graph| {
-                graph
-                    .device_references
-                    .iter()
-                    .map(|reference| &reference.device_id)
-            })
-            .collect();
+        let mut referenced: BTreeMap<_, ClientDirections> = BTreeMap::new();
+        for reference in graphs.iter().flat_map(|graph| graph.device_references) {
+            let directions = referenced.entry(&reference.device_id).or_default();
+            directions.read |= reference.read.is_some();
+            directions.write |= reference.write_channels.is_some();
+        }
         for reference in graphs.iter().flat_map(|graph| graph.source_references) {
             if let Some(id) = &reference.forwarding_endpoint {
-                referenced.insert(id);
+                referenced.entry(id).or_default().write = true;
             }
         }
-        for id in referenced {
-            let device = registry
+        for (id, directions) in referenced {
+            let mut device = registry
                 .get(id)
-                .ok_or_else(|| invalid("unknown shared device"))?;
-            value.device(device)?;
+                .ok_or_else(|| invalid("unknown shared device"))?
+                .clone();
+            if !directions.read {
+                device.capture = None;
+            }
+            if !directions.write {
+                device.render = None;
+            }
+            value.device(&device)?;
         }
         Ok(value)
     }

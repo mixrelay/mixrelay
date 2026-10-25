@@ -260,7 +260,12 @@ impl Renderer<'_> {
         // Native sample time when the device reports it, otherwise continue the previous
         // position. Any jump (a device skip, or switching between the two) is declared a
         // discontinuity instead of failing the renderer.
-        let native = timing.and_then(|timing| native_sample(timing.output));
+        let time = timing.map(|timing| {
+            self.native_clock
+                .as_ref()
+                .map_or(timing.output, |(plan, _)| plan.cycle_time(timing))
+        });
+        let native = time.and_then(native_sample);
         let base = native.or(self.position).unwrap_or(0);
         let mut discontinuity = self.position != Some(base);
         // A larger native quantum is split, never truncated or queued for later.
@@ -278,12 +283,10 @@ impl Renderer<'_> {
                 sample_rate: format.sample_rate,
                 frames: count,
                 first_frame: base + io.offset as u64,
-                monotonic_ns: timing
-                    .filter(|timing| timing.output.flags & 2 != 0)
-                    .map(|timing| {
-                        self.timebase.nanoseconds(timing.output.host_time)
-                            + io.offset as u64 * 1_000_000_000 / u64::from(format.sample_rate)
-                    }),
+                monotonic_ns: time.filter(|time| time.flags & 2 != 0).map(|time| {
+                    self.timebase.nanoseconds(time.host_time)
+                        + io.offset as u64 * 1_000_000_000 / u64::from(format.sample_rate)
+                }),
                 discontinuity: std::mem::take(&mut discontinuity),
             };
             let Ok(Some(report)) = self.processor.process_external_cycle(cycle, &mut io) else {

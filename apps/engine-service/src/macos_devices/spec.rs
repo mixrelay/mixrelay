@@ -131,8 +131,90 @@ pub(super) fn aggregate_members(specs: &BTreeMap<String, Spec>) -> Vec<String> {
 mod tests {
     use super::*;
     use mixrelay_audio_graph::{
-        AudioDeviceInputConfig, AudioDeviceOutputConfig, NodeConfig, NodeSpec,
+        AudioDeviceInputConfig, AudioDeviceOutputConfig, CompileContext, CompileLimits,
+        GraphCompiler, NodeConfig, NodeSpec, RenderFormat,
     };
+    use mixrelay_engine_service::{
+        graph_composition::{DeviceRegistry, ResolvedNodeIdentities, compose, lower_document},
+        session::AdapterRuntimeStatus,
+    };
+    use std::sync::Arc;
+
+    fn assert_single_input_owner(selected: BTreeMap<String, Spec>, format: RenderFormat) {
+        use super::super::{MacDevices, device_tests::wait_until, simulated::SimulatedHost};
+        let host = SimulatedHost::new();
+        let uid = selected.values().next().unwrap().native_uid().unwrap();
+        host.plug(uid.to_str().unwrap(), 2, 48_000, 0.25);
+        let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
+        let resources = MacDevices::with_host(status, 48_000, 128, host.clone());
+        let (owners, cache) = resources
+            .prepare_device_set(&BTreeMap::new(), selected, format)
+            .unwrap();
+        assert_eq!(owners.0.len(), 1);
+        assert!(
+            owners
+                .0
+                .values()
+                .all(|device| device.input && device.ready())
+        );
+        assert!(owners.1.is_empty());
+        assert_eq!(cache.len(), 1);
+        assert_eq!(host.registrations(), 1);
+        drop((owners, cache, resources));
+        wait_until(|| host.registrations() == 0);
+    }
+
+    #[test]
+    fn qualification_recorder_opens_only_a_native_input_without_changing_driver_geometry() {
+        let document: GraphDocument = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../crates/audio-graph/src/fixtures/qualification-stereo.json"
+        )))
+        .unwrap();
+        let NodeConfig::VirtualEndpoint(endpoint) = &document.nodes[0].config else {
+            panic!("qualification source is a virtual endpoint")
+        };
+        assert_eq!(document.nodes[0].id.as_str(), "qa-source");
+        assert!(endpoint.reference.render);
+        assert!(!endpoint.reference.capture);
+        let canonical = endpoint.spec.clone();
+        assert_eq!(canonical.render.unwrap().channels, 2);
+        assert_eq!(canonical.capture.unwrap().channels, 2);
+        let registry = DeviceRegistry::new(vec![canonical.clone()]).unwrap();
+        let authored =
+            lower_document(&document, &registry, &ResolvedNodeIdentities::default()).unwrap();
+        let context = CompileContext {
+            format: RenderFormat {
+                sample_rate: 48_000,
+                block_frames: 128,
+            },
+            limits: CompileLimits::default(),
+        };
+        let composed = compose(
+            &registry,
+            &[authored.as_fragment("qualification-stereo")],
+            document.revision,
+            context,
+            &GraphCompiler::default(),
+        )
+        .unwrap();
+        let selected = specs(&composed.document);
+        let native = &composed.native_devices[&canonical.id];
+        assert_eq!(selected.len(), 1);
+        let input = &selected[&format!("{}/capture", native.as_str())];
+        assert!(input.input);
+        assert_eq!(input.channels, 2);
+        assert_eq!(
+            input.selector,
+            DeviceSelector::PersistentUid {
+                uid: endpoint_uid(parse_endpoint_id(canonical.id.as_str()).unwrap()),
+            }
+        );
+        assert!(aggregate_members(&selected).is_empty());
+        assert_eq!(registry.get(&canonical.id), Some(&canonical));
+        assert_eq!(endpoint.spec, canonical);
+        assert_single_input_owner(selected, context.format);
+    }
 
     #[test]
     fn driver_clients_attach_native_capture_input_and_render_output_to_one_stable_uid() {

@@ -3,23 +3,25 @@ use crate::device_io::{control, mr_device_io_process};
 
 #[test]
 fn failed_stream_configuration_drains_the_partial_registration_before_retry() {
-    let hal = SimulatedHal::new();
-    hal.plug("output", 2, 48_000, 0.25);
-    let io = DeviceIo::new(c"output", false, 2, 48_000).unwrap();
-    io.set_output_only(true);
-    hal.state().usage_status = -17;
-    // SAFETY: sole control owner retains the fixture and every native registration.
-    unsafe {
-        assert_eq!(control::connect(&io, 0, &hal), -17);
+    for input in [false, true] {
+        let hal = SimulatedHal::new();
+        hal.plug("output", 2, 48_000, 0.25);
+        let io = DeviceIo::new(c"output", input, 2, 48_000).unwrap();
+        io.set_output_only(true);
+        hal.state().usage_status = -17;
+        // SAFETY: sole control owner retains the fixture and every native registration.
+        unsafe {
+            assert_eq!(control::connect(&io, 0, &hal), -17);
+            assert_eq!(hal.registrations(), 0);
+            assert_eq!(hal.watches(), 0);
+            hal.state().usage_status = 0;
+            assert_eq!(control::connect(&io, 0, &hal), 0);
+            assert!(control::alive(&io, &hal));
+            assert!(control::disconnect(&io, &hal));
+        }
         assert_eq!(hal.registrations(), 0);
         assert_eq!(hal.watches(), 0);
-        hal.state().usage_status = 0;
-        assert_eq!(control::connect(&io, 0, &hal), 0);
-        assert!(control::alive(&io, &hal));
-        assert!(control::disconnect(&io, &hal));
     }
-    assert_eq!(hal.registrations(), 0);
-    assert_eq!(hal.watches(), 0);
 }
 
 #[test]
@@ -41,7 +43,7 @@ fn output_only_registration_does_not_disable_another_clients_capture() {
                     if registration.context == ptr::from_ref(&output).addr() {
                         [false, true]
                     } else {
-                        [true, true]
+                        [true, false]
                     }
                 );
             }

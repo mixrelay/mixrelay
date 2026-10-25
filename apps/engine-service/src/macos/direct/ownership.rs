@@ -41,9 +41,25 @@ impl<'state> PreparedRenderer<'state> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{processor_at, stereo_bindings, stereo_list};
+    use super::super::{
+        CallbackIo,
+        buffers::Buffers,
+        tests::{processor_at, stereo_bindings, stereo_list},
+    };
     use super::*;
+    use crate::macos_devices::{
+        DeviceSet,
+        callback_fixture::{CallbackTime, NativeOwner, direct_plan},
+        direct::Binding,
+    };
+    use mixrelay_audio_engine::{BlockProcessor, PeakMeterBank, ProcessBlockError};
+    use mixrelay_audio_io::{
+        process::{ClockDomain, CycleError, ProcessCycle},
+        session::ClockAuthority,
+    };
+    use mixrelay_realtime::Timebase;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::{sync::Arc, time::Duration};
 
     fn invoke_unpublished(owner: &PreparedRenderer<'_>) -> [f32; 64] {
         let mut input = [0.25_f32; 64];
@@ -107,5 +123,108 @@ mod tests {
         assert!(!failed.load(Ordering::Acquire));
         drop(owner);
         assert_eq!(processor.plan().format().sample_rate, 48_000);
+    }
+
+    fn assert_acquisition_time_was_observed(processor: &mut BlockProcessor) {
+        let mut bindings = stereo_bindings();
+        for binding in &mut bindings {
+            binding.offset = None;
+        }
+        let mut io = CallbackIo {
+            buffers: Buffers::empty(),
+            bindings: &bindings,
+            offset: 0,
+            bridged: None,
+        };
+        let next = ProcessCycle {
+            clock: ClockDomain {
+                authority: ClockAuthority::Device,
+                id: 1,
+                epoch: 19,
+            },
+            sample_rate: 48_000,
+            frames: 32,
+            first_frame: 48_128,
+            monotonic_ns: Some(999_000_000),
+            discontinuity: false,
+        };
+        assert_eq!(
+            processor.process_external_cycle(next, &mut io),
+            Err(ProcessBlockError::InvalidCycle(
+                CycleError::TimestampRegressed
+            ))
+        );
+    }
+
+    #[test]
+    fn input_master_keeps_native_pcm_and_position_without_an_output_timestamp() {
+        let input = NativeOwner::new(2, 48_000, true);
+        let mut plan = direct_plan("input", "input", &input, DeviceSet::default());
+        plan.bindings.push(Binding {
+            id: "output".into(),
+            input: false,
+            offset: None,
+            channels: 2,
+        });
+        let prepared = processor_at(32, 48_000);
+        let meters = Arc::new(PeakMeterBank::new(8, 2));
+        let output_meter = prepared
+            .plan()
+            .meter_bindings()
+            .iter()
+            .position(|binding| binding.node_id().as_str() == "output")
+            .unwrap();
+        let mut processor = Box::new(
+            BlockProcessor::with_peak_meters(Arc::clone(prepared.plan()), Arc::clone(&meters))
+                .unwrap(),
+        );
+        let status = mixrelay_engine_service::session::AdapterRuntimeStatus::new(
+            crate::macos::adapter_profile(),
+        );
+        let progress = AtomicU64::new(0);
+        let failed = AtomicBool::new(false);
+        let invalid = AtomicBool::new(false);
+        let timebase = Timebase::current();
+        let mut owner = PreparedRenderer::new(Renderer {
+            timebase,
+            processor: &mut processor,
+            activation: None,
+            bindings: &plan.bindings,
+            clock_id: plan.clock_id,
+            epoch: 19,
+            native_clock: Some((&plan, plan.discontinuities())),
+            status: &status,
+            position: None,
+            progress: &progress,
+            failed: &failed,
+            invalid: &invalid,
+        });
+        let installed = owner.install(&plan);
+        for block in 0_u32..4 {
+            let host = timebase.ticks(Duration::from_nanos(
+                1_000_000_000 + u64::from(block) * 32 * 1_000_000_000 / 48_000,
+            ));
+            input.callback(
+                &mut [0.25; 64],
+                CallbackTime {
+                    now: host,
+                    host,
+                    sample: 48_000.0 + f64::from(block * 32),
+                    rate_scalar: 1.0,
+                },
+            );
+            assert_eq!(meters.take_peaks(1, output_meter, 2), [0.25, 0.25]);
+        }
+        drop(installed);
+        // SAFETY: withdrawing the registration drained every callback; this sole
+        // control-side observer holds the unpublished owner until the read ends.
+        let renderer = unsafe { &*owner.state.as_ref().get_ref().get() };
+        assert_eq!(renderer.position, Some(48_128));
+        assert_eq!(renderer.epoch, 19);
+        assert_eq!(progress.load(Ordering::Acquire), 4);
+        assert!(!failed.load(Ordering::Acquire));
+        assert!(!invalid.load(Ordering::Acquire));
+        drop(owner);
+        assert_acquisition_time_was_observed(&mut processor);
     }
 }

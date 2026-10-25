@@ -1,5 +1,40 @@
 use super::*;
 
+#[test]
+fn native_clients_follow_all_graphs_direction_union_without_changing_driver_geometry() {
+    let canonical = device("X");
+    let registry = DeviceRegistry::new(vec![canonical.clone()]).unwrap();
+    let document = GraphDocument::new(1, vec![], vec![]);
+    let readers = [reference("read", "X", true, false)];
+    let writers = [reference("write", "X", false, true)];
+    for (read, write) in [(true, false), (false, true), (true, true)] {
+        let mut graphs = Vec::new();
+        for (enabled, id, references) in [
+            (read, "reader", readers.as_slice()),
+            (write, "writer", writers.as_slice()),
+        ] {
+            if enabled {
+                graphs.push(GraphFragment {
+                    id,
+                    document: &document,
+                    device_references: references,
+                    source_references: &[],
+                    output_references: &[],
+                });
+            }
+        }
+        let composed = compose(&registry, &graphs, 1, context(), &GraphCompiler::default()).unwrap();
+        let plan = RenderPlan::prepare(&composed.execution).unwrap();
+        assert_eq!(plan.source_bindings().len(), usize::from(read));
+        assert_eq!(plan.sink_bindings().len(), usize::from(write));
+        for binding in plan.source_bindings().iter().chain(plan.sink_bindings()) {
+            assert_eq!(binding.channels(), 2);
+            assert_eq!(binding.virtual_endpoint_id(), Some(&canonical.id));
+        }
+        assert_eq!(registry.get(&canonical.id), Some(&canonical));
+    }
+}
+
 fn asymmetric_registry() -> DeviceRegistry {
     let wide = StreamSpec {
         channels: 4,

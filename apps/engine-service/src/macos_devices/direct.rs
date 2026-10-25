@@ -169,6 +169,18 @@ pub(crate) struct DirectPlan {
 }
 
 impl DirectPlan {
+    /// The master's active I/O direction supplies both sample and host time.
+    pub(crate) fn cycle_time(
+        &self,
+        timing: &mixrelay_macos_transport::device_io::IoTiming,
+    ) -> mixrelay_macos_transport::device_io::IoTimestamp {
+        if self.master.input {
+            timing.input
+        } else {
+            timing.output
+        }
+    }
+
     /// The direct master's current callback label, its mean frame's host time. The
     /// bridged transfers that callback renders pass at it, like its native transfers.
     pub(crate) fn callback_host(&self) -> u64 {
@@ -183,7 +195,7 @@ impl DirectPlan {
             .report(self.clock_id, elapsed);
     }
 
-    /// Control only. The pacing output renders synchronously; independent
+    /// Control only. The master renders synchronously; independent
     /// devices keep their own clock-crossing queues, never native ABL aliases.
     /// Inventory-confirmed absent bindings have no native storage or owner. No HAL
     /// shared-memory or app-capture timeline is silently relabelled as this `IOProc`.

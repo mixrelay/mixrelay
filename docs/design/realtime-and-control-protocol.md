@@ -6,6 +6,7 @@
 
 - **HAL 공유 링은 HAL이 소유하는 루프백 저장소다.** Driver 서비스가 익명 공유 메모리를 할당하고 HAL Driver(coreaudiod)에 전달한다. HAL은 재생을 캡처 링에 직접 써서 Driver 내부 루프백을 제공한다([hal_io.rs](../../native/macos/common/hal_io.rs)). 그래프 엔진은 일반 CoreAudio 클라이언트로 장치를 열며 HAL 링을 직접 처리하지 않는다. 앱 소스의 공유 메모리 전송은 이 루프백 저장소와 별도다.
 - **그래프 렌더링은 대부분 CoreAudio IOProc 안에서 실행된다.** 엔진은 MixRelay 가상 장치도 일반 CoreAudio 클라이언트로 열며([spec.rs](../../apps/engine-service/src/macos_devices/spec.rs)), 사용 가능한 장치 클록이 있으면 그 IOProc에서 동기적으로 렌더링한다([direct.rs](../../apps/engine-service/src/macos_devices/direct.rs)). 이 경로는 이미 실시간 스케줄링을 받는다.
+  입력 전용 IOProc은 자신의 출력 스트림을 비활성화한다. 직접 렌더링의 sample time과 host time은 master가 소유한 입력 또는 출력 방향에서 함께 읽는다.
 - **실시간 승격과 알림 대기는 일부 경로에 적용됐고, 폴링·제어 작업 분리는 남아 있다.**
   - 장치 클록이 없을 때의 대체 워커는 250µs 잠들며 폴링한다([macos/mod.rs](../../apps/engine-service/src/macos/mod.rs)).
   - 앱 캡처 pump는 tap 콜백 알림으로 깨어나고 변환 구간에 time-constraint 우선순위를 적용한다. 형식 갱신·자원 교체 같은 제어 작업은 여전히 같은 스레드에서 실시간 정책을 잠시 해제한 채 처리한다([clock_pump.rs](../../apps/desktop/src-tauri/src/macos_audio/clock_pump.rs)). 엔진 소비자가 측정 burst를 바탕으로 적응 목표를 소유하고 공유 클록 v3로 pump에 발행한다.

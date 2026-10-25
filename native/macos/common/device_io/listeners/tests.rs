@@ -74,38 +74,40 @@ fn target() -> WatchTarget {
         device: 123,
         scope: u32::from_be_bytes(*b"inpt"),
         limit: 64,
-        output_only: false,
+        unused_scope: None,
     }
 }
 
 #[test]
-fn appearing_input_streams_invalidate_an_output_only_registration() {
-    let backend = Native::default();
-    let invalid = Arc::new(AtomicBool::new(false));
-    let mut listeners = Listeners::default();
-    let target = WatchTarget {
-        scope: u32::from_be_bytes(*b"outp"),
-        output_only: true,
-        ..target()
-    };
-    listeners.install(&target, &invalid, &backend).unwrap();
-    let input_list = backend
-        .0
-        .borrow()
-        .copies
-        .iter()
-        .find(|(subscription, _)| {
-            subscription.object == target.device
-                && subscription.address
-                    == Address::new(u32::from_be_bytes(*b"stm#"), u32::from_be_bytes(*b"inpt"))
-        })
-        .expect("unused input topology watch")
-        .1
-        .clone();
-    let measured = allocation_counter::measure(|| input_list.call((123, ptr::null())));
-    assert_eq!(measured.count_total, 0);
-    assert!(invalid.load(Acquire));
-    assert!(listeners.remove(&backend));
+fn appearing_unused_streams_invalidate_either_single_direction_registration() {
+    for (used, unused) in [(*b"outp", *b"inpt"), (*b"inpt", *b"outp")] {
+        let backend = Native::default();
+        let invalid = Arc::new(AtomicBool::new(false));
+        let mut listeners = Listeners::default();
+        let target = WatchTarget {
+            scope: u32::from_be_bytes(used),
+            unused_scope: Some(u32::from_be_bytes(unused)),
+            ..target()
+        };
+        listeners.install(&target, &invalid, &backend).unwrap();
+        let unused_list = backend
+            .0
+            .borrow()
+            .copies
+            .iter()
+            .find(|(subscription, _)| {
+                subscription.object == target.device
+                    && subscription.address
+                        == Address::new(u32::from_be_bytes(*b"stm#"), u32::from_be_bytes(unused))
+            })
+            .expect("unused direction topology watch")
+            .1
+            .clone();
+        let measured = allocation_counter::measure(|| unused_list.call((123, ptr::null())));
+        assert_eq!(measured.count_total, 0);
+        assert!(invalid.load(Acquire));
+        assert!(listeners.remove(&backend));
+    }
 }
 
 #[test]

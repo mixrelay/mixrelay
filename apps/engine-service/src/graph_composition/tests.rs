@@ -317,7 +317,9 @@ fn only_referenced_named_devices_keep_independent_rates_and_last_removal_drops_n
     else {
         panic!()
     };
-    assert_eq!(*canonical, x);
+    let mut client = x.clone();
+    client.capture = None;
+    assert_eq!(*canonical, client);
     assert!(
         !composed
             .native_devices

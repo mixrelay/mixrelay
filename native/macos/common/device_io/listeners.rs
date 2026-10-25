@@ -34,7 +34,7 @@ pub(super) struct WatchTarget {
     pub(super) device: u32,
     pub(super) scope: u32,
     pub(super) limit: u32,
-    pub(super) output_only: bool,
+    pub(super) unused_scope: Option<u32>,
 }
 
 pub(super) trait ListenerBackend {
@@ -141,16 +141,12 @@ impl Listeners {
                 backend,
             )?;
         }
-        if target.output_only {
-            // New input streams must be disabled before this output-only IOProc
-            // can restart; never inherit CoreAudio's default enabled usage.
+        if let Some(scope) = target.unused_scope {
+            // New unused streams must be disabled before this IOProc restarts.
             self.subscribe(
                 Subscription {
                     object: target.device,
-                    address: Address::new(
-                        u32::from_be_bytes(*b"stm#"),
-                        u32::from_be_bytes(*b"inpt"),
-                    ),
+                    address: Address::new(u32::from_be_bytes(*b"stm#"), scope),
                 },
                 backend,
             )?;

@@ -81,6 +81,20 @@ struct Registration<'a, H> {
     hal: &'a H,
 }
 
+impl<H> Registration<'_, H> {
+    fn unused_scope(&self) -> Option<u32> {
+        if self.io.selection.input {
+            Some(u32::from_be_bytes(*b"outp"))
+        } else {
+            self.io
+                .progress
+                .output_only
+                .load(Acquire)
+                .then_some(u32::from_be_bytes(*b"inpt"))
+        }
+    }
+}
+
 impl<H: Hal> Backend for Registration<'_, H> {
     fn prepare(&mut self, expected: u32) -> Result<u32, i32> {
         let binding = native::resolve(&self.io.selection, self.hal).ok_or(-2)?;
@@ -107,7 +121,7 @@ impl<H: Hal> Backend for Registration<'_, H> {
                 } else {
                     2048
                 },
-                output_only: !self.io.selection.input && self.io.progress.output_only.load(Acquire),
+                unused_scope: self.unused_scope(),
             },
             &watch_invalid,
             self.hal,
@@ -133,12 +147,12 @@ impl<H: Hal> Backend for Registration<'_, H> {
         if self.io.progress.invalid.load(Acquire) || self.connection.watch_invalid.load(Acquire) {
             return -6;
         }
-        if !self.io.selection.input && self.io.progress.output_only.load(Acquire) {
+        if self.unused_scope().is_some() {
             let status = stream_usage::disable_unused(
                 self.hal,
                 device,
                 procedure,
-                false,
+                self.io.selection.input,
                 if self.io.selection.group.is_null() {
                     64
                 } else {

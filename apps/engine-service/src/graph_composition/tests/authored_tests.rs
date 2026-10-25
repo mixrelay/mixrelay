@@ -120,12 +120,13 @@ fn forwarding_reference_retains_only_its_endpoint_until_last_reference_is_remove
         retained.native_control_bindings[owner],
         vec![runtime_node_id("A", &NodeId::from("app"))]
     );
-    for side in ["native", "mix", "snapshot"] {
+    for side in ["native", "mix"] {
         assert_eq!(
             retained.native_control_bindings[&device_node_id(&VirtualEndpointId::from("X"), side)],
             vec![runtime_node_id("A", &NodeId::from("app"))]
         );
     }
+    assert!(!retained.device_buses.contains_key(&VirtualEndpointId::from("X")));
     assert_eq!(
         retained.native_control_bindings[&retained.native_sources["player"]],
         vec![runtime_node_id("A", &NodeId::from("app"))]
