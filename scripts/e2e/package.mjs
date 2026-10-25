@@ -127,7 +127,7 @@ export function installAndVerify(
     };
     verify('pkgutil', ['--check-signature', archive]);
     verify('spctl', ['--assess', '--type', 'install', archive]);
-    ticketTransport(output, () => verify('xcrun', ['stapler', 'validate', archive]));
+    ticketTransport(output, () => verify('xcrun', ['stapler', 'validate', '-v', archive]));
     run('pkgutil', ['--expand-full', archive, extracted]);
     install('sudo', ['-n', 'installer', '-dumplog', '-pkg', archive, '-target', '/'], 300000);
   } else {

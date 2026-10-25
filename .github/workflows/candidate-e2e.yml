@@ -32,7 +32,7 @@ on:
         type: boolean
         default: false
       macos_scheduler_trace:
-        description: Focused diagnosis of one upgrade PCM measurement with Apple System Trace
+        description: Focused diagnosis of one fresh-install PCM measurement with Apple System Trace
         type: boolean
         default: false
 

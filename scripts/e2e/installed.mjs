@@ -455,7 +455,7 @@ export async function qualifyMode({
       directory: output,
       measure: (diagnostics) => scenario('AUDIO-01', async () => {
         await nativeSignal(device, output, target.os, { ...diagnostics,
-          schedulerTrace: Boolean(baselineDirectory && process.env.MIXRELAY_E2E_SCHEDULER_TRACE === 'true') });
+          schedulerTrace: Boolean(!baselineDirectory && process.env.MIXRELAY_E2E_SCHEDULER_TRACE === 'true') });
         return [
           {
             file: 'native-signal.json',
