@@ -11,6 +11,7 @@ mod meter_snapshot;
 mod node_control;
 mod node_control_snapshot;
 mod recorder_control;
+mod recorder_sessions;
 mod runtime_node_control;
 use mixrelay_audio_engine::{
     BlockProcessor, ExternalBinding, MeterBinding, PeakMeterBank, ProcessorConfigurationError,
@@ -381,10 +382,8 @@ pub struct EngineGraphController {
     saved_pause: Option<std::path::PathBuf>,
     /// The engine paused itself after ending unexpectedly several times; cleared by Resume.
     paused_after_failures: std::sync::atomic::AtomicBool,
-    suspended_recorders: Mutex<Vec<engine_power::SuspendedRecorder>>,
-    recorder_cleanup_error: Mutex<Option<String>>,
     node_control_warning: Mutex<Option<String>>,
-    recorders: mixrelay_audio_recorder::RecorderRegistry,
+    recorders: recorder_sessions::RecorderSessions,
     exchange: Arc<ProcessorExchange>,
     factory: Arc<dyn ProcessorFactory>,
     graph: RwLock<GraphDocument>,
@@ -487,14 +486,12 @@ impl EngineGraphController {
         let recorders = mixrelay_audio_recorder::RecorderRegistry::default();
         let controller = Self {
             paid_access,
-            recorder_cleanup_error: Mutex::new(None),
             node_control_warning: Mutex::new(None),
             execution_enabled: std::sync::atomic::AtomicBool::new(true),
             incarnation: new_incarnation(),
             saved_pause: None,
             paused_after_failures: std::sync::atomic::AtomicBool::new(false),
-            suspended_recorders: Mutex::new(Vec::new()),
-            recorders: recorders.clone(),
+            recorders: recorder_sessions::RecorderSessions::new(recorders.clone()),
             exchange,
             factory: Arc::new(BuiltInProcessorFactory {
                 recorders,
@@ -753,13 +750,11 @@ impl ControlBackend for EngineGraphController {
                 ));
             }
         }
-        self.recorders
-            .command_with_duration_limit(
-                id.as_str(),
-                request,
-                free.then_some(feature_policy::FREE_RECORDING_SECONDS),
-            )
-            .map_err(recorder_control::recorder_error)
+        self.recorders.control(
+            id.as_str(),
+            request,
+            free.then_some(feature_policy::FREE_RECORDING_SECONDS),
+        )
     }
     fn application_capture_manifest(
         &self,
@@ -823,9 +818,7 @@ impl ControlBackend for EngineGraphController {
         status.processor_timings = self.processor_timings();
         status.processor_latencies = self.processor_latencies();
         status.failed_processors = self.failed_processor_status();
-        status
-            .recorder_error
-            .clone_from(&self.recorder_cleanup_error.lock());
+        status.recorder_error = self.recorders.cleanup_error();
         if let Some(session) = &mut status.audio_session {
             session.virtual_endpoint_settings = self.endpoint_settings();
             if status
@@ -1831,7 +1824,7 @@ fn binding_values(bindings: &[ExternalBinding]) -> Vec<serde_json::Value> {
 
 fn prepare_error(error: PrepareProcessorError) -> ProtocolError {
     match error {
-        PrepareProcessorError::Recorder(reason) => recorder_control::recorder_error(reason),
+        PrepareProcessorError::Recorder(reason) => recorder_sessions::recorder_error(reason),
         PrepareProcessorError::Render(error) => ProtocolError {
             code: ErrorCode::GraphInvalid,
             parameters: serde_json::json!({ "renderError": error.to_string() }),

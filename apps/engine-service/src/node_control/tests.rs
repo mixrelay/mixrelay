@@ -393,7 +393,7 @@ fn previous_take_stop_cannot_stop_a_new_recording_at_same_graph_revision() {
         .with_graph_catalog_path(directory.join("graphs.json"));
     let graph_id = engine.graph_catalog().unwrap().active_id;
     let id = engine.recorder_session_id(&graph_id, "record").unwrap();
-    let tap = engine.recorders.prepare(&id, 2).unwrap();
+    let tap = engine.recorders.registry().prepare(&id, 2).unwrap();
     tap.capture(&[0.25; 8], 48_000);
     let revision = engine.exchange.revisions().submitted;
     let command = |action, path, expected_recording| RecorderControlRequest {
@@ -478,7 +478,7 @@ fn recorder_off_finalizes_and_on_does_not_restart_recording() {
         .unwrap()
         .processor;
     let id = engine.recorder_session_id(&graph_id, "record").unwrap();
-    let tap = engine.recorders.prepare(&id, 2).unwrap();
+    let tap = engine.recorders.registry().prepare(&id, 2).unwrap();
     tap.capture(&[0.25; 8], 48_000);
     let start = RecorderRequest {
         action: RecorderAction::Record,

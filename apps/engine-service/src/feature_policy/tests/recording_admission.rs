@@ -39,8 +39,8 @@ fn recording_and_paused_takes_reserve_the_free_slot_until_stop() {
     let engine = engine(&fixture);
     let first_id = engine.recorder_session_id("graph-1", "first").unwrap();
     let second_id = engine.recorder_session_id("graph-1", "second").unwrap();
-    let first = engine.recorders.prepare(&first_id, 2).unwrap();
-    let second = engine.recorders.prepare(&second_id, 2).unwrap();
+    let first = engine.recorders.registry().prepare(&first_id, 2).unwrap();
+    let second = engine.recorders.registry().prepare(&second_id, 2).unwrap();
     first.capture(&[], 48_000);
     second.capture(&[], 48_000);
     let first_path = fixture.join("first.wav");

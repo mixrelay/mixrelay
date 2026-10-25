@@ -1,14 +1,7 @@
 use mixrelay_audio_graph::NodeConfig;
 use mixrelay_control_protocol::{ErrorCode, ProtocolError};
 
-use super::{EngineGraphController, graph_composition};
-
-pub(super) fn recorder_error(reason: String) -> ProtocolError {
-    ProtocolError {
-        code: ErrorCode::RecorderFailed,
-        parameters: serde_json::json!({"reason": serde_json::Value::String(reason)}),
-    }
-}
+use super::{EngineGraphController, graph_composition, recorder_sessions::recorder_error};
 
 impl EngineGraphController {
     pub(super) fn validate_free_record_start(
@@ -113,33 +106,14 @@ impl EngineGraphController {
                 ) {
                     continue;
                 }
-                let request = mixrelay_audio_recorder::RecorderRequest {
-                    action: mixrelay_audio_recorder::RecorderAction::Stop,
-                    path: None,
-                    sample_rate: None,
-                    encoding: None,
-                };
-                if let Err(reason) = self.recorders.command(&id, request) {
-                    tracing::error!(%graph_id, node_id = %node.id, %reason, "disabled recorder finalization failed");
-                    *self.recorder_cleanup_error.lock() = Some(reason);
-                }
+                self.recorders.stop_inactive(&id, &graph_id, &node.id);
             }
         }
     }
 
     pub(super) fn reclaim_recorders(&self) {
         self.exchange.reclaim_retired();
-        self.suspended_recorders.lock().retain(|recorder| {
-            matches!(
-                self.recorders.status(&recorder.id).state,
-                mixrelay_audio_recorder::RecorderState::Recording
-                    | mixrelay_audio_recorder::RecorderState::Paused
-            )
-        });
-        if let Err(reason) = self.recorders.reap_unused() {
-            tracing::error!(reason, "recorder finalization failed");
-            *self.recorder_cleanup_error.lock() = Some(reason);
-        }
+        self.recorders.reclaim();
     }
     pub(super) fn recorder_session_id(
         &self,
@@ -243,7 +217,7 @@ mod tests {
         let catalog = engine.graph_catalog().unwrap();
         let graph_id = catalog.active_id;
         let id = engine.recorder_session_id(&graph_id, "record").unwrap();
-        let tap = engine.recorders.prepare(&id, 2).unwrap();
+        let tap = engine.recorders.registry().prepare(&id, 2).unwrap();
         tap.capture(&[0.0; 4], 48_000);
         engine
             .control_recorder(
@@ -302,7 +276,7 @@ mod tests {
             &graph_composition::runtime_node_id(&original.active_id, &NodeId::from("record")),
             2,
         );
-        let tap = engine.recorders.prepare(id.as_str(), 2).unwrap();
+        let tap = engine.recorders.registry().prepare(id.as_str(), 2).unwrap();
         tap.capture(&[0.0; 4], 48_000);
         let path = directory.join("take.wav").to_string_lossy().into_owned();
         engine

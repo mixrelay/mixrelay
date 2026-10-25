@@ -338,7 +338,7 @@ fn expired_paid_recording_can_pause_resume_and_stop_but_cannot_start_a_new_multi
     };
     let engine = engine.with_graph_catalog_path(fixture.join("graphs.json"));
     let id = engine.recorder_session_id("graph-1", "record").unwrap();
-    let tap = engine.recorders.prepare(&id, 8).unwrap();
+    let tap = engine.recorders.registry().prepare(&id, 8).unwrap();
     tap.capture(&[], 48_000);
     let command = |action, path| mixrelay_control_protocol::RecorderControlRequest {
         expected_revision: 1,

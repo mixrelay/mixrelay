@@ -142,7 +142,7 @@ fn removal_finalizes_recording_and_late_recorder_command_cannot_target_replaceme
     let id = engine
         .recorder_session_id(&before.active_id, "record")
         .unwrap();
-    let tap = engine.recorders.prepare(&id, 2).unwrap();
+    let tap = engine.recorders.registry().prepare(&id, 2).unwrap();
     tap.capture(&[0.25; 8], 48_000);
     let command = RecorderControlRequest {
         expected_recording: None,

@@ -90,10 +90,7 @@ impl EngineGraphController {
                     }
                 }
                 weak.upgrade().map_or(Ok(()), |controller| {
-                    let recording = controller
-                        .recorders
-                        .stop_all()
-                        .map_err(crate::recorder_control::recorder_error);
+                    let recording = controller.recorders.finalize_all();
                     let checkpoint = controller.checkpoint_processor_state(None);
                     recording.and(checkpoint)
                 })

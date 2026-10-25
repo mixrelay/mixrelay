@@ -68,9 +68,7 @@ impl EngineGraphController {
         status.processor_timings = self.processor_timings();
         status.processor_latencies = self.processor_latencies();
         status.failed_processors = self.failed_processor_status();
-        status
-            .recorder_error
-            .clone_from(&self.recorder_cleanup_error.lock());
+        status.recorder_error = self.recorders.cleanup_error();
         status
     }
 
