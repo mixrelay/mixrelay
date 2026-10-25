@@ -83,6 +83,10 @@ function capture(file, program, args, timeout = 30000) {
   writeFileSync(path(file), `${result.stdout ?? ''}\n${result.stderr ?? ''}\nexit=${result.status}; signal=${result.signal ?? ''}; error=${result.error?.message ?? ''}\n`);
   return result;
 }
+if (existsSync(join(output, 'scheduler.trace')) && !existsSync(join(output, 'scheduler-trace-toc.xml'))) {
+  capture('scheduler-trace-export.log', 'xcrun', ['xctrace', 'export', '--input', join(output, 'scheduler.trace'),
+    '--toc', '--output', join(output, 'scheduler-trace-toc.xml')]);
+}
 const logs = join(homedir(), 'Library/Logs/MixRelay');
 if (existsSync(logs)) for (const file of readdirSync(logs).filter(name => /^[A-Za-z0-9_.-]+\.log$/.test(name))) {
   copyFileSync(join(logs, file), path(`app-log-${file}`));

@@ -148,9 +148,9 @@ async function linuxSignal(device, directory) {
 }
 
 export async function nativeSignal(device, directory, os, { execute = execFileSync, diagnostics = collectMacosLoad,
-  snapshot = snapshotMacosProcesses } = {}) {
+  snapshot = snapshotMacosProcesses, schedulerTrace = false } = {}) {
   if (os === 'linux') return linuxSignal(device, directory);
-  try { return macosSignal(device, directory, execute, snapshot); }
+  try { return macosSignal(device, directory, execute, snapshot, schedulerTrace); }
   catch (error) {
     try { diagnostics(directory); }
     catch (diagnosticError) { console.error(`Native PCM failure diagnostics: ${diagnosticError.message}`); }
@@ -177,16 +177,26 @@ export async function runNativeAudioCases({ measure, finalize, directory,
   }
 }
 
-function macosSignal(device, directory, execFileSync, snapshot) {
+export function macosProbeCommand(bundle, directory, uid, schedulerTrace = false) {
+  const args = ['-W', '-n', '-g', '--stdout', join(directory, 'native-probe.stdout.json'),
+    '--stderr', join(directory, 'native-probe.stderr.log'), bundle, '--args', '--json', '--timing',
+    '--capture-file', join(directory, 'native-signal.f32'), '--seconds', '3', '--channels', '2', uid];
+  return schedulerTrace
+    ? { program: 'xcrun', args: ['xctrace', 'record', '--template', 'System Trace', '--no-prompt',
+      '--output', join(directory, 'scheduler.trace'), '--time-limit', '45s', '--launch', '--', '/usr/bin/open', ...args], timeout: 90000 }
+    : { program: 'open', args, timeout: 60000 };
+}
+
+function macosSignal(device, directory, execFileSync, snapshot, schedulerTrace) {
   const uid = device.nativeDeviceIds.find(id => id.startsWith('io.mixrelay.audio.endpoint.'));
   assert.ok(uid, 'Missing canonical CoreAudio device identity');
   const bundle = execFileSync('zsh', ['scripts/probe-macos-roundtrip.sh', '--prepare-bundle', 'io.mixrelay.qualification.probe'],
     { encoding: 'utf8', timeout: 60000 }).trim();
-  const stdout = join(directory, 'native-probe.stdout.json'), stderr = join(directory, 'native-probe.stderr.log');
+  const stdout = join(directory, 'native-probe.stdout.json');
   try {
-    execFileSync('open', ['-W', '-n', '-g', '--stdout', stdout, '--stderr', stderr, bundle,
-      '--args', '--json', '--timing', '--capture-file', join(directory, 'native-signal.f32'),
-      '--seconds', '3', '--channels', '2', uid], { timeout: 60000 });
+    if (schedulerTrace) assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Scheduler diagnosis requires a disposable hosted Mac');
+    const command = macosProbeCommand(bundle, directory, uid, schedulerTrace);
+    execFileSync(command.program, command.args, { timeout: command.timeout });
   } finally {
     const executable = `${bundle}/Contents/MacOS/MRRoundTripProbe`;
     const pattern = `^${executable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`;

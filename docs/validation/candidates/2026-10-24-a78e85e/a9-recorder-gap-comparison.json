@@ -1,0 +1,128 @@
+{
+  "scope": "offline diagnostic; original qualification verdicts unchanged",
+  "method": "Exact stereo four-frame windows of the deterministic probe signal; no resampling or tolerance. Coverage is a lower bound near discontinuity edges.",
+  "results": [
+    {
+      "target": "installed-target-macos-14-arm64",
+      "mode": "upgrade",
+      "nativeMissing": 128,
+      "signalCoverageInRecorderByExactFourFrameWindows": 142720,
+      "gaps": [
+        {
+          "nativeCaptureFrames": [
+            88448,
+            88576
+          ],
+          "signalFrames": [
+            87424,
+            87552
+          ],
+          "frames": 128,
+          "exactFramesPresentInRecorder": 0
+        }
+      ],
+      "nativeSha256": "27b05ac94fdd64497df8831652f9389e0c125bcd773c4141c56188fb92a9a6f1",
+      "recordingSha256": "faf083a5f6c34d7a0804d3937ab3b62d856d642496eb537764d5e167067eaeee"
+    },
+    {
+      "target": "installed-target-macos-15-arm64",
+      "mode": "upgrade",
+      "nativeMissing": 940,
+      "signalCoverageInRecorderByExactFourFrameWindows": 141524,
+      "gaps": [
+        {
+          "nativeCaptureFrames": [
+            46932,
+            47104
+          ],
+          "signalFrames": [
+            45908,
+            46080
+          ],
+          "frames": 172,
+          "exactFramesPresentInRecorder": 0
+        },
+        {
+          "nativeCaptureFrames": [
+            142592,
+            143360
+          ],
+          "signalFrames": [
+            141568,
+            142336
+          ],
+          "frames": 768,
+          "exactFramesPresentInRecorder": 0
+        }
+      ],
+      "nativeSha256": "97c15b4321be5c5b7c5e5d77eb532cdf464d6ec7380b1f9c424a24b1b6a61dd7",
+      "recordingSha256": "0346902e8c5e1de85640e2c7abf2513ee8ce52dd5b6f7ff449ba2cb12a56a79e"
+    },
+    {
+      "target": "installed-target-macos-15-x64",
+      "mode": "fresh",
+      "nativeMissing": 672,
+      "signalCoverageInRecorderByExactFourFrameWindows": 142944,
+      "gaps": [
+        {
+          "nativeCaptureFrames": [
+            110432,
+            111104
+          ],
+          "signalFrames": [
+            109408,
+            110080
+          ],
+          "frames": 672,
+          "exactFramesPresentInRecorder": 0
+        }
+      ],
+      "nativeSha256": "83c0601a808a631e48db8597e74365103efe3e43eb47605a33b986553f5cfcee",
+      "recordingSha256": "d4fce2fb7b3e3d92fc74cb32418a5efffa49d8b06ace860001442b44a93f5e1a"
+    },
+    {
+      "target": "installed-target-macos-15-x64",
+      "mode": "upgrade",
+      "nativeMissing": 892,
+      "signalCoverageInRecorderByExactFourFrameWindows": 142724,
+      "gaps": [
+        {
+          "nativeCaptureFrames": [
+            69252,
+            70144
+          ],
+          "signalFrames": [
+            68228,
+            69120
+          ],
+          "frames": 892,
+          "exactFramesPresentInRecorder": 0
+        }
+      ],
+      "nativeSha256": "f410b3eadc8e0a0509d24c60a05906641a3aafcbf1434a14b5ea10ccca159bea",
+      "recordingSha256": "c78d74d09376993a44e40f77073d3efc3fdb2a55bf7c8abe010f74cc5f9466e8"
+    },
+    {
+      "target": "installed-target-macos-26-x64",
+      "mode": "upgrade",
+      "nativeMissing": 868,
+      "signalCoverageInRecorderByExactFourFrameWindows": 142748,
+      "gaps": [
+        {
+          "nativeCaptureFrames": [
+            38556,
+            39424
+          ],
+          "signalFrames": [
+            37532,
+            38400
+          ],
+          "frames": 868,
+          "exactFramesPresentInRecorder": 0
+        }
+      ],
+      "nativeSha256": "ba34577eb65ac8090a8996e84c0d3071a6047e6a2d9ea16891199a1900eb7edc",
+      "recordingSha256": "55028929fa405dae0a46eb24b4175dc28aac5ff39139204fd467e9b0a2cfe32f"
+    }
+  ]
+}

@@ -2,11 +2,47 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { analyseStereo, analyseRf64, nativeSignal, runNativeAudioCases, stopSignalProcesses, waitForSignalBoundary } from './native-signal.mjs';
+import { analyseStereo, analyseRf64, macosProbeCommand, nativeSignal, runNativeAudioCases, stopSignalProcesses, waitForSignalBoundary } from './native-signal.mjs';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { analyseSystemMix } from './system-capture.mjs';
+
+test('scheduler diagnosis wraps exactly the original LaunchServices measurement without another signal or changed audio settings', () => {
+  const ordinary = macosProbeCommand('/probe.app', '/evidence', 'native-uid');
+  const traced = macosProbeCommand('/probe.app', '/evidence', 'native-uid', true);
+  assert.equal(ordinary.program, 'open');
+  assert.equal(traced.program, 'xcrun');
+  assert.deepEqual(traced.args.slice(traced.args.indexOf('/usr/bin/open') + 1), ordinary.args);
+  assert.ok(traced.args.includes('System Trace'));
+  assert.equal(ordinary.args.filter(arg => arg === '--seconds').length, 1);
+  assert.equal(ordinary.args[ordinary.args.indexOf('--seconds') + 1], '3');
+  assert.equal(ordinary.args.some(arg => /buffer|warmup|retry/.test(arg)), false);
+});
+
+test('a scheduler trace cannot turn measured PCM loss into acceptance', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-scheduler-diagnostic-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const before = process.env.GITHUB_ACTIONS;
+  process.env.GITHUB_ACTIONS = 'true';
+  const measured = { inputAuthorization: { final: 3 }, activityProtection: true, complete: true,
+    channelOrder: true, missingFrames: 128, repeatedFrames: 0, corruptFrames: 128, nonfiniteSamples: 0, receivedFrames: 143872 };
+  const calls = [];
+  try {
+    await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
+      schedulerTrace: true, snapshot() {}, diagnostics() {},
+      execute(program) {
+        calls.push(program);
+        if (program === 'zsh') return '/probe.app';
+        if (program === 'xcrun') writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
+      },
+    }), /missingFrames/);
+    assert.deepEqual(calls, ['zsh', 'xcrun', 'pkill']);
+  } finally {
+    if (before === undefined) delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS = before;
+  }
+});
 
 function recording() {
   const header = Buffer.alloc(80);

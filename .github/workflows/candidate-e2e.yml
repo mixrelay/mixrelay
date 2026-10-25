@@ -31,6 +31,10 @@ on:
         description: Focused diagnosis of UI control errors; detach before native audio
         type: boolean
         default: false
+      macos_scheduler_trace:
+        description: Focused diagnosis of one upgrade PCM measurement with Apple System Trace
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -118,10 +122,11 @@ jobs:
         env:
           MATRIX: ${{ steps.baseline.outputs.matrix }}
           CONTROL_TRACE: ${{ inputs.linux_control_trace }}
+          SCHEDULER_TRACE: ${{ inputs.macos_scheduler_trace }}
           TARGET_IDS: ${{ inputs.targets }}
         run: |
-          if [[ "$CONTROL_TRACE" == true && -z "$TARGET_IDS" ]]; then
-            echo 'Control tracing is limited to focused diagnosis; full qualification uses the normal transport'
+          if [[ ( "$CONTROL_TRACE" == true || "$SCHEDULER_TRACE" == true ) && -z "$TARGET_IDS" ]]; then
+            echo 'Tracing is limited to focused diagnosis; full qualification runs without tracing'
             exit 1
           fi
           jq -e '.include | all(.os == "macos" or .os == "linux")' <<< "$MATRIX" > /dev/null
@@ -167,6 +172,7 @@ jobs:
         env:
           TARGET: ${{ matrix.id }}
           MIXRELAY_E2E_MACOS_UI_TOOLS: ${{ github.workspace }}/installed-ui-tools
+          MIXRELAY_E2E_SCHEDULER_TRACE: ${{ inputs.macos_scheduler_trace }}
         run: node scripts/e2e/installed.mjs --target "$TARGET" --directory candidate --candidate candidate/mix-relay.candidate.json --output evidence --disposable-environment
       - name: Preserve macOS failure diagnostics
         if: always()
