@@ -15,3 +15,38 @@ impl IoOutcome {
         }
     }
 }
+
+#[derive(Clone, Copy)]
+pub(crate) enum Direction {
+    Capture,
+    ClientOutput(u32),
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct Transfer {
+    pub direction: Direction,
+    pub frame: u64,
+    pub samples: *mut std::ffi::c_void,
+    pub frames: u32,
+}
+
+#[derive(Clone, Copy)]
+#[repr(u32)]
+pub(crate) enum ClientChange {
+    Register,
+    Activate,
+    Deactivate,
+    Remove,
+}
+
+impl ClientChange {
+    pub(crate) const fn from_raw(value: u32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Register),
+            1 => Some(Self::Activate),
+            2 => Some(Self::Deactivate),
+            3 => Some(Self::Remove),
+            _ => None,
+        }
+    }
+}

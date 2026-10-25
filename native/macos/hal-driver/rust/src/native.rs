@@ -6,8 +6,7 @@ use mixrelay_macos_transport::endpoint_transport::{
 };
 use mixrelay_macos_transport::hal_io::{
     HalIoContext as IoContext, mr_hal_io_begin_stream, mr_hal_io_bind, mr_hal_io_clock_state,
-    mr_hal_io_is_lock_free, mr_hal_io_read_capture, mr_hal_io_requires_replacement,
-    mr_hal_io_set_render_activity, mr_hal_io_write_render,
+    mr_hal_io_requires_replacement, mr_hal_io_set_render_activity,
 };
 use mixrelay_macos_transport::transport_inspection::inspect_descriptor;
 use std::cell::UnsafeCell;
@@ -17,6 +16,8 @@ use crate::abi::{Geometry, HostOps, NativeOps, Timestamp};
 use crate::clock::Clock;
 use crate::io_outcome::IoOutcome;
 use crate::registry::Registry;
+mod client_mix;
+use client_mix::ClientMix;
 
 #[repr(C)]
 #[derive(Default)]
@@ -54,6 +55,7 @@ struct AttachedIo {
     context: UnsafeCell<IoContext>,
     transport: *mut EndpointTransport,
     mapping: Mapping,
+    capacity: u32,
 }
 
 impl Drop for AttachedIo {
@@ -92,10 +94,8 @@ impl AttachedIo {
             context: UnsafeCell::new(context),
             transport,
             mapping,
+            capacity: config.capacity_frames,
         });
-        if !unsafe { mr_hal_io_is_lock_free(result.context.get()) } {
-            return None;
-        }
         Some(result)
     }
 
@@ -107,6 +107,7 @@ impl AttachedIo {
 struct Runtime {
     clock: Clock,
     io: Box<AttachedIo>,
+    clients: ClientMix,
 }
 
 impl Drop for Runtime {
@@ -149,7 +150,10 @@ unsafe extern "C" fn create(
         return std::ptr::null_mut();
     }
     unsafe { mr_hal_io_clock_state(io.context.get(), rate, false) };
-    Box::into_raw(Box::new(Runtime { clock, io })).cast()
+    let Some(clients) = ClientMix::new(unsafe { *geometry }, io.capacity) else {
+        return std::ptr::null_mut();
+    };
+    Box::into_raw(Box::new(Runtime { clock, io, clients })).cast()
 }
 
 unsafe extern "C" fn destroy(runtime: *mut c_void) {
@@ -174,6 +178,12 @@ unsafe extern "C" fn replace(
     let previous = unsafe { &*runtime.io.context.get() };
     let context = unsafe { &mut *candidate.context.get() };
     context.inherit_lifecycle(previous);
+    let Some(clients) = runtime
+        .clients
+        .replacement(unsafe { *geometry }, candidate.capacity)
+    else {
+        return false;
+    };
     if !candidate.bind() {
         return false;
     }
@@ -185,6 +195,7 @@ unsafe extern "C" fn replace(
     if candidate.mapping.identity != runtime.io.mapping.identity {
         unsafe { mr_hal_io_clock_state(runtime.io.context.get(), rate, false) };
     }
+    runtime.clients = clients;
     runtime.io = candidate;
     true
 }
@@ -220,9 +231,16 @@ unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32) -> bool {
     if !clock.set_rate(rate, unsafe { mach_absolute_time() }) {
         return false;
     }
+    let Some(clients) = runtime
+        .clients
+        .replacement(runtime.clients.geometry(), runtime.io.capacity)
+    else {
+        return false;
+    };
     if runtime.clock.running && !unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) } {
         return false;
     }
+    runtime.clients = clients;
     runtime.clock = clock;
     unsafe { mr_hal_io_clock_state(runtime.io.context.get(), rate, runtime.clock.running) };
     true
@@ -237,24 +255,85 @@ unsafe extern "C" fn timestamp(runtime: *mut c_void, now: u64, output: *mut Time
 unsafe extern "C" fn io(
     runtime: *mut c_void,
     render: bool,
+    client: u32,
     frame: u64,
     samples: *mut f32,
     count: u32,
 ) -> IoOutcome {
     // SAFETY: the registry's IO pin retains this initialized native runtime.
     let runtime = unsafe { &*runtime.cast::<Runtime>() };
-    if render {
-        // SAFETY: HAL provides the pinned mapping and count * render channels.
-        if unsafe { mr_hal_io_write_render(runtime.io.context.get(), frame, samples, count) } {
-            IoOutcome::completed(count)
-        } else {
-            IoOutcome::default()
-        }
+    let outcome = if render {
+        // SAFETY: MixOutput supplies canonical Float32 PCM for this registered client.
+        runtime.clients.render(
+            client,
+            frame,
+            unsafe {
+                std::slice::from_raw_parts(
+                    samples,
+                    count as usize
+                        * runtime
+                            .io
+                            .context
+                            .get()
+                            .as_ref()
+                            .map_or(0, |context| context.render_channels)
+                            as usize,
+                )
+            },
+            count,
+        )
     } else {
         // SAFETY: HAL provides count * capture channels writable Float32 samples.
-        IoOutcome::completed(unsafe {
-            mr_hal_io_read_capture(runtime.io.context.get(), frame, samples, count)
-        })
+        runtime.clients.capture(
+            frame,
+            unsafe {
+                std::slice::from_raw_parts_mut(
+                    samples,
+                    count as usize
+                        * runtime
+                            .io
+                            .context
+                            .get()
+                            .as_ref()
+                            .map_or(0, |context| context.capture_channels)
+                            as usize,
+                )
+            },
+            count,
+        )
+    };
+    if outcome.accepted && count != 0 {
+        // SAFETY: this pinned runtime retains the validated transport. Progress is
+        // published after the client queue, independently of any postmix callback.
+        unsafe {
+            mixrelay_macos_transport::endpoint_transport::mr_endpoint_transport_clock_demand(
+                runtime.io.transport,
+                render,
+                frame + u64::from(count),
+                count,
+            );
+            if render {
+                mr_hal_io_set_render_activity(runtime.io.context.get(), 3);
+            }
+        }
+    }
+    outcome
+}
+
+unsafe extern "C" fn client(runtime: *mut c_void, client: u32, action: u32) -> bool {
+    // SAFETY: registry control holds the device freeze, draining every IO pin.
+    let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
+    match crate::io_outcome::ClientChange::from_raw(action) {
+        Some(crate::io_outcome::ClientChange::Register) => runtime.clients.register(client),
+        Some(crate::io_outcome::ClientChange::Activate) => runtime.clients.set_active(client, true),
+        Some(crate::io_outcome::ClientChange::Deactivate) => {
+            runtime.clients.set_active(client, false)
+        }
+        Some(crate::io_outcome::ClientChange::Remove) => {
+            runtime.clients.remove(client);
+            true
+        }
+        _ => false,
     }
 }
 
@@ -306,19 +385,10 @@ pub(crate) fn native_registry(
         remaining_client: remaining,
         set_rate,
         timestamp,
+        client,
         io,
         requires_replacement,
         same_transport,
     };
     Registry::with_inspection(native, host, inspection)
-}
-
-/* Used by the C ABI contract test to compare the C11 and Rust atomic layouts. */
-#[unsafe(no_mangle)]
-extern "C" fn mr_hal_core_io_context_size() -> usize {
-    size_of::<IoContext>()
-}
-#[unsafe(no_mangle)]
-extern "C" fn mr_hal_core_io_context_alignment() -> usize {
-    align_of::<IoContext>()
 }

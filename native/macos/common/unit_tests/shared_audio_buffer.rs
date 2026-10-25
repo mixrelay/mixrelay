@@ -531,7 +531,7 @@ fn rejected_write_paths_release_the_claim_and_never_accept_inactive_epoch() {
 fn exited_hal_writer_is_retired_in_both_rings_and_only_new_mapping_recovers() {
     use crate::hal_io::{
         HalIoContext, mr_hal_io_begin_stream, mr_hal_io_bind, mr_hal_io_requires_replacement,
-        mr_hal_io_unbind, mr_hal_io_write_render,
+        mr_hal_io_unbind,
     };
     for capture in [false, true] {
         let old = DuplexMapping::new();
@@ -569,8 +569,9 @@ fn exited_hal_writer_is_retired_in_both_rings_and_only_new_mapping_recovers() {
             ));
             assert!(mr_hal_io_begin_stream(&raw mut restarted_hal));
             assert!(!mr_hal_io_requires_replacement(&raw mut restarted_hal));
-            assert!(mr_hal_io_write_render(
-                &raw mut restarted_hal,
+            assert!(mr_shared_audio_buffer_write(
+                fresh.render(),
+                mr_shared_audio_buffer_stats(fresh.render()).epoch,
                 0,
                 [0.25].as_ptr(),
                 1
@@ -584,8 +585,7 @@ fn exited_hal_writer_is_retired_in_both_rings_and_only_new_mapping_recovers() {
 fn capture_rearm_never_retires_a_live_hal_writer_and_recovers_after_claim_release() {
     use crate::hal_io::{
         HalIoContext, mr_hal_io_begin_stream, mr_hal_io_bind, mr_hal_io_clock_state,
-        mr_hal_io_read_capture, mr_hal_io_requires_replacement, mr_hal_io_unbind,
-        mr_hal_io_write_render,
+        mr_hal_io_requires_replacement, mr_hal_io_unbind,
     };
     let mapping = DuplexMapping::new();
     let capture_pointer = mapping.capture();
@@ -595,8 +595,9 @@ fn capture_rearm_never_retires_a_live_hal_writer_and_recovers_after_claim_releas
         assert!(mr_hal_io_bind(&raw mut hal, mapping.transport().cast()));
         assert!(mr_hal_io_begin_stream(&raw mut hal));
         mr_hal_io_clock_state(&raw mut hal, 48_000, true);
-        assert!(mr_hal_io_write_render(
-            &raw mut hal,
+        assert!(mr_shared_audio_buffer_write(
+            capture_pointer,
+            mr_shared_audio_buffer_stats(capture_pointer).epoch,
             0,
             [0.25_f32].as_ptr(),
             1
@@ -624,7 +625,7 @@ fn capture_rearm_never_retires_a_live_hal_writer_and_recovers_after_claim_releas
             1
         ));
         assert_eq!(
-            mr_hal_io_read_capture(&raw mut hal, 0, output.as_mut_ptr(), 1),
+            mr_shared_audio_buffer_read(capture_pointer, 0, output.as_mut_ptr(), 1),
             0
         );
         assert_eq!(output.map(f32::to_bits), [0.0_f32.to_bits()]);
@@ -642,9 +643,15 @@ fn capture_rearm_never_retires_a_live_hal_writer_and_recovers_after_claim_releas
             pcm.as_ptr(),
             1
         ));
-        assert!(mr_hal_io_write_render(&raw mut hal, 1, pcm.as_ptr(), 1));
+        assert!(mr_shared_audio_buffer_write(
+            capture_pointer,
+            epoch + 1,
+            1,
+            pcm.as_ptr(),
+            1
+        ));
         assert_eq!(
-            mr_hal_io_read_capture(&raw mut hal, 1, output.as_mut_ptr(), 1),
+            mr_shared_audio_buffer_read(capture_pointer, 1, output.as_mut_ptr(), 1),
             1
         );
         assert_eq!(output.map(f32::to_bits), [0.5_f32.to_bits()]);

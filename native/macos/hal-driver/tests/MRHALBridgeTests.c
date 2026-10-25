@@ -148,11 +148,11 @@ static void custom_property_lists(AudioObjectID device) {
     CFRelease(enabled);
     assert(raw == 1);
     CFDataRef snapshot = custom_data(device, 'mrdo');
-    assert(CFDataGetLength(snapshot) == (5 + 2048 * 8) * (CFIndex)sizeof(uint64_t));
+    assert(CFDataGetLength(snapshot) == (5 + 4096 * 9) * (CFIndex)sizeof(uint64_t));
     uint64_t header[5] = {0};
     memcpy(header, CFDataGetBytePtr(snapshot), sizeof(header));
     CFRelease(snapshot);
-    assert(header[0] == 1 && header[1] == 7 && header[2] == 2048 && header[3] == 0 && header[4] == 0);
+    assert(header[0] == 2 && header[1] == 8 && header[2] == 4096 && header[3] == 0 && header[4] == 0);
     assert(set_custom_flag(device, 0) == noErr);
     enabled = custom_data(device, 'mrdi');
     memcpy(&raw, CFDataGetBytePtr(enabled), sizeof(raw));
@@ -167,7 +167,7 @@ static void custom_property_lists(AudioObjectID device) {
     char json[128] = {0};
     assert(file != NULL && fgets(json, sizeof(json), file) != NULL);
     assert(fclose(file) == 0 && unlink(path) == 0);
-    assert(strcmp(json, "{\"version\":1,\"issued\":0,\"dropped\":0,\"capacity\":2048,\"rows\":[]}\n") == 0);
+    assert(strcmp(json, "{\"version\":2,\"issued\":0,\"dropped\":0,\"capacity\":4096,\"rows\":[]}\n") == 0);
     assert(mr_probe_hal_trace_enable(device, false).stage == NULL);
 }
 
@@ -214,8 +214,9 @@ static bool timestamp_fixture(void *runtime, uint64_t time, MRHALCoreTimestamp *
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
     return false;
 }
-static MRHALCoreIoOutcome io_fixture(void *runtime, bool render, uint64_t frame, float *data, uint32_t count) {
-    (void)runtime; (void)render; (void)frame; (void)data; (void)count;
+static bool client_fixture(void *runtime, uint32_t client, uint32_t action) { (void)runtime; (void)client; (void)action; return true; }
+static MRHALCoreIoOutcome io_fixture(void *runtime, bool render, uint32_t client, uint64_t frame, float *data, uint32_t count) {
+    (void)runtime; (void)render; (void)client; (void)frame; (void)data; (void)count;
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
     return (MRHALCoreIoOutcome){false, 0};
 }
@@ -223,7 +224,7 @@ static bool replacement_fixture(void *runtime) { (void)runtime; return false; }
 static bool same_fixture(void *runtime, int fd, size_t size) { (void)runtime; (void)fd; (void)size; return false; }
 static void transport_identity(void) {
     const MRHALCoreNativeOps native = {inspect_fixture, create_fixture, destroy_fixture, replace_fixture,
-        start_fixture, stop_fixture, stop_fixture, rate_fixture, timestamp_fixture, io_fixture,
+        start_fixture, stop_fixture, stop_fixture, rate_fixture, timestamp_fixture, client_fixture, io_fixture,
         replacement_fixture, same_fixture};
     const MRHALCoreHostOps host = {NULL, fixture_changed, fixture_request};
     gCore = mr_hal_core_create(&native, &host);
@@ -267,10 +268,10 @@ static void transport_identity(void) {
     transport_device = device;
     custom_property_lists(device);
     Boolean will = false, in_place = false;
-    assert((*gDriver)->WillDoIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationWriteMix, &will, &in_place) == noErr);
+    assert((*gDriver)->WillDoIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationMixOutput, &will, &in_place) == noErr);
     assert(will && in_place);
-    assert(will_io(gDriver, device, 7, kAudioServerPlugInIOOperationProcessOutput, &will, &in_place) == noErr);
-    assert(will && in_place);
+    assert(will_io(gDriver, device, 7, kAudioServerPlugInIOOperationWriteMix, &will, &in_place) == noErr);
+    assert(!will && in_place);
     /* WillDo is a startup query, not an IO-thread scope. */
     assert_control_transport();
     assert(will_io(NULL, device, 7, 0, &will, &in_place) == kAudioHardwareBadObjectError);
@@ -278,22 +279,22 @@ static void transport_identity(void) {
     AudioServerPlugInIOCycleInfo cycle = {0};
     float samples[2] = {0};
     assert(start_io(gDriver, device, 7) == noErr);
-    assert((*gDriver)->BeginIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationWriteMix, 1, &cycle) == noErr);
+    assert((*gDriver)->BeginIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationMixOutput, 1, &cycle) == noErr);
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
     /* Native IO reenters the property path; its nested scope cannot end the cycle. */
-    assert(do_io(gDriver, device, device + 2, 7, kAudioServerPlugInIOOperationWriteMix, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
+    assert(do_io(gDriver, device, device + 2, 7, kAudioServerPlugInIOOperationMixOutput, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
-    assert(rendered_client == 0 && rendered_device == 0);
+    assert(rendered_client == 7 && rendered_device == device);
     samples[0] = 0.125F; samples[1] = -0.25F;
     assert(do_io(gDriver, device, device + 2, 7, kAudioServerPlugInIOOperationProcessOutput, 1, &cycle, samples, NULL) == noErr);
     assert(rendered_client == 7 && rendered_device == device);
     assert(samples[0] == 0.125F && samples[1] == -0.25F);
     assert(do_io(gDriver, device, device + 2, 7, 0, 1, NULL, samples, NULL) == kAudioHardwareBadObjectError);
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
-    assert((*gDriver)->EndIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationWriteMix, 1, &cycle) == noErr);
+    assert((*gDriver)->EndIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationMixOutput, 1, &cycle) == noErr);
     assert_control_transport();
     /* Standalone DoIO and timestamp must clear every success/error return. */
-    assert(do_io(gDriver, device, device + 2, 7, kAudioServerPlugInIOOperationWriteMix, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
+    assert(do_io(gDriver, device, device + 2, 7, kAudioServerPlugInIOOperationMixOutput, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
     assert_control_transport();
     assert(do_io(NULL, device, device + 2, 7, 0, 1, &cycle, samples, NULL) == kAudioHardwareBadObjectError);
     assert_control_transport();
@@ -308,7 +309,7 @@ static void transport_identity(void) {
     MRHALCoreTimestamp stamp = {0};
     assert(!mr_hal_core_timestamp(gCore, device, mach_absolute_time(), &stamp));
     assert_control_transport();
-    assert(!mr_hal_core_io(gCore, device, device + 2, true, 0, samples, 1));
+    assert(!mr_hal_core_io(gCore, device, device + 2, true, 42, 0, samples, 1));
     assert_control_transport();
     assert(begin_io(NULL, device, 7, 0, 1, &cycle) == kAudioHardwareBadObjectError);
     assert_control_transport();
@@ -328,7 +329,7 @@ static void transport_identity(void) {
  * content delay while coreaudiod keeps zero scheduling latency. */
 static void input_latency_requester(void) {
     const MRHALCoreNativeOps native = {inspect_fixture, create_fixture, destroy_fixture, replace_fixture,
-        start_fixture, stop_fixture, stop_fixture, rate_fixture, timestamp_fixture, io_fixture,
+        start_fixture, stop_fixture, stop_fixture, rate_fixture, timestamp_fixture, client_fixture, io_fixture,
         replacement_fixture, same_fixture};
     const MRHALCoreHostOps host = {NULL, fixture_changed, fixture_request};
     gCore = mr_hal_core_create(&native, &host);
@@ -374,10 +375,10 @@ static void input_latency_requester(void) {
     float samples[2] = {0.125F, -0.25F};
     transport_device = device;
     assert(do_io(gDriver, device, device + 2, kAudioServerPlugInHostClientID,
-        kAudioServerPlugInIOOperationWriteMix, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
+        kAudioServerPlugInIOOperationMixOutput, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
     assert(property_get(gDriver, device, getpid(), &property, 0, NULL, 4, &written, &value) == noErr && value == 321);
     assert(do_io(gDriver, device, device + 2, 7,
-        kAudioServerPlugInIOOperationProcessOutput, 1, &cycle, samples, NULL) == noErr);
+        kAudioServerPlugInIOOperationMixOutput, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
     assert(samples[0] == 0.125F && samples[1] == -0.25F);
     assert(property_get(gDriver, device, getpid(), &property, 0, NULL, 4, &written, &value) == noErr && value == 0);
     assert(stop_io(gDriver, device, 7) == noErr);

@@ -13,7 +13,6 @@ use mixrelay_macos_transport::endpoint_transport::{
     mr_endpoint_transport_initialize, mr_endpoint_transport_render_buffer,
     mr_endpoint_transport_required_bytes,
 };
-use mixrelay_macos_transport::shared_audio_buffer::mr_shared_audio_buffer_read;
 
 use super::{Fixture, changed, request};
 use crate::abi::{HostOps, OK};
@@ -141,13 +140,22 @@ impl Transport {
         clock
     }
 
-    fn render<const N: usize>(&self, frames: u32) -> [f32; N] {
+    fn capture<const N: usize>(&self, fixture: &Fixture, id: u32, frames: u32) -> [f32; N] {
+        let snapshot = fixture.registry.snapshot(id).unwrap();
+        assert_eq!(fixture.registry.pin(id).unwrap().endpoint, self.endpoint);
+        assert_eq!(N, frames as usize * snapshot.capture_channels as usize);
         let mut samples = [0.0; N];
-        let buffer = unsafe { mr_endpoint_transport_render_buffer(self.pointer) };
-        assert_eq!(
-            unsafe { mr_shared_audio_buffer_read(buffer, 0, samples.as_mut_ptr(), frames) },
-            frames
-        );
+        assert!(unsafe {
+            fixture.registry.io(IoOperation {
+                device: id,
+                stream: id + 1,
+                render: false,
+                client: 42,
+                frame: 0,
+                samples: samples.as_mut_ptr().cast(),
+                frames,
+            })
+        });
         samples
     }
 }
@@ -175,7 +183,7 @@ fn native_fixture() -> Fixture {
 }
 
 #[test]
-fn native_integer_buffers_convert_real_transport_pcm_gain_and_exact_mute() {
+fn native_integer_capture_encodes_canonical_client_mix_gain_and_exact_mute() {
     let fixture = native_fixture();
     for (index, encoding) in crate::properties::NATIVE_FORMATS.into_iter().enumerate() {
         for channels in [1, 2, 7, 64] {
@@ -215,6 +223,7 @@ fn native_block_io(fixture: &Fixture, id: u32, operation: (bool, u64), bytes: &m
             id,
             id + if render { 2 } else { 1 },
             render,
+            42,
             frame,
             bytes.as_mut_ptr().cast(),
             32,
@@ -225,47 +234,57 @@ fn native_block_io(fixture: &Fixture, id: u32, operation: (bool, u64), bytes: &m
 fn assert_native_render(
     fixture: &Fixture,
     id: u32,
-    transport: &Transport,
+    _transport: &Transport,
     encoding: mixrelay_pcm_ring::SampleFormat,
     signal: &[f32],
 ) {
-    // Float32 uses aligned f32-owned storage even though the entry point is byte-oriented.
+    let mut canonical = signal.to_vec();
     let mut storage = vec![0.0_f32; signal.len()];
-    // SAFETY: f32-owned initialized storage has at least this byte extent and alignment;
-    // its original typed allocation is not borrowed while bytes are in use.
+    // SAFETY: the initialized Float32 allocation owns the full native input byte extent.
     let bytes = unsafe {
         std::slice::from_raw_parts_mut(
             storage.as_mut_ptr().cast::<u8>(),
             signal.len() * encoding.bytes_per_sample(),
         )
     };
-    assert!(encoding.encode(signal, bytes));
     assert_eq!(fixture.registry.set_output_volume(id + 3, 0.5), OK);
-    native_block_io(fixture, id, (true, 0), bytes);
-    let mut rendered = vec![0.0; signal.len()];
-    let buffer = unsafe { mr_endpoint_transport_render_buffer(transport.pointer) };
-    assert_eq!(
-        unsafe { mr_shared_audio_buffer_read(buffer, 0, rendered.as_mut_ptr(), 32) },
-        32
-    );
-    assert_eq!(
-        rendered
+    for (frame, muted) in [(0, false), (32, true)] {
+        assert_eq!(fixture.registry.set_output_mute(id + 4, muted), OK);
+        canonical.copy_from_slice(signal);
+        assert!(unsafe {
+            crate::abi::mr_hal_core_io(
+                (&raw const *fixture.registry).cast_mut(),
+                id,
+                id + 2,
+                true,
+                1,
+                frame,
+                canonical.as_mut_ptr().cast(),
+                32,
+            )
+        });
+        bytes.fill(0xa5);
+        native_block_io(fixture, id, (false, frame), bytes);
+        let mut captured = vec![0.0; signal.len()];
+        assert!(encoding.decode(bytes, &mut captured));
+        let expected: Vec<_> = signal
             .iter()
-            .map(|sample| sample.to_bits())
-            .collect::<Vec<_>>(),
-        signal
-            .iter()
-            .map(|sample| (sample * 0.5).to_bits())
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(fixture.registry.set_output_mute(id + 4, true), OK);
-    assert!(encoding.encode(signal, bytes));
-    native_block_io(fixture, id, (true, 32), bytes);
-    assert_eq!(
-        unsafe { mr_shared_audio_buffer_read(buffer, 32, rendered.as_mut_ptr(), 32) },
-        32
-    );
-    assert!(rendered.iter().all(|sample| sample.to_bits() == 0));
+            .map(|sample| {
+                if muted {
+                    0.0_f32.to_bits()
+                } else {
+                    (sample * 0.5).to_bits()
+                }
+            })
+            .collect();
+        assert_eq!(
+            captured
+                .iter()
+                .map(|sample| sample.to_bits())
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
 }
 
 fn assert_native_capture(
@@ -321,6 +340,7 @@ fn native_loopback_uses_absolute_callback_frames_in_both_callback_orders() {
     let read = |frame: u64, samples: &mut [f32; 128]| {
         assert!(unsafe {
             fixture.registry.io(IoOperation {
+                client: 42,
                 device: id,
                 stream: id + 1,
                 render: false,
@@ -336,6 +356,7 @@ fn native_loopback_uses_absolute_callback_frames_in_both_callback_orders() {
         let mut playback = [0.25_f32; 64];
         assert!(unsafe {
             fixture.registry.io(IoOperation {
+                client: 42,
                 device: id,
                 stream: id + 2,
                 render: true,
@@ -368,6 +389,7 @@ fn native_duplex_mappings_are_isolated_and_publish_independent_clocks() {
     for (device, samples) in [(a, source_a.as_mut_ptr()), (b, source_b.as_mut_ptr())] {
         assert!(unsafe {
             fixture.registry.io(IoOperation {
+                client: 42,
                 device,
                 stream: device + 2,
                 render: true,
@@ -378,18 +400,19 @@ fn native_duplex_mappings_are_isolated_and_publish_independent_clocks() {
         });
     }
     assert_eq!(
-        first.render::<64>(32).map(f32::to_bits),
+        first.capture::<64>(&fixture, a, 32).map(f32::to_bits),
         source_a.map(f32::to_bits)
     );
     assert_eq!(
-        second.render::<224>(32).map(f32::to_bits),
-        source_b.map(f32::to_bits)
+        second.capture::<96>(&fixture, b, 32).map(f32::to_bits),
+        [0.75_f32.to_bits(); 96]
     );
     let mut capture_a = [0.0_f32; 64];
     let mut capture_b = [0.0_f32; 96];
     for (device, samples) in [(a, capture_a.as_mut_ptr()), (b, capture_b.as_mut_ptr())] {
         assert!(unsafe {
             fixture.registry.io(IoOperation {
+                client: 42,
                 device,
                 stream: device + 1,
                 render: false,
@@ -442,6 +465,7 @@ fn native_replacement_retires_old_mapping_and_preserves_device_identity() {
     let mut source = [0.75_f32; 224];
     assert!(unsafe {
         fixture.registry.io(IoOperation {
+            client: 42,
             device: id,
             stream: id + 2,
             render: true,
@@ -450,10 +474,15 @@ fn native_replacement_retires_old_mapping_and_preserves_device_identity() {
             frames: 32,
         })
     });
-    assert_eq!(
-        replacement.render::<224>(32).map(f32::to_bits),
-        source.map(f32::to_bits)
-    );
+    let captured = replacement.capture::<1056>(&fixture, id, 32);
+    for frame in captured.chunks_exact(33) {
+        assert!(
+            frame[..7]
+                .iter()
+                .all(|sample| sample.to_bits() == 0.75_f32.to_bits())
+        );
+        assert!(frame[7..].iter().all(|sample| sample.to_bits() == 0));
+    }
     let previous_epoch = replacement.clock().epoch;
     replacement.add(&fixture, "Same mapping", 48_000);
     assert_eq!(
@@ -511,6 +540,7 @@ fn native_master_output_controls_scale_playback_and_loopback_at_product_widths()
             let mut playback = [0.8_f32; 2048];
             assert!(unsafe {
                 fixture.registry.io(IoOperation {
+                    client: 42,
                     device: id,
                     stream: id + 2,
                     render: true,
@@ -519,17 +549,6 @@ fn native_master_output_controls_scale_playback_and_loopback_at_product_widths()
                     frames: 32,
                 })
             });
-            let mut rendered = [0.0_f32; 2048];
-            let buffer = unsafe { mr_endpoint_transport_render_buffer(transport.pointer) };
-            assert_eq!(
-                unsafe { mr_shared_audio_buffer_read(buffer, frame, rendered.as_mut_ptr(), 32) },
-                32
-            );
-            assert!(
-                rendered[..count]
-                    .iter()
-                    .all(|sample| sample.to_bits() == expected.to_bits())
-            );
             assert!(
                 playback[count..]
                     .iter()
@@ -538,6 +557,7 @@ fn native_master_output_controls_scale_playback_and_loopback_at_product_widths()
             let mut received = [0.0_f32; 2048];
             assert!(unsafe {
                 fixture.registry.io(IoOperation {
+                    client: 42,
                     device: id,
                     stream: id + 1,
                     render: false,

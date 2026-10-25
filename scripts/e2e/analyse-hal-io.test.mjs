@@ -38,9 +38,22 @@ test('an incomplete snapshot and partial signal overlap remain explicit', () => 
 });
 
 test('invalid schemas and duplicate sequences cannot become trace evidence', () => {
-  assert.throws(() => analyseHalIo({ ...trace([]), version: 2 }));
+  assert.throws(() => analyseHalIo({ ...trace([]), version: 3 }));
   assert.throws(() => analyseHalIo(trace([[1, 0, 100, 8, 1, 9, 0, a]])));
   assert.throws(() => analyseHalIo(trace([[1, 0, 100, 8, 1, 8, 0, a], [1, 1, 100, 8, 1, 8, 0, a]])));
+});
+
+test('client output hashes remain distinct from a multi-client capture mix in v2', () => {
+  const input = { version: 2, capacity: 4096, issued: 3, dropped: 0, rows: [
+    [1, 1, 100, 8, 1, 8, 0, a, 42], [2, 1, 100, 8, 1, 8, 0, b, 43],
+    [3, 0, 100, 8, 1, 8, 0, 'aabbccddeeff0011', 0],
+  ] };
+  const result = analyseHalIo(input, window);
+  assert.deepEqual(result.writeClients, [42, 43]);
+  assert.equal(result.captureHashComparison, 'inapplicable_multiple_client_mix');
+  assert.deepEqual(result.suppliedHashDifferences, []);
+  assert.equal(result.retention.retainedRows, 3);
+  assert.throws(() => analyseHalIo({ ...input, capacity: 2048 }));
 });
 
 test('an empty or rejected oversized callback remains observable instead of being discarded', () => {

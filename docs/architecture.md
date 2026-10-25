@@ -91,9 +91,19 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 `GraphApplicationQueue`는 확인한 문서·사용자 초안·변경 요청의 순서를 소유한다.
 조회 결과는 큐가 선택·취소 상태를 다시 확인한 뒤 화면에 전달한다.
 
+HAL의 `ClientMix`는 등록된 클라이언트별 PCM 큐와 시작·정지·제거·교체 수명을 소유한다.
+`MixOutput`은 해당 클라이언트의 canonical Float32 출력을 큐에 게시하고, `ReadInput`은 같은
+장치 sample 좌표에서 활성 큐를 한 번씩 합산한다. 입력의 네이티브 정수 변환과 출력 볼륨·mute는
+`Device::process_io`가 맡는다. `ClientChange`와 `Transfer`는 수명 변경과 PCM 전송을 구분한다.
+제어 소유자는 `Device::freeze`로 콜백을 회수한 동안만 큐를 할당·교체·폐기한다.
+
+`HalIoContext`는 기존 공유 매핑의 클럭·epoch·producer activity를 게시한다.
+공유 PCM 링은 현재 매핑 형식의 수명 메타데이터를 보존하며 클라이언트 PCM의 저장소로 사용하지 않는다.
+이 소유자는 PCM의 복사·합산이나 채널 변환 scratch를 관리하지 않는다.
+
 HAL 네이티브 어댑터는 `IoOutcome`으로 호출 수락과 공급된 capture 프레임 수를 구분한다.
 `Device`가 소유한 `IoTrace`는 명시적으로 활성화한 측정 동안 Float32 쓰기·읽기의
-장치 sample 좌표·공급 프레임·0 프레임 수·PCM 해시를 메모리에 남긴다. 콜백에서 할당하거나
+장치 sample 좌표·클라이언트 ID·공급 프레임·0 프레임 수·PCM 해시를 메모리에 남긴다. 콜백에서 할당하거나
 파일에 쓰지 않으며 원본 PCM을 보관하지 않는다. 속성 조회는 일관성이 확인된 행만 전달한다.
 관찰 수가 고정 용량을 넘거나 기록 경쟁으로 행을 잃으면 관찰 수·용량·누락 수로 드러난다.
 HAL의 사용자 정의 진단 속성은 `CFPropertyList`로 선언하고 `CFDataRef`로 전달한다.

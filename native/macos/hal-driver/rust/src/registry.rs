@@ -32,6 +32,7 @@ pub(crate) struct IoOperation {
     pub device: u32,
     pub stream: u32,
     pub render: bool,
+    pub client: u32,
     pub frame: u64,
     pub samples: *mut c_void,
     pub frames: u32,
@@ -275,9 +276,7 @@ impl Registry {
             device
                 .capture_format
                 .publish(device.capture_format.format(), Box::default());
-            device
-                .render_format
-                .publish(device.render_format.format(), Box::default());
+            device.render_format.publish(device.render_format.format());
         }
         let running = device.running.load(Ordering::Acquire) != 0;
         drop(frozen);
@@ -435,12 +434,22 @@ impl Registry {
         };
         let mut control = lock(&device.control);
         let mut stopped = false;
+        let frozen = device.freeze();
         if add {
             if !device.alive.load(Ordering::Acquire) {
                 return NOT_FOUND;
             }
             if control.clients.contains_key(&client) {
                 return INVALID;
+            }
+            if !unsafe {
+                self.native.update_client(
+                    device.runtime.load(Ordering::Acquire),
+                    client,
+                    crate::io_outcome::ClientChange::Register,
+                )
+            } {
+                return NATIVE_ERROR;
             }
             control.clients.insert(client, false);
             device.input_latency.add(client);
@@ -452,7 +461,6 @@ impl Registry {
                 Some(true) => {
                     // A client process can disappear without a balanced StopIO.
                     // Its removal releases only that client's runtime claim.
-                    let frozen = device.freeze();
                     let count = device.running.load(Ordering::Acquire) - 1;
                     if device.alive.load(Ordering::Acquire) {
                         let runtime = device.runtime.load(Ordering::Acquire);
@@ -465,14 +473,23 @@ impl Registry {
                     device.running.store(count, Ordering::Release);
                     control.clients.remove(&client);
                     stopped = count == 0;
-                    drop(frozen);
                 }
                 None => return INVALID,
             }
         }
         if !add {
+            if device.alive.load(Ordering::Acquire) {
+                unsafe {
+                    self.native.update_client(
+                        device.runtime.load(Ordering::Acquire),
+                        client,
+                        crate::io_outcome::ClientChange::Remove,
+                    )
+                };
+            }
             device.input_latency.remove(client);
         }
+        drop(frozen);
         drop(control);
         drop(device);
         if stopped {
@@ -503,9 +520,23 @@ impl Registry {
             return CAPACITY;
         }
         let frozen = device.freeze();
+        let runtime = device.runtime.load(Ordering::Acquire);
+        if !unsafe {
+            self.native
+                .update_client(runtime, client, crate::io_outcome::ClientChange::Activate)
+        } {
+            return NATIVE_ERROR;
+        }
         if count == 0
             && !unsafe { (self.native.start)(device.runtime.load(Ordering::Acquire), now) }
         {
+            unsafe {
+                self.native.update_client(
+                    runtime,
+                    client,
+                    crate::io_outcome::ClientChange::Deactivate,
+                )
+            };
             return NATIVE_ERROR;
         }
         *running = true;
@@ -535,6 +566,15 @@ impl Registry {
         let count = device.running.load(Ordering::Acquire) - 1;
         if device.alive.load(Ordering::Acquire) {
             let runtime = device.runtime.load(Ordering::Acquire);
+            if !unsafe {
+                self.native.update_client(
+                    runtime,
+                    client,
+                    crate::io_outcome::ClientChange::Deactivate,
+                )
+            } {
+                return NATIVE_ERROR;
+            }
             if count == 0 {
                 unsafe { (self.native.stop)(runtime) };
             } else {
@@ -884,6 +924,7 @@ impl Registry {
             device: id,
             stream,
             render,
+            client,
             frame,
             samples,
             frames,
@@ -920,7 +961,18 @@ impl Registry {
             }
             return true;
         }
-        unsafe { device.process_io(render, frame, samples, frames) }
+        unsafe {
+            device.process_io(crate::io_outcome::Transfer {
+                direction: if render {
+                    crate::io_outcome::Direction::ClientOutput(client)
+                } else {
+                    crate::io_outcome::Direction::Capture
+                },
+                frame,
+                samples,
+                frames,
+            })
+        }
     }
 }
 

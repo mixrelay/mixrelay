@@ -3,10 +3,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::io_outcome::IoOutcome;
 
-// A three-second duplex probe plus its tail and the engine's input callbacks
-// fit at 512 frames/48 kHz. Longer observations explicitly report overwritten rows.
-const CAPACITY: usize = 2048;
-const FIELDS: usize = 7;
+// A complete 48 kHz installed probe retained up to 3,886 observations across
+// 128/512-frame clients. Longer sessions still report overwritten rows explicitly.
+const CAPACITY: usize = 4096;
+const FIELDS: usize = 8;
 
 pub(crate) struct IoTrace {
     enabled: AtomicBool,
@@ -23,6 +23,7 @@ struct Row {
 #[derive(Clone, Copy)]
 pub(crate) struct Observation<'a> {
     pub render: bool,
+    pub client: u32,
     pub frame: u64,
     pub channels: usize,
     pub samples: &'a [f32],
@@ -104,6 +105,7 @@ impl IoTrace {
             u64::from(observation.outcome.available),
             zero_frames,
             hash,
+            u64::from(observation.client),
         ];
         // SeqCst cells make a snapshot's two sequence reads bracket every field;
         // an overwritten or still-publishing row is refused instead of mixed.
@@ -114,10 +116,10 @@ impl IoTrace {
     }
 
     /// Fixed-size, native-endian `UInt64` payload: version, fields, capacity, issued,
-    /// dropped, then (sequence, render, frame, frames, accepted, available, zeros, hash).
+    /// dropped, then (sequence, render, frame, frames, accepted, available, zeros, hash, client).
     pub(crate) fn snapshot(&self) -> Vec<u8> {
         let mut words = vec![
-            1,
+            2,
             FIELDS as u64,
             CAPACITY as u64,
             self.next.load(Ordering::Acquire),
@@ -148,7 +150,7 @@ mod tests {
     fn words(trace: &IoTrace) -> Vec<u64> {
         trace
             .snapshot()
-            .chunks_exact(8)
+            .chunks_exact(size_of::<u64>())
             .map(|value| u64::from_ne_bytes(value.try_into().unwrap()))
             .collect()
     }
@@ -162,6 +164,7 @@ mod tests {
             let measured = allocation_counter::measure(|| {
                 trace.record(Observation {
                     render: false,
+                    client: 0,
                     frame: 64,
                     channels: 2,
                     samples: &pcm,
@@ -184,6 +187,7 @@ mod tests {
         for frame in 0..CAPACITY as u64 + 3 {
             trace.record(Observation {
                 render: true,
+                client: 42,
                 frame,
                 channels: 1,
                 samples: &[0.5],
@@ -193,7 +197,10 @@ mod tests {
         let actual = words(&trace);
         assert_eq!(actual[3], CAPACITY as u64 + 3);
         assert_eq!(actual[4], 0);
-        let mut sequences: Vec<_> = actual[5..].chunks_exact(8).map(|row| row[0]).collect();
+        let mut sequences: Vec<_> = actual[5..]
+            .chunks_exact(FIELDS + 1)
+            .map(|row| row[0])
+            .collect();
         sequences.sort_unstable();
         assert_eq!(sequences, (4..=CAPACITY as u64 + 3).collect::<Vec<_>>());
         trace.set_enabled(false);

@@ -94,3 +94,40 @@ control 속성 조회는 20ms identity 예산을 소진하면 Virtual을 반환�
 
 원시 기록과 REA bundle은 로컬 Diagnostics의 `installed-e2e-20261025/`에 보존한다.
 이 분석에서 연 Ghidra 세션·JVM·demangler는 종료했다. 로컬 실제 오디오·서비스·TCC를 조작하지 않았다.
+
+## cc5e81b9 설치본에서 드러난 서로 다른 실패
+
+전체 실행 [40220258479](https://github.com/mixrelay/mixrelay/actions/runs/40220258479)은 13개 중
+7개 통과, 6개 실패다. macOS 14 ARM과 Ubuntu x64·Debian 양 아키텍처·Kali 양 아키텍처·Arch x64가
+통과했다. macOS 15 양 아키텍처·26 양 아키텍처·27 ARM은 PCM에서, Ubuntu ARM은 업그레이드의
+GRAPH-01에서 실패했다. 이 실행은 `502de680` 이후 소스의 설치본 검증이 아니다.
+
+macOS 15 ARM의 업그레이드 원시 PCM에서 장치 `[167020, 167396)`의 376 프레임이 0이다.
+마지막 WriteMix 행 2418은 `[166892, 167020)`, ReadInput 행 2420은 `[166884, 167396)`이고
+공급은 136 프레임이다. 다음 WriteMix 행 2421은 167396에서 시작한다. 보존된 WriteMix 중
+누락 범위를 게시한 행이 없으며, 프로브는 대응 출력을 input 콜백보다 약 21.46ms 먼저 생성했다.
+같은 실행의 Apple 로그에는 작은 128프레임 클라이언트의 overload cycle 생략이 있다.
+이 관찰은 최종 WriteMix에만 의존하면 이미 생성된 다른 클라이언트 출력을 놓칠 수 있음을 보여 준다.
+
+SDK의 MixOutput 계약은 구현한 드라이버가 이후 출력 단계와 합산을 맡도록 한다.
+수정한 HAL은 클라이언트의 Float32 출력을 이 단계에서 보관하고 입력에서 합산한다.
+376프레임 누락 순서, 겹친 두 클라이언트, 한 클라이언트의 재시작·제거, 포맷·매핑 교체를
+실제 PCM 큐로 검증한다. 콜백에서는 할당·해제·대기·재시도를 하지 않는다.
+버퍼 크기·지연 오프셋·허용 오차는 바꾸지 않았다. 아직 모든 비영(非零) 손상의 원인이
+확정된 것은 아니며 실제 설치본에서의 수정 검증이 필요하다.
+
+진단 v2의 행은 `[sequence, render, frame, frames, accepted, available, zeroFrames, hash, client]`다.
+고정 보관 용량은 4096행이다. 관측한 3886회 호출을 보존하기 위한 진단 용량이며 오디오 버퍼 크기와
+무관하다. 오프라인 분석은 v1·v2를 읽고 다중 클라이언트의 개별 출력 해시를 합산 입력 해시와
+직접 비교하지 않는다. `node scripts/e2e/analyse-hal-io.mjs EVIDENCE_DIRECTORY --output NEW_FILE`은
+원시 PCM·콜백 시각·진단을 대조하며 합격 판정을 변경하지 않는다.
+
+Ubuntu ARM은 부팅, 신규 설치의 모든 시나리오, 업그레이드의 오디오·녹음·제거를 통과했다.
+GRAPH-01의 실패 화면에는 비활성 Recorder 버튼과 `node_not_found`, 자동 적용 중단을 나타내는
+`control_unavailable`이 함께 있다. AT-SPI 시간 초과도 있으나 최종 실패를 그 지연만으로 분류할 수 없다.
+해당 요청의 서버 거절 원인은 현재 보존 로그만으로 확정하지 못했다.
+
+Loopback 후속 절차 분석에서도 모든 클라이언트의 완료를 기다리는 barrier는 찾지 못했다.
+ARK의 출력 큐는 process 단위이고 client ID로 클럭을 고른다. daemon은 각 큐를 한 번 읽고 합산하며
+늦은 PCM을 이전 입력에 복구하지 않는다. 큐 frontier는 PCM add보다 먼저 게시된다.
+이 구조에서 임의의 대기·768프레임 지연을 MixRelay에 복사하지 않았다.

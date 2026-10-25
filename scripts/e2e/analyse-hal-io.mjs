@@ -8,23 +8,26 @@ import { analyseProbeReference } from './probe-pcm-reference.mjs';
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 
 export function analyseHalIo(trace, signalWindow = null) {
-  assert.equal(trace.version, 1, 'Unsupported HAL trace version');
-  assert.equal(trace.capacity, 2048, 'Unexpected HAL trace capacity');
+  assert.ok([1, 2].includes(trace.version), 'Unsupported HAL trace version');
+  assert.equal(trace.capacity, trace.version === 1 ? 2048 : 4096, 'Unexpected HAL trace capacity');
   assert.ok(integer(trace.issued) && integer(trace.dropped) && trace.dropped <= trace.issued);
   assert.ok(Array.isArray(trace.rows) && trace.rows.length <= trace.capacity);
   if (signalWindow) assert.ok(integer(signalWindow.start) && integer(signalWindow.end) && signalWindow.end > signalWindow.start);
   const sequences = new Set();
   const rows = trace.rows.map(row => {
-    assert.ok(Array.isArray(row) && row.length === 8 && row.slice(0, 7).every(integer));
+    assert.ok(Array.isArray(row) && row.length === (trace.version === 1 ? 8 : 9) && row.slice(0, 7).every(integer));
     const [sequence, render, frame, frames, accepted, available, zeroFrames, hash] = row;
     assert.ok(sequence > 0 && sequence <= trace.issued && !sequences.has(sequence), 'Invalid or repeated observation sequence');
     assert.ok(render <= 1 && accepted <= 1 && frames <= 0xffffffff && available <= frames && zeroFrames <= frames);
     assert.ok(Number.isSafeInteger(frame + frames) && typeof hash === 'string' && /^[0-9a-f]{16}$/.test(hash));
+    const client = trace.version === 2 ? row[8] : null;
+    assert.ok(client === null || (integer(client) && client <= 0xffffffff));
     sequences.add(sequence);
     const overlap = !signalWindow ? 'unknown' : frame >= signalWindow.end || frame + frames <= signalWindow.start
       ? 'outside' : frame >= signalWindow.start && frame + frames <= signalWindow.end ? 'full' : 'partial';
-    return { sequence, render: render === 1, frame, frames, accepted: accepted === 1, available, zeroFrames, hash, signalOverlap: overlap };
+    return { sequence, client, render: render === 1, frame, frames, accepted: accepted === 1, available, zeroFrames, hash, signalOverlap: overlap };
   }).sort((a, b) => a.sequence - b.sequence);
+  const writeClients = new Set(rows.filter(row => row.render).map(row => row.client));
   const writes = new Map();
   const suppliedHashDifferences = [];
   let exactCoordinatePairs = 0, unpairedCaptureRows = 0;
@@ -34,7 +37,7 @@ export function analyseHalIo(trace, signalWindow = null) {
     const write = writes.get(key);
     if (!write) { unpairedCaptureRows++; continue; }
     exactCoordinatePairs++;
-    if (write.accepted && row.accepted && row.available === row.frames && write.hash !== row.hash)
+    if (writeClients.size <= 1 && write.accepted && row.accepted && row.available === row.frames && write.hash !== row.hash)
       suppliedHashDifferences.push({ write, capture: row });
   }
   const visible = row => row.signalOverlap !== 'outside';
@@ -50,6 +53,8 @@ export function analyseHalIo(trace, signalWindow = null) {
     captureShortReads: rows.filter(row => !row.render && row.available < row.frames && visible(row)),
     suppliedCaptureSilence: rows.filter(row => !row.render && row.accepted && row.available === row.frames && row.zeroFrames > 0 && visible(row)),
     exactCoordinatePairs, unpairedCaptureRows, suppliedHashDifferences,
+    writeClients: [...writeClients],
+    captureHashComparison: writeClients.size <= 1 ? "single_output" : "inapplicable_multiple_client_mix",
     emptyTransfers: rows.filter(row => row.frames === 0).length,
     limitations: [
       'Observation sequence is assigned after native IO; it does not establish publication order across callbacks.',

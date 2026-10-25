@@ -77,10 +77,30 @@ pub(crate) struct NativeOps {
     pub remaining_client: unsafe extern "C" fn(*mut c_void),
     pub set_rate: unsafe extern "C" fn(*mut c_void, u32) -> bool,
     pub timestamp: unsafe extern "C" fn(*mut c_void, u64, *mut Timestamp) -> bool,
-    pub io:
-        unsafe extern "C" fn(*mut c_void, bool, u64, *mut f32, u32) -> crate::io_outcome::IoOutcome,
+    pub client: unsafe extern "C" fn(*mut c_void, u32, u32) -> bool,
+    pub io: unsafe extern "C" fn(
+        *mut c_void,
+        bool,
+        u32,
+        u64,
+        *mut f32,
+        u32,
+    ) -> crate::io_outcome::IoOutcome,
     pub requires_replacement: unsafe extern "C" fn(*mut c_void) -> bool,
     pub same_transport: unsafe extern "C" fn(*mut c_void, i32, usize) -> bool,
+}
+
+impl NativeOps {
+    /// # Safety
+    /// The runtime is live and the device control owner holds its IO freeze.
+    pub(crate) unsafe fn update_client(
+        self,
+        runtime: *mut c_void,
+        id: u32,
+        change: crate::io_outcome::ClientChange,
+    ) -> bool {
+        unsafe { (self.client)(runtime, id, change as u32) }
+    }
 }
 
 #[repr(C)]
@@ -402,6 +422,7 @@ pub(crate) unsafe extern "C" fn mr_hal_core_io(
     device: u32,
     stream: u32,
     render: bool,
+    client: u32,
     frame: u64,
     samples: *mut c_void,
     frames: u32,
@@ -417,6 +438,7 @@ pub(crate) unsafe extern "C" fn mr_hal_core_io(
             device,
             stream,
             render,
+            client,
             frame,
             samples,
             frames,

@@ -10,7 +10,7 @@ use std::sync::{Mutex, MutexGuard};
 use crate::abi::{Geometry, NativeOps, Snapshot};
 use crate::io_trace::{IoTrace, Observation};
 
-pub(crate) type ConversionScratch = [Box<[f32]>; 2];
+pub(crate) type ConversionScratch = Box<[f32]>;
 
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
@@ -60,7 +60,7 @@ pub(crate) struct Device {
     pub output_control: crate::output_control::OutputControl,
     pub io_trace: IoTrace,
     pub capture_format: NativeStream,
-    pub render_format: NativeStream,
+    pub render_format: NativeFormat,
     pub control: Mutex<Control>,
     pub native: NativeOps,
     pub runtime: AtomicPtr<c_void>,
@@ -98,7 +98,7 @@ impl Device {
             output_control: crate::output_control::OutputControl::default(),
             io_trace,
             capture_format: NativeStream::new(),
-            render_format: NativeStream::new(),
+            render_format: NativeFormat::new(),
             control: Mutex::new(Control {
                 name,
                 clients: BTreeMap::new(),
@@ -173,22 +173,11 @@ impl Device {
         pending: &Pending,
         mut reserve: impl FnMut(usize) -> Result<Vec<f32>, std::collections::TryReserveError>,
     ) -> Result<ConversionScratch, std::collections::TryReserveError> {
-        let (capture, render) = pending.attachment.as_ref().map_or(
-            (
-                self.capture_channels.load(Ordering::Acquire),
-                self.render_channels.load(Ordering::Acquire),
-            ),
-            |attachment| {
-                (
-                    attachment.geometry.capture_channels,
-                    attachment.geometry.render_channels,
-                )
-            },
+        let capture = pending.attachment.as_ref().map_or_else(
+            || self.capture_channels.load(Ordering::Acquire),
+            |attachment| attachment.geometry.capture_channels,
         );
-        Ok([
-            NativeStream::prepare(pending.formats[0], capture, &mut reserve)?,
-            NativeStream::prepare(pending.formats[1], render, &mut reserve)?,
-        ])
+        NativeStream::prepare(pending.formats[0], capture, &mut reserve)
     }
 
     /// Caller holds control and freeze after successful native rate/mapping change.
@@ -209,12 +198,11 @@ impl Device {
         }
         self.input_latency.publish(0, 0, None, None);
         self.rate.store(pending.rate, Ordering::Release);
-        let [capture, render] = scratch;
         // SAFETY: the configuration owner holds control and freeze; no IO pin can access
         // old scratch. Only a successful native transition reaches this publication.
         unsafe {
-            self.capture_format.publish(pending.formats[0], capture);
-            self.render_format.publish(pending.formats[1], render);
+            self.capture_format.publish(pending.formats[0], scratch);
+            self.render_format.publish(pending.formats[1]);
         }
     }
 
@@ -226,28 +214,26 @@ impl Device {
     /// pin stays held, `alive` was checked after acquiring it, and no other reference
     /// aliases the host's operation buffer. Removal cannot release the runtime until
     /// this pin drains.
-    pub(crate) unsafe fn process_io(
-        &self,
-        render: bool,
-        frame: u64,
-        samples: *mut c_void,
-        frames: u32,
-    ) -> bool {
+    pub(crate) unsafe fn process_io(&self, transfer: crate::io_outcome::Transfer) -> bool {
+        let crate::io_outcome::Transfer {
+            direction,
+            frame,
+            samples,
+            frames,
+        } = transfer;
+        let (render, client) = match direction {
+            crate::io_outcome::Direction::Capture => (false, 0),
+            crate::io_outcome::Direction::ClientOutput(client) => (true, client),
+        };
         let runtime = self.runtime.load(Ordering::Acquire);
-        let (stream, channels) = if render {
-            (
-                &self.render_format,
-                self.render_channels.load(Ordering::Acquire),
-            )
+        let channels = if render {
+            self.render_channels.load(Ordering::Acquire)
         } else {
-            (
-                &self.capture_format,
-                self.capture_channels.load(Ordering::Acquire),
-            )
+            self.capture_channels.load(Ordering::Acquire)
         };
         let count = frames as usize * channels as usize;
-        let format = stream.format();
-        if format == SampleFormat::Float32 {
+        let format = self.capture_format.format();
+        if render || format == SampleFormat::Float32 {
             if render {
                 // SAFETY: the HAL main buffer is exclusive, aligned Float32 in this format;
                 // the IO pin fixes its width and format until the callback returns.
@@ -256,11 +242,12 @@ impl Device {
             }
             // SAFETY: the IO pin fixes the native runtime and the caller's buffer.
             let outcome =
-                unsafe { (self.native.io)(runtime, render, frame, samples.cast(), frames) };
+                unsafe { (self.native.io)(runtime, render, client, frame, samples.cast(), frames) };
             if self.io_trace.enabled() {
                 // SAFETY: the Float32 buffer has count initialized samples after native IO.
                 self.io_trace.record(Observation {
                     render,
+                    client,
                     frame,
                     channels: channels as usize,
                     samples: unsafe { std::slice::from_raw_parts(samples.cast::<f32>(), count) },
@@ -269,8 +256,8 @@ impl Device {
             }
             return outcome.accepted;
         }
-        stream.with_scratch(count, |scratch| {
-            // SAFETY: ReadInput/WriteMix supply count native interleaved samples. Integer
+        self.capture_format.with_scratch(count, |scratch| {
+            // SAFETY: ReadInput supplies count native interleaved samples. Integer
             // formats need only byte alignment; no Float32 reference aliases this storage.
             let bytes = unsafe {
                 std::slice::from_raw_parts_mut(
@@ -278,25 +265,18 @@ impl Device {
                     count * format.bytes_per_sample(),
                 )
             };
-            if render {
-                if !format.decode(bytes, scratch) {
-                    return false;
-                }
-                self.output_control.apply(scratch);
-                unsafe { (self.native.io)(runtime, true, frame, scratch.as_mut_ptr(), frames) }
-                    .accepted
-            } else {
-                (unsafe { (self.native.io)(runtime, false, frame, scratch.as_mut_ptr(), frames) })
-                    .accepted
-                    && format.encode(scratch, bytes)
-            }
+            // SAFETY: ReadInput owns the complete native integer buffer; the prepared
+            // scratch is Float32, exclusively leased and retained by the device IO pin.
+            unsafe { (self.native.io)(runtime, false, client, frame, scratch.as_mut_ptr(), frames) }
+                .accepted
+                && format.encode(scratch, bytes)
         })
     }
 }
 
 /// One directional native format and its exclusively leased conversion storage.
 pub(crate) struct NativeStream {
-    format: AtomicU32,
+    format: NativeFormat,
     scratch: UnsafeCell<Box<[f32]>>,
     claimed: AtomicBool,
 }
@@ -308,20 +288,14 @@ unsafe impl Sync for NativeStream {}
 impl NativeStream {
     fn new() -> Self {
         Self {
-            format: AtomicU32::new(SampleFormat::Float32 as u32),
+            format: NativeFormat::new(),
             scratch: UnsafeCell::new(Box::default()),
             claimed: AtomicBool::new(false),
         }
     }
 
     pub(crate) fn format(&self) -> SampleFormat {
-        match self.format.load(Ordering::Acquire) {
-            1 => SampleFormat::Float32,
-            2 => SampleFormat::Signed16,
-            3 => SampleFormat::Signed24,
-            4 => SampleFormat::Signed32,
-            _ => unreachable!("native format is written only from SampleFormat"),
-        }
+        self.format.format()
     }
 
     fn prepare(
@@ -342,7 +316,7 @@ impl NativeStream {
     pub(crate) unsafe fn publish(&self, format: SampleFormat, scratch: Box<[f32]>) {
         // SAFETY: publication is control-only after Device::freeze drained all IO readers.
         unsafe { *self.scratch.get() = scratch };
-        self.format.store(format as u32, Ordering::Release);
+        self.format.publish(format);
     }
 
     fn with_scratch(&self, count: usize, process: impl FnOnce(&mut [f32]) -> bool) -> bool {
@@ -385,5 +359,27 @@ pub(crate) struct Freeze<'a>(&'a Device);
 impl Drop for Freeze<'_> {
     fn drop(&mut self) {
         self.0.frozen.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Native output metadata, separate from canonical client PCM and capture conversion storage.
+pub(crate) struct NativeFormat(AtomicU32);
+
+impl NativeFormat {
+    fn new() -> Self {
+        Self(AtomicU32::new(SampleFormat::Float32 as u32))
+    }
+    pub(crate) fn format(&self) -> SampleFormat {
+        match self.0.load(Ordering::Acquire) {
+            1 => SampleFormat::Float32,
+            2 => SampleFormat::Signed16,
+            3 => SampleFormat::Signed24,
+            4 => SampleFormat::Signed32,
+            _ => unreachable!("native format is written only from SampleFormat"),
+        }
+    }
+
+    pub(crate) fn publish(&self, format: SampleFormat) {
+        self.0.store(format as u32, Ordering::Release);
     }
 }

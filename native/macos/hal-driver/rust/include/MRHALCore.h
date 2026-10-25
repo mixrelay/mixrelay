@@ -40,7 +40,8 @@ typedef struct MRHALCoreNativeOps {
     void (*remaining_client)(void *);
     bool (*set_rate)(void *, uint32_t);
     bool (*timestamp)(void *, uint64_t, MRHALCoreTimestamp *);
-    MRHALCoreIoOutcome (*io)(void *, bool, uint64_t, float *, uint32_t);
+    bool (*client)(void *, uint32_t, uint32_t);
+    MRHALCoreIoOutcome (*io)(void *, bool, uint32_t, uint64_t, float *, uint32_t);
     bool (*requires_replacement)(void *);
     bool (*same_transport)(void *, int, size_t);
 } MRHALCoreNativeOps;
@@ -75,8 +76,6 @@ void mr_hal_core_enter_audio_thread(void);
 void mr_hal_core_leave_audio_thread(void);
 MRHALCore *mr_hal_core_create(const MRHALCoreNativeOps *, const MRHALCoreHostOps *);
 MRHALCore *mr_hal_core_create_native(const MRHALCoreHostOps *);
-size_t mr_hal_core_io_context_size(void);
-size_t mr_hal_core_io_context_alignment(void);
 /* Shutdown only: caller must first stop XPC/timers and all host callbacks. */
 void mr_hal_core_destroy(MRHALCore *);
 /* Consumes fd on EVERY path, including invalid arguments. The mapped transport
@@ -111,7 +110,7 @@ bool mr_hal_core_timestamp(MRHALCore *, uint32_t device_id, uint64_t now, MRHALC
  * including WriteMix. Never pass shared transport storage. Float32 is aligned;
  * signed16/24/32 are little-endian packed bytes. Internal transport stays Float32. */
 bool mr_hal_core_io(MRHALCore *, uint32_t device_id, uint32_t stream_id,
-                   bool render, uint64_t frame, void *, uint32_t frame_count);
+                   bool render, uint32_t client_id, uint64_t frame, void *, uint32_t frame_count);
 typedef struct MRHALCorePropertyAddress { uint32_t selector, scope, element; } MRHALCorePropertyAddress;
 typedef struct MRHALCoreNotification { uint32_t object_id; MRHALCorePropertyAddress address; } MRHALCoreNotification;
 bool mr_hal_core_has_property(MRHALCore *, uint32_t, const MRHALCorePropertyAddress *);

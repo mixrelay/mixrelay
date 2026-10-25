@@ -44,9 +44,10 @@ export function analyseProbeReference(trace, metrics, timing, pcm) {
   assert.ok(first && (first.flags & 1), 'Missing valid output origin');
   const origin = first.sample - first.first;
   const start = origin + Math.trunc(metrics.output.rate * 0.1), end = start + metrics.signalFrames;
+  const writeClients = new Set(trace.rows.filter(row => row[1] === 1).map(row => row[8] ?? null));
   const writes = trace.rows.filter(row => row[1] === 1 && row[2] >= start && row[2] + row[3] <= end);
   const differences = [];
-  for (const row of writes) {
+  for (const row of writeClients.size <= 1 ? writes : []) {
     const expected = probeRangeHash(row[2] - origin, row[3], channels);
     if (row[7] !== expected) differences.push({ sequence: row[0], frame: row[2], frames: row[3], observed: row[7], expected });
   }
@@ -81,7 +82,9 @@ export function analyseProbeReference(trace, metrics, timing, pcm) {
     mismatch.retainedWriteRows = trace.rows.filter(row => row[1] === 1
       && row[2] < mismatch.deviceEnd && row[2] + row[3] > mismatch.deviceStart);
   }
-  return { origin, signalWindow: { start, end }, nativeWrites: { comparedRows: writes.length, differences }, inputDifferences,
+  return { origin, signalWindow: { start, end }, nativeWrites: {
+    comparisonStatus: writeClients.size <= 1 ? 'single_output' : 'inapplicable_multiple_client_mix',
+    comparedRows: writeClients.size <= 1 ? writes.length : 0, writeClients: [...writeClients], differences }, inputDifferences,
     limitations: ['Reference applies to the integer-coded default probe signal and its original timing/capture files.',
       'Native trace retention and missing epoch labels still limit attribution. This comparison does not change qualification.'] };
 }

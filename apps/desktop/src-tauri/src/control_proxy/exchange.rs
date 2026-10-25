@@ -8,6 +8,7 @@ use std::{
 
 use mixrelay_control_protocol::ControlStage;
 use reqwest::{Method, Response};
+mod rejection;
 mod transport_failure;
 use serde_json::Value;
 use transport_failure::TransportFailure;
@@ -188,6 +189,7 @@ async fn finish(
             })?
         };
         let Some(id) = pending else {
+            rejection::observe(status, &body);
             if let Some(id) = completed {
                 acknowledge(client, &operation_url(origin, &id)?).await;
             }

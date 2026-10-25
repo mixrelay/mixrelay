@@ -114,6 +114,7 @@ fn pcm(fixture: &super::Fixture, device: u32, render: bool, frame: u64, value: f
     let mut samples = [value; 64];
     assert!(unsafe {
         fixture.registry.io(IoOperation {
+            client: 42,
             device,
             stream: device + if render { 2 } else { 1 },
             render,
@@ -146,7 +147,7 @@ fn callback_evidence_distinguishes_missing_capture_from_published_digital_silenc
         .map(|value| u64::from_ne_bytes(value.try_into().unwrap()))
         .collect();
     let rows: Vec<_> = words[5..]
-        .chunks_exact(8)
+        .chunks_exact(9)
         .filter(|row| row[0] != 0)
         .collect();
     assert_eq!(rows.len(), 4);
@@ -179,7 +180,18 @@ fn native_multi_client_activity_and_restart_discard_previous_capture() {
         }),
         (1, 0)
     );
-    pcm(&fixture, id, true, 32, 0.75);
+    let mut next = [0.75_f32; 64];
+    assert!(unsafe {
+        fixture.registry.io(IoOperation {
+            device: id,
+            stream: id + 2,
+            render: true,
+            client: 43,
+            frame: 32,
+            samples: next.as_mut_ptr().cast(),
+            frames: 32,
+        })
+    });
     assert_eq!(pcm(&fixture, id, false, 32, 0.0), [0.75_f32.to_bits(); 64]);
     assert_eq!(fixture.registry.stop(id, 43), OK);
     assert_eq!(transport.clock().running, 0);
@@ -273,7 +285,7 @@ fn failed_native_attachment_preserves_running_mapping_clock_and_pcm() {
     pcm(&fixture, id, true, 32, 0.25);
     assert_eq!(pcm(&fixture, id, false, 32, 0.0), [0.25_f32.to_bits(); 64]);
     assert_eq!(
-        old.render::<64>(32).map(f32::to_bits),
+        old.capture::<64>(&fixture, id, 32).map(f32::to_bits),
         [0.75_f32.to_bits(); 64]
     );
 }
@@ -385,6 +397,7 @@ impl<'a> Loopback<'a> {
         // SAFETY: the fixture owns the registry; each block is 32 stereo Float32 frames.
         assert!(unsafe {
             self.fixture.registry.io(IoOperation {
+                client: 42,
                 device: self.device,
                 stream: self.device + if render { 2 } else { 1 },
                 render,

@@ -127,9 +127,13 @@ unsafe extern "C" fn timestamp(runtime: *mut c_void, now: u64, output: *mut Time
     };
     runtime.running
 }
+unsafe extern "C" fn native_client(_: *mut c_void, _: u32, _: u32) -> bool {
+    true
+}
 unsafe extern "C" fn io(
     runtime: *mut c_void,
     render: bool,
+    _: u32,
     _: u64,
     samples: *mut f32,
     frames: u32,
@@ -167,6 +171,7 @@ fn standalone_ffi_audio_entries_restore_the_callers_thread_scope() {
             id,
             id + 2,
             true,
+            42,
             0,
             samples.as_mut_ptr().cast(),
             1,
@@ -176,7 +181,7 @@ fn standalone_ffi_audio_entries_restore_the_callers_thread_scope() {
     assert!(unsafe { crate::abi::mr_hal_core_timestamp(registry, id, 0, &raw mut timestamp) });
     assert!(!crate::transport::on_audio_thread());
     assert!(!unsafe {
-        crate::abi::mr_hal_core_io(registry, id, id + 2, true, 0, std::ptr::null_mut(), 1)
+        crate::abi::mr_hal_core_io(registry, id, id + 2, true, 42, 0, std::ptr::null_mut(), 1)
     });
     assert!(!crate::transport::on_audio_thread());
     assert!(!unsafe {
@@ -303,6 +308,7 @@ impl Fixture {
             remaining_client: remaining,
             set_rate,
             timestamp,
+            client: native_client,
             io,
             requires_replacement,
             same_transport,
@@ -427,6 +433,7 @@ fn independent_devices_enumerate_and_route_without_cross_talk() {
     let mut second = [0.75_f32; 64];
     unsafe {
         assert!(fixture.registry.io(IoOperation {
+            client: 42,
             device: a,
             stream: a + 2,
             render: true,
@@ -435,6 +442,7 @@ fn independent_devices_enumerate_and_route_without_cross_talk() {
             frames: 32
         }));
         assert!(fixture.registry.io(IoOperation {
+            client: 42,
             device: b,
             stream: b + 2,
             render: true,
@@ -443,6 +451,7 @@ fn independent_devices_enumerate_and_route_without_cross_talk() {
             frames: 32
         }));
         assert!(fixture.registry.io(IoOperation {
+            client: 42,
             device: a,
             stream: a + 1,
             render: false,
@@ -451,6 +460,7 @@ fn independent_devices_enumerate_and_route_without_cross_talk() {
             frames: 32
         }));
         assert!(fixture.registry.io(IoOperation {
+            client: 42,
             device: b,
             stream: b + 1,
             render: false,
@@ -715,6 +725,7 @@ fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration()
         // SAFETY: this retained dead stereo object still advertises packed PCM24.
         assert!(unsafe {
             fixture.registry.io(IoOperation {
+                client: 42,
                 device: id,
                 stream: id + 1,
                 render: false,
@@ -746,6 +757,7 @@ fn active_callback_drains_before_removal_releases_its_runtime() {
             // SAFETY: this callback exclusively owns its aligned 32-frame stereo buffer.
             assert!(unsafe {
                 registry.io(IoOperation {
+                    client: 42,
                     device: id,
                     stream: id + 2,
                     render: true,
@@ -813,7 +825,7 @@ fn reconnect_retains_live_clock_and_native_rate_failure_is_atomic() {
 }
 
 #[test]
-fn failed_integer_pcm_preparation_reclaims_partial_buffers() {
+fn failed_capture_pcm_preparation_returns_without_reserving_native_output_storage() {
     let fixture = Fixture::new();
     let id = fixture.add(1, 48_000);
     for stream in [id + 1, id + 2] {
@@ -827,23 +839,16 @@ fn failed_integer_pcm_preparation_reclaims_partial_buffers() {
     let device = fixture.registry.pin(id).unwrap();
     let control = lock(&device.control);
     let pending = control.pending.as_ref().unwrap();
-    for failed in 0..2 {
-        let mut attempted = 0;
-        let allocation = allocation_counter::measure(|| {
-            let result = device.prepare_scratch_with(pending, |samples| {
-                let reservation = attempted;
-                attempted += 1;
-                mixrelay_audio_io::pcm_buffer::zeroed(if reservation == failed {
-                    usize::MAX
-                } else {
-                    samples
-                })
-            });
-            assert!(result.is_err());
+    let mut attempted = 0;
+    let allocation = allocation_counter::measure(|| {
+        let result = device.prepare_scratch_with(pending, |_| {
+            attempted += 1;
+            mixrelay_audio_io::pcm_buffer::zeroed(usize::MAX)
         });
-        assert_eq!(attempted, failed + 1);
-        assert_eq!((allocation.count_current, allocation.bytes_current), (0, 0));
-    }
+        assert!(result.is_err());
+    });
+    assert_eq!(attempted, 1);
+    assert_eq!((allocation.count_current, allocation.bytes_current), (0, 0));
 }
 
 #[test]
@@ -905,6 +910,7 @@ fn failed_pcm_reservation_preserves_live_format_mapping_clock_and_audio() {
         // SAFETY: the unchanged active format owns two complete Float32 stereo frames.
         assert!(unsafe {
             fixture.registry.io(IoOperation {
+                client: 42,
                 device: id,
                 stream: id + if render { 2 } else { 1 },
                 render,
