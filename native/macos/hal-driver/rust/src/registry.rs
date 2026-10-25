@@ -185,13 +185,15 @@ impl Registry {
         if runtime.is_null() {
             return Err(NATIVE_ERROR);
         }
-        let device = Box::new(Device::new(
-            id,
-            geometry,
-            name.into(),
-            rate,
-            (self.native, runtime),
-        ));
+        let device = if let Ok(device) =
+            Device::new(id, geometry, name.into(), rate, (self.native, runtime))
+        {
+            Box::new(device)
+        } else {
+            // SAFETY: the unpublished runtime has no callback readers.
+            unsafe { (self.native.destroy)(runtime) };
+            return Err(CAPACITY);
+        };
         self.slots[index]
             .pointer
             .store(Box::into_raw(device), Ordering::SeqCst);

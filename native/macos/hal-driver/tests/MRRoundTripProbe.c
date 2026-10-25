@@ -1645,6 +1645,8 @@ static void mr_usage(FILE *stream) {
             "received, missing and repeated signal frames, damaged samples, slips, channel\n"
             "order and the latency the devices report. Changes no default device or setting.\n"
             "--timing writes the retained callback timeline to stderr after IO stops.\n"
+            "--hal-trace-file PATH enables MixRelay HAL evidence for this measurement, saves it\n"
+            "after IO stops, then disables it; other device settings stay unchanged.\n"
             "--capture-file PATH saves all captured interleaved native Float32 frames after IO stops.\n"
             "--impulse measures paths that change samples (asynchronous clocks, sample-rate\n"
             "conversion): it plays pulses at irregular ~0.25 s spacing and finds the one delay\n"
@@ -1671,6 +1673,7 @@ typedef struct MROptions {
     double seconds, channels;
     const char *uids[2];
     const char *capture_file;
+    const char *hal_trace_file;
     int found;
 } MROptions;
 
@@ -1692,6 +1695,9 @@ static int mr_options(int argc, char **argv, MROptions *options) {
             options->impulse = true;
         } else if (strcmp(argv[i], "--timing") == 0) {
             options->timing = true;
+        } else if (strcmp(argv[i], "--hal-trace-file") == 0 && i + 1 < argc) {
+            options->hal_trace_file = argv[++i];
+            ok = options->hal_trace_file[0] != '\0';
         } else if (strcmp(argv[i], "--capture-file") == 0 && i + 1 < argc) {
             options->capture_file = argv[++i];
             ok = options->capture_file[0] != '\0';
@@ -1840,6 +1846,50 @@ static bool mr_run(void *context) {
     return true;
 }
 
+// The opt-in driver payload contains counters and hashes, never retained PCM.
+static bool mr_hal_trace_enabled(AudioDeviceID device, bool enabled) {
+    const AudioObjectPropertyAddress address = {'mrdi', kAudioObjectPropertyScopeGlobal, 0};
+    const UInt32 value = enabled ? 1U : 0U;
+    return AudioObjectSetPropertyData(device, &address, 0U, NULL, sizeof(value), &value) == noErr;
+}
+
+static bool mr_hal_trace_save(AudioDeviceID device, const char *path) {
+    const AudioObjectPropertyAddress address = {'mrdo', kAudioObjectPropertyScopeGlobal, 0};
+    UInt32 size = 0U;
+    // v1 has five UInt64 header fields and 2048 eight-word rows.
+    const UInt32 expected = (5U + 2048U * 8U) * sizeof(uint64_t);
+    if (AudioObjectGetPropertyDataSize(device, &address, 0U, NULL, &size) != noErr || size != expected)
+        return false;
+    uint64_t *words = calloc(1U, size);
+    if (words == NULL) return false;
+    bool ok = AudioObjectGetPropertyData(device, &address, 0U, NULL, &size, words) == noErr &&
+              size == expected && words[0] == 1U && words[1] == 7U && words[2] == 2048U;
+    FILE *file = ok ? fopen(path, "wx") : NULL;
+    ok = file != NULL;
+    if (ok) {
+        fprintf(file, "{\"version\":1,\"issued\":%llu,\"dropped\":%llu,\"capacity\":2048,\"rows\":[",
+                (unsigned long long)words[3], (unsigned long long)words[4]);
+        bool comma = false;
+        for (UInt32 row = 0U; row < 2048U; ++row) {
+            const uint64_t *values = words + 5U + row * 8U;
+            if (values[0] == 0U) continue;
+            fprintf(file, "%s[", comma ? "," : "");
+            for (UInt32 column = 0U; column < 8U; ++column) {
+                if (column == 7U) fprintf(file, ",\"%016llx\"", (unsigned long long)values[column]);
+                else fprintf(file, "%s%llu", column == 0U ? "" : ",", (unsigned long long)values[column]);
+            }
+            fprintf(file, "]");
+            comma = true;
+        }
+        fprintf(file, "]}\n");
+        ok = ferror(file) == 0;
+        const bool closed = fclose(file) == 0;
+        ok = ok && closed;
+    }
+    free(words);
+    return ok;
+}
+
 int main(int argc, char **argv) {
     MROptions options = {.seconds = 5.0, .channels = MR_MAX_CHANNELS};
     const int status = mr_options(argc, argv, &options);
@@ -1857,7 +1907,19 @@ int main(int argc, char **argv) {
     mr_describe("output", probe->output, kAudioObjectPropertyScopeOutput, options.json);
     mr_describe("input", probe->input, kAudioObjectPropertyScopeInput, options.json);
     if (options.json) printf("\"channels\":%u,\"seconds\":%.1f,", probe->channels, options.seconds);
-    if (!mr_probe_with_activity(mr_run, probe)) return 1;
+    if (options.hal_trace_file != NULL && !mr_hal_trace_enabled(probe->output, true)) {
+        fprintf(stderr, "could not enable MixRelay HAL evidence\n");
+        return 1;
+    }
+    const bool ran = mr_probe_with_activity(mr_run, probe);
+    bool trace_saved = true;
+    if (options.hal_trace_file != NULL) {
+        trace_saved = mr_hal_trace_save(probe->output, options.hal_trace_file);
+        const bool disabled = mr_hal_trace_enabled(probe->output, false);
+        trace_saved = trace_saved && disabled;
+        if (!trace_saved) fprintf(stderr, "could not save or disable MixRelay HAL evidence\n");
+    }
+    if (!ran || !trace_saved) return 1;
     if (options.capture_file != NULL) {
         FILE *file = fopen(options.capture_file, "wbx");
         bool saved = file != NULL && mr_write_capture(file, probe);

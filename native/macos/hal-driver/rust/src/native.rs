@@ -15,6 +15,7 @@ use std::ffi::c_void;
 
 use crate::abi::{Geometry, HostOps, NativeOps, Timestamp};
 use crate::clock::Clock;
+use crate::io_outcome::IoOutcome;
 use crate::registry::Registry;
 
 #[repr(C)]
@@ -239,13 +240,21 @@ unsafe extern "C" fn io(
     frame: u64,
     samples: *mut f32,
     count: u32,
-) -> bool {
+) -> IoOutcome {
+    // SAFETY: the registry's IO pin retains this initialized native runtime.
     let runtime = unsafe { &*runtime.cast::<Runtime>() };
     if render {
-        unsafe { mr_hal_io_write_render(runtime.io.context.get(), frame, samples, count) }
+        // SAFETY: HAL provides the pinned mapping and count * render channels.
+        if unsafe { mr_hal_io_write_render(runtime.io.context.get(), frame, samples, count) } {
+            IoOutcome::completed(count)
+        } else {
+            IoOutcome::default()
+        }
     } else {
-        unsafe { mr_hal_io_read_capture(runtime.io.context.get(), frame, samples, count) };
-        true
+        // SAFETY: HAL provides count * capture channels writable Float32 samples.
+        IoOutcome::completed(unsafe {
+            mr_hal_io_read_capture(runtime.io.context.get(), frame, samples, count)
+        })
     }
 }
 

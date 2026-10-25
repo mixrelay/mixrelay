@@ -26,6 +26,10 @@ typedef struct MRHALCoreSnapshot {
     char uid[80];
     uint32_t capture_format, render_format;
 } MRHALCoreSnapshot;
+typedef struct MRHALCoreIoOutcome {
+    bool accepted;
+    uint32_t available;
+} MRHALCoreIoOutcome;
 typedef struct MRHALCoreNativeOps {
     bool (*inspect)(int, size_t, MRHALCoreGeometry *);
     void *(*create)(const MRHALCoreGeometry *, uint32_t, int, size_t);
@@ -36,7 +40,7 @@ typedef struct MRHALCoreNativeOps {
     void (*remaining_client)(void *);
     bool (*set_rate)(void *, uint32_t);
     bool (*timestamp)(void *, uint64_t, MRHALCoreTimestamp *);
-    bool (*io)(void *, bool, uint64_t, float *, uint32_t);
+    MRHALCoreIoOutcome (*io)(void *, bool, uint64_t, float *, uint32_t);
     bool (*requires_replacement)(void *);
     bool (*same_transport)(void *, int, size_t);
 } MRHALCoreNativeOps;

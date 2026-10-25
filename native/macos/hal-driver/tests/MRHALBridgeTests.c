@@ -9,6 +9,16 @@
 
 static int32_t forwarded_pid;
 static uint32_t rendered_client, rendered_device;
+static unsigned audio_scope_depth;
+static void observed_enter_audio(void) {
+    ++audio_scope_depth;
+    mr_hal_core_enter_audio_thread();
+}
+static void observed_leave_audio(void) {
+    assert(audio_scope_depth != 0U);
+    --audio_scope_depth;
+    mr_hal_core_leave_audio_thread();
+}
 static void observed_render_client(const MRHALCore *core, uint32_t device, uint32_t client) {
     rendered_device = device; rendered_client = client;
     mr_hal_core_render_client(core, device, client);
@@ -19,9 +29,13 @@ static int32_t observed_get(MRHALCore *core, uint32_t object, const MRHALCorePro
     return mr_hal_core_property_get(core, object, property, qs, q, capacity, written, output, pid);
 }
 #define mr_hal_core_property_get observed_get
+#define mr_hal_core_enter_audio_thread observed_enter_audio
+#define mr_hal_core_leave_audio_thread observed_leave_audio
 #include "../driver/MixRelayHALBridge.c"
 #undef mr_hal_core_property_get
 #undef mr_hal_core_render_client
+#undef mr_hal_core_enter_audio_thread
+#undef mr_hal_core_leave_audio_thread
 
 /* Keep the Rust property's stable FourCC projection tied to the active SDK. */
 _Static_assert(kAudioVolumeControlClassID == UINT32_C(0x766c6d65), "volume class ABI");
@@ -33,6 +47,8 @@ _Static_assert(kAudioLevelControlPropertyDecibelValue == UINT32_C(0x6c636476), "
 _Static_assert(kAudioLevelControlPropertyDecibelRange == UINT32_C(0x6c636472), "dB range ABI");
 _Static_assert(kAudioLevelControlPropertyConvertScalarToDecibels == UINT32_C(0x6c637364), "scalar conversion ABI");
 _Static_assert(kAudioLevelControlPropertyConvertDecibelsToScalar == UINT32_C(0x6c636473), "dB conversion ABI");
+_Static_assert(sizeof(MRHALCoreIoOutcome) == 8, "native IO outcome ABI");
+_Static_assert(offsetof(MRHALCoreIoOutcome, available) == 4, "capture availability ABI");
 _Static_assert(kAudioBooleanControlPropertyValue == UINT32_C(0x6263766c), "mute value ABI");
 _Static_assert(kAudioControlPropertyScope == UINT32_C(0x63736370), "control scope ABI");
 _Static_assert(kAudioControlPropertyElement == UINT32_C(0x63656c6d), "control element ABI");
@@ -70,15 +86,23 @@ static uint32_t transport_value(void) {
     assert(written == 4);
     return value;
 }
+static void assert_control_transport(void) {
+    assert(audio_scope_depth == 0U);
+    const uint32_t value = transport_value();
+    /* A control query may exhaust its 20 ms identity budget under descheduling.
+     * Scope ownership is asserted directly; Rust fake-clock tests own identity policy. */
+    assert(value == kAudioDeviceTransportTypeUSB || value == kAudioDeviceTransportTypeVirtual);
+}
+
 static bool timestamp_fixture(void *runtime, uint64_t time, MRHALCoreTimestamp *stamp) {
     (void)runtime; (void)time; (void)stamp;
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
     return false;
 }
-static bool io_fixture(void *runtime, bool render, uint64_t frame, float *data, uint32_t count) {
+static MRHALCoreIoOutcome io_fixture(void *runtime, bool render, uint64_t frame, float *data, uint32_t count) {
     (void)runtime; (void)render; (void)frame; (void)data; (void)count;
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
-    return false;
+    return (MRHALCoreIoOutcome){false, 0};
 }
 static bool replacement_fixture(void *runtime) { (void)runtime; return false; }
 static bool same_fixture(void *runtime, int fd, size_t size) { (void)runtime; (void)fd; (void)size; return false; }
@@ -121,7 +145,8 @@ static void transport_identity(void) {
     AudioObjectPropertyAddress property = {kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal, 0};
     uint32_t value = 0, written = 0;
     assert(property_get(gDriver, device, getpid(), &property, 0, NULL, 4, &written, &value) == noErr);
-    assert(forwarded_pid == getpid() && written == 4 && value == kAudioDeviceTransportTypeUSB);
+    assert(forwarded_pid == getpid() && written == 4);
+    assert(value == kAudioDeviceTransportTypeUSB || value == kAudioDeviceTransportTypeVirtual);
     assert(property_get(gDriver, device, 0, &property, 0, NULL, 4, &written, &value) == noErr);
     assert(forwarded_pid == 0 && value == kAudioDeviceTransportTypeVirtual);
     transport_device = device;
@@ -131,9 +156,9 @@ static void transport_identity(void) {
     assert(will_io(gDriver, device, 7, kAudioServerPlugInIOOperationProcessOutput, &will, &in_place) == noErr);
     assert(will && in_place);
     /* WillDo is a startup query, not an IO-thread scope. */
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     assert(will_io(NULL, device, 7, 0, &will, &in_place) == kAudioHardwareBadObjectError);
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     AudioServerPlugInIOCycleInfo cycle = {0};
     float samples[2] = {0};
     assert(start_io(gDriver, device, 7) == noErr);
@@ -150,27 +175,27 @@ static void transport_identity(void) {
     assert(do_io(gDriver, device, device + 2, 7, 0, 1, NULL, samples, NULL) == kAudioHardwareBadObjectError);
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
     assert((*gDriver)->EndIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationWriteMix, 1, &cycle) == noErr);
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     /* Standalone DoIO and timestamp must clear every success/error return. */
     assert(do_io(gDriver, device, device + 2, 7, kAudioServerPlugInIOOperationWriteMix, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     assert(do_io(NULL, device, device + 2, 7, 0, 1, &cycle, samples, NULL) == kAudioHardwareBadObjectError);
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     assert(do_io(gDriver, device, device + 2, 7, 0, 1, &cycle, samples, NULL) == noErr);
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     Float64 sample = 0; UInt64 time = 0, seed = 0;
     assert(timestamp(gDriver, device, 7, &sample, &time, &seed) == kAudioHardwareIllegalOperationError);
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     assert(timestamp(NULL, device, 7, &sample, &time, &seed) == kAudioHardwareBadObjectError);
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     /* The Rust FFI entry points also scope IO when called without the bridge. */
     MRHALCoreTimestamp stamp = {0};
     assert(!mr_hal_core_timestamp(gCore, device, mach_absolute_time(), &stamp));
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     assert(!mr_hal_core_io(gCore, device, device + 2, true, 0, samples, 1));
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     assert(begin_io(NULL, device, 7, 0, 1, &cycle) == kAudioHardwareBadObjectError);
-    assert(transport_value() == kAudioDeviceTransportTypeUSB);
+    assert_control_transport();
     assert(stop_io(gDriver, device, 7) == noErr);
     property.mSelector = kAudioDevicePropertyDeviceIsAlive;
     assert(property_get(gDriver, device, getpid(), &property, 0, NULL, 4, &written, &value) == noErr);

@@ -348,6 +348,14 @@ fn device(snapshot: &Snapshot, address: &Address) -> Result<Value, i32> {
         b"nsrt" if address.scope == GLOBAL => Ok(rate(snapshot.sample_rate)),
         b"nsr#" if address.scope == GLOBAL => Ok(ranges()),
         b"ring" => Ok(number(crate::clock::TIMESTAMP_PERIOD)),
+        b"cust" if address.scope == GLOBAL => Ok(Value::Array(
+            [*b"mrdi", *b"mrdo"]
+                .into_iter()
+                .flat_map(|selector| [u32::from_be_bytes(selector), 0, 0])
+                .flat_map(u32::to_ne_bytes)
+                .collect(),
+            12,
+        )),
         b"cstb" => Ok(number(1)),
         b"dch2" if directional && channels >= 2 => Ok(Value::Inline(Inline::new(pair::<4, 8>(
             1_u32.to_ne_bytes(),
@@ -502,6 +510,18 @@ fn output_control(
     }
 }
 
+fn io_evidence(registry: &Registry, object: u32, address: &Address) -> Result<Value, i32> {
+    let device = registry.pin(object).ok_or(BAD_OBJECT)?;
+    if device.id != object || address.scope != GLOBAL {
+        return Err(UNKNOWN);
+    }
+    if address.selector == u32::from_be_bytes(*b"mrdi") {
+        Ok(number(u32::from(device.io_trace.enabled())))
+    } else {
+        Ok(Value::Struct(device.io_trace.snapshot()))
+    }
+}
+
 fn property(
     registry: &Registry,
     object: u32,
@@ -570,6 +590,9 @@ fn property(
     // for control (StopIO holds it while draining that thread's pin), so it is refused.
     if crate::transport::on_audio_thread() {
         return Err(ILLEGAL);
+    }
+    if [*b"mrdi", *b"mrdo"].contains(&address.selector.to_be_bytes()) {
+        return io_evidence(registry, object, address);
     }
     let snapshot = registry.snapshot(object).ok_or(BAD_OBJECT)?;
     if (object == snapshot.input_stream_id && snapshot.capture_channels == 0)
@@ -733,7 +756,7 @@ fn settable(registry: &Registry, object: u32, address: &Address) -> Result<bool,
     property(registry, object, address, None)?;
     Ok(matches!(
         &address.selector.to_be_bytes(),
-        b"nsrt" | b"sact" | b"sfmt" | b"pft " | b"lcsv" | b"lcdv" | b"bcvl"
+        b"nsrt" | b"sact" | b"sfmt" | b"pft " | b"lcsv" | b"lcdv" | b"bcvl" | b"mrdi"
     ))
 }
 
@@ -813,6 +836,18 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_set(
         return BAD_OBJECT;
     };
     let status = match &address.selector.to_be_bytes() {
+        b"mrdi" => {
+            let Ok(bytes) = <[u8; 4]>::try_from(bytes) else {
+                return BAD_SIZE;
+            };
+            let Some(device) = registry.pin(object) else {
+                return BAD_OBJECT;
+            };
+            let _control = crate::device::lock(&device.control);
+            let _freeze = device.freeze();
+            device.io_trace.set_enabled(u32::from_ne_bytes(bytes) != 0);
+            0
+        }
         b"lcsv" | b"lcdv" | b"bcvl" => {
             set_output_control(registry, object, address.selector, bytes)
         }

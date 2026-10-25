@@ -133,7 +133,7 @@ unsafe extern "C" fn io(
     _: u64,
     samples: *mut f32,
     frames: u32,
-) -> bool {
+) -> crate::io_outcome::IoOutcome {
     if PAUSE_IO.load(Ordering::Acquire) {
         IO_ENTERED.store(true, Ordering::Release);
         while !RELEASE_IO.load(Ordering::Acquire) {
@@ -148,7 +148,41 @@ unsafe extern "C" fn io(
             unsafe { *samples.add(index) = runtime.value };
         }
     }
-    true
+    crate::io_outcome::IoOutcome::completed(frames)
+}
+
+#[test]
+fn standalone_ffi_audio_entries_restore_the_callers_thread_scope() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 7, true), OK);
+    assert_eq!(fixture.registry.start(id, 7, 0), OK);
+    let registry = (&raw const *fixture.registry).cast_mut();
+    let mut samples = [0.25_f32; 2];
+    let mut timestamp = crate::abi::Timestamp::default();
+    assert!(!crate::transport::on_audio_thread());
+    assert!(unsafe {
+        crate::abi::mr_hal_core_io(
+            registry,
+            id,
+            id + 2,
+            true,
+            0,
+            samples.as_mut_ptr().cast(),
+            1,
+        )
+    });
+    assert!(!crate::transport::on_audio_thread());
+    assert!(unsafe { crate::abi::mr_hal_core_timestamp(registry, id, 0, &raw mut timestamp) });
+    assert!(!crate::transport::on_audio_thread());
+    assert!(!unsafe {
+        crate::abi::mr_hal_core_io(registry, id, id + 2, true, 0, std::ptr::null_mut(), 1)
+    });
+    assert!(!crate::transport::on_audio_thread());
+    assert!(!unsafe {
+        crate::abi::mr_hal_core_timestamp(std::ptr::null_mut(), id, 0, &raw mut timestamp)
+    });
+    assert!(!crate::transport::on_audio_thread());
 }
 
 #[test]

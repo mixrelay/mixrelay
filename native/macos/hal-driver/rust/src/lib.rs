@@ -13,6 +13,8 @@ mod device;
 mod input_latency;
 #[cfg(target_os = "macos")]
 mod inventory;
+mod io_outcome;
+mod io_trace;
 #[cfg(target_os = "macos")]
 mod native;
 mod output_control;

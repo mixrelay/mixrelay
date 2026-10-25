@@ -180,7 +180,8 @@ export async function runNativeAudioCases({ measure, finalize, directory,
 export function macosProbeCommand(bundle, directory, uid) {
   const args = ['-W', '-n', '-g', '--stdout', join(directory, 'native-probe.stdout.json'),
     '--stderr', join(directory, 'native-probe.stderr.log'), bundle, '--args', '--json', '--timing',
-    '--capture-file', join(directory, 'native-signal.f32'), '--seconds', '3', '--channels', '2', uid];
+    '--capture-file', join(directory, 'native-signal.f32'),
+    '--hal-trace-file', join(directory, 'native-hal-io.json'), '--seconds', '3', '--channels', '2', uid];
   return { program: 'open', args, timeout: 60000 };
 }
 

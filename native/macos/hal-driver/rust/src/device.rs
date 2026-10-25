@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering}
 use std::sync::{Mutex, MutexGuard};
 
 use crate::abi::{Geometry, NativeOps, Snapshot};
+use crate::io_trace::{IoTrace, Observation};
 
 pub(crate) type ConversionScratch = [Box<[f32]>; 2];
 
@@ -57,6 +58,7 @@ pub(crate) struct Device {
     pub output_active: AtomicBool,
     pub input_latency: crate::input_latency::InputLatency,
     pub output_control: crate::output_control::OutputControl,
+    pub io_trace: IoTrace,
     pub capture_format: NativeStream,
     pub render_format: NativeStream,
     pub control: Mutex<Control>,
@@ -79,8 +81,9 @@ impl Device {
         name: String,
         rate: u32,
         native_runtime: (NativeOps, *mut c_void),
-    ) -> Self {
-        Self {
+    ) -> Result<Self, std::collections::TryReserveError> {
+        let io_trace = IoTrace::new()?;
+        Ok(Self {
             id,
             endpoint: geometry.endpoint_id,
             uid: endpoint_uid(geometry.endpoint_id),
@@ -93,6 +96,7 @@ impl Device {
             output_active: AtomicBool::new(true),
             input_latency: crate::input_latency::InputLatency::default(),
             output_control: crate::output_control::OutputControl::default(),
+            io_trace,
             capture_format: NativeStream::new(),
             render_format: NativeStream::new(),
             control: Mutex::new(Control {
@@ -108,7 +112,7 @@ impl Device {
             runtime: AtomicPtr::new(native_runtime.1),
             frozen: AtomicBool::new(false),
             io_readers: AtomicUsize::new(0),
-        }
+        })
     }
 
     pub(crate) fn snapshot(&self) -> Snapshot {
@@ -250,7 +254,20 @@ impl Device {
                 self.output_control
                     .apply(unsafe { std::slice::from_raw_parts_mut(samples.cast::<f32>(), count) });
             }
-            return unsafe { (self.native.io)(runtime, render, frame, samples.cast(), frames) };
+            // SAFETY: the IO pin fixes the native runtime and the caller's buffer.
+            let outcome =
+                unsafe { (self.native.io)(runtime, render, frame, samples.cast(), frames) };
+            if self.io_trace.enabled() {
+                // SAFETY: the Float32 buffer has count initialized samples after native IO.
+                self.io_trace.record(Observation {
+                    render,
+                    frame,
+                    channels: channels as usize,
+                    samples: unsafe { std::slice::from_raw_parts(samples.cast::<f32>(), count) },
+                    outcome,
+                });
+            }
+            return outcome.accepted;
         }
         stream.with_scratch(count, |scratch| {
             // SAFETY: ReadInput/WriteMix supply count native interleaved samples. Integer
@@ -267,8 +284,10 @@ impl Device {
                 }
                 self.output_control.apply(scratch);
                 unsafe { (self.native.io)(runtime, true, frame, scratch.as_mut_ptr(), frames) }
+                    .accepted
             } else {
                 (unsafe { (self.native.io)(runtime, false, frame, scratch.as_mut_ptr(), frames) })
+                    .accepted
                     && format.encode(scratch, bytes)
             }
         })

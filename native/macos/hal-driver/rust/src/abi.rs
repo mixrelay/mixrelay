@@ -77,7 +77,8 @@ pub(crate) struct NativeOps {
     pub remaining_client: unsafe extern "C" fn(*mut c_void),
     pub set_rate: unsafe extern "C" fn(*mut c_void, u32) -> bool,
     pub timestamp: unsafe extern "C" fn(*mut c_void, u64, *mut Timestamp) -> bool,
-    pub io: unsafe extern "C" fn(*mut c_void, bool, u64, *mut f32, u32) -> bool,
+    pub io:
+        unsafe extern "C" fn(*mut c_void, bool, u64, *mut f32, u32) -> crate::io_outcome::IoOutcome,
     pub requires_replacement: unsafe extern "C" fn(*mut c_void) -> bool,
     pub same_transport: unsafe extern "C" fn(*mut c_void, i32, usize) -> bool,
 }
