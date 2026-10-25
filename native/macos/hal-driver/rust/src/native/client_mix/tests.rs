@@ -12,7 +12,6 @@ fn mixer(render: u32, capture: u32) -> ClientMix {
     .unwrap();
     for id in [42, 43, 44] {
         assert!(mixer.register(id));
-        assert!(mixer.set_active(id, true));
     }
     mixer
 }
@@ -49,7 +48,7 @@ fn a_prepared_client_output_survives_missing_postmix_cycles_and_different_captur
 }
 
 #[test]
-fn overlapping_clients_mix_once_and_one_clients_restart_cannot_replay_or_reset_its_peer() {
+fn overlapping_clients_mix_once_and_registration_reuse_cannot_replay_or_reset_its_peer() {
     let mut mixer = mixer(2, 4);
     assert!(mixer.render(42, 100, &[0.125; 16], 8).accepted);
     assert!(mixer.render(43, 100, &[0.25; 16], 8).accepted);
@@ -60,8 +59,8 @@ fn overlapping_clients_mix_once_and_one_clients_restart_cannot_replay_or_reset_i
             .chunks_exact(4)
             .all(|frame| frame == [0.375, 0.375, 0.0, 0.0])
     );
-    assert!(mixer.set_active(43, false));
-    assert!(mixer.set_active(43, true));
+    mixer.remove(43);
+    assert!(mixer.register(43));
     assert_eq!(mixer.capture(100, &mut output, 8).available, 8);
     assert!(
         output
@@ -85,14 +84,14 @@ fn overlapping_clients_mix_once_and_one_clients_restart_cannot_replay_or_reset_i
 }
 
 #[test]
-fn a_missing_contribution_is_not_reported_as_a_complete_mix_or_filled_with_old_pcm() {
+fn a_finished_client_supplies_zero_beyond_its_window_while_its_peer_continues() {
     let mixer = mixer(2, 2);
     assert!(mixer.render(42, 0, &[0.125; 16], 8).accepted);
     assert!(mixer.render(43, 0, &[0.25; 8], 4).accepted);
     let mut output = [9.0; 16];
     let outcome = mixer.capture(0, &mut output, 8);
     assert!(outcome.accepted);
-    assert_eq!(outcome.available, 4);
+    assert_eq!(outcome.available, 8);
     assert_eq!(
         output.map(f32::to_bits),
         [
@@ -108,7 +107,7 @@ fn a_missing_contribution_is_not_reported_as_a_complete_mix_or_filled_with_old_p
 }
 
 #[test]
-fn replacement_preserves_registration_and_activity_but_starts_an_empty_pcm_timeline() {
+fn replacement_preserves_registration_but_starts_an_empty_pcm_timeline() {
     let mixer = mixer(2, 2);
     assert!(mixer.render(42, 0, &[0.5; 16], 8).accepted);
     let replacement = mixer.replacement(mixer.geometry(), 16_384).unwrap();

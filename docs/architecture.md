@@ -91,11 +91,15 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 `GraphApplicationQueue`는 확인한 문서·사용자 초안·변경 요청의 순서를 소유한다.
 조회 결과는 큐가 선택·취소 상태를 다시 확인한 뒤 화면에 전달한다.
 
-HAL의 `ClientMix`는 등록된 클라이언트별 PCM 큐와 시작·정지·제거·교체 수명을 소유한다.
+HAL의 `ClientMix`는 등록된 클라이언트별 PCM 큐와 등록·제거·교체 수명을 소유한다.
 `MixOutput`은 해당 클라이언트의 canonical Float32 출력을 큐에 게시하고, `ReadInput`은 같은
-장치 sample 좌표에서 활성 큐를 한 번씩 합산한다. 입력의 네이티브 정수 변환과 출력 볼륨·mute는
-`Device::process_io`가 맡는다. `ClientChange`와 `Transfer`는 수명 변경과 PCM 전송을 구분한다.
+장치 sample 좌표에서 게시된 큐를 한 번씩 합산한다. 큐의 게시 범위를 벗어난 프레임은 0을 더하며
+다른 클라이언트의 공급을 기다리지 않는다. 입력의 네이티브 정수 변환과 출력 볼륨·mute는
+`Device::process_io`가 맡는다. `ClientChange`와 `Transfer`는 등록 변경과 PCM 전송을 구분한다.
 제어 소유자는 `Device::freeze`로 콜백을 회수한 동안만 큐를 할당·교체·폐기한다.
+`Registry`는 장치의 시작 참조를 세고 최초 시작·최종 종료를 네이티브 런타임에 요청한다.
+최초 시작은 모든 큐의 PCM 타임라인을 초기화한다. 다른 클라이언트의 시작·정지는 게시된 PCM을
+지우지 않으며, 등록된 출력 클라이언트가 직접 StartIO를 받아야 한다는 조건을 두지 않는다.
 
 `HalIoContext`는 기존 공유 매핑의 클럭·epoch·producer activity를 게시한다.
 공유 PCM 링은 현재 매핑 형식의 수명 메타데이터를 보존하며 클라이언트 PCM의 저장소로 사용하지 않는다.

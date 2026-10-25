@@ -520,23 +520,9 @@ impl Registry {
             return CAPACITY;
         }
         let frozen = device.freeze();
-        let runtime = device.runtime.load(Ordering::Acquire);
-        if !unsafe {
-            self.native
-                .update_client(runtime, client, crate::io_outcome::ClientChange::Activate)
-        } {
-            return NATIVE_ERROR;
-        }
         if count == 0
             && !unsafe { (self.native.start)(device.runtime.load(Ordering::Acquire), now) }
         {
-            unsafe {
-                self.native.update_client(
-                    runtime,
-                    client,
-                    crate::io_outcome::ClientChange::Deactivate,
-                )
-            };
             return NATIVE_ERROR;
         }
         *running = true;
@@ -566,15 +552,6 @@ impl Registry {
         let count = device.running.load(Ordering::Acquire) - 1;
         if device.alive.load(Ordering::Acquire) {
             let runtime = device.runtime.load(Ordering::Acquire);
-            if !unsafe {
-                self.native.update_client(
-                    runtime,
-                    client,
-                    crate::io_outcome::ClientChange::Deactivate,
-                )
-            } {
-                return NATIVE_ERROR;
-            }
             if count == 0 {
                 unsafe { (self.native.stop)(runtime) };
             } else {

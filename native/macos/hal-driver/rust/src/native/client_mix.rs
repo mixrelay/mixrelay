@@ -88,7 +88,6 @@ impl Drop for Queue {
 
 struct Client {
     id: u32,
-    active: bool,
     rendered: AtomicBool,
     queue: Option<Queue>,
 }
@@ -141,7 +140,6 @@ impl ClientMix {
         };
         self.clients.push(Client {
             id,
-            active: false,
             rendered: AtomicBool::new(false),
             queue,
         });
@@ -154,32 +152,26 @@ impl ClientMix {
         }
     }
 
-    pub(super) fn set_active(&mut self, id: u32, active: bool) -> bool {
-        let Some(client) = self.clients.iter_mut().find(|client| client.id == id) else {
-            return false;
-        };
-        if active
-            && let Some(queue) = &client.queue
-            && !queue.begin()
-        {
-            let Some(queue) = Queue::new(self.capacity, self.geometry.render_channels) else {
-                return false;
-            };
-            if !queue.begin() {
-                return false;
+    pub(super) fn begin_device_io(&mut self) -> bool {
+        for client in &mut self.clients {
+            if let Some(queue) = &client.queue
+                && !queue.begin()
+            {
+                let Some(queue) = Queue::new(self.capacity, self.geometry.render_channels) else {
+                    return false;
+                };
+                client.queue = Some(queue);
             }
-            client.queue = Some(queue);
+            // Device control excludes callbacks while opening the new timeline.
+            client.rendered.store(false, Ordering::Relaxed);
         }
-        client.active = active;
-        // Control excludes callbacks, so the next render publication starts this client afresh.
-        client.rendered.store(false, Ordering::Relaxed);
         true
     }
 
     pub(super) fn replacement(&self, geometry: Geometry, capacity: u32) -> Option<Self> {
         let mut next = Self::new(geometry, capacity)?;
         for client in &self.clients {
-            if !next.register(client.id) || !next.set_active(client.id, client.active) {
+            if !next.register(client.id) {
                 return None;
             }
         }
@@ -199,11 +191,7 @@ impl ClientMix {
         {
             return IoOutcome::default();
         }
-        let Some(client) = self
-            .clients
-            .iter()
-            .find(|candidate| candidate.id == client && candidate.active)
-        else {
+        let Some(client) = self.clients.iter().find(|candidate| candidate.id == client) else {
             return IoOutcome::default();
         };
         if samples.len() != frames as usize * self.geometry.render_channels as usize
@@ -236,18 +224,18 @@ impl ClientMix {
         let mut sources = self
             .clients
             .iter()
-            .filter(|client| client.active && client.rendered.load(Ordering::Acquire));
+            .filter(|client| client.rendered.load(Ordering::Acquire));
         let Some(first) = sources.next().and_then(|client| client.queue.as_ref()) else {
             return IoOutcome::completed(0);
         };
-        let mut complete = [true; crate::formats::MAX_BUFFER_FRAMES];
+        let mut available = [false; crate::formats::MAX_BUFFER_FRAMES];
         let mut scratch = [0.0; 64];
         let render_channels = self.geometry.render_channels as usize;
         let mut mix = |queue: &Queue| {
             for (index, destination) in output.chunks_exact_mut(channels).enumerate() {
                 let supplied =
                     queue.read(frame + index as u64, &mut scratch[..render_channels], 1) == 1;
-                complete[index] &= supplied;
+                available[index] |= supplied;
                 for (destination, sample) in destination.iter_mut().zip(&scratch[..render_channels])
                 {
                     *destination += sample;
@@ -264,7 +252,7 @@ impl ClientMix {
             }
         }
         IoOutcome::completed(
-            complete[..frames as usize]
+            available[..frames as usize]
                 .iter()
                 .fold(0_u32, |count, valid| count + u32::from(*valid)),
         )

@@ -203,7 +203,10 @@ unsafe extern "C" fn replace(
 unsafe extern "C" fn start(runtime: *mut c_void, now: u64) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     let mut clock = runtime.clock.clone();
-    if !clock.start(now) || !unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) } {
+    if !clock.start(now)
+        || !runtime.clients.begin_device_io()
+        || !unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) }
+    {
         return false;
     }
     runtime.clock = clock;
@@ -325,10 +328,6 @@ unsafe extern "C" fn client(runtime: *mut c_void, client: u32, action: u32) -> b
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     match crate::io_outcome::ClientChange::from_raw(action) {
         Some(crate::io_outcome::ClientChange::Register) => runtime.clients.register(client),
-        Some(crate::io_outcome::ClientChange::Activate) => runtime.clients.set_active(client, true),
-        Some(crate::io_outcome::ClientChange::Deactivate) => {
-            runtime.clients.set_active(client, false)
-        }
         Some(crate::io_outcome::ClientChange::Remove) => {
             runtime.clients.remove(client);
             true

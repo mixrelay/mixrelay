@@ -127,6 +127,36 @@ fn pcm(fixture: &super::Fixture, device: u32, render: bool, frame: u64, value: f
 }
 
 #[test]
+fn registered_output_client_can_supply_pcm_while_another_client_holds_device_io() {
+    let fixture = native_fixture();
+    let transport = Transport::new(10, 2, 2);
+    let id = transport.add(&fixture, "Separate IO and output clients", 48_000);
+    assert_eq!(fixture.registry.client(id, 43, true), OK);
+    assert_eq!(fixture.registry.start(id, 43, 1), OK);
+    // A new output client may arrive after the device has already started.
+    assert_eq!(fixture.registry.client(id, 42, true), OK);
+    pcm(&fixture, id, true, 0, 0.25);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.25_f32.to_bits(); 64]);
+    // A balanced Start/Stop on the output client cannot erase committed PCM
+    // while another client still holds the device's IO lifetime.
+    assert_eq!(fixture.registry.start(id, 42, 2), OK);
+    assert_eq!(fixture.registry.stop(id, 42), OK);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.25_f32.to_bits(); 64]);
+    assert_eq!(fixture.registry.client(id, 42, false), OK);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.9), [0; 64]);
+    assert_eq!(fixture.registry.client(id, 42, true), OK);
+    pcm(&fixture, id, true, 32, 0.5);
+    assert_eq!(pcm(&fixture, id, false, 32, 0.0), [0.5_f32.to_bits(); 64]);
+    assert_eq!(fixture.registry.stop(id, 43), OK);
+    assert_eq!(pcm(&fixture, id, false, 32, 0.9), [0; 64]);
+    assert_eq!(fixture.registry.start(id, 43, 3), OK);
+    // The first device start opens a new timeline for every registered queue.
+    assert_eq!(pcm(&fixture, id, false, 32, 0.9), [0; 64]);
+    pcm(&fixture, id, true, 0, 0.75);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.75_f32.to_bits(); 64]);
+}
+
+#[test]
 fn callback_evidence_distinguishes_missing_capture_from_published_digital_silence() {
     let fixture = native_fixture();
     let transport = Transport::new(10, 2, 2);

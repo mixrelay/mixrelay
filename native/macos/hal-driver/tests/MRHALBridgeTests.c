@@ -387,6 +387,8 @@ static void input_latency_requester(void) {
     mr_hal_core_destroy(gCore); gCore = NULL;
 }
 
+#include "MRHALBridgePCMTests.h"
+
 int main(void) {
     assert(MixRelayHAL_Create(NULL, NULL) == NULL);
     assert(MixRelayHAL_Create(NULL, kAudioServerPlugInTypeUUID) == gDriver);
@@ -415,6 +417,7 @@ int main(void) {
     assert(latency_notice.address.scope == kAudioObjectPropertyScopeInput);
     transport_identity();
     input_latency_requester();
-    puts("PASS HAL COM lifetime, transport and latency PID forwarding, copied and nullable bundle identity, balanced IO scopes");
+    registered_client_pcm();
+    puts("PASS HAL COM lifetime, transport and latency PID forwarding, copied and nullable bundle identity, balanced IO scopes, registered client PCM");
     return 0;
 }

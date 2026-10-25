@@ -131,3 +131,21 @@ Loopback 후속 절차 분석에서도 모든 클라이언트의 완료를 기�
 ARK의 출력 큐는 process 단위이고 client ID로 클럭을 고른다. daemon은 각 큐를 한 번 읽고 합산하며
 늦은 PCM을 이전 입력에 복구하지 않는다. 큐 frontier는 PCM add보다 먼저 게시된다.
 이 구조에서 임의의 대기·768프레임 지연을 MixRelay에 복사하지 않았다.
+
+`646d223` 설치본의 실행 [40229099074](https://github.com/mixrelay/mixrelay/actions/runs/40229099074)에서
+macOS 14 ARM의 출력 431회·432회가 각각 모두 거절됐다. macOS 15 ARM에서는 신규 설치의 client
+253 출력 1642회가 수락되고 261 출력 409회가 거절됐으며, 업그레이드도 client별 차이가 같다.
+이 설치본은 PCM·녹음 검증에 실패했다. 추가한 합성 회귀 시험에서도 한 client가 장치를 시작한 뒤
+새로 등록된 다른 client가 출력하면 `ClientMix`의 client별 active 조건에서 실패한다.
+
+ARK의 StartIO·StopIO trampoline과 shim은 client 인자를 장치에 전달하지 않는다.
+장치는 시작 참조 수를 관리하고, MixOutput은 AddDeviceClient로 등록된 ID의 context를 조회한다.
+BeginIO의 thread hook은 비어 있고 EndIO도 active 상태를 변경하지 않는다. 출력이 끝난 큐는
+게시 범위 이후 0을 공급하며, client별 필수 기여 집합은 없다. 이는 기존 ARK export의
+0xe410·0xd0b8·0xc1dc·0x5118과 0xb750·0x1349c·0x151d0·0x1a260에서 확인했다.
+
+수정본은 장치 실행 수명과 출력 등록을 분리한다. 실제 Rust 네이티브 런타임의 회귀 시험은
+직접 StartIO를 받지 않은 등록 client의 출력, 다른 client가 실행 중일 때의 시작·정지,
+제거·재등록, 장치 전체 재시작 후 이전 PCM 폐기를 검증한다. C SDK 시험도 가짜 PCM 콜백을
+거치지 않고 실제 Rust 큐에 연결해 같은 순서를 확인한다. 이 시험은 익명 공유 메모리만 쓰며
+시스템 장치 등록·실제 오디오 스트림을 사용하지 않는다. 수정본의 설치 검증은 아직 필요하다.
