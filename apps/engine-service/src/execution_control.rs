@@ -72,10 +72,7 @@ impl EngineGraphController {
         catalog: Option<&Catalog>,
         context: CompileContext,
     ) -> Result<ComposedGraph, ProtocolError> {
-        if !self
-            .execution_enabled
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if !self.power.enabled() {
             return compose_catalog(
                 &[],
                 CatalogExecutionContext {

@@ -236,9 +236,7 @@ mod tests {
                 .observed
                 >= first
         );
-        controller
-            .execution_enabled
-            .store(false, std::sync::atomic::Ordering::Release);
+        controller.power.set_enabled(false);
         let state = controller.telemetry_state().unwrap();
         assert!(!state.status.engine_power.unwrap().enabled);
         assert!(!controller.telemetry_status.lock().as_ref().unwrap().enabled);

@@ -13,10 +13,7 @@ const RETRY_COOLDOWN: Duration = Duration::from_secs(2);
 impl EngineGraphController {
     /// Reports failures only for enabled processors in the currently active execution view.
     pub(crate) fn failed_processor_status(&self) -> Vec<FailedProcessor> {
-        if !self
-            .execution_enabled
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if !self.power.enabled() {
             return Vec::new();
         }
         let revision = self.exchange.plan_revisions().active;
@@ -59,10 +56,7 @@ impl EngineGraphController {
             self.read_catalog()?.catalog_revision,
         )?;
         let instance_id = parse_instance_id(&request.expected_instance_id)?;
-        if !self
-            .execution_enabled
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if !self.power.enabled() {
             return Err(node_error(
                 ErrorCode::NodeDisabled,
                 &request.graph_id,

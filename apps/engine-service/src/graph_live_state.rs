@@ -99,9 +99,7 @@ impl EngineGraphController {
             let unavailable_worker =
                 previous.ports.is_some() && !self.processor_controls.has_worker(&runtime_id);
             if unavailable_worker
-                && self
-                    .execution_enabled
-                    .load(std::sync::atomic::Ordering::Acquire)
+                && self.power.enabled()
                 && changes
                     .iter()
                     .any(|change| change.node_id == node.id.as_str())
@@ -113,9 +111,7 @@ impl EngineGraphController {
             }
             if excluded == Some(&runtime_id) {
                 provider.parameters.clone_from(&previous.parameters);
-            } else if self
-                .execution_enabled
-                .load(std::sync::atomic::Ordering::Acquire)
+            } else if self.power.enabled()
                 && !unavailable_worker
                 && (!restoring || self.provider_is_running(&runtime_id))
             {

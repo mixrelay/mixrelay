@@ -297,7 +297,7 @@ impl EngineGraphController {
 
     pub(super) fn with_graph_catalog_path(mut self, path: PathBuf) -> Self {
         // A paused engine restores its graph without claiming audio.
-        self.restore_saved_pause(&path);
+        self.power.restore(&path);
         let loaded = Catalog::load(&path);
         let protected = match &loaded {
             Ok(Some(catalog)) => self
@@ -509,7 +509,7 @@ impl EngineGraphController {
         self.catalog_write_error
             .lock()
             .clone()
-            .or_else(|| self.pause_save_warning.lock().clone())
+            .or_else(|| self.power.warning())
             .or_else(|| self.node_control_warning.lock().clone())
     }
 

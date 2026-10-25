@@ -30,10 +30,7 @@ impl EngineGraphController {
         &self,
         node_id: Option<&str>,
     ) -> Result<(), ProtocolError> {
-        if !self
-            .execution_enabled
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if !self.power.enabled() {
             return Ok(());
         }
         if node_id.is_none() && self.catalog_restore.lock().is_some() {

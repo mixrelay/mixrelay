@@ -203,7 +203,7 @@ fn powered_off_provider_preserves_preset_and_accepts_explicit_parameter_delta() 
         ));
     }
     let (engine, _) = parameter_fixture(document);
-    engine.execution_enabled.store(false, Ordering::Release);
+    engine.power.set_enabled(false);
     let mut proposed = engine.graph();
     proposed.revision += 1;
     let expected = provider_parameters(&proposed).clone();

@@ -903,9 +903,7 @@ fn off_and_applied_control_changes_invalidate_the_cached_reading_immediately() {
             .iter()
             .any(|node| node.dynamics.is_some())
     );
-    engine
-        .execution_enabled
-        .store(false, std::sync::atomic::Ordering::Release);
+    engine.power.set_enabled(false);
     assert!(
         engine
             .meter_snapshot_at(now)
@@ -913,9 +911,7 @@ fn off_and_applied_control_changes_invalidate_the_cached_reading_immediately() {
             .iter()
             .all(|node| node.dynamics.is_none())
     );
-    engine
-        .execution_enabled
-        .store(true, std::sync::atomic::Ordering::Release);
+    engine.power.set_enabled(true);
     assert!(
         engine
             .meter_snapshot_at(now)

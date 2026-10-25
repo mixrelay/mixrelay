@@ -6,6 +6,7 @@ use std::{
 use parking_lot::{Mutex, RwLock};
 pub mod crash_guard;
 mod engine_power;
+mod execution_choice;
 mod feature_policy;
 mod meter_snapshot;
 mod node_control;
@@ -375,13 +376,9 @@ enum PrepareProcessorError {
 
 pub struct EngineGraphController {
     paid_access: Arc<dyn Fn() -> bool + Send + Sync>,
-    execution_enabled: std::sync::atomic::AtomicBool,
+    power: execution_choice::ExecutionChoice,
     /// Random identity of this engine run; telemetry from a replaced engine never mixes in.
     incarnation: String,
-    /// Marks a pause that must outlive the service; set with the durable catalog.
-    saved_pause: Option<std::path::PathBuf>,
-    /// The engine paused itself after ending unexpectedly several times; cleared by Resume.
-    paused_after_failures: std::sync::atomic::AtomicBool,
     node_control_warning: Mutex<Option<String>>,
     recorders: recorder_sessions::RecorderSessions,
     exchange: Arc<ProcessorExchange>,
@@ -393,8 +390,6 @@ pub struct EngineGraphController {
     verified_catalog_state_refs:
         Mutex<std::collections::BTreeSet<mixrelay_processor_state::StateRef>>,
     catalog_write_error: Mutex<Option<String>>,
-    /// Kept apart from catalog saves, which clear their own warning on success.
-    pause_save_warning: Mutex<Option<String>>,
     catalog_restore: Mutex<Option<graph_catalog::PendingRestore>>,
     required_endpoint_node_id: Option<NodeId>,
     endpoint_backend: Arc<dyn VirtualEndpointBackend>,
@@ -487,10 +482,8 @@ impl EngineGraphController {
         let controller = Self {
             paid_access,
             node_control_warning: Mutex::new(None),
-            execution_enabled: std::sync::atomic::AtomicBool::new(true),
+            power: execution_choice::ExecutionChoice::new(),
             incarnation: new_incarnation(),
-            saved_pause: None,
-            paused_after_failures: std::sync::atomic::AtomicBool::new(false),
             recorders: recorder_sessions::RecorderSessions::new(recorders.clone()),
             exchange,
             factory: Arc::new(BuiltInProcessorFactory {
@@ -512,7 +505,6 @@ impl EngineGraphController {
             catalog: Mutex::new(None),
             verified_catalog_state_refs: Mutex::new(std::collections::BTreeSet::new()),
             catalog_write_error: Mutex::new(None),
-            pause_save_warning: Mutex::new(None),
             catalog_restore: Mutex::new(None),
             required_endpoint_node_id,
             endpoint_backend,
@@ -735,9 +727,7 @@ impl ControlBackend for EngineGraphController {
                 | mixrelay_audio_recorder::RecorderAction::Pause
         ) {
             let graph = self.catalog_document_locked(graph_id)?;
-            if !self
-                .execution_enabled
-                .load(std::sync::atomic::Ordering::Acquire)
+            if !self.power.enabled()
                 || !graph
                     .nodes
                     .iter()
@@ -1045,9 +1035,7 @@ impl EngineGraphController {
         }
         let runtime_id =
             graph_composition::runtime_node_id(&self.view_graph_id(), &NodeId::from(node_id));
-        if !self
-            .execution_enabled
-            .load(std::sync::atomic::Ordering::Acquire)
+        if !self.power.enabled()
             || !self
                 .graph
                 .read()
@@ -1090,7 +1078,7 @@ impl EngineGraphController {
         drop(graph);
         let persistence_error = self
             .persist_parameter_document(&document)
-            .or_else(|| self.pause_save_warning.lock().clone());
+            .or_else(|| self.power.warning());
         Ok(ProcessorParameterUpdateResponse {
             protocol_version: PROTOCOL_VERSION,
             node_id: node_id.to_owned(),
@@ -1221,7 +1209,6 @@ impl EngineGraphController {
 
 impl EngineGraphController {
     fn meter_snapshot_at(&self, now: std::time::Instant) -> MeterSnapshot {
-        use std::sync::atomic::Ordering;
         let catalog = self.catalog.lock();
         let graph_id = catalog
             .as_ref()
@@ -1239,14 +1226,14 @@ impl EngineGraphController {
             plan_revision: revisions.active,
             submitted_revision: revisions.submitted,
             applied_revision,
-            enabled: self.execution_enabled.load(Ordering::Acquire),
+            enabled: self.power.enabled(),
         };
         let valid = || {
             self.exchange.plan_revisions() == revisions
                 && view.is_none_or(|view| {
                     revisions.active.max(view.controls.applied_revision()) == applied_revision
                 })
-                && self.execution_enabled.load(Ordering::Acquire) == key.enabled
+                && self.power.enabled() == key.enabled
         };
         self.meter_publisher.lock().read(
             now,
@@ -1590,10 +1577,7 @@ impl EngineGraphController {
     }
 
     fn external_processor_node(&self, node_id: &str) -> Result<NodeId, ProtocolError> {
-        if !self
-            .execution_enabled
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if !self.power.enabled() {
             return Err(node_control::node_error(
                 ErrorCode::NodeDisabled,
                 &self.view_graph_id(),

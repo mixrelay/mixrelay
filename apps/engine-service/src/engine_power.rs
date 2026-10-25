@@ -1,20 +1,8 @@
 //! Execution is independent of authored documents and control-service lifetime.
 //! Empty publication uses the same acknowledged resource handoff as graph edits.
-use std::{
-    io,
-    path::Path,
-    sync::atomic::{AtomicBool, Ordering},
-};
-
 use mixrelay_control_protocol::{EnginePowerStatus, GraphApplyResponse, GraphApplyState};
 
 use crate::{EngineGraphController, ProtocolError, session_error};
-
-/// A pause outlives the service: a restarted or rebooted engine stays paused until
-/// Resume. Running is the default, so Resume removes the marker.
-const SAVED_PAUSE: &str = "engine-paused.json";
-/// Saved with a pause the engine chose after repeated unexpected ends.
-const REPEATED_FAILURES: &str = "repeatedFailures";
 
 impl EngineGraphController {
     /// Starts paused because the service's crash guard found repeated unexpected ends.
@@ -22,86 +10,25 @@ impl EngineGraphController {
     #[must_use]
     pub fn after_repeated_failures(self, tripped: bool) -> Self {
         if tripped {
-            self.execution_enabled.store(false, Ordering::Release);
-            self.paused_after_failures.store(true, Ordering::Release);
+            self.power.pause_after_failures();
         }
         self
     }
 
-    pub(super) fn restore_saved_pause(&mut self, catalog: &Path) {
-        let marker = catalog.with_file_name(SAVED_PAUSE);
-        if marker.exists() {
-            tracing::info!("engine stays paused from the previous session");
-            self.execution_enabled = AtomicBool::new(false);
-            // The reason stays until Resume, across restarts; an unreadable one is dropped,
-            // never the pause itself.
-            let saved: serde_json::Value = std::fs::read(&marker)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-                .unwrap_or_default();
-            if saved["reason"] == REPEATED_FAILURES {
-                self.paused_after_failures = AtomicBool::new(true);
-            }
-        }
-        self.saved_pause = Some(marker);
-        if self.paused_after_failures.load(Ordering::Acquire) {
-            // Like a user pause: the graph is restored without audio until Resume.
-            self.persist_pause(false);
-        }
-    }
-
-    fn save_pause(&self, enabled: bool) -> io::Result<()> {
-        let Some(marker) = &self.saved_pause else {
-            return Ok(());
-        };
-        if !enabled {
-            let mut saved = serde_json::json!({ "enabled": false });
-            if self.paused_after_failures.load(Ordering::Acquire) {
-                saved["reason"] = REPEATED_FAILURES.into();
-            }
-            return crate::persistence::stage_json(marker, &saved)
-                .and_then(crate::persistence::StagedWrite::commit);
-        }
-        match std::fs::remove_file(marker) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            removed => removed,
-        }
-    }
-
-    /// A failed save is reported with the other save warnings and retried by control
-    /// maintenance until storage accepts it.
-    fn persist_pause(&self, enabled: bool) {
-        let mut warning = self.pause_save_warning.lock();
-        match self.save_pause(enabled) {
-            Ok(()) if warning.take().is_some() => {
-                tracing::info!(enabled, "engine pause choice saved after retry");
-            }
-            Ok(()) => {}
-            Err(error) => {
-                if warning.is_none() {
-                    tracing::error!(%error, enabled, "engine pause choice was not saved");
-                }
-                *warning = Some(format!("engine pause: {error}"));
-            }
-        }
-    }
-
     pub(super) fn retry_pause_save(&self) {
-        if self.pause_save_warning.lock().is_none() {
+        if !self.power.unsaved() {
             return;
         }
         // Serialized with power changes, so a retry cannot save a superseded choice.
         let _mutation = self.mutation.lock();
-        self.persist_pause(self.execution_enabled.load(Ordering::Acquire));
+        self.power.persist(self.power.enabled());
     }
 
     pub(super) fn preview_engine_start(
         &self,
     ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
         let _mutation = self.mutation.lock();
-        if self.execution_enabled.load(Ordering::Acquire)
-            || self.engine_power_status().transitioning
-        {
+        if self.power.enabled() || self.engine_power_status().transitioning {
             return Err(session_error("engine must be off before start preflight"));
         }
         let mut document = self.graph.read().clone();
@@ -117,15 +44,14 @@ impl EngineGraphController {
         crate::execution_control::composed_capture_manifest(&composed)
     }
     pub(super) fn engine_power_status(&self) -> EnginePowerStatus {
-        let enabled = self.execution_enabled.load(Ordering::Acquire);
+        let enabled = self.power.enabled();
         let revisions = self.exchange.revisions();
         EnginePowerStatus {
             enabled,
             transitioning: revisions.active != revisions.submitted
                 || (!enabled && !self.graph_resources.execution_released()),
-            unsaved: self.pause_save_warning.lock().is_some(),
-            pause_reason: (!enabled && self.paused_after_failures.load(Ordering::Acquire))
-                .then_some(mixrelay_control_protocol::EnginePauseReason::RepeatedFailures),
+            unsaved: self.power.unsaved(),
+            pause_reason: self.power.pause_reason(enabled),
         }
     }
 
@@ -135,7 +61,7 @@ impl EngineGraphController {
         expected_revision: Option<u64>,
     ) -> Result<GraphApplyResponse, ProtocolError> {
         let _mutation = self.mutation.lock();
-        let previous = self.execution_enabled.load(Ordering::Acquire);
+        let previous = self.power.enabled();
         let revisions = self.exchange.revisions();
         if expected_revision.is_some_and(|expected| expected != revisions.submitted) {
             return Err(session_error("engine power preflight is stale"));
@@ -171,23 +97,23 @@ impl EngineGraphController {
         if !enabled {
             self.recorders.suspend()?;
         }
-        self.execution_enabled.store(enabled, Ordering::Release);
+        self.power.set_enabled(enabled);
         let context = *self.context.read();
         // The choice is saved once published, before recorder resume can fail.
         let result = self
             .publish_graph_context(document, catalog, context, enabled)
             .map(|mut response| {
-                self.persist_pause(enabled);
+                self.power.persist(enabled);
                 response.persistence_error = self.graph_persistence_warning();
                 response
             });
         if result.is_err() {
-            self.execution_enabled.store(previous, Ordering::Release);
+            self.power.set_enabled(previous);
             if !enabled {
                 self.recorders.resume()?;
             }
         } else if enabled {
-            self.paused_after_failures.store(false, Ordering::Release);
+            self.power.clear_failure_reason();
             self.recorders.resume()?;
         }
         if let Some(error) = checkpoint_error {
@@ -205,7 +131,7 @@ impl EngineGraphController {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::execution_choice::SAVED_PAUSE;
     use mixrelay_audio_graph::GraphDocument;
     use mixrelay_audio_recorder::{RecorderAction, RecorderRequest, RecorderState};
     use mixrelay_control_server::ControlBackend;
