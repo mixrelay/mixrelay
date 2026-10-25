@@ -1,3 +1,4 @@
+use super::super::{Arc, BlockProcessor, RenderFormat};
 use super::*;
 use crate::ProcessorExchange;
 use mixrelay_audio_graph::{CompileContext, CompileLimits, GraphCompiler, GraphDocument};
@@ -32,6 +33,15 @@ impl Drop for Counter {
 }
 
 fn processor(revision: u64, placeholder: bool, drops: &Arc<AtomicUsize>) -> Box<BlockProcessor> {
+    processor_with_identity(revision, placeholder, drops, 7)
+}
+
+fn processor_with_identity(
+    revision: u64,
+    placeholder: bool,
+    drops: &Arc<AtomicUsize>,
+    identity: u64,
+) -> Box<BlockProcessor> {
     let execution = GraphCompiler::default()
         .compile(
             &GraphDocument::new(revision, vec![], vec![]),
@@ -44,16 +54,18 @@ fn processor(revision: u64, placeholder: bool, drops: &Arc<AtomicUsize>) -> Box<
             },
         )
         .unwrap();
-    let mut processor =
-        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
-    processor.hosted_processors = vec![Box::new(Counter {
-        identity: 7,
-        cursor: 0,
-        placeholder,
-        drops: Arc::clone(drops),
-    }) as Box<dyn HostedAudioProcessor>]
-    .into_boxed_slice();
-    processor.hosted_identities = Box::new([(7, 0)]);
+    let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
+    let processor = BlockProcessor::with_hosted(
+        plan,
+        vec![Box::new(Counter {
+            identity,
+            cursor: 0,
+            placeholder,
+            drops: Arc::clone(drops),
+        }) as Box<dyn HostedAudioProcessor>]
+        .into_boxed_slice(),
+    )
+    .unwrap();
     Box::new(processor)
 }
 
@@ -63,7 +75,7 @@ fn activation_moves_the_complete_instance_without_resetting_pcm_cursor() {
     let mut current = processor(1, false, &drops);
     let exchange = ProcessorExchange::new(1);
     let mut output = [0.0];
-    assert!(current.hosted_processors[0].process(&[], &mut output, 1));
+    assert!(current.hosted.processors[0].process(&[], &mut output, 1));
     exchange.submit(processor(2, true, &drops)).unwrap();
     assert!(
         exchange
@@ -72,7 +84,7 @@ fn activation_moves_the_complete_instance_without_resetting_pcm_cursor() {
     );
     exchange.reclaim_retired();
     assert_eq!(drops.load(Ordering::Relaxed), 0);
-    assert!(current.hosted_processors[0].process(&[], &mut output, 1));
+    assert!(current.hosted.processors[0].process(&[], &mut output, 1));
     assert_eq!(output[0].to_bits(), 2.0_f32.to_bits());
     drop(current);
     assert_eq!(drops.load(Ordering::Relaxed), 1);
@@ -88,17 +100,16 @@ fn rejected_configuration_and_cancel_do_not_take_the_active_instance() {
         exchange.activate_pending_configured(&mut current, |_| Err("rejected")),
         Err("rejected")
     );
-    assert!(!current.hosted_processors[0].requests_reuse());
+    assert!(!current.hosted.processors[0].requests_reuse());
     drop(exchange);
     assert_eq!(drops.load(Ordering::Relaxed), 0);
-    assert!(current.hosted_processors[0].process(&[], &mut [0.0], 1));
+    assert!(current.hosted.processors[0].process(&[], &mut [0.0], 1));
 }
 
 #[test]
 fn missing_identity_never_activates_a_placeholder() {
     let drops = Arc::new(AtomicUsize::new(0));
-    let mut current = processor(1, false, &drops);
-    current.hosted_identities = Box::new([(8, 0)]);
+    let mut current = processor_with_identity(1, false, &drops, 8);
     let exchange = ProcessorExchange::new(1);
     exchange.submit(processor(2, true, &drops)).unwrap();
     assert!(
@@ -126,13 +137,14 @@ fn removal_marks_the_old_owner_inactive_before_retired_reclamation() {
     let active = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let drops = Arc::new(AtomicUsize::new(0));
     let mut current = processor(1, false, &drops);
-    current.hosted_processors =
+    current.hosted = HostedRack::new(
+        &current.plan,
         vec![Box::new(OwnerFlag(Arc::clone(&active))) as Box<dyn HostedAudioProcessor>]
-            .into_boxed_slice();
-    current.hosted_identities = Box::new([]);
+            .into_boxed_slice(),
+    )
+    .unwrap();
     let mut removed = processor(2, true, &drops);
-    removed.hosted_processors = Box::new([]);
-    removed.hosted_identities = Box::new([]);
+    removed.hosted = HostedRack::new(&removed.plan, Box::new([])).unwrap();
     let exchange = ProcessorExchange::new(1);
     exchange.submit(removed).unwrap();
     assert!(
@@ -189,8 +201,7 @@ fn reuse_replacement_and_removal_never_accumulate_hosted_owners() {
         );
     }
     let mut removed = processor(1_026, true, &drops);
-    removed.hosted_processors = Box::new([]);
-    removed.hosted_identities = Box::new([]);
+    removed.hosted = HostedRack::new(&removed.plan, Box::new([])).unwrap();
     exchange.submit(removed).unwrap();
     assert!(exchange.activate_pending(&mut current));
     exchange.reclaim_retired();
@@ -226,7 +237,7 @@ fn failed_submission_and_activation_release_hosted_owners_without_touching_activ
     drop(exchange);
     assert_eq!(drops.load(Ordering::Relaxed), 3);
     let mut output = [0.0];
-    assert!(current.hosted_processors[0].process(&[], &mut output, 1));
+    assert!(current.hosted.processors[0].process(&[], &mut output, 1));
     assert_eq!(output[0].to_bits(), 1.0_f32.to_bits());
     drop(current);
     assert_eq!(drops.load(Ordering::Relaxed), 4);

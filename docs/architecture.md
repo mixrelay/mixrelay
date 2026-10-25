@@ -105,6 +105,21 @@ Linux 어댑터는 Secret Service의 잠긴 항목을 해제하거나 프롬프�
 잠김·중복·읽기 실패는 엔진의 기존 무료 접근 판정으로 이어지며, 저장·제거는 오류를 반환한다.
 읽을 수 있는 고유 항목은 원래 entitlement와 만료를 검사한다.
 
+## 그래프 준비와 오디오 블록 처리
+
+`audio-engine::render::prepare`는 검증한 그래프의 포트·라우트·커널을 낮추고 저장 공간과
+플러그인을 준비한다. provider의 저장 layout·bus·채널 검증은 `prepare::providers`가 맡는다.
+준비 결과인 `RenderPlan`에는 숫자 인덱스와 불변 topology를 보관한다.
+
+`ExternalIo`는 블록에서 사용하는 실행 gate·클럭·프레임 수를 네이티브 어댑터에 전달한다.
+`render::cycle`은 admission, 외부 PCM 전송, DSP 실행, 녹음·미터 게시 순서를 소유한다.
+용량 부족으로 거절한 cycle은 PCM이나 DSP 이력을 전진시키지 않는다.
+
+`HostedRack`은 준비한 플러그인 인스턴스·재사용 인덱스·multibus scratch를 함께 소유한다.
+인덱스는 인스턴스 목록에서 생성하며 외부에 가변 목록을 전달하지 않는다.
+활성화는 준비된 인스턴스 전체를 옮기고, 폐기는 기존 retired 소유자의 회수 경로에서 수행한다.
+단일 bus 처리와 multibus gather·scatter 및 dry fallback도 이 소유자의 처리 계약에 속한다.
+
 ## 크레이트를 만들 때
 - 플랫폼 중립 크레이트는 `crates/`, OS 어댑터는 `native/<os>/`, 실행 파일은 `apps/`에 둔다. 이름은 `mixrelay-<역할>`이다. 기존 C 라이브러리 바인딩만 담는 새 크레이트는 `-sys`로 끝낸다(M-FFI-NAMING).
 - 워크스페이스 `members`에 추가하고, 버전·edition·린트는 `workspace = true`로 물려받는다(M-CARGO-WORKSPACE, M-CRATES-IN-WORKSPACE). 형제 크레이트는 `path` 의존으로 연결한다.

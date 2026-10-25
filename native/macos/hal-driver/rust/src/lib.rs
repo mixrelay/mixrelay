@@ -25,8 +25,7 @@ mod property_notifications;
 mod registry;
 mod transport;
 
-#[path = "../../../../../crates/audio-io/src/formats.rs"]
-pub mod formats;
+use mixrelay_audio_io::formats;
 
 #[cfg(test)]
 mod tests;

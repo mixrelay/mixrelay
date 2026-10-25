@@ -1,6 +1,7 @@
 //! Graph-owned session continuity, independent of adapter owner replacement.
-use super::{ExternalBinding, ExternalIo, ProcessBlockError, ProcessCycle, TransferOutcome};
+use super::{ExternalBinding, ExternalIo, ProcessBlockError};
 use mixrelay_audio_io::process::InputActivity;
+use mixrelay_audio_io::process::{ProcessCycle, TransferOutcome};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(super) struct State {

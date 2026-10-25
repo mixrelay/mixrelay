@@ -58,7 +58,7 @@ fn every_pcm_reservation_failure_returns_and_reclaims_partial_storage() {
         assert_eq!(Arc::strong_count(&plan), 1);
     }
     let processor = buffers::fail_after(10, || BlockProcessor::new(plan)).unwrap();
-    assert_eq!(processor.hosted_scratch.len(), 8);
+    assert_eq!(processor.hosted.scratch_samples(), 8);
     assert!(
         processor
             .dynamics_minimum_gains

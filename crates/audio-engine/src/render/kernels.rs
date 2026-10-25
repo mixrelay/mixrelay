@@ -1,5 +1,5 @@
 //! Realtime node kernels borrow prepared buffers and state; no graph preparation or control publication.
-use super::{DryBusMap, HostedAudioProcessor, HostedIo, Kernel, PortSlot, port_pair, sample_count};
+use super::{Kernel, PortSlot, hosted::HostedRack, port_pair, sample_count};
 
 pub(super) struct KernelResources<'a> {
     pub(super) arena: &'a mut [f32],
@@ -12,9 +12,7 @@ pub(super) struct KernelResources<'a> {
     pub(super) effects: &'a [super::effects::Binding],
     pub(super) device_bus_state: &'a mut [f32],
     pub(super) device_bus_cursor: usize,
-    pub(super) hosted_scratch: &'a mut [f32],
-    pub(super) hosted_input_scratch_samples: usize,
-    pub(super) hosted_processors: &'a mut [Box<dyn HostedAudioProcessor>],
+    pub(super) hosted: &'a mut HostedRack,
 }
 
 #[allow(clippy::too_many_lines)] // Exhaustive dispatch borrows each prepared resource without allocating.
@@ -113,54 +111,10 @@ pub(super) fn apply_kernel(
             apply_mixer(resources.arena, inputs, *output, frames);
         }
         Kernel::Hosted { io, processor } => {
-            apply_hosted_kernel(resources, io, *processor, frames);
+            resources
+                .hosted
+                .process(resources.arena, io, *processor, frames);
         }
-    }
-}
-
-fn apply_hosted_kernel(
-    resources: KernelResources<'_>,
-    io: &HostedIo,
-    processor_index: usize,
-    frames: usize,
-) {
-    let KernelResources {
-        arena,
-        hosted_scratch,
-        hosted_input_scratch_samples,
-        hosted_processors,
-        ..
-    } = resources;
-    match io {
-        HostedIo::Single { input, output } => apply_hosted_processor(
-            arena,
-            *input,
-            *output,
-            frames,
-            hosted_processors[processor_index].as_mut(),
-        ),
-        HostedIo::Multiple {
-            inputs,
-            outputs,
-            input_channels,
-            output_channels,
-            dry_maps,
-        } => apply_hosted_processor_multiple(
-            arena,
-            MultipleHostedIo {
-                inputs,
-                outputs,
-                input_channels: *input_channels,
-                output_channels: *output_channels,
-                frames,
-                dry_maps,
-            },
-            HostedScratch {
-                samples: hosted_scratch,
-                input_samples: hosted_input_scratch_samples,
-            },
-            hosted_processors[processor_index].as_mut(),
-        ),
     }
 }
 
@@ -209,125 +163,6 @@ fn apply_mixer(arena: &mut [f32], inputs: &[PortSlot], output: PortSlot, frames:
         let (source, destination) = port_pair(arena, input, output, frames);
         for (destination, source) in destination.iter_mut().zip(source) {
             *destination += source;
-        }
-    }
-}
-
-fn apply_hosted_processor(
-    arena: &mut [f32],
-    input: PortSlot,
-    output: PortSlot,
-    frames: usize,
-    processor: &mut dyn HostedAudioProcessor,
-) {
-    let (source, destination) = port_pair(arena, input, output, frames);
-    let processed = processor.process(source, destination, frames);
-    if processed {
-        return;
-    }
-    let shared_channels = usize::from(input.channels.min(output.channels));
-    for frame in 0..frames {
-        for channel in 0..usize::from(output.channels) {
-            arena[output.offset + frame * usize::from(output.channels) + channel] =
-                if channel < shared_channels {
-                    arena[input.offset + frame * usize::from(input.channels) + channel]
-                } else {
-                    0.0
-                };
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct MultipleHostedIo<'a> {
-    inputs: &'a [PortSlot],
-    outputs: &'a [PortSlot],
-    input_channels: u16,
-    output_channels: u16,
-    frames: usize,
-    dry_maps: &'a [DryBusMap],
-}
-
-struct HostedScratch<'a> {
-    samples: &'a mut [f32],
-    input_samples: usize,
-}
-
-fn apply_hosted_processor_multiple(
-    arena: &mut [f32],
-    io: MultipleHostedIo<'_>,
-    scratch: HostedScratch<'_>,
-    processor: &mut dyn HostedAudioProcessor,
-) {
-    let input_samples = sample_count(io.frames, io.input_channels);
-    let output_samples = sample_count(io.frames, io.output_channels);
-    let HostedScratch {
-        samples,
-        input_samples: scratch_input_samples,
-    } = scratch;
-    let (input_scratch, output_scratch) = samples.split_at_mut(scratch_input_samples);
-    let input = &mut input_scratch[..input_samples];
-    let output = &mut output_scratch[..output_samples];
-    gather_buses(arena, io.inputs, input, io.frames, io.input_channels);
-    if !processor.process(input, output, io.frames) {
-        preserve_main_buses(input, output, &io);
-    }
-    scatter_buses(arena, io.outputs, output, io.frames, io.output_channels);
-}
-
-fn gather_buses(
-    arena: &[f32],
-    buses: &[PortSlot],
-    destination: &mut [f32],
-    frames: usize,
-    total_channels: u16,
-) {
-    let mut channels_before = 0;
-    for frame in 0..frames {
-        for bus in buses {
-            let channels = usize::from(bus.channels);
-            let source_start = bus.offset + frame * channels;
-            let destination_start = frame * usize::from(total_channels) + channels_before;
-            destination[destination_start..destination_start + channels]
-                .copy_from_slice(&arena[source_start..source_start + channels]);
-            channels_before += channels;
-        }
-        channels_before = 0;
-    }
-}
-
-fn scatter_buses(
-    arena: &mut [f32],
-    buses: &[PortSlot],
-    source: &[f32],
-    frames: usize,
-    total_channels: u16,
-) {
-    let mut channels_before = 0;
-    for frame in 0..frames {
-        for bus in buses {
-            let channels = usize::from(bus.channels);
-            let source_start = frame * usize::from(total_channels) + channels_before;
-            let destination_start = bus.offset + frame * channels;
-            arena[destination_start..destination_start + channels]
-                .copy_from_slice(&source[source_start..source_start + channels]);
-            channels_before += channels;
-        }
-        channels_before = 0;
-    }
-}
-
-fn preserve_main_buses(input: &[f32], output: &mut [f32], io: &MultipleHostedIo<'_>) {
-    output.fill(0.0);
-    let input_channels = usize::from(io.input_channels);
-    let output_channels = usize::from(io.output_channels);
-    for mapping in io.dry_maps {
-        for frame in 0..io.frames {
-            let source = frame * input_channels + mapping.source_channel_offset;
-            let destination = frame * output_channels + mapping.destination_channel_offset;
-            let channels = usize::from(mapping.channels);
-            output[destination..destination + channels]
-                .copy_from_slice(&input[source..source + channels]);
         }
     }
 }

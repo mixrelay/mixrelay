@@ -497,7 +497,7 @@ fn saved_main_single_bus_keeps_direct_fallback_path() {
         &FailedMultibusFactory(Arc::clone(&counts)),
     )
     .expect("valid main layout should prepare");
-    assert!(processor.hosted_scratch.is_empty());
+    assert_eq!(processor.hosted.scratch_samples(), 0);
     let input = [1.0, 2.0, 3.0, 4.0];
     let sources: [&[f32]; 1] = [&input];
     let mut output = [9.0; 4];
