@@ -108,7 +108,7 @@ fn select(engine: &EngineGraphController, action: GraphCatalogAction) {
         .unwrap();
 }
 
-fn assert_shared_pcm(processor: &mut BlockProcessor) {
+fn assert_shared_pcm(processor: &mut BlockProcessor, expected_writers: &[&str]) {
     let frames = processor.plan().format().block_frames;
     let samples = frames as usize * 2;
     let signal: Vec<f32> = [0.25, -0.5, 0.75, -0.125]
@@ -145,7 +145,24 @@ fn assert_shared_pcm(processor: &mut BlockProcessor) {
             )
             .unwrap();
     }
-    assert_eq!(outputs.len(), 2);
+    assert_eq!(
+        processor
+            .plan()
+            .sink_bindings()
+            .iter()
+            .map(|binding| binding.virtual_endpoint_id().unwrap().as_str())
+            .collect::<Vec<_>>(),
+        expected_writers
+    );
+    assert_eq!(
+        processor
+            .plan()
+            .source_bindings()
+            .iter()
+            .map(|binding| binding.virtual_endpoint_id().unwrap().as_str())
+            .collect::<Vec<_>>(),
+        [DEVICE_A]
+    );
     for (binding, output) in processor.plan().sink_bindings().iter().zip(outputs) {
         match binding.virtual_endpoint_id().unwrap().as_str() {
             // A has no graph contribution route. Its basic OS loopback belongs
@@ -174,13 +191,13 @@ fn controller_runs_both_graphs_and_view_switches_do_not_submit_or_interrupt_shar
     assert_eq!(engine.exchange.revisions(), revision);
     engine.apply_graph_request(graph_b(3).into()).unwrap();
     assert!(engine.exchange.activate_pending(&mut processor));
-    assert_shared_pcm(&mut processor);
+    assert_shared_pcm(&mut processor, &[DEVICE_A, DEVICE_B]);
     let revision = engine.exchange.revisions();
     for id in ["graph-1", &graph_b_id, "graph-1", &graph_b_id] {
         select(&engine, GraphCatalogAction::Select { id: id.into() });
         assert_eq!(engine.exchange.revisions(), revision);
         assert!(!engine.exchange.activate_pending(&mut processor));
-        assert_shared_pcm(&mut processor);
+        assert_shared_pcm(&mut processor, &[DEVICE_A, DEVICE_B]);
         assert!(
             engine
                 .meters()
@@ -199,7 +216,7 @@ fn meters_respond_with_pcm_while_native_mutation_is_blocked() {
     let engine = controller_with_driver_devices();
     engine.apply_graph_request(graph_b(2).into()).unwrap();
     let mut processor = crate::controller_test_support::settle(&engine);
-    assert_shared_pcm(&mut processor);
+    assert_shared_pcm(&mut processor, &[DEVICE_B]);
     let snapshot = std::thread::scope(|scope| {
         let mutation = engine.mutation.lock();
         let (sender, receiver) = mpsc::channel();
@@ -224,7 +241,7 @@ fn meters_respond_with_pcm_while_native_mutation_is_blocked() {
             .iter()
             .any(|node| node.peaks.iter().any(|peak| *peak > 0.0))
     );
-    assert_shared_pcm(&mut processor);
+    assert_shared_pcm(&mut processor, &[DEVICE_B]);
 }
 
 #[test]
@@ -419,7 +436,7 @@ fn deleted_selection_is_committed_before_the_new_plan_can_activate() {
     engine.refresh_control_snapshot();
     assert!(engine.exchange.activate_pending(&mut processor));
     assert_ne!(engine.view_graph_id(), "graph-1");
-    assert_shared_pcm(&mut processor);
+    assert_shared_pcm(&mut processor, &[DEVICE_B]);
     let snapshot = engine.meters();
     assert!(!snapshot.nodes.is_empty());
     assert_eq!(snapshot.revision, processor.plan().revision());
@@ -463,7 +480,7 @@ fn catalog_removal_keeps_shared_device_wiring_and_pcm_in_surviving_graph() {
     );
     engine.apply_graph_request(graph_b(3).into()).unwrap();
     assert!(engine.exchange.activate_pending(&mut processor));
-    assert_shared_pcm(&mut processor);
+    assert_shared_pcm(&mut processor, &[DEVICE_A, DEVICE_B]);
     let before = engine.graph();
     select(
         &engine,
@@ -477,7 +494,7 @@ fn catalog_removal_keeps_shared_device_wiring_and_pcm_in_surviving_graph() {
     assert_eq!(engine.endpoint_settings().unwrap().devices.len(), 2);
     // Both duplex devices are still referenced by B. Their device-owned loopback
     // survives deletion of A, as does B's explicit route between the devices.
-    assert_shared_pcm(&mut processor);
+    assert_shared_pcm(&mut processor, &[DEVICE_B]);
 }
 
 #[derive(Default)]
