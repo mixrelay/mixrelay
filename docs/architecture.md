@@ -79,6 +79,10 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 `EngineGraphController`는 그래프의 노드·revision·요금제 조건을 확인하고 녹음 동작을 요청한다.
 전원 제어와 텔레메트리는 녹음 상태를 직접 변경하지 않는다.
 
+편집기의 `GraphReadback`은 읽기 전용 `ControlPort`로 그래프 선택과 적용 revision을 확인한다.
+`GraphApplicationQueue`는 확인한 문서·사용자 초안·변경 요청의 순서를 소유한다.
+조회 결과는 큐가 선택·취소 상태를 다시 확인한 뒤 화면에 전달한다.
+
 ## 크레이트를 만들 때
 - 플랫폼 중립 크레이트는 `crates/`, OS 어댑터는 `native/<os>/`, 실행 파일은 `apps/`에 둔다. 이름은 `mixrelay-<역할>`이다. 기존 C 라이브러리 바인딩만 담는 새 크레이트는 `-sys`로 끝낸다(M-FFI-NAMING).
 - 워크스페이스 `members`에 추가하고, 버전·edition·린트는 `workspace = true`로 물려받는다(M-CARGO-WORKSPACE, M-CRATES-IN-WORKSPACE). 형제 크레이트는 `path` 의존으로 연결한다.

@@ -10,13 +10,12 @@ import {
   type ProcessorRetryRequest,
   type RuntimeGraphDocument,
 } from '../../core/control-port/types';
-import { waitForPushedRevision } from '../../core/control-port/waitForPushedRevision';
 import { acknowledgedNodeControl } from './controlReconciliation';
+import { GraphReadback, pauseGraphObservation } from './GraphReadback';
 import { audioGraphToRuntimeGraph } from './model';
 import { waitForGraphRequest } from './waitForGraphRequest';
 
 export const GRAPH_APPLICATION_TIMEOUT_MS = 10_000;
-const POLL_MS = 200;
 
 interface QueueCallbacks {
   getGraphId?: () => string | undefined;
@@ -137,41 +136,9 @@ function hasSameProcessor(graph: RuntimeGraphDocument, change: ProcessorParamete
   });
 }
 
-/** Bounds even a stalled IPC promise. Late replies cannot mutate the queue after cancellation. */
-function bounded<T>(request: Promise<T>, signal: AbortSignal, timeoutMs: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => finish(() => reject(failure('graph_apply_timeout'))), timeoutMs);
-    const cancel = () => finish(() => reject(signal.reason));
-    const finish = (settle: () => void) => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', cancel);
-      settle();
-    };
-    signal.addEventListener('abort', cancel, { once: true });
-    if (signal.aborted) cancel();
-    request.then(
-      (value) => finish(() => resolve(value)),
-      (error) => finish(() => reject(error)),
-    );
-  });
-}
-
-function pause(signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const cancel = () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', cancel);
-      resolve();
-    }, POLL_MS);
-    signal.addEventListener('abort', cancel, { once: true });
-  });
-}
-
 /** One writer per workspace; external changes refresh the acknowledged settings automatically. */
 export class GraphApplicationQueue {
+  private readonly readback: GraphReadback;
   private operation: AbortController | null = null;
   private pending: AudioGraphModel | null = null;
   private pendingParameters = new Map<string, ProcessorParameterChange>();
@@ -192,7 +159,9 @@ export class GraphApplicationQueue {
       | 'isOperationPending'
     >,
     private readonly callbacks: QueueCallbacks,
-  ) {}
+  ) {
+    this.readback = new GraphReadback(port, GRAPH_APPLICATION_TIMEOUT_MS, failure);
+  }
 
   get canPublishParameters() {
     return !this.blocked && !this.operation;
@@ -250,7 +219,7 @@ export class GraphApplicationQueue {
     this.callbacks.error(null);
     try {
       if (this.callbacks.beforeApply)
-        await bounded(this.callbacks.beforeApply(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
+        await this.readback.bound(this.callbacks.beforeApply(), signal);
       signal.throwIfAborted();
       this.validateNodeControlSource(source, graphId, nodeId);
       sent = true;
@@ -308,8 +277,7 @@ export class GraphApplicationQueue {
     attempt: { accepted: boolean; sent: boolean },
     retryProcessor: NonNullable<ControlPort['retryProcessor']>,
   ): Promise<NodeControlResult> {
-    if (this.callbacks.beforeApply)
-      await bounded(this.callbacks.beforeApply(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
+    if (this.callbacks.beforeApply) await this.readback.bound(this.callbacks.beforeApply(), signal);
     signal.throwIfAborted();
     this.validateProcessorRetrySource(source, target);
     attempt.sent = true;
@@ -325,7 +293,7 @@ export class GraphApplicationQueue {
     );
     attempt.accepted = true;
     if (response.revision !== source.revision + 1) throw failure('graph_revision_stale');
-    if (response.state !== 'active') await this.waitForRevision(response.revision, signal);
+    if (response.state !== 'active') await this.readback.waitForRevision(response.revision, signal);
     signal.throwIfAborted();
     this.validateProcessorRetryAcknowledgement(source, target, response.revision);
     if (this.pending) throw failure('graph_draft_changed');
@@ -433,7 +401,7 @@ export class GraphApplicationQueue {
     if (typeof response.requiresGraphReload !== 'boolean') throw failure('control_request_failed');
     if (response.revision !== source.revision && response.revision !== source.revision + 1)
       throw failure('graph_revision_stale');
-    if (response.state !== 'active') await this.waitForRevision(response.revision, signal);
+    if (response.state !== 'active') await this.readback.waitForRevision(response.revision, signal);
     signal.throwIfAborted();
     this.validateNodeControlSource(source, graphId, nodeId);
     if (this.pending) throw failure('graph_draft_changed');
@@ -522,31 +490,6 @@ export class GraphApplicationQueue {
     );
   }
 
-  private async waitForRevision(revision: number, signal: AbortSignal) {
-    if (this.port.subscribeState)
-      return waitForPushedRevision(
-        this.port,
-        revision,
-        signal,
-        GRAPH_APPLICATION_TIMEOUT_MS,
-        failure,
-      );
-    const deadline = Date.now() + GRAPH_APPLICATION_TIMEOUT_MS;
-    while (true) {
-      signal.throwIfAborted();
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) throw failure('graph_apply_timeout');
-      const status = await bounded(this.port.getGraphStatus(), signal, remaining);
-      signal.throwIfAborted();
-      // A newer document is not confirmation of our edit: do not overwrite another writer.
-      if (status.activeRevision > revision || status.submittedRevision > revision) {
-        throw failure('graph_revision_stale');
-      }
-      if (status.activeRevision === revision) return;
-      await pause(signal);
-    }
-  }
-
   private guardOwner(signal: AbortSignal, graphId: string | undefined) {
     signal.throwIfAborted();
     if (this.callbacks.getGraphId?.() !== graphId) {
@@ -562,8 +505,8 @@ export class GraphApplicationQueue {
     publication: 'immediate' | 'deferred' = 'immediate',
   ) {
     const graphId = expected?.graphId ?? this.callbacks.getGraphId?.();
-    const document = await this.readOwnedGraph(signal, graphId);
-    if (wait) await this.waitForRevision(document.revision, signal);
+    const document = await this.readback.document(signal, graphId);
+    if (wait) await this.readback.waitForRevision(document.revision, signal);
     this.guardOwner(signal, graphId);
     if (expected?.revision !== undefined && document.revision !== expected.revision)
       throw failure('graph_revision_stale');
@@ -576,33 +519,13 @@ export class GraphApplicationQueue {
     return document;
   }
 
-  /**
-   * Reads this graph's document only while it is still selected. Another client can select a
-   * different graph without changing the audio revision, and the engine publishes the new
-   * document before its catalog, so separate reads cannot attribute `GET /graph` to a graph.
-   * The catalog response names the selection and carries its document in one snapshot; a
-   * lagging revision there only makes the next write stale, never attributes B's content to A.
-   */
-  private async readOwnedGraph(signal: AbortSignal, graphId: string | undefined) {
-    if (!this.port.getGraphCatalog || graphId === undefined)
-      return bounded(this.port.getGraph(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
-    const catalog = await bounded(
-      this.port.getGraphCatalog(),
-      signal,
-      GRAPH_APPLICATION_TIMEOUT_MS,
-    );
-    if (catalog.activeId !== graphId) throw failure('graph_catalog_revision_stale');
-    return catalog.document;
-  }
-
   private async apply(
     model: AudioGraphModel,
     changes: ProcessorParameterChange[],
     signal: AbortSignal,
   ) {
     // A previously accepted UI parameter edit must settle before native state is captured.
-    if (this.callbacks.beforeApply)
-      await bounded(this.callbacks.beforeApply(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
+    if (this.callbacks.beforeApply) await this.readback.bound(this.callbacks.beforeApply(), signal);
     signal.throwIfAborted();
     const source = this.document ?? this.callbacks.getDocument();
     if (!source) throw failure('control_request_failed');
@@ -627,7 +550,7 @@ export class GraphApplicationQueue {
       clientOperationId,
     );
     if (response.revision !== document.revision) throw failure('graph_revision_stale');
-    if (response.state !== 'active') await this.waitForRevision(response.revision, signal);
+    if (response.state !== 'active') await this.readback.waitForRevision(response.revision, signal);
     signal.throwIfAborted();
     // Persistence is a separate acknowledgement: audio has already applied. Do not
     // retry/rollback the graph or block subsequent edits because disk storage failed.
@@ -749,7 +672,7 @@ export class GraphApplicationQueue {
         this.pendingParameters = new Map([...parameters, ...this.pendingParameters]);
         requireRebasableConflict(error, deadline);
         baseline = current;
-        await pause(signal);
+        await pauseGraphObservation(signal);
       }
     }
   }
@@ -776,11 +699,7 @@ export class GraphApplicationQueue {
 
   private async readReloadLayout(graphId: string | undefined, signal: AbortSignal) {
     if (!graphId || !this.callbacks.getReloadLayout) return undefined;
-    const response = await bounded(
-      this.callbacks.getReloadLayout(graphId),
-      signal,
-      GRAPH_APPLICATION_TIMEOUT_MS,
-    );
+    const response = await this.readback.bound(this.callbacks.getReloadLayout(graphId), signal);
     signal.throwIfAborted();
     if (response.graphId !== graphId) throw failure('graph_layout_identity_mismatch');
     if (this.callbacks.getGraphId?.() !== graphId) throw failure('graph_revision_stale');
@@ -793,7 +712,7 @@ export class GraphApplicationQueue {
     initialModel: AudioGraphModel | null,
   ) {
     if (mode === 'reload' && this.callbacks.beforeReload)
-      await bounded(this.callbacks.beforeReload(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
+      await this.readback.bound(this.callbacks.beforeReload(), signal);
     const before = this.recoveryBaseline ?? this.document ?? this.callbacks.getDocument();
     const graphId = this.callbacks.getGraphId?.();
     const document = await this.readEngine(

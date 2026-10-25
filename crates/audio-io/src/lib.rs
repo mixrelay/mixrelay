@@ -92,9 +92,9 @@ pub struct VirtualEndpointSpec {
     pub id: VirtualEndpointId,
     /// Nonempty native device name without an interior NUL byte.
     pub display_name: String,
-    /// Audio rendered by OS applications enters the `MixRelay` graph through this stream.
+    /// OS playback/output stream. Applications and the engine write PCM to this stream.
     pub render: Option<StreamSpec>,
-    /// Audio sent by the `MixRelay` graph is captured by OS applications through this stream.
+    /// OS recording/input stream. Applications and the engine read PCM from this stream.
     pub capture: Option<StreamSpec>,
     pub supported_sample_rates: Vec<u32>,
     pub default_sample_rate: u32,
