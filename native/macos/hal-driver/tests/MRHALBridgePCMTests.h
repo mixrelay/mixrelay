@@ -2,6 +2,7 @@
  * mapping. This never registers a system device or starts a native stream. */
 #include <sys/mman.h>
 #include "../../common/MRAnonymousMemory.h"
+#include "MRHALClockPropertyTests.h"
 
 static void registered_client_pcm(void) {
     const MRHALCoreHostOps host = {NULL, fixture_changed, fixture_request};
@@ -19,6 +20,10 @@ static void registered_client_pcm(void) {
     uint32_t device = 0;
     assert(mr_hal_core_upsert(gCore, config.endpoint_id, "PCM fixture", 48000,
         fd, size, &device) == MR_HAL_CORE_OK);
+    assert_clock_properties(device);
+    observed_enter_audio();
+    assert_clock_properties(device);
+    observed_leave_audio();
     AudioServerPlugInClientInfo owner = {.mClientID = 7};
     AudioServerPlugInClientInfo output = {.mClientID = 8};
     assert(add_client(gDriver, device, &owner) == noErr);

@@ -13,6 +13,8 @@ use crate::abi::{
 use crate::device::lock;
 use crate::registry::{IoOperation, Registry};
 
+#[path = "clock_property_tests.rs"]
+mod clock_property_tests;
 #[path = "inventory_tests.rs"]
 mod inventory_tests;
 #[path = "native_tests.rs"]

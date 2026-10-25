@@ -12,6 +12,7 @@
 // reproduces another channel), and any recorded channel can locate the signal.
 #include "MRProbeHalTrace.h"
 #include <CoreAudio/CoreAudio.h>
+#include <CoreAudio/AudioServerPlugIn.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_time.h>
 
@@ -448,6 +449,22 @@ static void mr_text_known(bool known, uint32_t value) {
     }
 }
 
+static void mr_describe_clock(AudioDeviceID device) {
+    UInt32 algorithm = 0, period = 0, stable = 0;
+    const bool algorithm_known = mr_get(device, kAudioDevicePropertyClockAlgorithm,
+        kAudioObjectPropertyScopeGlobal, &algorithm, sizeof(algorithm));
+    const bool period_known = mr_get(device, kAudioDevicePropertyZeroTimeStampPeriod,
+        kAudioObjectPropertyScopeGlobal, &period, sizeof(period));
+    const bool stable_known = mr_get(device, kAudioDevicePropertyClockIsStable,
+        kAudioObjectPropertyScopeGlobal, &stable, sizeof(stable));
+    putchar(',');
+    mr_json_known("clockAlgorithm", algorithm_known, algorithm);
+    putchar(',');
+    mr_json_known("timestampPeriod", period_known, period);
+    putchar(',');
+    mr_json_known("clockStable", stable_known, stable);
+}
+
 static void mr_describe(const char *role, AudioDeviceID device, AudioObjectPropertyScope scope,
                         bool json) {
     char name[256], uid[256];
@@ -478,6 +495,7 @@ static void mr_describe(const char *role, AudioDeviceID device, AudioObjectPrope
         mr_json_known("safetyOffset", reported.safety_known, reported.safety);
         putchar(',');
         mr_json_known("streamLatency", reported.stream_known, reported.stream_latency);
+        mr_describe_clock(device);
         printf("},");
         return;
     }

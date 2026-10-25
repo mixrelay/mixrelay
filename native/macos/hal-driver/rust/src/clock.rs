@@ -1,6 +1,18 @@
+//! Nominal host-derived timestamps and the host's matching clock metadata.
 use crate::abi::Timestamp;
 
+// Power-of-two timestamp period above the SDK minimum of 10,923 frames.
 pub(crate) const TIMESTAMP_PERIOD: u32 = 16_384;
+
+pub(crate) fn property(selector: u32) -> Option<u32> {
+    match &selector.to_be_bytes() {
+        b"ring" => Some(TIMESTAMP_PERIOD),
+        // Timestamps already follow nominal host time; an IIR adds another estimate.
+        b"clok" => Some(u32::from_be_bytes(*b"raww")),
+        b"cstb" => Some(1),
+        _ => None,
+    }
+}
 
 /// Control mutations are excluded from callback readers by the device IO gate.
 /// Each device has its own anchor and discontinuity seed, even at equal rates.

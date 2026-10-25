@@ -268,7 +268,6 @@ fn device(snapshot: &Snapshot, address: &Address) -> Result<Value, i32> {
         b"ltnc" | b"saft" if directional => Ok(number(0)),
         b"nsrt" if address.scope == GLOBAL => Ok(rate(snapshot.sample_rate)),
         b"nsr#" if address.scope == GLOBAL => Ok(ranges()),
-        b"ring" => Ok(number(crate::clock::TIMESTAMP_PERIOD)),
         b"cust" if address.scope == GLOBAL => Ok(Value::Array(
             [*b"mrdi", *b"mrdo"]
                 .into_iter()
@@ -283,7 +282,6 @@ fn device(snapshot: &Snapshot, address: &Address) -> Result<Value, i32> {
                 .collect(),
             12,
         )),
-        b"cstb" => Ok(number(1)),
         b"dch2" if directional && channels >= 2 => Ok(Value::Inline(Inline::new(pair::<4, 8>(
             1_u32.to_ne_bytes(),
             2_u32.to_ne_bytes(),
@@ -469,12 +467,16 @@ fn property(
 ) -> Result<Value, i32> {
     // IO/timestamp threads may reenter property reads. They are answered only inline values
     // that need no control lock: the plugin's class/owner scalars and the device properties
-    // below that read fixed-slot atomics (`ltnc`, `saft`, `tran`).
+    // below that read fixed-slot atomics, plus the clock's constant metadata.
     if object == 1 {
         return plugin(registry, address, uid);
     }
     if address.element != 0 || ![GLOBAL, INPUT, OUTPUT].contains(&address.scope) {
         return Err(UNKNOWN);
+    }
+    if let Some(value) = crate::clock::property(address.selector) {
+        let device = registry.pin(object).ok_or(BAD_OBJECT)?;
+        return (object == device.id).then(|| number(value)).ok_or(UNKNOWN);
     }
     if [*b"ltnc", *b"saft"].contains(&address.selector.to_be_bytes()) {
         let device = registry.pin(object).ok_or(BAD_OBJECT)?;

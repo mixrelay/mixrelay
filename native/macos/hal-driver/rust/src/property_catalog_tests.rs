@@ -916,12 +916,12 @@ fn io_threads_are_refused_snapshot_properties_instead_of_waiting_for_control() {
 }
 
 /// Every selector the property catalog answers on any object.
-const CATALOG_SELECTORS: [&[u8; 4]; 47] = [
+const CATALOG_SELECTORS: [&[u8; 4]; 48] = [
     b"bcls", b"clas", b"stdv", b"lnam", b"lmak", b"rsrc", b"ownd", b"dev#", b"box#", b"clk#",
     b"uidd", b"uid ", b"muid", b"akin", b"clkd", b"hidn", b"livn", b"goin", b"dflt", b"sflt",
-    b"ltnc", b"saft", b"nsrt", b"nsr#", b"ring", b"cstb", b"dch2", b"srnd", b"stm#", b"ctrl",
-    b"tran", b"sact", b"sdir", b"term", b"schn", b"sfmt", b"pft ", b"sfma", b"pfta", b"cscp",
-    b"celm", b"lcsv", b"lcdv", b"lcdr", b"lcsd", b"lcds", b"bcvl",
+    b"ltnc", b"saft", b"nsrt", b"nsr#", b"ring", b"clok", b"cstb", b"dch2", b"srnd", b"stm#",
+    b"ctrl", b"tran", b"sact", b"sdir", b"term", b"schn", b"sfmt", b"pft ", b"sfma", b"pfta",
+    b"cscp", b"celm", b"lcsv", b"lcdv", b"lcdr", b"lcsd", b"lcds", b"bcvl",
 ];
 
 /// Has/size/get of one property, asserting none of them allocates. `Some` holds the
@@ -1035,6 +1035,11 @@ fn audio_thread_property_reads_never_allocate() {
         ]);
         for scope in [*b"glob", *b"inpt", *b"outp"] {
             expected.push((id, *b"tran", scope, requester, u32::from_be_bytes(*b"virt")));
+            expected.extend([
+                (id, *b"ring", scope, requester, 16_384),
+                (id, *b"clok", scope, requester, u32::from_be_bytes(*b"raww")),
+                (id, *b"cstb", scope, requester, 1),
+            ]);
         }
     }
     answered.sort_unstable();
