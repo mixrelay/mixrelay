@@ -37,8 +37,7 @@ export function waitForPushedRevision(
     };
     const schedulePoll = (delay = 200) => {
       clearTimeout(pollTimer);
-      if (!done && !observedPush && !pending)
-        pollTimer = setTimeout(() => void poll(), delay);
+      if (!done && !observedPush && !pending) pollTimer = setTimeout(() => void poll(), delay);
     };
     const poll = async () => {
       pending = true;
