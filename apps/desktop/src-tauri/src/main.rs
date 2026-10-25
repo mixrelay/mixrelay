@@ -3,6 +3,7 @@ use tauri::{Manager, WindowEvent};
 mod app_menu;
 mod app_mode;
 mod background;
+mod control_channel;
 mod control_proxy;
 mod diagnostics;
 mod driver_control;
@@ -112,14 +113,14 @@ pub(crate) fn restore_captures(app: &tauri::AppHandle) {
 }
 
 /// Free audio remains available independently of paid entitlement.
-fn start_audio(app: &tauri::AppHandle) -> Result<(), String> {
+fn start_audio(app: &tauri::AppHandle) -> Result<(), AudioStartupFailure> {
     if *app.state::<app_mode::AppMode>() == app_mode::AppMode::Graph {
         if app.try_state::<background::Connection>().is_none() {
             let connection = background::Connection::for_app(app)?;
             *app.state::<control_proxy::ControlProxyClient>()
                 .background
                 .lock()
-                .map_err(|_| "background connection lock poisoned")? = Some(connection.clone());
+                .map_err(|_| AudioStartupFailure::ConnectionLock)? = Some(connection.clone());
             app.manage(connection);
         }
         return Ok(());
@@ -133,9 +134,19 @@ fn start_audio(app: &tauri::AppHandle) -> Result<(), String> {
         engine_lifecycle::monitor(app);
         return Ok(());
     }
-    app.manage(engine_lifecycle::EngineLifecycle::start()?);
+    app.manage(engine_lifecycle::EngineLifecycle::start().map_err(AudioStartupFailure::Engine)?);
     engine_lifecycle::monitor(app);
     Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+enum AudioStartupFailure {
+    #[error(transparent)]
+    Connection(#[from] background::ConnectionFailure),
+    #[error("background connection lock poisoned")]
+    ConnectionLock,
+    #[error("engine startup failed: {0}")]
+    Engine(String),
 }
 
 fn install_local_controls(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {

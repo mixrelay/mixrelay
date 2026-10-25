@@ -4,7 +4,7 @@ use crate::controller_test_support::settle;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 struct Runtime {
-    base: Arc<dyn RuntimeStatusBackend>,
+    base: Arc<dyn RuntimeBackend>,
     rate: AtomicU32,
     frames: AtomicU32,
     endpoint_rate: AtomicU32,
@@ -22,6 +22,11 @@ impl RuntimeStatusBackend for Runtime {
         capabilities.can_reconfigure_live = true;
         status
     }
+}
+
+impl ProcessingControlBackend for Runtime {}
+
+impl SessionFormatBackend for Runtime {
     fn external_sample_rate(&self) -> Option<u32> {
         let rate = self.rate.load(Ordering::Acquire);
         (rate != 0).then_some(rate)

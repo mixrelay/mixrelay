@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 use tokio::sync::Notify;
 
-use super::socket::RESPONSE_LIMIT;
+use crate::control_channel::RESPONSE_LIMIT;
 
 #[derive(Default)]
 pub(super) struct Outbound {

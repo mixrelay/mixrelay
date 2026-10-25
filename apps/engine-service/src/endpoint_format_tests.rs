@@ -26,12 +26,30 @@ struct NativeState {
 }
 struct Runtime {
     state: Arc<NativeState>,
-    base: Arc<dyn RuntimeStatusBackend>,
+    base: Arc<dyn RuntimeBackend>,
 }
 impl RuntimeStatusBackend for Runtime {
     fn status(&self, format: RenderFormat) -> AppStatus {
         self.base.status(format)
     }
+}
+
+impl ProcessingControlBackend for Runtime {
+    fn suspend(&self) -> Result<(), HostAudioBackendError> {
+        if self.state.change_during_suspend.load(Ordering::Acquire) {
+            self.state.rate.store(44_100, Ordering::Release);
+        }
+        Ok(())
+    }
+    fn fail_reconfiguration(&self) {
+        self.state.failed.store(true, Ordering::Release);
+    }
+    fn resume(&self) {
+        self.state.resumed.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+impl SessionFormatBackend for Runtime {
     fn external_format(&self, current: RenderFormat) -> Option<RenderFormat> {
         Some(RenderFormat {
             sample_rate: if self.state.primary_clock.load(Ordering::Acquire) {
@@ -48,18 +66,6 @@ impl RuntimeStatusBackend for Runtime {
             self.state.rate.load(Ordering::Acquire)
         );
         Ok(())
-    }
-    fn suspend(&self) -> Result<(), HostAudioBackendError> {
-        if self.state.change_during_suspend.load(Ordering::Acquire) {
-            self.state.rate.store(44_100, Ordering::Release);
-        }
-        Ok(())
-    }
-    fn fail_reconfiguration(&self) {
-        self.state.failed.store(true, Ordering::Release);
-    }
-    fn resume(&self) {
-        self.state.resumed.fetch_add(1, Ordering::Relaxed);
     }
 }
 struct Endpoint {

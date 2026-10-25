@@ -8,7 +8,10 @@ use std::time::Duration;
 use mixrelay_control_protocol::ControlTelemetry;
 use tokio::sync::watch;
 
-use crate::control_proxy::telemetry::{EventParser, Mailbox, SILENCE_LIMIT};
+use crate::{
+    control_channel::{Mailbox, SILENCE_LIMIT},
+    control_proxy::telemetry::EventParser,
+};
 
 /// Bounds opening the engine stream, which the shared HTTP client does not.
 pub(crate) const OPEN_TIMEOUT: Duration = Duration::from_secs(5);

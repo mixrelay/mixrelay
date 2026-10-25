@@ -287,7 +287,7 @@ fn asynchronous_device_acknowledgement_updates_every_catalog_reference_in_one_pu
 }
 
 struct MasterClockRuntime {
-    base: Arc<dyn RuntimeStatusBackend>,
+    base: Arc<dyn RuntimeBackend>,
     endpoint: Arc<AsynchronousEndpoint>,
     reject_adoption: bool,
     adoptions: AtomicU32,
@@ -298,14 +298,31 @@ impl RuntimeStatusBackend for MasterClockRuntime {
     fn status(&self, format: RenderFormat) -> AppStatus {
         self.base.status(format)
     }
+}
 
+impl ProcessingControlBackend for MasterClockRuntime {
+    fn suspend(&self) -> Result<(), HostAudioBackendError> {
+        self.base.suspend()
+    }
+    fn fail_reconfiguration(&self) {
+        self.base.fail_reconfiguration();
+    }
+    fn resume(&self) {
+        self.resumes.lock().push((
+            self.endpoint.state.rate.load(Ordering::Acquire),
+            self.endpoint.negotiation.lock().pending.is_some(),
+        ));
+        self.base.resume();
+    }
+}
+
+impl SessionFormatBackend for MasterClockRuntime {
     fn external_format(&self, current: RenderFormat) -> Option<RenderFormat> {
         Some(RenderFormat {
             sample_rate: self.endpoint.state.rate.load(Ordering::Acquire),
             ..current
         })
     }
-
     fn adopt_external_format(&self, requested: RenderFormat) -> Result<(), HostAudioBackendError> {
         self.adoptions.fetch_add(1, Ordering::Relaxed);
         assert_eq!(requested.sample_rate, 44_100);
@@ -316,22 +333,6 @@ impl RuntimeStatusBackend for MasterClockRuntime {
             });
         }
         Ok(())
-    }
-
-    fn suspend(&self) -> Result<(), HostAudioBackendError> {
-        self.base.suspend()
-    }
-
-    fn fail_reconfiguration(&self) {
-        self.base.fail_reconfiguration();
-    }
-
-    fn resume(&self) {
-        self.resumes.lock().push((
-            self.endpoint.state.rate.load(Ordering::Acquire),
-            self.endpoint.negotiation.lock().pending.is_some(),
-        ));
-        self.base.resume();
     }
 }
 

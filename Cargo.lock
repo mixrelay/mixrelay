@@ -860,15 +860,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-queue"
-version = "0.3.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "803d13fb3b09d88be9f4dbc29062c66b19bf7170867ceb746d2a8689bf6c7a26"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-utils"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2730,7 +2721,6 @@ dependencies = [
  "parking_lot",
  "rubato",
  "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -5777,7 +5767,6 @@ dependencies = [
  "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-foundation",
- "thiserror 2.0.20",
  "truce-rack-core",
 ]
 
@@ -5812,7 +5801,6 @@ name = "truce-rack-core"
 version = "1.1.5"
 dependencies = [
  "bitflags 2.13.1",
- "crossbeam-queue",
  "smallvec",
  "thiserror 2.0.20",
 ]

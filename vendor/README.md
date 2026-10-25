@@ -11,6 +11,8 @@ three adapters use the error type supplied by `truce-rack-core`; they do not der
 The upstream `.orig` manifests remain provenance, not active build inputs. This
 dependency cleanup does not change plugin loading, DSP, native ABI or format support.
 
+The core manifest also omits unused `crossbeam-queue`; AU omits unused `thiserror`.
+
 An actual Debian 13/aarch64 workspace build exposed 9 VST3 and 2 CLAP type errors:
 the bindings use target-dependent `c_char`, whereas these adapters hard-coded `i8`.
 Use VST3 `char8`/`TUID`/`FIDString` and CLAP `c_char` without changing byte layout, DSP or ownership.

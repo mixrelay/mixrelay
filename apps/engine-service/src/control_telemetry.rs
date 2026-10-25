@@ -109,6 +109,10 @@ mod tests {
                 self.0.load(Ordering::Relaxed)
             }
         }
+
+        impl crate::ProcessingControlBackend for PermissionStatus {}
+
+        impl crate::SessionFormatBackend for PermissionStatus {}
         let backend = Arc::new(PermissionStatus(AtomicBool::new(false)));
         let mut controller =
             crate::endpoint_settings_tests::controller(GraphDocument::new(7, vec![], vec![]));
@@ -157,6 +161,10 @@ mod tests {
             AppStatus::default()
         }
     }
+
+    impl crate::ProcessingControlBackend for DriverReadback {}
+
+    impl crate::SessionFormatBackend for DriverReadback {}
 
     #[test]
     fn telemetry_driver_readback_releases_writer_admission_without_a_ui_client() {

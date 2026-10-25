@@ -49,7 +49,7 @@ impl Probe {
 }
 
 pub(super) fn compatible(hello: &Value) -> bool {
-    hello["protocolVersion"] == super::LINK_PROTOCOL
+    hello["protocolVersion"] == crate::control_channel::LINK_PROTOCOL
         && hello["product"] == "mixrelay-driver"
         && hello["version"].as_str().is_some_and(supported_version)
 }
@@ -306,7 +306,7 @@ mod tests {
             reader.read_line(&mut frame).await.unwrap();
             let request: Value = serde_json::from_str(&frame).unwrap();
             let body = if request["command"]["name"] == "hello" {
-                json!({"protocolVersion":crate::background::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")})
+                json!({"protocolVersion":crate::control_channel::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")})
             } else {
                 json!({"status":status})
             };
@@ -334,11 +334,10 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
         (
-            Connection {
-                path: directory.join("control.sock"),
-                uid: std::fs::metadata(directory).unwrap().uid(),
-                link: std::sync::Arc::default(),
-            },
+            Connection::for_socket_fixture(
+                directory.join("control.sock"),
+                std::fs::metadata(directory).unwrap().uid(),
+            ),
             executable,
         )
     }
@@ -350,7 +349,7 @@ mod tests {
             directory.path(),
             "printf attempt >> attempts\nif test ! -f first; then touch first; exit 2; fi\ntouch ready",
         );
-        let path = connection.path.clone();
+        let path = directory.path().join("control.sock");
         let ready = directory.path().join("ready");
         let server = tokio::spawn(async move {
             while !ready.exists() {
@@ -401,7 +400,7 @@ mod tests {
         );
         assert!(!directory.path().join("launched").exists());
         let server = tokio::spawn(serve_connection(
-            UnixListener::bind(&connection.path).unwrap(),
+            UnixListener::bind(directory.path().join("control.sock")).unwrap(),
             503,
         ));
         let stages = std::sync::Mutex::new(Vec::new());
@@ -427,13 +426,13 @@ mod tests {
     async fn a_slow_but_healthy_engine_is_reported_as_being_prepared() {
         let directory = tempfile::tempdir().unwrap();
         let (connection, executable) = fixture(directory.path(), "touch launched");
-        let listener = UnixListener::bind(&connection.path).unwrap();
+        let listener = UnixListener::bind(directory.path().join("control.sock")).unwrap();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut reader = BufReader::new(stream);
             for (result, delay) in [
                 (
-                    json!({"protocolVersion":crate::background::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")}),
+                    json!({"protocolVersion":crate::control_channel::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")}),
                     0,
                 ),
                 (json!({"status":200}), 300),
@@ -510,7 +509,7 @@ mod tests {
             assert!(!compatible(&hello));
         }
         assert!(compatible(
-            &json!({"protocolVersion":crate::background::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")})
+            &json!({"protocolVersion":crate::control_channel::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")})
         ));
     }
 
@@ -518,18 +517,17 @@ mod tests {
     async fn controller_with_unavailable_engine_never_opens_editor() {
         for code in [200, 503] {
             let directory = tempfile::tempdir().unwrap();
-            let connection = Connection {
-                path: directory.path().join("control.sock"),
-                uid: std::fs::metadata(directory.path()).unwrap().uid(),
-                link: std::sync::Arc::default(),
-            };
-            let listener = UnixListener::bind(&connection.path).unwrap();
+            let connection = Connection::for_socket_fixture(
+                directory.path().join("control.sock"),
+                std::fs::metadata(directory.path()).unwrap().uid(),
+            );
+            let listener = UnixListener::bind(directory.path().join("control.sock")).unwrap();
             let server = tokio::spawn(async move {
                 // The controller keeps a connection open for the next request.
                 let (stream, _) = listener.accept().await.unwrap();
                 let mut reader = BufReader::new(stream);
                 for result in [
-                    json!({"protocolVersion":crate::background::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")}),
+                    json!({"protocolVersion":crate::control_channel::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")}),
                     json!({"status":code}),
                 ] {
                     let mut frame = String::new();

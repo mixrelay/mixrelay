@@ -1,4 +1,9 @@
 use serde::{Deserialize, Serialize};
+mod control_failure;
+pub use control_failure::{
+    ControlBoundary, ControlFailureCode, ControlFailureContext, ControlPlatform, ControlStage,
+    FailureDelivery,
+};
 mod telemetry;
 pub use telemetry::{ControlStateSnapshot, ControlTelemetry, TelemetryDecoder, TelemetryEncoder};
 mod editor_surface;

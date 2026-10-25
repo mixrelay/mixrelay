@@ -39,7 +39,8 @@ use handoff::{Publication, ResourceConsumer, ResourceHandoff};
 use mixrelay_audio_graph::{GraphDocument, RenderFormat};
 use mixrelay_audio_io::{HostAudioBackendError, process::TransferOutcome};
 use mixrelay_engine_service::{
-    GraphResourceBackend, PreparedGraphFormat, RuntimeStatusBackend, session::AdapterRuntimeStatus,
+    GraphResourceBackend, PreparedGraphFormat, ProcessingControlBackend, RuntimeStatusBackend,
+    SessionFormatBackend, session::AdapterRuntimeStatus,
 };
 use spec::{Spec, aggregate_members, specs};
 use std::{
@@ -596,12 +597,6 @@ impl GraphResourceBackend for MacDevices {
     }
 }
 impl RuntimeStatusBackend for MacDevices {
-    fn fail_reconfiguration(&self) {
-        self.status.fail_reconfiguration();
-    }
-    fn suspend(&self) -> Result<(), HostAudioBackendError> {
-        self.status.pause_at_boundary()
-    }
     fn capabilities_for_format(
         &self,
         format: RenderFormat,
@@ -610,6 +605,29 @@ impl RuntimeStatusBackend for MacDevices {
             .observe_routing_clock(self.follows_hardware(), self.routing_rate());
         self.status.capabilities_for_format(format)
     }
+    fn awaiting_microphone_permission(&self) -> bool {
+        self.host.permission_waiting()
+    }
+    fn status(&self, format: RenderFormat) -> mixrelay_control_protocol::AppStatus {
+        self.status
+            .observe_routing_clock(self.follows_hardware(), self.routing_rate());
+        self.status.status(format)
+    }
+}
+
+impl ProcessingControlBackend for MacDevices {
+    fn fail_reconfiguration(&self) {
+        self.status.fail_reconfiguration();
+    }
+    fn suspend(&self) -> Result<(), HostAudioBackendError> {
+        self.status.pause_at_boundary()
+    }
+    fn resume(&self) {
+        self.status.resume();
+    }
+}
+
+impl SessionFormatBackend for MacDevices {
     fn external_sample_rate(&self) -> Option<u32> {
         self.status.external_sample_rate()
     }
@@ -635,14 +653,6 @@ impl RuntimeStatusBackend for MacDevices {
         }
         self.status.adopt_external_format(requested)
     }
-    fn awaiting_microphone_permission(&self) -> bool {
-        self.host.permission_waiting()
-    }
-    fn status(&self, format: RenderFormat) -> mixrelay_control_protocol::AppStatus {
-        self.status
-            .observe_routing_clock(self.follows_hardware(), self.routing_rate());
-        self.status.status(format)
-    }
     fn reconfigure(
         &self,
         current: RenderFormat,
@@ -657,9 +667,6 @@ impl RuntimeStatusBackend for MacDevices {
             return self.status.reconfigure_routing_buffer(requested);
         }
         self.status.reconfigure(current, requested)
-    }
-    fn resume(&self) {
-        self.status.resume();
     }
 }
 

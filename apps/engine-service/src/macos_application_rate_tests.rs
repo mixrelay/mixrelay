@@ -10,8 +10,9 @@ use mixrelay_audio_io::{
 };
 use mixrelay_control_server::ControlBackend;
 use mixrelay_engine_service::{
-    EngineGraphController, EngineGraphControllerConfig, RuntimeStatusBackend,
-    default_peak_meter_bank, session::AdapterRuntimeStatus,
+    EngineGraphController, EngineGraphControllerConfig, ProcessingControlBackend,
+    RuntimeStatusBackend, SessionFormatBackend, default_peak_meter_bank,
+    session::AdapterRuntimeStatus,
 };
 use mixrelay_processor_host::ProcessorCatalog;
 use std::sync::{Arc, Mutex};
@@ -30,6 +31,11 @@ impl RuntimeStatusBackend for NativeNegotiationFixture {
     ) -> Option<mixrelay_audio_io::session::AudioSessionCapabilities> {
         self.profile.capabilities_for_format(format)
     }
+}
+
+impl ProcessingControlBackend for NativeNegotiationFixture {}
+
+impl SessionFormatBackend for NativeNegotiationFixture {
     fn reconfigure(
         &self,
         _: RenderFormat,

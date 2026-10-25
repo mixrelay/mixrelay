@@ -142,11 +142,6 @@ export interface VirtualEndpointSpec {
   defaultSampleRate: number;
 }
 
-export interface RuntimeVirtualEndpointConfig extends VirtualEndpointSpec {
-  gainDb?: number;
-  reference: { render: boolean; capture: boolean };
-}
-
 export type RuntimeApplicationSelector =
   | { bundle_id: string; include_descendants: boolean; match: 'bundle_id' }
   | { match: 'executable_path'; path: string }

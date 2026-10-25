@@ -16,8 +16,7 @@ use super::meters::{TelemetryHub, TelemetrySource};
 use super::outbound::Outbound;
 use super::{LocalControl, Request, RequestKind};
 
-pub(crate) const FRAME_LIMIT: u64 = 4 * 1024 * 1024;
-pub(crate) const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
+use crate::control_channel::FRAME_LIMIT;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 /// A connection with nothing in flight and no subscription closes after this long; clients

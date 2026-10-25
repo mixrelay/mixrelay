@@ -911,9 +911,6 @@ pub(crate) fn lv2_search_path(custom_paths: &[PathBuf]) -> Option<std::ffi::OsSt
     }
 }
 
-#[allow(dead_code)]
-fn _assert_path_is_send(_: &Path) {}
-
 #[cfg(test)]
 mod tests {
     use super::*;

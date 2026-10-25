@@ -10,9 +10,9 @@ use mixrelay_audio_io::session::{
 };
 use mixrelay_control_protocol::{AppStatus, DriverState, PROTOCOL_VERSION};
 
-use crate::RuntimeStatusBackend;
 use crate::persistence::StagedWrite;
 use crate::session_preferences::SessionPreferences;
+use crate::{ProcessingControlBackend, RuntimeStatusBackend, SessionFormatBackend};
 
 pub mod processing;
 use processing::{ProcessingLease, ProcessingLifecycle, WorkerState};
@@ -798,79 +798,6 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
     fn capabilities_for_format(&self, format: RenderFormat) -> Option<AudioSessionCapabilities> {
         Some(self.capabilities(format))
     }
-    fn external_sample_rate(&self) -> Option<u32> {
-        if let Some(reader) = &self.external_format_reader {
-            let format = reader();
-            self.observe_device_format(format);
-            return format.map(|format| format.sample_rate);
-        }
-        let rate = self.external_rate_reader.and_then(|reader| reader());
-        if self.external_rate_reader.is_some() {
-            self.observe_device_rate(rate);
-        }
-        rate
-    }
-
-    fn external_format(&self, current: RenderFormat) -> Option<RenderFormat> {
-        if let Some(reader) = &self.external_format_reader {
-            let format = reader();
-            self.observe_device_format(format);
-            format
-        } else {
-            self.external_sample_rate().map(|sample_rate| RenderFormat {
-                sample_rate,
-                ..current
-            })
-        }
-    }
-
-    fn adopt_external_format(
-        &self,
-        requested: RenderFormat,
-    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
-        use mixrelay_audio_io::HostAudioBackendError;
-        if !self.supports_format(requested)
-            || (self.external_rate_reader.is_none() && self.external_format_reader.is_none())
-        {
-            return Err(HostAudioBackendError::CapabilityUnavailable {
-                capability: "external format following".into(),
-            });
-        }
-        if self.external_format(requested) != Some(requested) {
-            return Err(HostAudioBackendError::BackendFailure {
-                message: "external native format changed during preparation".into(),
-            });
-        }
-        // The device has already changed. Storage failures are warnings, not a reason
-        // to keep processing PCM at the wrong rate. Preserve the last good file.
-        let staged = self.stage_preferences(requested);
-        self.pause_at_boundary()?;
-        if self.external_format(requested) != Some(requested) {
-            return Err(HostAudioBackendError::BackendFailure {
-                message: "external native format changed during suspension".into(),
-            });
-        }
-        let saved = staged.and_then(|staged| {
-            staged.map_or(Ok(()), |staged| {
-                staged.commit().map_err(|error| error.to_string())
-            })
-        });
-        self.preferences_error
-            .store(saved.is_err(), Ordering::Release);
-        if let Err(error) = saved {
-            tracing::warn!(%error, ?requested, "externally accepted format was not saved");
-        }
-        if self.preferences.is_some() {
-            self.preferred_format
-                .store(pack_format(requested), Ordering::Release);
-        }
-        self.restore_failed.store(false, Ordering::Release);
-        // Never call the native setter here. The caller publishes the prepared DSP plan
-        // before resuming; the saved last-accepted format prevents restart undoing the DAW.
-        self.failed.store(false, Ordering::Release);
-        Ok(())
-    }
-
     fn status(&self, format: RenderFormat) -> AppStatus {
         let format = if self.set_device_rate.is_some()
             || self.set_device_format.is_some()
@@ -950,7 +877,87 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
             }),
         }
     }
+}
 
+impl ProcessingControlBackend for AdapterRuntimeStatus {
+    fn resume(&self) {
+        if !self.failed.load(Ordering::Acquire) {
+            self.processing.resume();
+        }
+    }
+}
+
+impl SessionFormatBackend for AdapterRuntimeStatus {
+    fn external_sample_rate(&self) -> Option<u32> {
+        if let Some(reader) = &self.external_format_reader {
+            let format = reader();
+            self.observe_device_format(format);
+            return format.map(|format| format.sample_rate);
+        }
+        let rate = self.external_rate_reader.and_then(|reader| reader());
+        if self.external_rate_reader.is_some() {
+            self.observe_device_rate(rate);
+        }
+        rate
+    }
+    fn external_format(&self, current: RenderFormat) -> Option<RenderFormat> {
+        if let Some(reader) = &self.external_format_reader {
+            let format = reader();
+            self.observe_device_format(format);
+            format
+        } else {
+            self.external_sample_rate().map(|sample_rate| RenderFormat {
+                sample_rate,
+                ..current
+            })
+        }
+    }
+    fn adopt_external_format(
+        &self,
+        requested: RenderFormat,
+    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
+        use mixrelay_audio_io::HostAudioBackendError;
+        if !self.supports_format(requested)
+            || (self.external_rate_reader.is_none() && self.external_format_reader.is_none())
+        {
+            return Err(HostAudioBackendError::CapabilityUnavailable {
+                capability: "external format following".into(),
+            });
+        }
+        if self.external_format(requested) != Some(requested) {
+            return Err(HostAudioBackendError::BackendFailure {
+                message: "external native format changed during preparation".into(),
+            });
+        }
+        // The device has already changed. Storage failures are warnings, not a reason
+        // to keep processing PCM at the wrong rate. Preserve the last good file.
+        let staged = self.stage_preferences(requested);
+        self.pause_at_boundary()?;
+        if self.external_format(requested) != Some(requested) {
+            return Err(HostAudioBackendError::BackendFailure {
+                message: "external native format changed during suspension".into(),
+            });
+        }
+        let saved = staged.and_then(|staged| {
+            staged.map_or(Ok(()), |staged| {
+                staged.commit().map_err(|error| error.to_string())
+            })
+        });
+        self.preferences_error
+            .store(saved.is_err(), Ordering::Release);
+        if let Err(error) = saved {
+            tracing::warn!(%error, ?requested, "externally accepted format was not saved");
+        }
+        if self.preferences.is_some() {
+            self.preferred_format
+                .store(pack_format(requested), Ordering::Release);
+        }
+        self.restore_failed.store(false, Ordering::Release);
+        // Never call the native setter here. The caller publishes the prepared DSP plan
+        // before resuming; the saved last-accepted format prevents restart undoing the DAW.
+        self.failed.store(false, Ordering::Release);
+        Ok(())
+    }
     fn reconfigure(
         &self,
         current: RenderFormat,
@@ -1013,12 +1020,6 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
         self.restore_failed.store(false, Ordering::Release);
         self.failed.store(false, Ordering::Release);
         Ok(())
-    }
-
-    fn resume(&self) {
-        if !self.failed.load(Ordering::Acquire) {
-            self.processing.resume();
-        }
     }
 }
 

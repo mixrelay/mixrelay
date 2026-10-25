@@ -343,6 +343,15 @@ async fn lost_send_missing_and_other_resolution_failures_are_uncertain() {
             .unwrap();
         assert_eq!(result.status, 503);
         assert_eq!(result.body["parameters"]["operationOutcome"], "uncertain");
+        assert_eq!(
+            result.body["parameters"]["diagnostic"]["boundary"],
+            "runtime_engine"
+        );
+        assert_eq!(result.body["parameters"]["diagnostic"]["stage"], "request");
+        assert_eq!(
+            result.body["parameters"]["diagnostic"]["delivery"],
+            "uncertain"
+        );
         #[cfg(target_os = "macos")]
         assert_eq!(result.delivery, RequestDelivery::Uncertain);
         assert_eq!(server.await.unwrap().len(), 2);
@@ -518,6 +527,10 @@ async fn recovery_body_failure_is_uncertain_and_does_not_lookup_again() {
                 .unwrap();
             assert_eq!(result.status, 503);
             assert_eq!(result.body["parameters"]["operationOutcome"], "uncertain");
+            assert_eq!(
+                result.body["parameters"]["diagnostic"]["stage"],
+                "receipt_observation"
+            );
             #[cfg(target_os = "macos")]
             assert_eq!(result.delivery, RequestDelivery::Uncertain);
             let requests = server.await.unwrap();

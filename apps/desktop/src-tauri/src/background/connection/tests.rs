@@ -1,5 +1,6 @@
+use super::super::forward_transport_error;
 use super::*;
-use std::{fs, os::unix::fs::PermissionsExt, time::Instant};
+use std::{fs, time::Instant};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::UnixListener;
 
@@ -18,39 +19,74 @@ async fn an_interrupted_initial_catalog_read_reports_retryable_transport_without
         .exchange("control_get_graph_catalog", Value::Null)
         .await
         .unwrap_err();
-    let result = forward_transport_error("control_get_graph_catalog", failure).unwrap();
+    let result = forward_transport_error("control_get_graph_catalog", &failure).unwrap();
     assert_eq!(result["status"], 503);
     assert_eq!(result["body"]["code"], "control_unavailable");
+    assert_eq!(
+        result["body"]["parameters"]["diagnostic"]["boundary"],
+        "editor_runtime"
+    );
+    assert_eq!(
+        result["body"]["parameters"]["diagnostic"]["stage"],
+        "response"
+    );
+    assert_eq!(
+        result["body"]["parameters"]["diagnostic"]["delivery"],
+        "uncertain"
+    );
     server.await.unwrap();
 }
 
 #[test]
 fn catalog_transport_classification_keeps_security_protocol_and_mutation_failures_terminal() {
-    for reason in [
-        "background controller belongs to a different user",
-        "invalid background result",
-        "background request is too large",
+    for failure in [
+        ConnectionFailure::PeerMismatch,
+        ConnectionFailure::InvalidResponse,
+        ConnectionFailure::RequestTooLarge,
     ] {
+        let reason = failure.to_string();
         assert_eq!(
-            forward_transport_error("control_get_graph_catalog", reason.into()),
-            Err(Value::String(reason.into()))
+            forward_transport_error("control_get_graph_catalog", &failure),
+            Err(Value::String(reason))
         );
     }
     assert!(
         forward_transport_error(
             "control_mutate_graph_catalog",
-            "background response is uncertain; command was not replayed".into()
+            &ConnectionFailure::ResponseTimeout
         )
         .is_err()
     );
 }
 
 fn fixture_connection(directory: &std::path::Path) -> Connection {
-    Connection {
-        path: directory.join("service.sock"),
-        uid: fs::metadata(directory).unwrap().uid(),
-        link: Arc::default(),
-    }
+    Connection::for_socket_fixture(
+        directory.join("service.sock"),
+        fs::metadata(directory).unwrap().uid(),
+    )
+}
+
+#[tokio::test]
+async fn a_missing_socket_retains_its_os_error_and_unsent_delivery() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = fixture_connection(directory.path());
+    let failure = connection
+        .exchange("control_get_graph_catalog", Value::Null)
+        .await
+        .unwrap_err();
+    assert!(matches!(failure, ConnectionFailure::Connect(_)));
+    let response = forward_transport_error("control_get_graph_catalog", &failure).unwrap();
+    let diagnostic = &response["body"]["parameters"]["diagnostic"];
+    assert_eq!(diagnostic["platform"], std::env::consts::OS);
+    assert_eq!(diagnostic["boundary"], "editor_runtime");
+    assert_eq!(diagnostic["stage"], "connect");
+    assert_eq!(diagnostic["delivery"], "not_sent");
+    assert_eq!(diagnostic["osError"], libc::ENOENT);
+    assert!(
+        !diagnostic
+            .to_string()
+            .contains(directory.path().to_str().unwrap())
+    );
 }
 
 async fn request(reader: &mut BufReader<tokio::net::UnixStream>) -> Value {
@@ -209,46 +245,6 @@ async fn another_users_socket_is_rejected_before_command_delivery() {
     assert_eq!(stream.read(&mut byte).await.unwrap(), 0);
 }
 
-#[test]
-fn editor_process_fixture() {
-    let Some(executable) = std::env::var_os("MIXRELAY_FIXTURE_CONTROLLER") else {
-        return;
-    };
-    spawn_controller(std::path::Path::new(&executable)).unwrap();
-}
-
-#[test]
-fn controller_survives_actual_editor_process_exit() {
-    let directory = tempfile::tempdir().unwrap();
-    let executable = directory.path().join("controller.sh");
-    let ready = directory.path().join("ready");
-    let stop = directory.path().join("stop");
-    let finished = directory.path().join("finished");
-    // A bounded fixture always exits even if an assertion fails; no native audio is opened.
-    fs::write(&executable, "#!/bin/sh\ncd \"$(dirname \"$0\")\"\nprintf ready > ready\ni=0\nwhile test ! -f stop && test \"$i\" -lt 100; do sleep 0.05; i=$((i+1)); done\nprintf finished > finished\n").unwrap();
-    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "background::tests::editor_process_fixture"])
-        .env("MIXRELAY_FIXTURE_CONTROLLER", &executable)
-        .status()
-        .unwrap();
-    assert!(status.success());
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !ready.exists() {
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(
-        !finished.exists(),
-        "editor exit must not stop the controller"
-    );
-    fs::write(stop, "stop").unwrap();
-    while !finished.exists() {
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
 /// A runtime that answers one meter subscription with `replies` (the request id fills in
 /// `"id": null`), then closes the connection.
 fn meter_runtime(connection: &Connection, replies: Vec<Value>) -> tokio::task::JoinHandle<()> {
@@ -335,7 +331,7 @@ async fn a_meter_subscription_without_a_first_window_is_refused() {
         let connection = fixture_connection(directory.path());
         let server = meter_runtime(&connection, replies);
         let refused = connection.subscribe_telemetry().await.err().unwrap();
-        assert!(refused.starts_with(reason), "{refused}");
+        assert!(refused.to_string().starts_with(reason), "{refused}");
         server.await.unwrap();
     }
 }

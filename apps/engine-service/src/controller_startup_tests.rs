@@ -19,6 +19,10 @@ impl RuntimeStatusBackend for NativeCalls {
     }
 }
 
+impl ProcessingControlBackend for NativeCalls {}
+
+impl SessionFormatBackend for NativeCalls {}
+
 impl GraphResourceBackend for NativeCalls {
     fn reconcile(
         &self,

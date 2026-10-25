@@ -11,12 +11,11 @@ use std::{
     time::Duration,
 };
 
+use crate::control_channel::Mailbox;
 use mixrelay_control_protocol::{ControlTelemetry, TelemetryEncoder};
 use tauri::Manager as _;
-use tokio::sync::{Notify, Semaphore, watch};
+use tokio::sync::{Semaphore, watch};
 
-/// The engine publishes a window every 50 ms; this much silence means the stream is dead.
-pub(crate) const SILENCE_LIMIT: Duration = Duration::from_secs(2);
 /// Windows the webview may hold unacknowledged.
 const CREDITS: usize = 2;
 /// A webview that returns no credit for this long has stopped consuming.
@@ -24,61 +23,6 @@ const CREDIT_LIMIT: Duration = Duration::from_secs(10);
 // A hidden editor needs state/liveness, while its meters are not displayed. Stay
 // below the two-second UI watchdog; restoring visibility bypasses this interval.
 const HIDDEN_INTERVAL: Duration = Duration::from_secs(1);
-
-/// One reader's undelivered window. Newer windows fold into it, so a slow reader costs a
-/// single window of memory and still sees every peak since its last delivery.
-#[derive(Default)]
-pub(crate) struct Mailbox {
-    state: Mutex<Pending>,
-    ready: Notify,
-}
-
-#[derive(Default)]
-struct Pending {
-    window: Option<ControlTelemetry>,
-    ended: Option<String>,
-}
-
-impl Mailbox {
-    fn pending(&self) -> std::sync::MutexGuard<'_, Pending> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    pub(crate) fn deliver(&self, window: ControlTelemetry) {
-        let mut pending = self.pending();
-        match &mut pending.window {
-            Some(older) => older.absorb(window),
-            slot @ None => *slot = Some(window),
-        }
-        drop(pending);
-        self.ready.notify_one();
-    }
-
-    /// Ends the stream after any pending window; the first reason wins.
-    pub(crate) fn end(&self, reason: &str) {
-        self.pending()
-            .ended
-            .get_or_insert_with(|| reason.to_owned());
-        self.ready.notify_one();
-    }
-
-    /// The pending window, or once none remains, why the stream ended.
-    pub(crate) async fn take(&self) -> Result<ControlTelemetry, String> {
-        loop {
-            {
-                let mut pending = self.pending();
-                if let Some(window) = pending.window.take() {
-                    return Ok(window);
-                }
-                if let Some(reason) = &pending.ended {
-                    return Err(reason.clone());
-                }
-            }
-            // `notify_one` stores a permit, so a delivery between the check and here wakes us.
-            self.ready.notified().await;
-        }
-    }
-}
 
 /// The editor's live meter subscriptions. Each removes itself when it ends.
 #[derive(Default)]
@@ -115,7 +59,10 @@ pub(crate) async fn control_subscribe_telemetry(
         .ok_or("meter push needs the background runtime")?
         .inner()
         .clone();
-    let mut subscription = connection.subscribe_telemetry().await?;
+    let mut subscription = connection
+        .subscribe_telemetry()
+        .await
+        .map_err(|error| error.to_string())?;
     let subscriptions = app.state::<TelemetrySubscriptions>();
     let id = subscriptions.next.fetch_add(1, Ordering::Relaxed) + 1;
     let credit = Arc::new(Semaphore::new(CREDITS));

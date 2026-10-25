@@ -12,7 +12,7 @@ use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::mpsc;
 
-use crate::control_proxy::telemetry::Mailbox;
+use crate::control_channel::Mailbox;
 
 /// Frames queued for the writer; a sender that waits longer is told the runtime stalled.
 const OUTBOUND_FRAMES: usize = 32;
@@ -169,7 +169,7 @@ impl Link {
     }
 
     async fn read(self: Arc<Self>, read: OwnedReadHalf) {
-        let limit = crate::control_proxy::local::socket::RESPONSE_LIMIT;
+        let limit = crate::control_channel::RESPONSE_LIMIT;
         let mut reader = BufReader::new(read);
         loop {
             let mut line = Vec::new();

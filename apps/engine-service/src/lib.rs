@@ -36,6 +36,11 @@ use mixrelay_processor_host::{
     CatalogNodeResolver, ExternalProcessorFactory, ProcessorCatalog, ProcessorControlRegistry,
 };
 
+mod runtime_backend;
+pub use runtime_backend::{
+    ProcessingControlBackend, RuntimeBackend, RuntimeStatusBackend, SessionFormatBackend,
+};
+
 pub const DEFAULT_ENDPOINT_NODE_ID: &str = "default-virtual-io";
 
 #[cfg(target_os = "macos")]
@@ -219,74 +224,6 @@ impl PreparedGraphFormat for UnchangedGraphFormat {
     fn commit(self: Box<Self>) {}
 }
 
-/// Supplies host-driver health without coupling the control protocol to a platform module.
-pub trait RuntimeStatusBackend: Send + Sync {
-    fn status(&self, format: RenderFormat) -> AppStatus;
-
-    fn awaiting_microphone_permission(&self) -> bool {
-        false
-    }
-
-    /// Quiesces processing at an audio boundary before a device transaction.
-    /// The controller resumes after publication or a verified rollback.
-    /// # Errors
-    /// Rejects unavailable suspension or an unacknowledged callback boundary.
-    fn suspend(&self) -> Result<(), HostAudioBackendError> {
-        Err(HostAudioBackendError::CapabilityUnavailable {
-            capability: "audio processing suspension".into(),
-        })
-    }
-
-    /// Latches a failed native rollback. Implementations exposing device setters
-    /// must retain suspension until an explicit recovery establishes a valid plan.
-    fn fail_reconfiguration(&self) {}
-
-    /// Capability projection for a proposed format, not the currently active DSP format.
-    fn capabilities_for_format(
-        &self,
-        format: RenderFormat,
-    ) -> Option<mixrelay_audio_io::session::AudioSessionCapabilities> {
-        self.status(format)
-            .audio_session
-            .map(|session| session.capabilities)
-    }
-    /// Reads a native rate only for an explicitly opted-in external-clock follower.
-    /// Called on the control plane, never on the audio callback.
-    fn external_sample_rate(&self) -> Option<u32> {
-        None
-    }
-    /// Full own-endpoint observation. Rate-only adapters retain their DSP block size.
-    fn external_format(&self, current: RenderFormat) -> Option<RenderFormat> {
-        self.external_sample_rate().map(|sample_rate| RenderFormat {
-            sample_rate,
-            ..current
-        })
-    }
-    /// Adopts an already changed native rate without writing it back. Last-accepted format
-    /// persistence may warn, but cannot veto adoption of an otherwise valid native format.
-    /// # Errors
-    /// Rejects unsupported followers or a native rate that changed during preparation.
-    fn adopt_external_format(&self, _requested: RenderFormat) -> Result<(), HostAudioBackendError> {
-        Err(HostAudioBackendError::CapabilityUnavailable {
-            capability: "external format following".into(),
-        })
-    }
-    /// Quiesces I/O and negotiates a native format on the control thread.
-    /// # Errors
-    /// Returns an error on unsupported or failed negotiation; the old format must be restored
-    /// or audio must remain suspended. Publication happens before `resume` is called.
-    fn reconfigure(
-        &self,
-        _current: RenderFormat,
-        _requested: RenderFormat,
-    ) -> Result<(), HostAudioBackendError> {
-        Err(HostAudioBackendError::CapabilityUnavailable {
-            capability: "live format reconfiguration".into(),
-        })
-    }
-    fn resume(&self) {}
-}
-
 #[derive(Debug)]
 pub struct FixedRuntimeStatus {
     driver_state: DriverState,
@@ -319,6 +256,10 @@ impl RuntimeStatusBackend for FixedRuntimeStatus {
         }
     }
 }
+
+impl ProcessingControlBackend for FixedRuntimeStatus {}
+
+impl SessionFormatBackend for FixedRuntimeStatus {}
 
 #[derive(Debug, Default)]
 pub struct NoopGraphResourceBackend;
@@ -467,7 +408,7 @@ pub struct EngineGraphController {
     processor_catalog: ProcessorCatalog,
     processor_controls: ProcessorControlRegistry,
     graph_resources: Arc<dyn GraphResourceBackend>,
-    runtime_status: Arc<dyn RuntimeStatusBackend>,
+    runtime_status: Arc<dyn RuntimeBackend>,
 }
 
 pub struct EngineGraphControllerConfig {
@@ -478,7 +419,7 @@ pub struct EngineGraphControllerConfig {
     pub required_endpoint_node_id: Option<NodeId>,
     pub processor_catalog: ProcessorCatalog,
     pub graph_resources: Arc<dyn GraphResourceBackend>,
-    pub runtime_status: Arc<dyn RuntimeStatusBackend>,
+    pub runtime_status: Arc<dyn RuntimeBackend>,
     /// Whether paid access is active, read at each admission. Production passes
     /// `mixrelay_licensing::has_local_paid_access`; tests pass a fixed answer so they never
     /// reach the user's keychain.

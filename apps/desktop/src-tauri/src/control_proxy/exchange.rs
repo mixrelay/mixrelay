@@ -1,3 +1,4 @@
+//! Sends control commands once and resolves accepted operation receipts.
 use std::{
     collections::hash_map::RandomState,
     hash::BuildHasher,
@@ -5,8 +6,11 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use mixrelay_control_protocol::ControlStage;
 use reqwest::{Method, Response};
+mod transport_failure;
 use serde_json::Value;
+use transport_failure::TransportFailure;
 
 #[cfg(target_os = "macos")]
 use super::RequestDelivery;
@@ -54,8 +58,10 @@ pub(super) async fn request(
     }
     let result = match request.send().await {
         Ok(response) => finish(client, origin, response, requested.as_deref(), None).await,
-        Err(error) if error.is_connect() => return Ok(failed(path, &error, false)),
-        Err(error) => Err(ExchangeError::Transport(error)),
+        Err(error) if error.is_connect() => {
+            return Ok(failed(path, &TransportFailure::request(error), false));
+        }
+        Err(error) => Err(ExchangeError::Transport(TransportFailure::request(error))),
     };
     match result {
         Ok(response) => Ok(response),
@@ -120,7 +126,7 @@ async fn observe_operation(
 }
 
 enum ExchangeError {
-    Transport(reqwest::Error),
+    Transport(TransportFailure),
     Invalid(String),
 }
 
@@ -137,6 +143,11 @@ async fn finish(
     requested: Option<&str>,
     mut accepted: Option<String>,
 ) -> Result<ControlProxyResponse, ExchangeError> {
+    let mut response_stage = if accepted.is_some() {
+        ControlStage::ReceiptObservation
+    } else {
+        ControlStage::Response
+    };
     loop {
         let engine = observe_engine(client, &response);
         let pending = operation_id(&response)?;
@@ -169,7 +180,9 @@ async fn finish(
         } else {
             // Reqwest classifies some body transport errors as decode errors too.
             // Separate byte reads from JSON parsing to preserve that distinction.
-            let bytes = response.bytes().await.map_err(ExchangeError::Transport)?;
+            let bytes = response.bytes().await.map_err(|source| {
+                ExchangeError::Transport(TransportFailure::at(response_stage, source))
+            })?;
             serde_json::from_slice(&bytes).map_err(|error| {
                 ExchangeError::Invalid(format!("local control response was invalid: {error}"))
             })?
@@ -190,6 +203,7 @@ async fn finish(
         client.operation_liveness.notify_waiters();
         let url = operation_url(origin, &id)?;
         tokio::time::sleep(Duration::from_millis(100)).await;
+        response_stage = ControlStage::ReceiptObservation;
         response = match client
             .client
             .get(url)
@@ -198,7 +212,12 @@ async fn finish(
             .await
         {
             Ok(response) => response,
-            Err(error) => return Err(ExchangeError::Transport(error)),
+            Err(error) => {
+                return Err(ExchangeError::Transport(TransportFailure::at(
+                    ControlStage::ReceiptObservation,
+                    error,
+                )));
+            }
         };
     }
 }
@@ -322,14 +341,18 @@ async fn acknowledge(client: &ControlProxyClient, url: &reqwest::Url) {
     }
 }
 
-fn failed(path: &str, error: &reqwest::Error, accepted: bool) -> ControlProxyResponse {
-    tracing::warn!(path, ?error, accepted, "control exchange failed");
-    let code = if error.is_connect() || error.is_timeout() {
+fn failed(path: &str, error: &TransportFailure, accepted: bool) -> ControlProxyResponse {
+    let diagnostic = error.diagnostic(accepted);
+    tracing::warn!(path, platform = ?diagnostic.platform, boundary = ?diagnostic.boundary,
+        stage = ?diagnostic.stage, failure = ?diagnostic.failure, delivery = ?diagnostic.delivery,
+        os_error = diagnostic.os_error, "control exchange failed");
+    let code = if error.unavailable() {
         "control_unavailable"
     } else {
         "control_request_failed"
     };
-    let mut parameters = serde_json::json!({"path": path, "reason": error.to_string()});
+    let mut parameters =
+        serde_json::json!({"path": path, "reason": error.to_string(), "diagnostic": diagnostic});
     if accepted {
         parameters["operationOutcome"] = Value::from("uncertain");
     }

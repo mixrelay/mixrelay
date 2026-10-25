@@ -21,5 +21,4 @@ audioadapter-buffers.workspace = true
 
 [dev-dependencies]
 mixrelay-test-support = { path = "../test-support" }
-serde_json.workspace = true
 allocation-counter = "0.8.1"

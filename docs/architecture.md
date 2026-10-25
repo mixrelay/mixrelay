@@ -54,6 +54,26 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
   - HAL 동작 → `hal-core`(Rust), ABI 연결만 C 브리지
 - 테스트 배치는 [Rust 작업 규칙](rust-guidelines.md)의 테스트 절을 따른다. 테스트용 가짜는 `#[cfg(test)]` 뒤에 두고 제품 코드의 가시성을 넓히지 않는다.
 
+## 네이티브 실행과 제어 채널
+
+엔진의 네이티브 실행 계약은 다음 책임으로 나눈다. 하나의 네이티브 소유자가 세 계약을 구현하고
+`RuntimeBackend`로 조립한다. 포맷 변경은 같은 장치 수명의 상태·정지·협상을 사용해야 한다.
+
+| 계약 | 책임 |
+| --- | --- |
+| `RuntimeStatusBackend` | 실행 상태·권한 대기·제안된 포맷의 기능 조회 |
+| `ProcessingControlBackend` | 오디오 경계에서 정지·재개와 실패한 rollback의 정지 유지 |
+| `SessionFormatBackend` | 외부 클록 관찰·따라가기와 네이티브 포맷 협상 |
+
+편집기와 런타임은 `control_channel`의 프레임 상한·프로토콜 버전·텔레메트리 mailbox 계약을 공유한다.
+클라이언트의 `background::connection`은 요청 전달과 구독을, `background::process`는 자식 프로세스 수명을,
+`background::directories`는 OS별 경로 결정을 맡는다. 서버 내부 구현을 클라이언트의 계약으로 사용하지 않는다.
+
+제어 전송 실패는 `ControlFailureContext`에 OS·경계·단계·실패 코드·전달 확실성·OS 오류 번호를 남긴다.
+`editor_runtime`은 편집기와 사용자 런타임 사이의 소켓, `runtime_engine`은 런타임과 엔진 사이의 HTTP다.
+연결 거부, 응답 본문 실패, 영수증 관찰 실패를 구분하며 전달이 불확실한 변경 명령은 재전송하지 않는다.
+이 기록에는 요청 인자·경로·장치 이름을 넣지 않는다.
+
 ## 크레이트를 만들 때
 - 플랫폼 중립 크레이트는 `crates/`, OS 어댑터는 `native/<os>/`, 실행 파일은 `apps/`에 둔다. 이름은 `mixrelay-<역할>`이다. 기존 C 라이브러리 바인딩만 담는 새 크레이트는 `-sys`로 끝낸다(M-FFI-NAMING).
 - 워크스페이스 `members`에 추가하고, 버전·edition·린트는 `workspace = true`로 물려받는다(M-CARGO-WORKSPACE, M-CRATES-IN-WORKSPACE). 형제 크레이트는 `path` 의존으로 연결한다.
