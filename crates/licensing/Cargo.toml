@@ -14,15 +14,17 @@ workspace = true
 # Public License API only; never embed a merchant API credential in a binary.
 reqwest = { workspace = true, features = ["form", "rustls"] }
 secrecy = { version = "0.10.3", features = ["serde"] }
-# The same native credential entry is used by the desktop and unprivileged removers.
-keyring = { version = "3.6.3", features = ["apple-native", "sync-secret-service", "crypto-rust", "vendored"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+keyring = { version = "3.6.3", features = ["apple-native"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
-# Background admission reads existing unlocked entries without creating a prompt.
-dbus-secret-service = { version = "4.1.0", features = ["crypto-rust"] }
+# Editor, engine and removal share the same noninteractive native entry.
+dbus-secret-service = { version = "4.1.0", features = ["crypto-rust", "vendored"] }
 
 [dev-dependencies]
+keyring = { version = "3.6.3", default-features = false }
 tokio = { workspace = true, features = ["io-util", "time"] }

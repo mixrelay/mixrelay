@@ -515,6 +515,7 @@ fn io_evidence(registry: &Registry, object: u32, address: &Address) -> Result<Va
     if device.id != object || address.scope != GLOBAL {
         return Err(UNKNOWN);
     }
+    let _control = crate::device::lock(&device.control);
     if address.selector == u32::from_be_bytes(*b"mrdi") {
         Ok(number(u32::from(device.io_trace.enabled())))
     } else {

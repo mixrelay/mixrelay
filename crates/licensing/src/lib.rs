@@ -1,4 +1,4 @@
-//! Lemon Squeezy's public License API, isolated from the audio engine.
+//! License API, entitlement policy and native credential persistence.
 //!
 //! Remote requests, local entitlement policy and the shared native credential format.
 //! The desktop owns purchase UI and Driver lifecycle. Licensing never stops running audio.
@@ -10,7 +10,8 @@ mod response;
 
 pub use client::{LicenseClient, LicenseHttp, LicenseHttpResponse};
 pub use credentials::{
-    LOCAL_LICENSE_SERVICE, StoredLicense, clear_local_license, has_local_paid_access,
+    StoredLicense, clear_local_license, has_local_paid_access, read_local_license,
+    write_local_license,
 };
 pub use entitlement::{AccessSnapshot, AccessStatus, EntitlementRecord};
 pub use secrecy::SecretString;

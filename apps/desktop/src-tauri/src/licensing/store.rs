@@ -3,8 +3,8 @@
 use std::sync::{Arc, Mutex};
 
 use mixrelay_licensing::{
-    AccessSnapshot, Activation, EntitlementRecord, LOCAL_LICENSE_SERVICE, LicenseError,
-    SecretString, StoredLicense as Vault,
+    AccessSnapshot, Activation, EntitlementRecord, LicenseError, SecretString,
+    StoredLicense as Vault,
 };
 use secrecy::ExposeSecret as _;
 
@@ -19,19 +19,11 @@ struct NativeCredentials;
 
 impl CredentialStore for NativeCredentials {
     fn read(&self) -> Result<Option<SecretString>, LicenseError> {
-        let entry = keyring::Entry::new(LOCAL_LICENSE_SERVICE, "desktop")
-            .map_err(|_| LicenseError::StorageUnavailable)?;
-        match entry.get_password() {
-            Ok(value) => Ok(Some(SecretString::from(value))),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err(LicenseError::StorageUnavailable),
-        }
+        mixrelay_licensing::read_local_license()
     }
 
     fn write(&self, value: &SecretString) -> Result<(), LicenseError> {
-        keyring::Entry::new(LOCAL_LICENSE_SERVICE, "desktop")
-            .and_then(|entry| entry.set_password(value.expose_secret()))
-            .map_err(|_| LicenseError::StorageUnavailable)
+        mixrelay_licensing::write_local_license(value)
     }
 }
 

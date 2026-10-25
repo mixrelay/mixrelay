@@ -20,7 +20,6 @@ mixrelay-driver-control = { path = "../../../crates/driver-control" }
 mixrelay-engine-process = { path = "../../../crates/engine-process" }
 mixrelay-licensing = { path = "../../../crates/licensing" }
 # Native credential stores; no plaintext license-file fallback.
-keyring = { version = "3.6.3", features = ["apple-native", "sync-secret-service", "crypto-rust", "vendored"] }
 open = "5.4.4"
 secrecy = { version = "0.10.3", features = ["serde"] }
 sha2 = "0.10.9"

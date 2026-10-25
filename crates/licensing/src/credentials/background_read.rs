@@ -1,20 +1,22 @@
 //! Select an existing, unique unlocked credential without an unlock capability.
 use crate::{LicenseError, SecretString};
 
-pub(super) fn unique_unlocked<T>(
+pub(super) fn with_unique_unlocked<T, R>(
     unlocked: &[T],
     locked_count: usize,
-    read: impl FnOnce(&T) -> Result<Vec<u8>, LicenseError>,
-) -> Result<Option<SecretString>, LicenseError> {
+    apply: impl FnOnce(&T) -> Result<R, LicenseError>,
+) -> Result<Option<R>, LicenseError> {
     match (unlocked, locked_count) {
         ([], 0) => Ok(None),
-        ([item], 0) => {
-            let bytes = read(item)?;
-            let value = String::from_utf8(bytes).map_err(|_| LicenseError::StorageUnavailable)?;
-            Ok(Some(SecretString::from(value)))
-        }
+        ([item], 0) => apply(item).map(Some),
         _ => Err(LicenseError::StorageUnavailable),
     }
+}
+
+pub(super) fn decode_secret(bytes: Vec<u8>) -> Result<SecretString, LicenseError> {
+    String::from_utf8(bytes)
+        .map(SecretString::from)
+        .map_err(|_| LicenseError::StorageUnavailable)
 }
 
 #[cfg(test)]
@@ -30,9 +32,10 @@ mod tests {
             (vec![1], 1, false),
             (vec![1, 2], 0, false),
         ] {
-            let result = unique_unlocked(&unlocked, locked_count, |_| {
-                panic!("secret read must not start")
-            });
+            let result: Result<Option<SecretString>, LicenseError> =
+                with_unique_unlocked(&unlocked, locked_count, |_| {
+                    panic!("secret read must not start")
+                });
             if absent {
                 assert!(matches!(result, Ok(None)));
             } else {
@@ -43,19 +46,21 @@ mod tests {
 
     #[test]
     fn one_unlocked_entry_preserves_the_stored_value_and_read_errors() {
-        let value = unique_unlocked(&[7], 0, |item| {
+        let value = with_unique_unlocked(&[7], 0, |item| {
             assert_eq!(*item, 7);
-            Ok(b"existing-entitlement".to_vec())
+            decode_secret(b"existing-entitlement".to_vec())
         })
         .unwrap()
         .unwrap();
         assert_eq!(value.expose_secret(), "existing-entitlement");
         assert!(matches!(
-            unique_unlocked(&[7], 0, |_| Err(LicenseError::StorageUnavailable)),
+            with_unique_unlocked::<_, SecretString>(&[7], 0, |_| Err(
+                LicenseError::StorageUnavailable
+            )),
             Err(LicenseError::StorageUnavailable)
         ));
         assert!(matches!(
-            unique_unlocked(&[7], 0, |_| Ok(vec![0xff])),
+            with_unique_unlocked(&[7], 0, |_| decode_secret(vec![0xff])),
             Err(LicenseError::StorageUnavailable)
         ));
     }

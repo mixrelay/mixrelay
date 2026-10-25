@@ -8,12 +8,18 @@ use crate::{EntitlementRecord, LicenseError, SecretString};
 #[cfg(any(target_os = "linux", test))]
 mod background_read;
 #[cfg(target_os = "linux")]
-mod secret_service_read;
+mod secret_service;
+#[cfg(target_os = "linux")]
+use secret_service as native_store;
+#[cfg(not(target_os = "linux"))]
+mod keyring_store;
+#[cfg(not(target_os = "linux"))]
+use keyring_store as native_store;
 
 const MAX_RECORD_BYTES: usize = 4_096;
 
 /// Native service name. Development builds cannot overwrite product credentials.
-pub const LOCAL_LICENSE_SERVICE: &str = if cfg!(debug_assertions) {
+const LOCAL_LICENSE_SERVICE: &str = if cfg!(debug_assertions) {
     "MixRelay.licensing.dev"
 } else {
     "MixRelay.licensing"
@@ -87,26 +93,29 @@ impl StoredLicense {
 /// Missing, malformed, inaccessible or expired credentials retain free access.
 #[must_use]
 pub fn has_local_paid_access() -> bool {
-    let Ok(Some(value)) = read_background_credential() else {
+    let Ok(Some(value)) = read_local_license() else {
         return false;
     };
     paid_access_at(&value, std::time::SystemTime::now())
 }
 
-#[cfg(target_os = "linux")]
-fn read_background_credential() -> Result<Option<SecretString>, LicenseError> {
-    secret_service_read::read()
+/// Read the current user's stored license without returning native store handles.
+/// Linux never unlocks or creates a collection during this read.
+/// # Errors
+/// Returns `StorageUnavailable` for locked, ambiguous or unreadable entries.
+pub fn read_local_license() -> Result<Option<SecretString>, LicenseError> {
+    native_store::read()
 }
 
-#[cfg(not(target_os = "linux"))]
-fn read_background_credential() -> Result<Option<SecretString>, LicenseError> {
-    let entry = keyring::Entry::new(LOCAL_LICENSE_SERVICE, "desktop")
-        .map_err(|_| LicenseError::StorageUnavailable)?;
-    match entry.get_password() {
-        Ok(value) => Ok(Some(SecretString::from(value))),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(_) => Err(LicenseError::StorageUnavailable),
+/// Persist the bounded license entry for the current user.
+/// Linux updates an unlocked item or creates one in an existing unlocked collection.
+/// # Errors
+/// Returns `StorageUnavailable` if the value is oversized or the store cannot commit it.
+pub fn write_local_license(value: &SecretString) -> Result<(), LicenseError> {
+    if value.expose_secret().len() > MAX_RECORD_BYTES {
+        return Err(LicenseError::StorageUnavailable);
     }
+    native_store::write(value)
 }
 
 fn paid_access_at(value: &SecretString, now: std::time::SystemTime) -> bool {
@@ -130,23 +139,20 @@ fn paid_access_at(value: &SecretString, now: std::time::SystemTime) -> bool {
 /// Returns `StorageUnavailable` if the native store cannot be read or updated, or
 /// its existing entry cannot safely preserve the original clock history.
 pub fn clear_local_license() -> Result<(), LicenseError> {
-    let entry = keyring::Entry::new(LOCAL_LICENSE_SERVICE, "desktop")
-        .map_err(|_| LicenseError::StorageUnavailable)?;
-    clear_entry(&entry)
+    clear_with(read_local_license, write_local_license)
 }
 
-fn clear_entry(entry: &keyring::Entry) -> Result<(), LicenseError> {
-    let value = match entry.get_password() {
-        Ok(value) => SecretString::from(value),
-        Err(keyring::Error::NoEntry) => return Ok(()),
-        Err(_) => return Err(LicenseError::StorageUnavailable),
+fn clear_with(
+    read: impl FnOnce() -> Result<Option<SecretString>, LicenseError>,
+    write: impl FnOnce(&SecretString) -> Result<(), LicenseError>,
+) -> Result<(), LicenseError> {
+    let Some(value) = read()? else {
+        return Ok(());
     };
     let mut saved = StoredLicense::decode(&value)?;
     saved.record.clear_paid();
     saved.key = None;
-    entry
-        .set_password(saved.encode()?.expose_secret())
-        .map_err(|_| LicenseError::StorageUnavailable)
+    write(&saved.encode()?)
 }
 
 #[cfg(test)]
@@ -156,6 +162,51 @@ mod tests {
 
     fn entry() -> keyring::Entry {
         keyring::Entry::new_with_credential(Box::<keyring::mock::MockCredential>::default())
+    }
+
+    fn clear_entry(entry: &keyring::Entry) -> Result<(), LicenseError> {
+        clear_with(
+            || match entry.get_password() {
+                Ok(value) => Ok(Some(SecretString::from(value))),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(_) => Err(LicenseError::StorageUnavailable),
+            },
+            |value| {
+                entry
+                    .set_password(value.expose_secret())
+                    .map_err(|_| LicenseError::StorageUnavailable)
+            },
+        )
+    }
+
+    #[test]
+    fn unavailable_credentials_do_not_trigger_an_uninstall_write() {
+        assert_eq!(
+            clear_with(
+                || Err(LicenseError::StorageUnavailable),
+                |_| panic!("unavailable store must not be changed")
+            ),
+            Err(LicenseError::StorageUnavailable)
+        );
+    }
+
+    #[test]
+    fn stored_paid_access_requires_a_valid_unexpired_seat() {
+        let mut record = EntitlementRecord::new(1_000);
+        let activation: Activation =
+            serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
+                .unwrap();
+        record.record_verified(activation, 2_000).unwrap();
+        let value = StoredLicense {
+            record,
+            key: Some(SecretString::from("fixture-paid-key")),
+        }
+        .encode()
+        .unwrap();
+        let at = |seconds| std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds);
+        assert!(paid_access_at(&value, at(2_001)));
+        assert!(!paid_access_at(&value, at(2_000 + 366 * 24 * 60 * 60)));
+        assert!(!paid_access_at(&SecretString::from("invalid"), at(2_001)));
     }
 
     #[test]

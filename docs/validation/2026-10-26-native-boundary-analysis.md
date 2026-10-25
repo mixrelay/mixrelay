@@ -23,6 +23,8 @@ Ghidra의 분석 주소는 ELF 좌표에 `0x100000`을 더한다.
 Linux 읽기 어댑터는 `connect_with_max_prompt_timeout(Dh, 0)`을 사용한다.
 `Unlock` 없이 잠긴 항목까지 포함해 유일성을 확인하고, 고유한 unlocked 항목만 `GetSecret`으로
 읽는다. 첫 검색에 항목이 없을 때의 legacy default collection 조회도 보존한다.
+편집기의 자동 저장과 제거 도구도 같은 네이티브 경계를 사용하며, 저장은 기존 unlocked 항목·collection에
+한정한다. 잠긴 paid 항목은 덮어쓰거나 제거 성공으로 처리하지 않는다.
 연결과 개별 D-Bus 호출의 제한 시간은 별도이며, 0은 전체 작업의 0초 deadline을 뜻하지 않는다.
 합성 시험은 잠김·중복·부재에서 secret 읽기를 시작하지 않는지와 기존 값·읽기 오류의 전달을 확인한다.
 Linux 설치본에서의 수정 검증은 아직 남아 있다. macOS credential 읽기는 이 변경의 대상이 아니다.
