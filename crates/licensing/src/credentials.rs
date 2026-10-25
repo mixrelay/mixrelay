@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{EntitlementRecord, LicenseError, SecretString};
 
+#[cfg(any(target_os = "linux", test))]
+mod background_read;
+#[cfg(target_os = "linux")]
+mod secret_service_read;
+
 const MAX_RECORD_BYTES: usize = 4_096;
 
 /// Native service name. Development builds cannot overwrite product credentials.
@@ -82,16 +87,33 @@ impl StoredLicense {
 /// Missing, malformed, inaccessible or expired credentials retain free access.
 #[must_use]
 pub fn has_local_paid_access() -> bool {
-    let Ok(entry) = keyring::Entry::new(LOCAL_LICENSE_SERVICE, "desktop") else {
+    let Ok(Some(value)) = read_background_credential() else {
         return false;
     };
-    let Ok(value) = entry.get_password() else {
+    paid_access_at(&value, std::time::SystemTime::now())
+}
+
+#[cfg(target_os = "linux")]
+fn read_background_credential() -> Result<Option<SecretString>, LicenseError> {
+    secret_service_read::read()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_background_credential() -> Result<Option<SecretString>, LicenseError> {
+    let entry = keyring::Entry::new(LOCAL_LICENSE_SERVICE, "desktop")
+        .map_err(|_| LicenseError::StorageUnavailable)?;
+    match entry.get_password() {
+        Ok(value) => Ok(Some(SecretString::from(value))),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(_) => Err(LicenseError::StorageUnavailable),
+    }
+}
+
+fn paid_access_at(value: &SecretString, now: std::time::SystemTime) -> bool {
+    let Ok(saved) = StoredLicense::decode(value) else {
         return false;
     };
-    let Ok(saved) = StoredLicense::decode(&SecretString::from(value)) else {
-        return false;
-    };
-    let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
+    let Ok(now) = now.duration_since(std::time::UNIX_EPOCH) else {
         return false;
     };
     saved.record.access_at(now.as_secs()).status == crate::AccessStatus::Licensed

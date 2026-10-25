@@ -2901,6 +2901,7 @@ dependencies = [
 name = "mixrelay-licensing"
 version = "0.1.0"
 dependencies = [
+ "dbus-secret-service",
  "keyring",
  "reqwest",
  "secrecy",

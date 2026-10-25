@@ -20,5 +20,9 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Background admission reads existing unlocked entries without creating a prompt.
+dbus-secret-service = { version = "4.1.0", features = ["crypto-rust"] }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["io-util", "time"] }
