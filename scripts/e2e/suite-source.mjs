@@ -6,7 +6,8 @@ import { pathToFileURL } from 'node:url';
 
 function suiteOnly(path) {
   return path.startsWith('docs/') || path.startsWith('scripts/e2e/') ||
-    ['.github/workflows/candidate-e2e.yml', '.github/workflows/qualification-hosts.yml'].includes(path);
+    ['.github/workflows/candidate-e2e.yml', '.github/workflows/qualification-hosts.yml',
+      '.github/workflows/installed-evidence.yml'].includes(path);
 }
 
 export function compareSuiteSource({ sourceRevision, suiteRevision, sourceTree, suiteTree }) {

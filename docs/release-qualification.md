@@ -90,7 +90,7 @@ Dispatch `candidate-e2e.yml` on the source branch with `linux_build_run` and
 matching source records and all four artifact hashes. The suite revision is recorded
 separately, so test-tool fixes can exercise existing installers without rebuilding them.
 The suite also compares the complete installer source tree with its checked-out commit.
-Only documentation, `scripts/e2e/` and the two qualification workflows may differ.
+Only documentation, `scripts/e2e/` and the three qualification workflows may differ.
 Product code, package recipes, build tools, executable modes and submodule differences
 require new installers. The artifact preserves the comparison in `suite-source.json`.
 The resulting `installed-e2e-evidence` artifact contains the exact candidate, raw
@@ -100,7 +100,8 @@ The optional `targets` input accepts comma-separated hosted target IDs for diagn
 Unselected targets remain unexecuted in the full gate. Use all targets for release
 qualification.
 
-An in-repository PR marks `Installed candidate / full support contract` pending on its source head
+The separate `Require installed qualification evidence` workflow marks
+`Installed candidate / full support contract` pending on an in-repository PR's source head
 until installed evidence exists. A full dispatch marks its suite commit pending and
 then records the complete gate verdict. This exposes a failed installed run beside
 the PR's source checks. Focused dispatches preserve that status.

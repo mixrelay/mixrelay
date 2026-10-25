@@ -12,14 +12,17 @@ const compare = (source, suite, truncated = false) => compareSuiteSource({ sourc
 test('frozen installers can be exercised by changed suite code and documentation', () => {
   const runtime = entry('apps/engine-service/src/main.rs');
   const result = compare([runtime, entry('scripts/e2e/installed.mjs')],
-    [runtime, entry('scripts/e2e/installed.mjs', 'b'.repeat(40)), entry('docs/validation/current.md')]);
+    [runtime, entry('scripts/e2e/installed.mjs', 'b'.repeat(40)), entry('docs/validation/current.md'),
+      entry('.github/workflows/installed-evidence.yml')]);
   assert.equal(result.productSourceMatches, true);
-  assert.deepEqual(result.changedSuiteFiles, ['docs/validation/current.md', 'scripts/e2e/installed.mjs']);
+  assert.deepEqual(result.changedSuiteFiles, ['.github/workflows/installed-evidence.yml',
+    'docs/validation/current.md', 'scripts/e2e/installed.mjs']);
 });
 
 test('runtime, package recipes and build tools require installers from the changed product source', () => {
   for (const path of ['apps/control-ui/src/app/App.tsx', 'native/macos/hal-driver/rust/src/lib.rs',
-    'packaging/linux/mixrelay-driver.service', 'scripts/build-linux-release.mjs', 'Cargo.lock']) {
+    'packaging/linux/mixrelay-driver.service', 'scripts/build-linux-release.mjs',
+    '.github/workflows/build-linux-release.yml', 'Cargo.lock']) {
     const result = compare([entry(path)], [entry(path, 'b'.repeat(40))]);
     assert.equal(result.productSourceMatches, false);
     assert.deepEqual(result.productChanges, [path]);
