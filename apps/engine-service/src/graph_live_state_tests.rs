@@ -150,7 +150,7 @@ fn disabling_failed_provider_retains_saved_preset_and_reports_warning() {
     let published = engine.publish_graph_locked(proposed, candidate).unwrap();
     assert!(published.persistence_error.is_some());
     assert!(engine.graph_catalog().unwrap().persistence_error.is_some());
-    assert!(engine.catalog_write_error.lock().is_none());
+    assert!(engine.catalog.warning().is_none());
     assert_eq!(provider_parameters(&engine.graph()), expected);
 }
 

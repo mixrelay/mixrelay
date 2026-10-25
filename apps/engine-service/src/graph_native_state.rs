@@ -33,7 +33,7 @@ impl EngineGraphController {
         if !self.power.enabled() {
             return Ok(());
         }
-        if node_id.is_none() && self.catalog_restore.lock().is_some() {
+        if node_id.is_none() && self.catalog_restore.is_pending() {
             return Ok(());
         }
         self.checkpoint_processor_state_with(node_id, |id, remaining| {
@@ -71,8 +71,8 @@ impl EngineGraphController {
         let reuse = self.processor_controls.reuse_transaction();
         let result = self.checkpoint_processor_state_transaction(target, &mut capture);
         if let Err(error) = &result {
-            *self.catalog_write_error.lock() =
-                Some(format!("native state checkpoint failed: {error:?}"));
+            self.catalog
+                .record_warning(Some(format!("native state checkpoint failed: {error:?}")));
         }
         result?;
         reuse.commit();
@@ -135,7 +135,7 @@ impl EngineGraphController {
         }
         *self.graph.write() = candidate.active_document().clone();
         self.commit_catalog_memory(Some(candidate));
-        *self.catalog_write_error.lock() = None;
+        self.catalog.record_warning(None);
         Ok(())
     }
     fn capture_document(

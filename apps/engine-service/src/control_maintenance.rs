@@ -85,7 +85,7 @@ impl EngineGraphController {
                     controller.reclaim_recorders();
                     controller.retry_catalog_restore();
                     controller.retry_pause_save();
-                    if controller.catalog_restore.lock().is_none() {
+                    if !controller.catalog_restore.is_pending() {
                         controller.checkpoint_closed_editor(&mut ledger);
                     }
                 }

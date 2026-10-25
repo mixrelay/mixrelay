@@ -56,14 +56,12 @@ impl ApplicationIdentityResolver for NativeIdentities<'_> {
 
 impl EngineGraphController {
     pub(crate) fn view_graph_id(&self) -> String {
-        self.catalog
-            .lock()
-            .as_ref()
-            .and_then(|store| store.value.as_ref().ok())
-            .map_or_else(
+        self.catalog.inspect(|value| {
+            value.and_then(|value| value.as_ref().ok()).map_or_else(
                 || "session".into(),
                 |catalog| catalog.selected_id().to_owned(),
             )
+        })
     }
 
     pub(super) fn compose_execution(

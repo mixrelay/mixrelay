@@ -78,7 +78,7 @@ impl EngineGraphController {
         validate_capture_revision(proposed.revision, revisions.active, revisions.submitted)?;
         let current = self.graph.read().clone();
         let graph_id = self.view_graph_id();
-        let restoring = self.catalog_restore.lock().is_some();
+        let restoring = self.catalog_restore.is_pending();
         validate_changes(&current, proposed, changes, writable)?;
         let mut candidate = proposed.clone();
         for node in &mut candidate.nodes {

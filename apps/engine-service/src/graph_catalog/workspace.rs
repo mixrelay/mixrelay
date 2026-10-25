@@ -196,9 +196,7 @@ impl EngineGraphController {
         }
         // An explicit file operation opts this session into durable recall.
         // Failed file operations never replace a protected saved catalog.
-        if let Some(store) = self.catalog.lock().as_mut() {
-            store.persistent = true;
-        }
+        self.catalog.allow_persistence();
         let candidate = self.catalog_candidate(&self.graph.read());
         let staged = self.stage_catalog(candidate.as_ref())?;
         self.finish_catalog_write(staged);

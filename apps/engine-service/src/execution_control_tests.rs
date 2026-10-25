@@ -416,16 +416,17 @@ fn deleted_selection_is_committed_before_the_new_plan_can_activate() {
             })
         });
         observed.recv_timeout(Duration::from_secs(2)).unwrap();
-        let catalog = engine.catalog.lock();
-        release.send(()).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let next = 4;
-        while !engine.execution_views.read().contains_key(&next) && Instant::now() < deadline {
-            std::thread::yield_now();
-        }
-        let metadata_ready = engine.execution_views.read().contains_key(&next);
-        let pending_before_selection_commit = engine.exchange.has_pending();
-        drop(catalog);
+        let (metadata_ready, pending_before_selection_commit) = engine.catalog.inspect(|_| {
+            release.send(()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let next = 4;
+            while !engine.execution_views.read().contains_key(&next) && Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            let metadata_ready = engine.execution_views.read().contains_key(&next);
+            let pending_before_selection_commit = engine.exchange.has_pending();
+            (metadata_ready, pending_before_selection_commit)
+        });
         publisher.join().unwrap().unwrap();
         assert!(metadata_ready);
         assert!(

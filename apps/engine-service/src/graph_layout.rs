@@ -65,28 +65,27 @@ pub(super) fn validate(layout: &GraphLayout) -> Result<(), &'static str> {
 
 impl EngineGraphController {
     pub(crate) fn read_graph_layout(&self, id: &str) -> Result<GraphLayoutResponse, ProtocolError> {
-        let catalog = self.catalog.lock();
-        let value = catalog
-            .as_ref()
-            .ok_or_else(|| {
-                error(
-                    ErrorCode::ControlUnavailable,
-                    id,
-                    "graph catalog is not enabled",
-                )
-            })?
-            .value
-            .as_ref()
-            .map_err(|reason| error(ErrorCode::ControlUnavailable, id, reason))?;
-        let graph = value
-            .graphs
-            .iter()
-            .find(|graph| graph.id == id)
-            .ok_or_else(|| error(ErrorCode::GraphInvalid, id, "graph does not exist"))?;
-        Ok(GraphLayoutResponse {
-            graph_id: id.into(),
-            layout_revision: graph.layout_revision,
-            layout: graph.layout.clone(),
+        self.catalog.inspect(|catalog| {
+            let value = catalog
+                .ok_or_else(|| {
+                    error(
+                        ErrorCode::ControlUnavailable,
+                        id,
+                        "graph catalog is not enabled",
+                    )
+                })?
+                .as_ref()
+                .map_err(|reason| error(ErrorCode::ControlUnavailable, id, reason))?;
+            let graph = value
+                .graphs
+                .iter()
+                .find(|graph| graph.id == id)
+                .ok_or_else(|| error(ErrorCode::GraphInvalid, id, "graph does not exist"))?;
+            Ok(GraphLayoutResponse {
+                graph_id: id.into(),
+                layout_revision: graph.layout_revision,
+                layout: graph.layout.clone(),
+            })
         })
     }
 
@@ -97,21 +96,20 @@ impl EngineGraphController {
     ) -> Result<GraphLayoutResponse, ProtocolError> {
         validate(&request.layout).map_err(|reason| error(ErrorCode::GraphInvalid, id, reason))?;
         let _mutation = self.mutation.lock();
-        let mut candidate = self
-            .catalog
-            .lock()
-            .as_ref()
-            .ok_or_else(|| {
-                error(
-                    ErrorCode::ControlUnavailable,
-                    id,
-                    "graph catalog is not enabled",
-                )
-            })?
-            .value
-            .as_ref()
-            .map_err(|reason| error(ErrorCode::ControlUnavailable, id, reason))?
-            .clone();
+        let mut candidate = self.catalog.inspect(|catalog| {
+            let value = catalog
+                .ok_or_else(|| {
+                    error(
+                        ErrorCode::ControlUnavailable,
+                        id,
+                        "graph catalog is not enabled",
+                    )
+                })?
+                .as_ref()
+                .map_err(|reason| error(ErrorCode::ControlUnavailable, id, reason))?
+                .clone();
+            Ok::<_, ProtocolError>(value)
+        })?;
         let graph = candidate
             .graphs
             .iter_mut()
@@ -147,7 +145,7 @@ impl EngineGraphController {
             })?;
         }
         self.commit_catalog_memory(Some(candidate));
-        *self.catalog_write_error.lock() = None;
+        self.catalog.record_warning(None);
         Ok(response)
     }
 }

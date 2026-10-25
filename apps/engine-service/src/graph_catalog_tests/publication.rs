@@ -66,7 +66,7 @@ fn unavailable_catalog_storage_rejects_before_prepare_and_same_revision_can_retr
     let revisions = engine.exchange.revisions();
     let blocked = fixture.0.join("occupied");
     fs::write(&blocked, b"not a directory").unwrap();
-    engine.catalog.lock().as_mut().unwrap().path = blocked.join("graphs.json");
+    engine.catalog.set_path(blocked.join("graphs.json"));
     let mut document = parameter_document();
     document.revision = revisions.submitted + 1;
     assert!(
@@ -78,7 +78,7 @@ fn unavailable_catalog_storage_rejects_before_prepare_and_same_revision_can_retr
     assert_eq!(fs::read(fixture.path()).unwrap(), disk);
     assert_eq!(prepares.load(Ordering::Relaxed), 0);
 
-    engine.catalog.lock().as_mut().unwrap().path = fixture.path();
+    engine.catalog.set_path(fixture.path());
     engine
         .apply_graph_locked(document.clone(), engine.catalog_candidate(&document))
         .unwrap();

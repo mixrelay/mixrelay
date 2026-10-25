@@ -1,7 +1,7 @@
 use super::{
-    NativeAllocation, decode_native_format, mr_pw_stream_failed, mr_pw_stream_format,
-    mr_pw_stream_native_format, mr_pw_stream_node_id, mr_pw_stream_ready,
-    mr_pw_stream_set_description, mr_pw_stream_supported_formats,
+    NativeAllocation, decode_native_format, mr_pw_stream_failed, mr_pw_stream_native_format,
+    mr_pw_stream_node_id, mr_pw_stream_ready, mr_pw_stream_set_description,
+    mr_pw_stream_supported_formats,
 };
 use std::{
     ffi::{CStr, CString},
@@ -37,21 +37,6 @@ impl StreamProperties {
         // reads the stream's node ID under its control-loop lock.
         let id = unsafe { mr_pw_stream_node_id(allocation.pointer.as_ptr()) };
         (id != u32::MAX).then_some(id)
-    }
-
-    /// Reads readiness and the negotiated format of this exact native acquisition.
-    #[must_use]
-    pub fn ready_format(&self, rate: u32, channels: u16) -> bool {
-        let Some(allocation) = self.0.upgrade() else {
-            return false;
-        };
-        // SAFETY: both observations are atomic native values; the strong owner
-        // pins teardown across both reads and no PCM cursor is touched.
-        unsafe {
-            mr_pw_stream_ready(allocation.pointer.as_ptr()) != 0
-                && mr_pw_stream_format(allocation.pointer.as_ptr())
-                    == (u64::from(rate) << 32 | u64::from(channels))
-        }
     }
 
     /// Reports the actual advertised encoding mask and coherent negotiated tuple.

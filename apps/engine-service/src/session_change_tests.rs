@@ -489,7 +489,7 @@ fn user_format_change_with_unwritable_catalog_does_not_prepare_native_resources(
     let current = controller.context.read().format;
     let occupied = fixture.join("occupied");
     std::fs::write(&occupied, b"not a directory").unwrap();
-    controller.catalog.lock().as_mut().unwrap().path = occupied.join("graphs.json");
+    controller.catalog.set_path(occupied.join("graphs.json"));
 
     assert!(
         controller

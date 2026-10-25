@@ -386,11 +386,8 @@ pub struct EngineGraphController {
     graph: RwLock<GraphDocument>,
     context: RwLock<CompileContext>,
     mutation: Mutex<()>,
-    catalog: Mutex<Option<graph_catalog::CatalogStore>>,
-    verified_catalog_state_refs:
-        Mutex<std::collections::BTreeSet<mixrelay_processor_state::StateRef>>,
-    catalog_write_error: Mutex<Option<String>>,
-    catalog_restore: Mutex<Option<graph_catalog::PendingRestore>>,
+    catalog: graph_catalog::CatalogStorage,
+    catalog_restore: graph_catalog::CatalogRecall,
     required_endpoint_node_id: Option<NodeId>,
     endpoint_backend: Arc<dyn VirtualEndpointBackend>,
     meter_bindings: RwLock<BTreeMap<u64, Vec<MeterBinding>>>,
@@ -502,10 +499,8 @@ impl EngineGraphController {
                 limits: CompileLimits::default(),
             }),
             mutation: Mutex::new(()),
-            catalog: Mutex::new(None),
-            verified_catalog_state_refs: Mutex::new(std::collections::BTreeSet::new()),
-            catalog_write_error: Mutex::new(None),
-            catalog_restore: Mutex::new(None),
+            catalog: graph_catalog::CatalogStorage::default(),
+            catalog_restore: graph_catalog::CatalogRecall::default(),
             required_endpoint_node_id,
             endpoint_backend,
             meter_bindings: RwLock::new(meter_bindings),
@@ -1140,8 +1135,8 @@ impl EngineGraphController {
         let staged_catalog = match self.stage_catalog(catalog.as_ref()) {
             Ok(staged) => staged,
             Err(error) if !persistence_required => {
-                *self.catalog_write_error.lock() =
-                    Some(format!("engine stop persistence: {error:?}"));
+                self.catalog
+                    .record_warning(Some(format!("engine stop persistence: {error:?}")));
                 None
             }
             Err(error) => return Err(error),
@@ -1197,7 +1192,7 @@ impl EngineGraphController {
             })
             .map_err(configuration_error)?;
         self.refresh_control_snapshot();
-        *self.catalog_restore.lock() = None;
+        self.catalog_restore.complete();
         Ok(GraphApplyResponse {
             protocol_version: PROTOCOL_VERSION,
             revision,
@@ -1209,85 +1204,85 @@ impl EngineGraphController {
 
 impl EngineGraphController {
     fn meter_snapshot_at(&self, now: std::time::Instant) -> MeterSnapshot {
-        let catalog = self.catalog.lock();
-        let graph_id = catalog
-            .as_ref()
-            .and_then(|store| store.value.as_ref().ok())
-            .map_or("session", |catalog| catalog.selected_id());
-        let bindings = self.meter_bindings.read();
-        let views = self.execution_views.read();
-        let revisions = self.exchange.plan_revisions();
-        let view = views.get(&revisions.active);
-        let applied_revision = view.map_or(revisions.active, |view| {
-            revisions.active.max(view.controls.applied_revision())
-        });
-        let key = meter_snapshot::MeterKey {
-            graph_id: graph_id.to_owned(),
-            plan_revision: revisions.active,
-            submitted_revision: revisions.submitted,
-            applied_revision,
-            enabled: self.power.enabled(),
-        };
-        let valid = || {
-            self.exchange.plan_revisions() == revisions
-                && view.is_none_or(|view| {
-                    revisions.active.max(view.controls.applied_revision()) == applied_revision
-                })
-                && self.power.enabled() == key.enabled
-        };
-        self.meter_publisher.lock().read(
-            now,
-            key.clone(),
-            |measured| {
-                let nodes = bindings
-                    .get(&revisions.active)
-                    .into_iter()
-                    .flatten()
-                    .enumerate()
-                    .filter_map(|(index, binding)| {
-                        // Only this publisher drains. Hidden graph bindings are also consumed.
-                        let peaks = if measured {
-                            self.meters
-                                .take_peaks(applied_revision, index, binding.channels())
-                        } else {
-                            vec![0.0; usize::from(binding.channels())]
-                        };
-                        let dynamics = (measured && binding.has_dynamics())
-                            .then(|| {
-                                self.meters.take_dynamics(
-                                    applied_revision,
-                                    index,
-                                    binding.channels(),
-                                )
-                            })
-                            .flatten()
-                            .map(|reading| mixrelay_control_protocol::DynamicsMeterSnapshot {
-                                input_peaks: reading.input_peaks,
-                                gain_reduction_db: reading.gain_reduction_db,
-                                threshold_db: reading.threshold_db,
-                            });
-                        let origin = view?.origins.get(binding.node_id())?;
-                        (origin.graph_id == graph_id).then(|| NodeMeterSnapshot {
-                            node_id: origin.node_id.as_str().to_owned(),
-                            port_id: origin
-                                .meter_port
-                                .as_ref()
-                                .unwrap_or(binding.port_id())
-                                .as_str()
-                                .to_owned(),
-                            peaks,
-                            dynamics,
-                        })
+        self.catalog.inspect(|catalog| {
+            let graph_id = catalog
+                .and_then(|value| value.as_ref().ok())
+                .map_or("session", |catalog| catalog.selected_id());
+            let bindings = self.meter_bindings.read();
+            let views = self.execution_views.read();
+            let revisions = self.exchange.plan_revisions();
+            let view = views.get(&revisions.active);
+            let applied_revision = view.map_or(revisions.active, |view| {
+                revisions.active.max(view.controls.applied_revision())
+            });
+            let key = meter_snapshot::MeterKey {
+                graph_id: graph_id.to_owned(),
+                plan_revision: revisions.active,
+                submitted_revision: revisions.submitted,
+                applied_revision,
+                enabled: self.power.enabled(),
+            };
+            let valid = || {
+                self.exchange.plan_revisions() == revisions
+                    && view.is_none_or(|view| {
+                        revisions.active.max(view.controls.applied_revision()) == applied_revision
                     })
-                    .collect();
-                MeterSnapshot {
-                    protocol_version: PROTOCOL_VERSION,
-                    revision: applied_revision,
-                    nodes,
-                }
-            },
-            valid,
-        )
+                    && self.power.enabled() == key.enabled
+            };
+            self.meter_publisher.lock().read(
+                now,
+                key.clone(),
+                |measured| {
+                    let nodes = bindings
+                        .get(&revisions.active)
+                        .into_iter()
+                        .flatten()
+                        .enumerate()
+                        .filter_map(|(index, binding)| {
+                            // Only this publisher drains. Hidden graph bindings are also consumed.
+                            let peaks = if measured {
+                                self.meters
+                                    .take_peaks(applied_revision, index, binding.channels())
+                            } else {
+                                vec![0.0; usize::from(binding.channels())]
+                            };
+                            let dynamics = (measured && binding.has_dynamics())
+                                .then(|| {
+                                    self.meters.take_dynamics(
+                                        applied_revision,
+                                        index,
+                                        binding.channels(),
+                                    )
+                                })
+                                .flatten()
+                                .map(|reading| mixrelay_control_protocol::DynamicsMeterSnapshot {
+                                    input_peaks: reading.input_peaks,
+                                    gain_reduction_db: reading.gain_reduction_db,
+                                    threshold_db: reading.threshold_db,
+                                });
+                            let origin = view?.origins.get(binding.node_id())?;
+                            (origin.graph_id == graph_id).then(|| NodeMeterSnapshot {
+                                node_id: origin.node_id.as_str().to_owned(),
+                                port_id: origin
+                                    .meter_port
+                                    .as_ref()
+                                    .unwrap_or(binding.port_id())
+                                    .as_str()
+                                    .to_owned(),
+                                peaks,
+                                dynamics,
+                            })
+                        })
+                        .collect();
+                    MeterSnapshot {
+                        protocol_version: PROTOCOL_VERSION,
+                        revision: applied_revision,
+                        nodes,
+                    }
+                },
+                valid,
+            )
+        })
     }
 
     /// Publishes read-side metadata after native preparation, before the exchange exposes a plan.
@@ -1535,8 +1530,9 @@ impl EngineGraphController {
         match self.stage_catalog(catalog) {
             Ok(staged) => Ok(staged),
             Err(error) if origin == SessionChangeOrigin::Observed => {
-                *self.catalog_write_error.lock() =
-                    Some(format!("external format catalog save failed: {error:?}"));
+                self.catalog.record_warning(Some(format!(
+                    "external format catalog save failed: {error:?}"
+                )));
                 Ok(None)
             }
             Err(error) => Err(error),

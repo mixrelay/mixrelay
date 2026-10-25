@@ -226,7 +226,7 @@ fn parameter_storage_failures_keep_native_edit_and_later_save_recovers_all_ids()
             fs::write(&blocked, b"not a directory").unwrap();
             blocked.join("graphs.json")
         };
-        engine.catalog.lock().as_mut().unwrap().path = destination;
+        engine.catalog.set_path(destination);
         let publications = AtomicU64::new(0);
         let accepted = engine
             .apply_processor_parameter_update("effect", 7, 0.25, |_, _| {
@@ -242,7 +242,7 @@ fn parameter_storage_failures_keep_native_edit_and_later_save_recovers_all_ids()
         );
         assert_eq!(fs::read(fixture.path()).unwrap(), original);
         assert!(engine.graph_catalog().unwrap().persistence_error.is_some());
-        engine.catalog.lock().as_mut().unwrap().path = fixture.path();
+        engine.catalog.set_path(fixture.path());
         let recovered = engine
             .apply_processor_parameter_update("effect", 9, 0.75, |_, _| Ok(()))
             .unwrap();
@@ -283,7 +283,7 @@ fn rejected_parameter_does_not_write_and_catalog_disabled_is_explicitly_in_memor
             .is_none()
     );
     let (memory_only, _) = parameter_fixture(parameter_document());
-    assert!(memory_only.catalog.lock().is_none());
+    assert!(memory_only.catalog.inspect(|value| value.is_none()));
     assert!(
         memory_only
             .apply_processor_parameter_update("effect", 7, 0.25, |_, _| Ok(()))
@@ -414,7 +414,7 @@ fn exhausted_saved_revision_keeps_saved_document_readable_without_replacing_byte
         controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
     assert_eq!(engine.graph().revision, u64::MAX);
     assert_eq!(engine.graph_catalog().unwrap().document.revision, u64::MAX);
-    assert!(engine.catalog_restore.lock().is_some());
+    assert!(engine.catalog_restore.is_pending());
     assert_eq!(engine.graph_status().submitted_revision, 1);
     assert_eq!(fs::read(fixture.path()).unwrap(), saved);
 }
@@ -542,7 +542,7 @@ fn unavailable_background_native_target_keeps_catalog_readable_and_preserves_byt
     let engine = controller(bootstrap.clone()).with_graph_catalog_path(fixture.path());
     assert_eq!(engine.graph_catalog().unwrap().graphs.len(), 2);
     assert_eq!(engine.graph().nodes, bootstrap.nodes);
-    assert!(engine.catalog_restore.lock().is_some());
+    assert!(engine.catalog_restore.is_pending());
     assert_eq!(fs::read(fixture.path()).unwrap(), before);
 }
 
@@ -553,7 +553,7 @@ fn failed_stage_leaves_engine_and_catalog_unmodified() {
         controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
     let blocked = fixture.0.join("not-a-directory");
     fs::write(&blocked, b"x").unwrap();
-    engine.catalog.lock().as_mut().unwrap().path = blocked.join("graphs.json");
+    engine.catalog.set_path(blocked.join("graphs.json"));
     let document = engine.graph();
     let before = fs::read(fixture.path()).unwrap();
     assert!(
@@ -599,7 +599,7 @@ fn rename_failure_after_native_prepare_publishes_audio_and_warns_without_orphani
     let before = fs::read(fixture.path()).unwrap();
     let destination = fixture.0.join("directory-instead-of-file");
     fs::create_dir(&destination).unwrap();
-    engine.catalog.lock().as_mut().unwrap().path = destination;
+    engine.catalog.set_path(destination);
     let document = default_duplex_document(engine.graph().revision + 1, Some(-6.0));
     let applied = engine.apply_graph_request(document.clone().into()).unwrap();
     assert_eq!(resources.0.load(Ordering::Relaxed), 1);
@@ -617,7 +617,7 @@ fn rename_failure_after_native_prepare_publishes_audio_and_warns_without_orphani
         ))
         .unwrap();
     assert!(unchanged.persistence_error.is_some());
-    engine.catalog.lock().as_mut().unwrap().path = fixture.path();
+    engine.catalog.set_path(fixture.path());
     let mut document = engine.graph();
     document.revision += 1;
     engine.apply_graph_request(document.into()).unwrap();

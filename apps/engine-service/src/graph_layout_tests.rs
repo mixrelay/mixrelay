@@ -278,7 +278,7 @@ fn disk_failures_keep_previous_layout_and_allow_same_revision_retry() {
     let directory = fixture.0.join("not-a-file");
     fs::create_dir(&directory).unwrap();
     for path in [file.join("graphs.json"), directory] {
-        engine.catalog.lock().as_mut().unwrap().path = path;
+        engine.catalog.set_path(path);
         let rejected = engine
             .update_graph_layout(
                 "graph-1",
@@ -297,7 +297,7 @@ fn disk_failures_keep_previous_layout_and_allow_same_revision_retry() {
         );
         assert_eq!(fs::read(fixture.path()).unwrap(), before);
     }
-    engine.catalog.lock().as_mut().unwrap().path = fixture.path();
+    engine.catalog.set_path(fixture.path());
     engine
         .update_graph_layout(
             "graph-1",

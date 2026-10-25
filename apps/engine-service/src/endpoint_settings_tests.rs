@@ -23,7 +23,7 @@ impl VirtualEndpointBackend for CatalogReadbackBackend {
     fn settings(&self) -> Option<VirtualEndpointSettings> {
         if let Some(owner) = self.owner.lock().upgrade() {
             assert!(
-                owner.catalog.try_lock().is_some(),
+                owner.catalog.is_unlocked(),
                 "Driver read must not hold catalog"
             );
         }
@@ -58,7 +58,7 @@ impl VirtualEndpointBackend for CatalogReadbackBackend {
     fn sample_rate(&self, _: &VirtualEndpointId) -> Result<u32, HostAudioBackendError> {
         let owner = self.owner.lock().upgrade().unwrap();
         assert!(
-            owner.catalog.try_lock().is_some(),
+            owner.catalog.is_unlocked(),
             "native read must not hold catalog"
         );
         Ok(48_000)

@@ -329,7 +329,7 @@ fn native_editor_checkpoint_storage_failure_rolls_back_and_same_revision_retry_s
             fs::write(&blocked, b"not a directory").unwrap();
             blocked.join("graphs.json")
         };
-        engine.catalog.lock().as_mut().unwrap().path = destination;
+        engine.catalog.set_path(destination);
         let native = serde_json::json!({"nativeToken": "BA=="});
         let mutation = engine.mutation.lock();
         assert!(
@@ -341,7 +341,7 @@ fn native_editor_checkpoint_storage_failure_rolls_back_and_same_revision_retry_s
         assert_eq!(engine.graph(), document);
         assert_eq!(fs::read(fixture.path()).unwrap(), disk);
         assert!(engine.graph_catalog().unwrap().persistence_error.is_some());
-        engine.catalog.lock().as_mut().unwrap().path = fixture.path();
+        engine.catalog.set_path(fixture.path());
         let mutation = engine.mutation.lock();
         engine
             .checkpoint_processor_state_with(Some("effect"), |_, _| Ok(native.clone()))

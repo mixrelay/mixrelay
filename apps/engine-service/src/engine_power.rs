@@ -118,7 +118,8 @@ impl EngineGraphController {
         }
         if let Some(error) = checkpoint_error {
             tracing::error!(?error, "engine stop retained last saved plug-in state");
-            *self.catalog_write_error.lock() = Some(format!("engine stop checkpoint: {error:?}"));
+            self.catalog
+                .record_warning(Some(format!("engine stop checkpoint: {error:?}")));
         }
         tracing::info!(
             enabled,
@@ -551,7 +552,7 @@ mod tests {
             .processor;
         let blocker = directory.join("file-not-directory");
         std::fs::write(&blocker, b"occupied").unwrap();
-        engine.catalog.lock().as_mut().unwrap().path = blocker.join("graphs.json");
+        engine.catalog.set_path(blocker.join("graphs.json"));
         let response = engine.change_engine_power(false, None).unwrap();
         assert!(response.persistence_error.is_some());
         engine.exchange.activate_pending(&mut processor);

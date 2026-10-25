@@ -106,34 +106,3 @@ pub struct AudioSessionStatus {
     pub transport_latency_frames: Option<u32>,
     pub capabilities: AudioSessionCapabilities,
 }
-
-impl SessionFormat {
-    /// Validates a stream at a synchronous boundary (for example a host send/return).
-    /// Conversion is deliberately not inferred from matching nominal sample rates.
-    ///
-    /// # Errors
-    /// Returns the first incompatible constraint without altering either stream.
-    pub fn require_synchronous(
-        self,
-        peer: Self,
-        clock_is_synchronized: bool,
-    ) -> Result<(), SessionIssue> {
-        if self.sample_rate == 0
-            || self.block_frames == 0
-            || peer.sample_rate == 0
-            || peer.block_frames == 0
-        {
-            return Err(SessionIssue::InvalidFormat);
-        }
-        if self.sample_rate != peer.sample_rate {
-            return Err(SessionIssue::SampleRateMismatch);
-        }
-        if self.block_frames != peer.block_frames {
-            return Err(SessionIssue::BlockSizeMismatch);
-        }
-        if !clock_is_synchronized {
-            return Err(SessionIssue::ClockNotSynchronized);
-        }
-        Ok(())
-    }
-}

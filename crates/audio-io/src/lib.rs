@@ -369,22 +369,6 @@ pub struct ApplicationCaptureHealth {
     pub running: bool,
 }
 
-pub trait HostAudioDiscoveryBackend: Send + Sync {
-    /// Returns applications that the host can address using stable, non-localized selectors.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`HostAudioBackendError`] when host discovery is unavailable.
-    fn applications(&self) -> Result<Vec<CapturableApplication>, HostAudioBackendError>;
-
-    /// Returns physical and virtual audio devices with their current channel capabilities.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`HostAudioBackendError`] when host discovery is unavailable.
-    fn devices(&self) -> Result<Vec<AudioDeviceDescriptor>, HostAudioBackendError>;
-}
-
 /// Control-plane policy, distinct from low-level transport capacity. A backend may
 /// transport many channels without offering device creation or reconfiguration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

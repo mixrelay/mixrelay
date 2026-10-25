@@ -416,19 +416,6 @@ impl ReleasePayloadVerifier {
         )
     }
 
-    /// Checks the installed on-demand audio engine.
-    /// # Errors
-    /// Rejects incorrect architecture, publisher or entitlement metadata.
-    pub fn verify_graph_engine(&self, engine: &Path) -> Result<(), ReleaseError> {
-        verify_architecture(engine)?;
-        verify_signature(
-            engine,
-            &self.team.requirement("mixrelay-engine-service"),
-            ArtifactRole::Engine,
-            VerificationPolicy::Launch,
-        )
-    }
-
     fn verify_installer_executable_with(
         &self,
         path: &Path,

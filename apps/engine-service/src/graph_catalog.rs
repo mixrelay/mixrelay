@@ -38,13 +38,16 @@ pub(crate) mod live_state;
 
 #[path = "graph_restore.rs"]
 mod restore;
-pub(super) use restore::PendingRestore;
+pub(super) use restore::CatalogRecall;
 
 #[path = "device_catalog.rs"]
 mod devices;
 
 mod saved_graphs;
 mod state_assets;
+mod storage;
+pub(super) use storage::CatalogStorage;
+use storage::Persistence;
 mod workspace;
 
 use saved_graphs::SavedGraphs;
@@ -126,12 +129,6 @@ impl SavedGraph {
             layout: GraphLayout::default(),
         }
     }
-}
-
-pub(super) struct CatalogStore {
-    pub(super) path: PathBuf,
-    pub(super) persistent: bool,
-    pub(super) value: Result<Catalog, String>,
 }
 
 pub(super) fn invalid(reason: &str) -> ProtocolError {
@@ -285,11 +282,11 @@ impl EngineGraphController {
         match config_directory() {
             Ok(directory) => self.with_graph_catalog_path(directory.join("graphs.json")),
             Err(error) => {
-                *self.catalog.lock() = Some(CatalogStore {
-                    path: PathBuf::new(),
-                    persistent: false,
-                    value: Err(error.to_string()),
-                });
+                self.catalog.initialize(
+                    PathBuf::new(),
+                    Persistence::SessionOnly,
+                    Err(error.to_string()),
+                );
                 self
             }
         }
@@ -309,11 +306,11 @@ impl EngineGraphController {
         if !self.is_paid() && protected {
             self.processor_controls
                 .configure_state_store(path.with_extension("states"));
-            *self.catalog.lock() = Some(CatalogStore {
+            self.catalog.initialize(
                 path,
-                persistent: false,
-                value: Ok(Catalog::imported(self.graph())),
-            });
+                Persistence::SessionOnly,
+                Ok(Catalog::imported(self.graph())),
+            );
             self.refresh_control_snapshot();
             return self;
         }
@@ -325,19 +322,16 @@ impl EngineGraphController {
                 let value = Catalog::imported(self.graph());
                 let saved =
                     stage_json_limited(&path, &value, MAX_BYTES).and_then(StagedWrite::commit);
-                *self.catalog.lock() = Some(CatalogStore {
+                self.catalog.initialize(
                     path,
-                    persistent: true,
-                    value: saved.map(|()| value).map_err(|error| error.to_string()),
-                });
+                    Persistence::Durable,
+                    saved.map(|()| value).map_err(|error| error.to_string()),
+                );
             }
             Ok(Some(value)) => {
                 let document = value.active().document.clone();
-                *self.catalog.lock() = Some(CatalogStore {
-                    path,
-                    persistent: true,
-                    value: Ok(value),
-                });
+                self.catalog
+                    .initialize(path, Persistence::Durable, Ok(value));
                 // The editable document is durable user data, not the bootstrap audio
                 // processor. Failed native startup must never substitute that processor's graph.
                 *self.graph.write() = document;
@@ -346,11 +340,8 @@ impl EngineGraphController {
                 }
             }
             Err(error) => {
-                *self.catalog.lock() = Some(CatalogStore {
-                    path,
-                    persistent: true,
-                    value: Err(error),
-                });
+                self.catalog
+                    .initialize(path, Persistence::Durable, Err(error));
             }
         }
         self.refresh_control_snapshot();
@@ -358,27 +349,14 @@ impl EngineGraphController {
     }
 
     pub(super) fn catalog_candidate(&self, document: &GraphDocument) -> Option<Catalog> {
-        let catalog = self.catalog.lock();
-        let store = catalog.as_ref()?;
-        // A corrupt catalog is read-only, not an engine-wide editing lock.
-        let Ok(value) = store.value.as_ref() else {
-            return None;
-        };
-        let mut value = value.clone();
-        value.update_document(document.clone());
-        Some(value)
+        self.catalog.candidate(document)
     }
 
     pub(super) fn stage_catalog(
         &self,
         candidate: Option<&Catalog>,
     ) -> Result<Option<StagedWrite>, ProtocolError> {
-        if self
-            .catalog
-            .lock()
-            .as_ref()
-            .is_some_and(|store| !store.persistent)
-        {
+        if self.catalog.writes_disabled() {
             return Ok(None);
         }
         let Some(candidate) = candidate else {
@@ -387,44 +365,11 @@ impl EngineGraphController {
         if self.validate_workspace_export_usage(candidate).is_err() {
             return Ok(None);
         }
-        let references = state_assets::referenced(candidate)?;
-        let (path, accepted_references) = {
-            let catalog = self.catalog.lock();
-            let store = catalog
-                .as_ref()
-                .ok_or_else(|| unavailable("graph catalog not enabled"))?;
-            let accepted_references = store
-                .value
-                .as_ref()
-                .ok()
-                .map(state_assets::referenced)
-                .transpose()?
-                .unwrap_or_default();
-            (store.path.clone(), accepted_references)
-        };
-        let mut verified = self.verified_catalog_state_refs.lock();
-        let next_verified = if references.is_empty() {
-            std::collections::BTreeSet::new()
-        } else {
-            let states = self
-                .processor_controls
+        self.catalog.stage(candidate, || {
+            self.processor_controls
                 .state_store()
-                .map_err(|error| unavailable(&error))?;
-            state_assets::verify_catalog_delta(
-                &references,
-                &accepted_references,
-                &verified,
-                |reference| {
-                    states
-                        .verify(reference)
-                        .map_err(|error| invalid(&error.to_string()))
-                },
-            )?
-        };
-        let staged = stage_json_limited(&path, candidate, MAX_BYTES)
-            .map_err(|error| document_write_error(&error))?;
-        *verified = next_verified;
-        Ok(Some(staged))
+                .map_err(|error| unavailable(&error))
+        })
     }
 
     pub(super) fn commit_catalog_memory(&self, candidate: Option<Catalog>) {
@@ -434,39 +379,30 @@ impl EngineGraphController {
 
     /// Updates authored selection before a prepared plan can become active.
     pub(super) fn replace_catalog_memory(&self, candidate: Option<Catalog>) {
-        if let Some(candidate) = candidate
-            && let Some(store) = self.catalog.lock().as_mut()
-        {
-            store.value = Ok(candidate);
-        }
+        self.catalog.replace(candidate);
     }
 
     pub(super) fn finish_catalog_write(&self, staged: Option<StagedWrite>) {
-        if let Some(staged) = staged {
-            // Native preparation may already own pending resources. Disk replacement failure
-            // must not reject publication and leave those resources without their processor.
-            *self.catalog_write_error.lock() = staged.commit().err().map(|error| error.to_string());
-        }
+        self.catalog.finish(staged);
     }
 
     /// Called with the controller mutation lock after a parameter was accepted natively.
     /// Disk failures are durability warnings, not failed audio edits. Keep memory current so
     /// a later successful edit also persists every previously accepted parameter ID.
     pub(super) fn persist_parameter_document(&self, document: &GraphDocument) -> Option<String> {
-        let candidate = {
-            let catalog = self.catalog.lock();
-            let store = catalog.as_ref()?;
-            match &store.value {
-                Ok(value) => {
-                    let mut candidate = value.clone();
-                    candidate.update_document(document.clone());
-                    candidate
-                }
-                Err(error) => {
-                    let error = format!("graph catalog is unavailable: {error}");
-                    *self.catalog_write_error.lock() = Some(error.clone());
-                    return Some(error);
-                }
+        let candidate = self.catalog.inspect(|value| match value? {
+            Ok(value) => {
+                let mut candidate = value.clone();
+                candidate.update_document(document.clone());
+                Some(Ok(candidate))
+            }
+            Err(error) => Some(Err(format!("graph catalog is unavailable: {error}"))),
+        })?;
+        let candidate = match candidate {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                self.catalog.record_warning(Some(error.clone()));
+                return Some(error);
             }
         };
         let result = self
@@ -486,66 +422,49 @@ impl EngineGraphController {
             });
         self.commit_catalog_memory(Some(candidate));
         let error = result.err();
-        self.catalog_write_error.lock().clone_from(&error);
+        self.catalog.record_warning(error.clone());
         error
     }
 
     pub(super) fn read_catalog(&self) -> Result<GraphCatalogResponse, ProtocolError> {
         // Read one committed document/layout snapshot; native preparation owns mutation,
         // but must never prevent the UI from displaying durable user data.
-        let catalog = self.catalog.lock();
-        let mut response = catalog
-            .as_ref()
-            .ok_or_else(|| unavailable("graph catalog not enabled"))?
-            .value
-            .as_ref()
-            .map(Catalog::response)
-            .map_err(|error| unavailable(error))?;
+        let mut response = self.catalog.read(Catalog::response)?;
         response.persistence_error = self.graph_persistence_warning();
         Ok(response)
     }
 
     pub(super) fn graph_persistence_warning(&self) -> Option<String> {
-        self.catalog_write_error
-            .lock()
-            .clone()
+        self.catalog
+            .warning()
             .or_else(|| self.power.warning())
             .or_else(|| self.node_control_warning.lock().clone())
     }
 
     pub(super) fn read_catalog_document(&self, id: &str) -> Result<GraphDocument, ProtocolError> {
-        let catalog = self.catalog.lock();
-        catalog
-            .as_ref()
-            .ok_or_else(|| unavailable("graph catalog not enabled"))?
-            .value
-            .as_ref()
-            .map_err(|error| unavailable(error))?
-            .graphs
-            .iter()
-            .find(|graph| graph.id == id)
-            .map(|graph| graph.document.clone())
-            .ok_or_else(|| invalid("graph does not exist"))
+        self.catalog.read(|value| {
+            value
+                .graphs
+                .iter()
+                .find(|graph| graph.id == id)
+                .map(|graph| graph.document.clone())
+                .ok_or_else(|| invalid("graph does not exist"))
+        })?
     }
 
     // Caller holds mutation across document validation and its control operation.
     pub(super) fn catalog_document_locked(&self, id: &str) -> Result<GraphDocument, ProtocolError> {
-        let catalog = self.catalog.lock();
-        let value = catalog
-            .as_ref()
-            .ok_or_else(|| unavailable("graph catalog not enabled"))?
-            .value
-            .as_ref()
-            .map_err(|error| unavailable(error))?;
-        if id == value.selected_id() {
-            return Ok(self.graph.read().clone());
-        }
-        value
-            .graphs
-            .iter()
-            .find(|graph| graph.id == id)
-            .map(|graph| graph.document.clone())
-            .ok_or_else(|| invalid("graph does not exist"))
+        self.catalog.read(|value| {
+            if id == value.selected_id() {
+                return Ok(self.graph.read().clone());
+            }
+            value
+                .graphs
+                .iter()
+                .find(|graph| graph.id == id)
+                .map(|graph| graph.document.clone())
+                .ok_or_else(|| invalid("graph does not exist"))
+        })?
     }
 
     pub(super) fn mutate_catalog(
@@ -553,15 +472,7 @@ impl EngineGraphController {
         request: GraphCatalogRequest,
     ) -> Result<GraphCatalogResponse, ProtocolError> {
         let _mutation = self.mutation.lock();
-        let mut value = self
-            .catalog
-            .lock()
-            .as_ref()
-            .ok_or_else(|| unavailable("graph catalog not enabled"))?
-            .value
-            .as_ref()
-            .map_err(|error| unavailable(error))?
-            .clone();
+        let mut value = self.catalog.read(Clone::clone)?;
         let revisions = self.exchange.revisions();
         if request.expected_revision != revisions.submitted
             || revisions.active != revisions.submitted
@@ -597,7 +508,7 @@ impl EngineGraphController {
                 .map_err(|error| unavailable(&error.to_string()))?;
         }
         *self.graph.write() = document;
-        *self.catalog_write_error.lock() = None;
+        self.catalog.record_warning(None);
         self.commit_catalog_memory(Some(value.clone()));
         let mut response = value.response();
         response.persistence_error = self.graph_persistence_warning();
@@ -605,14 +516,7 @@ impl EngineGraphController {
     }
 
     fn current_catalog_response(&self) -> Result<GraphCatalogResponse, ProtocolError> {
-        let catalog = self.catalog.lock();
-        let mut response = catalog
-            .as_ref()
-            .ok_or_else(|| unavailable("graph catalog not enabled"))?
-            .value
-            .as_ref()
-            .map_err(|error| unavailable(error))?
-            .response();
+        let mut response = self.catalog.read(Catalog::response)?;
         response.document = self.graph.read().clone();
         response.persistence_error = self.graph_persistence_warning();
         Ok(response)

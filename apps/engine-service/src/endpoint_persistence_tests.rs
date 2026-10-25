@@ -226,7 +226,7 @@ fn catalog_staging_failure_preserves_disk_memory_and_allows_retry() {
     let expected = first.graph();
     let blocked = fixture.directory.join("not-a-directory");
     fs::write(&blocked, b"blocking fixture").unwrap();
-    first.catalog.lock().as_mut().unwrap().path = blocked.join("graphs.json");
+    first.catalog.set_path(blocked.join("graphs.json"));
 
     let error = first
         .apply_graph_request(endpoint_document(3, "Unsaved").into())
@@ -235,7 +235,7 @@ fn catalog_staging_failure_preserves_disk_memory_and_allows_retry() {
     assert_eq!(first.graph(), expected);
     assert_eq!(first.graph_catalog().unwrap().document, expected);
     assert_eq!(fs::read(fixture.path()).unwrap(), original);
-    first.catalog.lock().as_mut().unwrap().path = fixture.path();
+    first.catalog.set_path(fixture.path());
     first
         .apply_graph_request(endpoint_document(3, "Recovered").into())
         .unwrap();
@@ -293,7 +293,7 @@ fn failed_native_restore_keeps_saved_catalog_and_defers_native_preparation() {
         restarted.graph_catalog().unwrap().document,
         restarted.graph()
     );
-    assert!(restarted.catalog_restore.lock().is_some());
+    assert!(restarted.catalog_restore.is_pending());
     assert_eq!(restarted.exchange.revisions().active, 1);
     assert_eq!(restarted.exchange.revisions().submitted, 1);
     assert_eq!(fs::read(fixture.path()).unwrap(), original);

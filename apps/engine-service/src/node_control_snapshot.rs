@@ -42,35 +42,34 @@ impl EngineGraphController {
 
     pub(super) fn refresh_control_snapshot(&self) {
         let graph = self.graph.read();
-        let catalog = self.catalog.lock();
-        let documents = catalog
-            .as_ref()
-            .and_then(|store| store.value.as_ref().ok())
-            .map_or_else(
+        let (graphs, recorder_ids) = self.catalog.inspect(|catalog| {
+            let documents = catalog.and_then(|value| value.as_ref().ok()).map_or_else(
                 || vec![("session", "Untitled Graph", &*graph)],
                 |value| value.control_documents().collect(),
             );
-        let graphs = documents
-            .iter()
-            .map(|(id, name, document)| graph_snapshot(id, name, document))
-            .collect();
-        let recorder_ids = documents
-            .iter()
-            .flat_map(|(id, _, document)| {
-                document.nodes.iter().filter_map(move |node| {
-                    let NodeConfig::Recorder { channels } = node.config else {
-                        return None;
-                    };
-                    Some((
-                        ((*id).to_owned(), node.id.as_str().to_owned()),
-                        mixrelay_audio_engine::recording_session_key(
-                            &crate::graph_composition::runtime_node_id(id, &node.id),
-                            channels,
-                        ),
-                    ))
+            let graphs = documents
+                .iter()
+                .map(|(id, name, document)| graph_snapshot(id, name, document))
+                .collect();
+            let recorder_ids = documents
+                .iter()
+                .flat_map(|(id, _, document)| {
+                    document.nodes.iter().filter_map(move |node| {
+                        let NodeConfig::Recorder { channels } = node.config else {
+                            return None;
+                        };
+                        Some((
+                            ((*id).to_owned(), node.id.as_str().to_owned()),
+                            mixrelay_audio_engine::recording_session_key(
+                                &crate::graph_composition::runtime_node_id(id, &node.id),
+                                channels,
+                            ),
+                        ))
+                    })
                 })
-            })
-            .collect();
+                .collect();
+            (graphs, recorder_ids)
+        });
         let snapshot = EngineControlSnapshot {
             revision: graph.revision,
             active_revision: self.exchange.revisions().active,
@@ -78,7 +77,6 @@ impl EngineGraphController {
             engine_power: self.engine_power_status(),
             graphs,
         };
-        drop(catalog);
         drop(graph);
         *self.control_snapshot.write() = Some(ControlReadView {
             snapshot,

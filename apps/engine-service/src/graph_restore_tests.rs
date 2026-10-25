@@ -27,10 +27,7 @@ impl crate::GraphResourceBackend for TemporaryNativeFailure {
 #[test]
 fn transient_native_startup_failure_retries_without_losing_saved_catalog_or_bootstrap_overwrite() {
     use crate::{ControlBackend, default_duplex_document};
-    use std::{
-        sync::{Arc, atomic::Ordering},
-        time::Instant,
-    };
+    use std::sync::{Arc, atomic::Ordering};
 
     let saved = default_duplex_document(9, Some(-6.0));
     let other = default_duplex_document(12, Some(-12.0));
@@ -54,16 +51,16 @@ fn transient_native_startup_failure_retries_without_losing_saved_catalog_or_boot
     assert_eq!(engine.graph_catalog_document("second").unwrap(), other);
     assert_eq!(fs::read(&fixture.path).unwrap(), before);
     let _status = engine.status();
-    engine.retry_catalog_restore();
+    let due = engine.catalog_restore.deadline().unwrap();
+    engine.retry_catalog_restore_at(due.checked_sub(std::time::Duration::from_nanos(1)).unwrap());
     assert_eq!(
         backend.0.load(Ordering::Relaxed),
         1,
         "reads and early ticks must not retry"
     );
-    engine.catalog_restore.lock().as_mut().unwrap().retry_after = Instant::now();
-    engine.retry_catalog_restore();
+    engine.retry_catalog_restore_at(due);
     assert_eq!(backend.0.load(Ordering::Relaxed), 2);
-    assert!(engine.catalog_restore.lock().is_none());
+    assert!(!engine.catalog_restore.is_pending());
     assert_eq!(engine.graph().nodes, saved.nodes);
     assert_eq!(engine.graph().edges, saved.edges);
     assert_eq!(engine.graph().revision, 13);
