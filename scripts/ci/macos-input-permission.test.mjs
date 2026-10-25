@@ -159,6 +159,7 @@ int main(void) {
   const executable = join(directory, 'probe-consent');
   execFileSync('xcrun', ['clang', '-std=c17', '-O2', '-mmacosx-version-min=14.2',
     '-Wall', '-Wextra', '-Wpedantic', '-Wconversion', '-Wsign-conversion', '-Wshadow', '-Werror',
-    fixture, '-framework', 'CoreAudio', '-framework', 'CoreFoundation', '-o', executable]);
+    fixture, fileURLToPath(new URL('../../native/macos/hal-driver/tests/MRProbeHalTrace.c', import.meta.url)),
+    '-framework', 'CoreAudio', '-framework', 'CoreFoundation', '-o', executable]);
   execFileSync(executable, [], { timeout: 10000 });
 });

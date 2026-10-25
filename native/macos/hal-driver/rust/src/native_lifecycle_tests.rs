@@ -132,25 +132,7 @@ fn callback_evidence_distinguishes_missing_capture_from_published_digital_silenc
     let id = transport.add(&fixture, "Capture evidence", 48_000);
     start(&fixture, id);
     let device = fixture.registry.pin(id).unwrap();
-    let registry = (&raw const *fixture.registry).cast_mut();
-    let address = crate::properties::Address {
-        selector: u32::from_be_bytes(*b"mrdi"),
-        scope: u32::from_be_bytes(*b"glob"),
-        element: 0,
-    };
-    let enabled = 1_u32;
-    assert_eq!(
-        unsafe {
-            crate::properties::mr_hal_core_property_set(
-                registry,
-                id,
-                &raw const address,
-                4,
-                (&raw const enabled).cast(),
-            )
-        },
-        0
-    );
+    device.io_trace.set_enabled(true);
     pcm(&fixture, id, true, 0, 0.25);
     assert_eq!(
         pcm(&fixture, id, false, 16, 0.9),
@@ -158,42 +140,7 @@ fn callback_evidence_distinguishes_missing_capture_from_published_digital_silenc
     );
     pcm(&fixture, id, true, 64, 0.0);
     assert_eq!(pcm(&fixture, id, false, 64, 0.9), [0; 64]);
-    let address = crate::properties::Address {
-        selector: u32::from_be_bytes(*b"mrdo"),
-        ..address
-    };
-    let mut size = 0;
-    assert_eq!(
-        unsafe {
-            crate::properties::mr_hal_core_property_size(
-                registry,
-                id,
-                &raw const address,
-                &raw mut size,
-            )
-        },
-        0
-    );
-    let mut bytes = vec![0_u8; size as usize];
-    let mut written = 0;
-    assert_eq!(
-        unsafe {
-            crate::properties::mr_hal_core_property_get(
-                registry,
-                id,
-                &raw const address,
-                0,
-                std::ptr::null(),
-                size,
-                &raw mut written,
-                bytes.as_mut_ptr().cast(),
-                0,
-            )
-        },
-        0
-    );
-    assert_eq!(written, size);
-    assert!(device.io_trace.enabled());
+    let bytes = device.io_trace.snapshot();
     let words: Vec<_> = bytes
         .chunks_exact(8)
         .map(|value| u64::from_ne_bytes(value.try_into().unwrap()))

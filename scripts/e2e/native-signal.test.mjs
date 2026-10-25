@@ -42,6 +42,33 @@ test('a scheduler trace cannot turn measured PCM loss into acceptance', async t 
   }
 });
 
+test('a native property failure retains its procedure and OSStatus and is never replayed', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-property-failure-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  for (const processFailed of [false, true]) {
+    const original = new Error('probe exited with status 1');
+    const calls = [];
+    await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
+      snapshot() {}, diagnostics() {},
+      execute(program) {
+        calls.push(program);
+        if (program === 'zsh') return '/probe.app';
+        if (program === 'open') {
+          writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify({
+            error: { stage: 'hal_trace_enable', osStatus: 2003332927, errno: 0 },
+          }));
+          if (processFailed) throw original;
+        }
+      },
+    }), error => {
+      assert.match(error.message, /stage=hal_trace_enable osStatus=2003332927 errno=0/);
+      assert.equal(error.cause, processFailed ? original : undefined);
+      return true;
+    });
+    assert.deepEqual(calls, ['zsh', 'open', 'pkill']);
+  }
+});
+
 test('system-wide tracing is ready before the original measurement and stops after success or failure', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'mr-system-trace-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

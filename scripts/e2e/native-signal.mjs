@@ -239,19 +239,29 @@ async function macosSignal(device, directory, execFileSync, snapshot, schedulerT
   const bundle = execFileSync('zsh', ['scripts/probe-macos-roundtrip.sh', '--prepare-bundle', 'io.mixrelay.qualification.probe'],
     { encoding: 'utf8', timeout: 60000 }).trim();
   const stdout = join(directory, 'native-probe.stdout.json');
+  let processFailure;
   try {
     if (schedulerTrace) assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Scheduler diagnosis requires a disposable hosted Mac');
     const command = macosProbeCommand(bundle, directory, uid);
     const measure = () => execFileSync(command.program, command.args, { timeout: command.timeout });
     if (schedulerTrace) await trace(directory, measure);
     else measure();
+  } catch (error) {
+    processFailure = error;
   } finally {
     const executable = `${bundle}/Contents/MacOS/MRRoundTripProbe`;
     const pattern = `^${executable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`;
     try { execFileSync('pkill', ['-TERM', '-f', pattern], { timeout: 5000 }); }
     catch (error) { if (error.status !== 1) throw error; }
   }
-  const measured = JSON.parse(readFileSync(stdout, 'utf8'));
+  let measured;
+  try { measured = JSON.parse(readFileSync(stdout, 'utf8')); }
+  catch (error) { throw new Error('Native macOS probe result could not be read', { cause: processFailure ?? error }); }
+  if (measured.error) {
+    const { stage, osStatus, errno } = measured.error;
+    throw new Error(`Native macOS probe failed: stage=${stage} osStatus=${osStatus} errno=${errno}`, { cause: processFailure });
+  }
+  if (processFailure) throw processFailure;
   try { snapshot(directory); }
   catch (error) { console.error(`Native post-signal process snapshot: ${error.message}`); }
   assert.equal(measured.inputAuthorization?.final, 3, 'Probe recording consent must precede native I/O');

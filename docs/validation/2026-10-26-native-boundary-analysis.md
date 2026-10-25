@@ -54,6 +54,24 @@ JSON 행은 `[sequence, render, frame, frames, accepted, available, zeroFrames, 
 해시는 Float32 비트에 적용한 64비트 FNV 값의 16진수 문자열이다. 원본 PCM은 별도 capture 파일에
 보존한다. 기록 활성화에 따른 추가 계산 비용과 고정 용량의 한계도 측정 해석에 포함해야 한다.
 
+## 진단 속성의 전송 결함
+
+`1c458123`의 [진단 실행 40214476447](https://github.com/mixrelay/mixrelay/actions/runs/40214476447)은
+macOS 15 ARM에서 PCM 측정 전에 실패해 취소했다. 이 실행은 네 Mac만 선택한 진단이며
+전체 설치본 검증 결과에 합산하지 않는다. 원시 증거 업로드도 GitHub ArtifactService의 요청 시간 초과로
+실패했다. 저장 용량 초과를 나타내는 로그는 없었다.
+
+사용자 정의 속성 `mrdi`·`mrdo`를 `None` 데이터 형식으로 선언한 것이 결함이다.
+Apple SDK에서 이 형식은 속성·qualifier 데이터가 없다는 뜻이며 원시 바이트 전송 형식이 아니다.
+두 속성은 `CFPropertyList`로 선언하고, 클라이언트와 서버가 포인터 크기의 `CFDataRef`를 교환한다.
+HAL 조회가 만든 참조는 호출자가 해제하고, 설정에서 전달한 참조는 호출 동안 빌린다.
+
+C 계약 시험은 실제 CoreFoundation binary property list 직렬화·역직렬화 뒤 SDK 어댑터로 설정·조회한다.
+같은 경계를 통해 프로브의 전송·증거 파일 저장도 실행하며 실제 오디오 장치는 열지 않는다.
+잘못된 flag·객체 형식·크기는 거부한다. 선언을 이전 `None` 값으로 되돌리면 이 시험이 실패한다.
+프로브는 측정 중 실패해도 완성된 JSON에 단계·OSStatus·파일 오류를 남긴다.
+이 수정의 설치본 검증과 기존 PCM 손상의 원인 확인은 아직 남아 있다.
+
 ## Loopback 후속 대조
 
 `ECIOCycleParam::init` (`0x151d0`)은 mixo에 output timestamp, read에 input timestamp를 고른다.

@@ -16,93 +16,9 @@ pub(crate) struct Address {
     pub element: u32,
 }
 
-#[repr(C)]
-pub(crate) struct Notification {
-    object: u32,
-    address: Address,
-}
-
-/// Writes the property addresses changed by one control-plane event, in host order.
-/// Returns the count fitting `capacity`; a null output only queries that count.
-///
-/// # Safety
-/// A non-null output must point to `capacity` aligned writable notifications and
-/// remain exclusively borrowed for this call. No output storage is retained.
-#[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn mr_hal_core_notifications(
-    object: u32,
-    change: u32,
-    output: *mut Notification,
-    capacity: usize,
-) -> usize {
-    use crate::abi::{
-        ALIVE, FORMAT, INPUT_LATENCY, LIST, NAME, OUTPUT_MUTE, OUTPUT_VOLUME, RUNNING,
-        STREAM_ACTIVE, TRANSPORT,
-    };
-    let mut count = 0;
-    let mut push = |object, selector, scope| {
-        if count == capacity {
-            return;
-        }
-        if !output.is_null() {
-            // SAFETY: count is below the caller's writable capacity; each index
-            // is initialized once and no reference to the ABI output is retained.
-            unsafe {
-                output.add(count).write(Notification {
-                    object,
-                    address: Address {
-                        selector: u32::from_be_bytes(selector),
-                        scope,
-                        element: 0,
-                    },
-                });
-            }
-        }
-        count += 1;
-    };
-    match change {
-        LIST => {
-            push(1, *b"dev#", GLOBAL);
-            push(1, *b"ownd", GLOBAL);
-        }
-        NAME => {
-            for id in [object, object + 1, object + 2] {
-                push(id, *b"lnam", GLOBAL);
-            }
-        }
-        FORMAT => {
-            push(object, *b"nsrt", GLOBAL);
-            push(object, *b"ownd", GLOBAL);
-            push(object, *b"ctrl", GLOBAL);
-            push(object, *b"ctrl", OUTPUT);
-            for scope in [INPUT, OUTPUT] {
-                push(object, *b"stm#", scope);
-                push(object, *b"srnd", scope);
-            }
-            for stream in [object + 1, object + 2] {
-                for selector in [*b"sfmt", *b"pft ", *b"sfma", *b"pfta"] {
-                    push(stream, selector, GLOBAL);
-                }
-            }
-        }
-        INPUT_LATENCY => push(object, *b"ltnc", INPUT),
-        TRANSPORT => push(object, *b"tran", GLOBAL),
-        ALIVE => push(object, *b"livn", GLOBAL),
-        RUNNING => push(object, *b"goin", GLOBAL),
-        STREAM_ACTIVE => push(object, *b"sact", GLOBAL),
-        OUTPUT_VOLUME => {
-            push(object + 3, *b"lcsv", GLOBAL);
-            push(object + 3, *b"lcdv", GLOBAL);
-        }
-        OUTPUT_MUTE => push(object + 4, *b"bcvl", GLOBAL),
-        _ => {}
-    }
-    count
-}
-
-const GLOBAL: u32 = u32::from_be_bytes(*b"glob");
-const INPUT: u32 = u32::from_be_bytes(*b"inpt");
-const OUTPUT: u32 = u32::from_be_bytes(*b"outp");
+pub(super) const GLOBAL: u32 = u32::from_be_bytes(*b"glob");
+pub(super) const INPUT: u32 = u32::from_be_bytes(*b"inpt");
+pub(super) const OUTPUT: u32 = u32::from_be_bytes(*b"outp");
 const BAD_OBJECT: i32 = i32::from_be_bytes(*b"!obj");
 const UNKNOWN: i32 = i32::from_be_bytes(*b"who?");
 const BAD_SIZE: i32 = i32::from_be_bytes(*b"!siz");
@@ -159,13 +75,14 @@ enum Value {
     Struct(Vec<u8>),
     Array(Vec<u8>, usize),
     Text(Vec<u8>),
+    Data(Vec<u8>),
 }
 impl Value {
     fn size(&self) -> usize {
         match self {
             Self::Inline(inline) => inline.length,
             Self::Struct(bytes) | Self::Array(bytes, _) => bytes.len(),
-            Self::Text(_) => size_of::<*const c_void>(),
+            Self::Text(_) | Self::Data(_) => size_of::<*const c_void>(),
         }
     }
     /// # Safety
@@ -183,6 +100,10 @@ impl Value {
                     unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), output.cast(), size) };
                 }
                 Ok(size)
+            }
+            Self::Data(bytes) => {
+                // SAFETY: forwarded caller storage; the returned CFData is host-owned.
+                unsafe { crate::property_data::write(bytes, capacity, output) }.map_err(data_error)
             }
             Self::Text(bytes) => {
                 if capacity < size_of::<*const c_void>() {
@@ -351,7 +272,13 @@ fn device(snapshot: &Snapshot, address: &Address) -> Result<Value, i32> {
         b"cust" if address.scope == GLOBAL => Ok(Value::Array(
             [*b"mrdi", *b"mrdo"]
                 .into_iter()
-                .flat_map(|selector| [u32::from_be_bytes(selector), 0, 0])
+                .flat_map(|selector| {
+                    [
+                        u32::from_be_bytes(selector),
+                        crate::property_data::DATA_TYPE,
+                        0,
+                    ]
+                })
                 .flat_map(u32::to_ne_bytes)
                 .collect(),
             12,
@@ -510,6 +437,15 @@ fn output_control(
     }
 }
 
+fn data_error(error: crate::property_data::DataError) -> i32 {
+    match error {
+        crate::property_data::DataError::Size => BAD_SIZE,
+        crate::property_data::DataError::Type | crate::property_data::DataError::Allocation => {
+            ILLEGAL
+        }
+    }
+}
+
 fn io_evidence(registry: &Registry, object: u32, address: &Address) -> Result<Value, i32> {
     let device = registry.pin(object).ok_or(BAD_OBJECT)?;
     if device.id != object || address.scope != GLOBAL {
@@ -517,9 +453,11 @@ fn io_evidence(registry: &Registry, object: u32, address: &Address) -> Result<Va
     }
     let _control = crate::device::lock(&device.control);
     if address.selector == u32::from_be_bytes(*b"mrdi") {
-        Ok(number(u32::from(device.io_trace.enabled())))
+        Ok(Value::Data(
+            u32::from(device.io_trace.enabled()).to_ne_bytes().to_vec(),
+        ))
     } else {
-        Ok(Value::Struct(device.io_trace.snapshot()))
+        Ok(Value::Data(device.io_trace.snapshot()))
     }
 }
 
@@ -832,23 +770,25 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_set(
         Ok(false) => return ILLEGAL,
         Err(error) => return error,
     }
+    if address.selector == u32::from_be_bytes(*b"mrdi") {
+        // SAFETY: the host marshals this custom property as a live CFPropertyListRef.
+        let enabled = match unsafe { crate::property_data::read_flag(size, input) } {
+            Ok(enabled) => enabled,
+            Err(error) => return data_error(error),
+        };
+        let Some(device) = registry.pin(object) else {
+            return BAD_OBJECT;
+        };
+        let _control = crate::device::lock(&device.control);
+        let _freeze = device.freeze();
+        device.io_trace.set_enabled(enabled);
+        return 0;
+    }
     let bytes = unsafe { std::slice::from_raw_parts(input.cast::<u8>(), size as usize) };
     let Some(snapshot) = registry.snapshot(object) else {
         return BAD_OBJECT;
     };
     let status = match &address.selector.to_be_bytes() {
-        b"mrdi" => {
-            let Ok(bytes) = <[u8; 4]>::try_from(bytes) else {
-                return BAD_SIZE;
-            };
-            let Some(device) = registry.pin(object) else {
-                return BAD_OBJECT;
-            };
-            let _control = crate::device::lock(&device.control);
-            let _freeze = device.freeze();
-            device.io_trace.set_enabled(u32::from_ne_bytes(bytes) != 0);
-            0
-        }
         b"lcsv" | b"lcdv" | b"bcvl" => {
             set_output_control(registry, object, address.selector, bytes)
         }
@@ -890,132 +830,4 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_set(
         _ => return UNKNOWN,
     };
     if status == 0 { 0 } else { ILLEGAL }
-}
-
-#[cfg(test)]
-mod notification_tests {
-    use super::*;
-    use crate::abi::{FORMAT, LIST, NAME};
-
-    const OBJECT: u32 = 20;
-    const SENTINEL: (u32, u32, u32, u32) = (u32::MAX, u32::MAX, u32::MAX, u32::MAX);
-    type NotificationPayload = (usize, [(u32, u32, u32, u32); 16]);
-
-    fn payload(change: u32, capacity: usize) -> NotificationPayload {
-        let mut output: [Notification; 16] = std::array::from_fn(|_| Notification {
-            object: SENTINEL.0,
-            address: Address {
-                selector: SENTINEL.1,
-                scope: SENTINEL.2,
-                element: SENTINEL.3,
-            },
-        });
-        assert!(capacity <= output.len());
-        // SAFETY: this initialized ABI array is aligned, exclusive and large enough.
-        let count =
-            unsafe { mr_hal_core_notifications(OBJECT, change, output.as_mut_ptr(), capacity) };
-        (
-            count,
-            output.map(|value| {
-                (
-                    value.object,
-                    value.address.selector,
-                    value.address.scope,
-                    value.address.element,
-                )
-            }),
-        )
-    }
-
-    #[test]
-    fn format_notifications_preserve_host_order_and_partial_output_bounds() {
-        let expected = [
-            (OBJECT, *b"nsrt", GLOBAL),
-            (OBJECT, *b"ownd", GLOBAL),
-            (OBJECT, *b"ctrl", GLOBAL),
-            (OBJECT, *b"ctrl", OUTPUT),
-            (OBJECT, *b"stm#", INPUT),
-            (OBJECT, *b"srnd", INPUT),
-            (OBJECT, *b"stm#", OUTPUT),
-            (OBJECT, *b"srnd", OUTPUT),
-            (OBJECT + 1, *b"sfmt", GLOBAL),
-            (OBJECT + 1, *b"pft ", GLOBAL),
-            (OBJECT + 1, *b"sfma", GLOBAL),
-            (OBJECT + 1, *b"pfta", GLOBAL),
-            (OBJECT + 2, *b"sfmt", GLOBAL),
-            (OBJECT + 2, *b"pft ", GLOBAL),
-            (OBJECT + 2, *b"sfma", GLOBAL),
-            (OBJECT + 2, *b"pfta", GLOBAL),
-        ]
-        .map(|(object, selector, scope)| (object, u32::from_be_bytes(selector), scope, 0));
-        for capacity in [0, 5, 16] {
-            let (count, output) = payload(FORMAT, capacity);
-            assert_eq!(count, capacity.min(expected.len()));
-            assert_eq!(output[..count], expected[..count]);
-            assert!(output[count..].iter().all(|value| *value == SENTINEL));
-            // SAFETY: null output queries the fitting count and is never dereferenced.
-            assert_eq!(
-                unsafe {
-                    mr_hal_core_notifications(OBJECT, FORMAT, std::ptr::null_mut(), capacity)
-                },
-                count
-            );
-        }
-    }
-
-    #[test]
-    fn inventory_and_rename_notifications_target_owned_objects() {
-        let (count, inventory) = payload(LIST, 16);
-        assert_eq!(count, 2);
-        assert_eq!(
-            inventory[..count],
-            [
-                (1, u32::from_be_bytes(*b"dev#"), GLOBAL, 0),
-                (1, u32::from_be_bytes(*b"ownd"), GLOBAL, 0),
-            ]
-        );
-        let (count, rename) = payload(NAME, 16);
-        assert_eq!(count, 3);
-        assert_eq!(
-            rename[..count],
-            [OBJECT, OBJECT + 1, OBJECT + 2].map(|object| (
-                object,
-                u32::from_be_bytes(*b"lnam"),
-                GLOBAL,
-                0
-            ))
-        );
-        let (count, unsupported) = payload(u32::MAX, 16);
-        assert_eq!(count, 0);
-        assert_eq!(unsupported, [SENTINEL; 16]);
-    }
-
-    #[test]
-    fn transport_notifications_target_the_device_global_property() {
-        let (count, output) = payload(crate::abi::TRANSPORT, 16);
-        assert_eq!(count, 1);
-        assert_eq!(output[0], (OBJECT, u32::from_be_bytes(*b"tran"), GLOBAL, 0));
-        assert!(output[1..].iter().all(|value| *value == SENTINEL));
-    }
-
-    #[test]
-    fn native_output_notifications_target_level_and_mute_control_objects() {
-        let (count, volume) = payload(crate::abi::OUTPUT_VOLUME, 16);
-        assert_eq!(count, 2);
-        assert_eq!(
-            volume[..count],
-            [*b"lcsv", *b"lcdv"].map(|selector| (
-                OBJECT + 3,
-                u32::from_be_bytes(selector),
-                GLOBAL,
-                0
-            ))
-        );
-        let (count, mute) = payload(crate::abi::OUTPUT_MUTE, 16);
-        assert_eq!(count, 1);
-        assert_eq!(
-            mute[0],
-            (OBJECT + 4, u32::from_be_bytes(*b"bcvl"), GLOBAL, 0)
-        );
-    }
 }

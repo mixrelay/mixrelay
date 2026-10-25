@@ -20,6 +20,8 @@ mod native;
 mod output_control;
 #[cfg(target_os = "macos")]
 mod properties;
+mod property_data;
+mod property_notifications;
 mod registry;
 mod transport;
 

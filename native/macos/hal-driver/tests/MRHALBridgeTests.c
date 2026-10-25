@@ -1,6 +1,7 @@
 /* The Rust owner tests control-resource lifetime and reconnect behavior.
  * This fixture exercises the retained SDK COM adapter without starting the HAL. */
 #include <assert.h>
+#include <CoreAudio/CoreAudio.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -55,6 +56,120 @@ _Static_assert(kAudioControlPropertyElement == UINT32_C(0x63656c6d), "control el
 _Static_assert(kAudioFormatFlagIsFloat == 1U, "Float32 ASBD flag ABI");
 _Static_assert(kAudioFormatFlagIsSignedInteger == 4U, "signed integer ASBD flag ABI");
 _Static_assert(kAudioFormatFlagIsPacked == 8U, "packed PCM ASBD flag ABI");
+_Static_assert(kAudioServerPlugInCustomPropertyDataTypeCFPropertyList == UINT32_C(0x706c7374), "property-list ABI");
+
+static CFDataRef serialized_data(CFDataRef value) {
+    CFErrorRef error = NULL;
+    CFDataRef encoded = CFPropertyListCreateData(NULL, value, kCFPropertyListBinaryFormat_v1_0, 0, &error);
+    assert(encoded != NULL && error == NULL);
+    CFPropertyListRef decoded = CFPropertyListCreateWithData(NULL, encoded, kCFPropertyListImmutable, NULL, &error);
+    CFRelease(encoded);
+    assert(decoded != NULL && error == NULL && CFGetTypeID(decoded) == CFDataGetTypeID());
+    return (CFDataRef)decoded;
+}
+
+/* Simulate the host's property-list serialization across the client/server boundary. */
+static OSStatus client_set(AudioObjectID device, const AudioObjectPropertyAddress *address, UInt32 qs, const void *q, UInt32 size, const void *input) {
+    if (size != sizeof(CFDataRef)) return kAudioHardwareBadPropertySizeError;
+    CFDataRef value = NULL;
+    memcpy(&value, input, sizeof(value));
+    CFDataRef decoded = serialized_data(value);
+    const OSStatus status = (*gDriver)->SetPropertyData(gDriver, device, getpid(), address, qs, q, sizeof(decoded), &decoded);
+    CFRelease(decoded);
+    return status;
+}
+static OSStatus client_size(AudioObjectID device, const AudioObjectPropertyAddress *address, UInt32 qs, const void *q, UInt32 *size) {
+    return (*gDriver)->GetPropertyDataSize(gDriver, device, getpid(), address, qs, q, size);
+}
+static OSStatus client_get(AudioObjectID device, const AudioObjectPropertyAddress *address, UInt32 qs, const void *q, UInt32 *size, void *output) {
+    CFDataRef value = NULL;
+    const OSStatus status = (*gDriver)->GetPropertyData(gDriver, device, getpid(), address, qs, q, *size, size, &value);
+    if (status != noErr) return status;
+    CFDataRef decoded = serialized_data(value);
+    CFRelease(value);
+    memcpy(output, &decoded, sizeof(decoded));
+    return noErr;
+}
+#define AudioObjectSetPropertyData client_set
+#define AudioObjectGetPropertyDataSize client_size
+#define AudioObjectGetPropertyData client_get
+#include "MRProbeHalTrace.c"
+#undef AudioObjectSetPropertyData
+#undef AudioObjectGetPropertyDataSize
+#undef AudioObjectGetPropertyData
+
+static CFDataRef custom_data(AudioObjectID device, AudioObjectPropertySelector selector) {
+    const AudioObjectPropertyAddress property = {selector, kAudioObjectPropertyScopeGlobal, 0};
+    UInt32 size = 0, written = 0;
+    assert((*gDriver)->GetPropertyDataSize(gDriver, device, getpid(), &property, 0, NULL, &size) == noErr);
+    assert(size == sizeof(CFDataRef));
+    CFDataRef value = NULL;
+    assert((*gDriver)->GetPropertyData(gDriver, device, getpid(), &property, 0, NULL, size, &written, &value) == noErr);
+    assert(written == sizeof(value) && value != NULL && CFGetTypeID(value) == CFDataGetTypeID());
+    CFDataRef decoded = serialized_data(value);
+    CFRelease(value);
+    return decoded;
+}
+
+static OSStatus set_custom_flag(AudioObjectID device, UInt32 value) {
+    const AudioObjectPropertyAddress property = {'mrdi', kAudioObjectPropertyScopeGlobal, 0};
+    CFDataRef source = CFDataCreate(NULL, (const UInt8 *)&value, sizeof(value));
+    assert(source != NULL);
+    CFDataRef decoded = serialized_data(source);
+    CFRelease(source);
+    const OSStatus status = (*gDriver)->SetPropertyData(gDriver, device, getpid(), &property, 0, NULL, sizeof(decoded), &decoded);
+    CFRelease(decoded);
+    return status;
+}
+
+static void custom_property_lists(AudioObjectID device) {
+    const AudioObjectPropertyAddress list = {kAudioObjectPropertyCustomPropertyInfoList, kAudioObjectPropertyScopeGlobal, 0};
+    AudioServerPlugInCustomPropertyInfo info[2] = {0};
+    UInt32 size = 0, written = 0;
+    assert((*gDriver)->GetPropertyDataSize(gDriver, device, getpid(), &list, 0, NULL, &size) == noErr);
+    assert(size == sizeof(info));
+    assert((*gDriver)->GetPropertyData(gDriver, device, getpid(), &list, 0, NULL, sizeof(info), &written, info) == noErr);
+    assert(written == sizeof(info));
+    for (unsigned index = 0; index < 2; ++index) {
+        assert(info[index].mSelector == (index == 0 ? 'mrdi' : 'mrdo'));
+        assert(info[index].mPropertyDataType == kAudioServerPlugInCustomPropertyDataTypeCFPropertyList);
+        assert(info[index].mQualifierDataType == kAudioServerPlugInCustomPropertyDataTypeNone);
+    }
+    assert(set_custom_flag(device, 1) == noErr);
+    assert(set_custom_flag(device, 2) == kAudioHardwareIllegalOperationError);
+    const AudioObjectPropertyAddress flag = {'mrdi', kAudioObjectPropertyScopeGlobal, 0};
+    UInt32 raw = 0;
+    assert((*gDriver)->SetPropertyData(gDriver, device, getpid(), &flag, 0, NULL, sizeof(raw), &raw) == kAudioHardwareBadPropertySizeError);
+    CFStringRef wrong = CFSTR("not CFData");
+    assert((*gDriver)->SetPropertyData(gDriver, device, getpid(), &flag, 0, NULL, sizeof(wrong), &wrong) == kAudioHardwareIllegalOperationError);
+    CFDataRef enabled = custom_data(device, 'mrdi');
+    assert(CFDataGetLength(enabled) == sizeof(raw));
+    memcpy(&raw, CFDataGetBytePtr(enabled), sizeof(raw));
+    CFRelease(enabled);
+    assert(raw == 1);
+    CFDataRef snapshot = custom_data(device, 'mrdo');
+    assert(CFDataGetLength(snapshot) == (5 + 2048 * 8) * (CFIndex)sizeof(uint64_t));
+    uint64_t header[5] = {0};
+    memcpy(header, CFDataGetBytePtr(snapshot), sizeof(header));
+    CFRelease(snapshot);
+    assert(header[0] == 1 && header[1] == 7 && header[2] == 2048 && header[3] == 0 && header[4] == 0);
+    assert(set_custom_flag(device, 0) == noErr);
+    enabled = custom_data(device, 'mrdi');
+    memcpy(&raw, CFDataGetBytePtr(enabled), sizeof(raw));
+    CFRelease(enabled);
+    assert(raw == 0);
+    assert(mr_probe_hal_trace_enable(device, true).stage == NULL);
+    char path[] = "/tmp/mixrelay-hal-trace-XXXXXX";
+    const int fd = mkstemp(path);
+    assert(fd >= 0 && close(fd) == 0 && unlink(path) == 0);
+    assert(mr_probe_hal_trace_save(device, path).stage == NULL);
+    FILE *file = fopen(path, "r");
+    char json[128] = {0};
+    assert(file != NULL && fgets(json, sizeof(json), file) != NULL);
+    assert(fclose(file) == 0 && unlink(path) == 0);
+    assert(strcmp(json, "{\"version\":1,\"issued\":0,\"dropped\":0,\"capacity\":2048,\"rows\":[]}\n") == 0);
+    assert(mr_probe_hal_trace_enable(device, false).stage == NULL);
+}
 
 static bool inspect_fixture(int fd, size_t size, MRHALCoreGeometry *geometry) {
     (void)fd; (void)size;
@@ -150,6 +265,7 @@ static void transport_identity(void) {
     assert(property_get(gDriver, device, 0, &property, 0, NULL, 4, &written, &value) == noErr);
     assert(forwarded_pid == 0 && value == kAudioDeviceTransportTypeVirtual);
     transport_device = device;
+    custom_property_lists(device);
     Boolean will = false, in_place = false;
     assert((*gDriver)->WillDoIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationWriteMix, &will, &in_place) == noErr);
     assert(will && in_place);
