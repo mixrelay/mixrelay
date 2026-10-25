@@ -697,15 +697,20 @@ pub(crate) mod tests {
         )
         .unwrap();
         let plan = Arc::clone(processor.plan());
-        let mut a_pcm = [0.0; 64];
+        assert_eq!(plan.source_bindings().len(), 1);
+        assert_eq!(
+            plan.source_bindings()[0].virtual_endpoint_id(),
+            Some(&"A".into())
+        );
+        assert_eq!(plan.sink_bindings().len(), 1);
+        assert_eq!(
+            plan.sink_bindings()[0].virtual_endpoint_id(),
+            Some(&"D".into())
+        );
         let mut d_pcm = [0.0; 64];
         for expected in [0.0, 0.25] {
             processor
-                .process_block(
-                    32,
-                    &[&[0.25; 64], &[0.0; 64]],
-                    &mut [&mut a_pcm, &mut d_pcm],
-                )
+                .process_block(32, &[&[0.25; 64]], &mut [&mut d_pcm])
                 .unwrap();
             assert_eq!(d_pcm.map(f32::to_bits), [expected; 64].map(f32::to_bits));
         }
