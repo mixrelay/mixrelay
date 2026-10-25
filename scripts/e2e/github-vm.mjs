@@ -151,7 +151,7 @@ export function guestDiskSize(imageInfo) {
 
 const activeCommands = new Set();
 let interrupted = false;
-function command(program, args, { timeout = 60000, log, allowFailure = false, cwd } = {}) {
+export function command(program, args, { timeout = 60000, log, allowFailure = false, cwd, progress } = {}) {
   assert.equal(interrupted, false, 'VM job was interrupted');
   return new Promise((resolvePromise, reject) => {
     const child = spawn(program, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -162,6 +162,7 @@ function command(program, args, { timeout = 60000, log, allowFailure = false, cw
     for (const pipe of [child.stdout, child.stderr])
       pipe.on('data', (bytes) => {
         stream?.write(bytes);
+        progress?.(bytes);
         if (output.length < 1024 * 1024) output += bytes.toString();
       });
     const timer = setTimeout(() => {
@@ -424,6 +425,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
       },
     );
     identity.push(`MIXRELAY_E2E_VM_ACCELERATOR=${session.accelerator}`);
+    if (process.env.MIXRELAY_E2E_CONTROL_TRACE === 'true') identity.push('MIXRELAY_E2E_CONTROL_TRACE=true');
     phase(
       smoke
         ? 'Checking the actual OS and desktop audio prerequisites'
@@ -439,7 +441,8 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
       [
         `env ${identity.join(' ')} bash /home/qa/workspace/scripts/e2e/guest-session.sh ${smoke ? '--smoke ' : ''}${target.id}`,
       ],
-      { timeout: 5400000, allowFailure: true, log: join(output, 'guest-suite.log') },
+      { timeout: 5400000, allowFailure: true, log: join(output, 'guest-suite.log'),
+        progress: bytes => process.stdout.write(bytes) },
     );
     const traceStopped = traceSignals
       ? await ssh([traceCommand('stop')], { allowFailure: true, log: join(output, 'guest-signal-trace.log') })

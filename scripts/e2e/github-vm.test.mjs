@@ -1,7 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { cloudConfig, cloudNetwork, guestCpuCount, guestDiskSize, qemuArguments } from './github-vm.mjs';
+import { cloudConfig, cloudNetwork, command, guestCpuCount, guestDiskSize, qemuArguments } from './github-vm.mjs';
+
+test('guest progress reaches the live console and raw evidence without masking a nonzero exit', async t => {
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const directory = mkdtempSync(join(tmpdir(), 'mr-guest-progress-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const log = join(directory, 'suite.log');
+  let progress = '';
+  const result = await command(process.execPath, ['-e',
+    "process.stdout.write('AUDIO-01: started\\n'); process.stderr.write('native failure\\n'); process.exitCode = 7;"],
+  { log, allowFailure: true, progress: bytes => { progress += bytes; } });
+  assert.equal(result.code, 7);
+  assert.match(progress, /AUDIO-01: started\n/);
+  assert.match(progress, /native failure\n/);
+  assert.equal(readFileSync(log, 'utf8'), progress);
+  await assert.rejects(command(process.execPath, ['-e', 'process.exitCode = 7']), /exited 7/);
+});
 
 test('cloud guest has a locked account and a job-specific SSH key', () => {
   const config = JSON.parse(cloudConfig('ssh-ed25519 AAAA test').split('\n').slice(1).join('\n'));

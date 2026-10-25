@@ -20,6 +20,7 @@ import { installAndVerify, launchInstalled, requireDisposableHost } from './pack
 import { removeInstalled } from './removal.mjs';
 import { wholeSystemCapture } from './system-capture.mjs';
 import { controlRecorder } from './recorder-control.mjs';
+import { startLinuxControlTrace } from './linux-control-trace.mjs';
 import {
   isolateFreshState,
   prepareUpgradeDriver,
@@ -334,31 +335,35 @@ export async function qualifyMode({
     graphId = catalog.activeId;
     assert.deepEqual(original.nodes, [], 'Reset QA workspace: existing graph is preserved');
     assert.deepEqual(original.edges, []);
-    ui = await startInstalledUi(target.os, output);
-    await scenario('GRAPH-01', async () => {
-      await ui.ready();
-      const current = await eventually(
-        () => api('graphs'),
-        (value) => value.document.nodes.length === 2 && value.document.edges.length > 0,
-        'Installed UI did not commit its connection',
-      );
-      const source = current.document.nodes.find((node) => node.type === 'compressor');
-      const recorder = current.document.nodes.find((node) => node.type === 'recorder');
-      assert.ok(source && recorder, 'Installed UI created different nodes');
-      assert.ok(
-        current.document.edges.every(
-          (edge) => edge.source.nodeId === source.id && edge.destination.nodeId === recorder.id,
-        ),
-        'Installed UI connected different nodes',
-      );
-      await active(current.document.revision);
-      const proof = evidence('installed-ui-graph.json', current);
-      const files = ['installed-ui.png', 'installed-ui-tree.txt'].map((file) => ({
-        file,
-        sha256: digest(readFileSync(join(output, file))),
-      }));
-      return [proof, ...files];
-    });
+    const trace = target.os === 'linux' && process.env.MIXRELAY_E2E_CONTROL_TRACE === 'true'
+      ? await startLinuxControlTrace(output) : undefined;
+    try {
+      ui = await startInstalledUi(target.os, output);
+      await scenario('GRAPH-01', async () => {
+        await ui.ready();
+        const current = await eventually(
+          () => api('graphs'),
+          (value) => value.document.nodes.length === 2 && value.document.edges.length > 0,
+          'Installed UI did not commit its connection',
+        );
+        const source = current.document.nodes.find((node) => node.type === 'compressor');
+        const recorder = current.document.nodes.find((node) => node.type === 'recorder');
+        assert.ok(source && recorder, 'Installed UI created different nodes');
+        assert.ok(
+          current.document.edges.every(
+            (edge) => edge.source.nodeId === source.id && edge.destination.nodeId === recorder.id,
+          ),
+          'Installed UI connected different nodes',
+        );
+        await active(current.document.revision);
+        const proof = evidence('installed-ui-graph.json', current);
+        const files = ['installed-ui.png', 'installed-ui-tree.txt'].map((file) => ({
+          file,
+          sha256: digest(readFileSync(join(output, file))),
+        }));
+        return [proof, ...files];
+      });
+    } finally { await trace?.stop(); }
     const afterUi = await api('graphs');
     assert.equal(afterUi.activeId, graphId);
     assert.ok(

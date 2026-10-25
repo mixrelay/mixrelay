@@ -27,6 +27,10 @@ on:
         description: Diagnose the host with a third-party loopback after candidate removal
         type: boolean
         default: false
+      linux_control_trace:
+        description: Focused diagnosis of UI control errors; detach before native audio
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -113,7 +117,13 @@ jobs:
         id: groups
         env:
           MATRIX: ${{ steps.baseline.outputs.matrix }}
+          CONTROL_TRACE: ${{ inputs.linux_control_trace }}
+          TARGET_IDS: ${{ inputs.targets }}
         run: |
+          if [[ "$CONTROL_TRACE" == true && -z "$TARGET_IDS" ]]; then
+            echo 'Control tracing is limited to focused diagnosis; full qualification uses the normal transport'
+            exit 1
+          fi
           jq -e '.include | all(.os == "macos" or .os == "linux")' <<< "$MATRIX" > /dev/null
           printf 'macos=%s\n' "$(jq -c '{include: [.include[] | select(.os == "macos")]}' <<< "$MATRIX")" >> "$GITHUB_OUTPUT"
           printf 'linux=%s\n' "$(jq -c '{include: [.include[] | select(.os == "linux")]}' <<< "$MATRIX")" >> "$GITHUB_OUTPUT"
@@ -208,6 +218,7 @@ jobs:
       - name: Install and exercise final package in the distro VM
         env:
           TARGET: ${{ matrix.id }}
+          MIXRELAY_E2E_CONTROL_TRACE: ${{ inputs.linux_control_trace }}
         run: node scripts/e2e/github-vm.mjs --target "$TARGET" --directory candidate --output evidence
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

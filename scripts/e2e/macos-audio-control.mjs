@@ -45,7 +45,8 @@ export async function macosAudioControl(evidence, target) {
     run('git', ['-C', workspace, 'checkout', '--detach', revision]);
     assert.equal(run('git', ['-C', workspace, 'rev-parse', 'HEAD']).trim(), revision);
     run('xcodebuild', ['-project', join(workspace, 'BlackHole.xcodeproj'), '-scheme', 'BlackHole',
-      '-configuration', 'Release', '-derivedDataPath', join(workspace, 'build'), 'CODE_SIGNING_ALLOWED=NO'], 300000);
+      '-configuration', 'Release', '-derivedDataPath', join(workspace, 'build'),
+      'MACOSX_DEPLOYMENT_TARGET=14.2', 'CODE_SIGNING_ALLOWED=NO'], 300000);
     const built = join(workspace, 'build/Build/Products/Release/BlackHole.driver');
     run('codesign', ['--force', '--sign', '-', built]);
     run('codesign', ['--verify', '--deep', '--strict', built]);
