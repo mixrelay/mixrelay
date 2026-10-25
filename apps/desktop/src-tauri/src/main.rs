@@ -52,6 +52,8 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     system_stop::observe_background_stop(app.handle())?;
     if *app.state::<app_mode::AppMode>() == app_mode::AppMode::Graph {
         #[cfg(target_os = "macos")]
+        app.manage(macos_audio::DeviceActivityCache::new());
+        #[cfg(target_os = "macos")]
         macos_webview::create_deferred(app)?;
         start_audio(app.handle())?;
         workspace_menu::install(app)?;

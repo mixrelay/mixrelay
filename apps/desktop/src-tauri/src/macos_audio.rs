@@ -29,13 +29,19 @@ mod capture_transaction;
 mod clock_pump;
 #[path = "macos_audio/device_activity.rs"]
 mod device_activity;
+pub(crate) use device_activity::DeviceActivityCache;
 
 /// Apps currently playing into or recording from each `MixRelay` device, keyed by the
 /// device's native UID. A device absent from the map has no app using it.
 #[tauri::command]
-pub(crate) fn list_device_app_activity()
--> Result<std::collections::BTreeMap<String, Vec<device_activity::DeviceAppActivity>>, String> {
-    device_activity::activity()
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Tauri injects State by value; a borrowed State is not a command argument"
+)]
+pub(crate) fn list_device_app_activity(
+    cache: State<'_, DeviceActivityCache>,
+) -> Result<std::collections::BTreeMap<String, Vec<device_activity::DeviceAppActivity>>, String> {
+    cache.activity().map_err(|error| error.to_string())
 }
 #[cfg(test)]
 #[cfg(mixrelay_application_clock_fixture)]
