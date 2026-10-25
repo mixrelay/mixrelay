@@ -35,14 +35,14 @@ static MRProbeHalTraceResult mr_trace_read(AudioDeviceID device, CFDataRef *data
 }
 
 static bool mr_trace_write(FILE *file, const uint64_t *words) {
-    fprintf(file, "{\"version\":2,\"issued\":%llu,\"dropped\":%llu,\"capacity\":4096,\"rows\":[",
+    fprintf(file, "{\"version\":3,\"issued\":%llu,\"dropped\":%llu,\"capacity\":8192,\"rows\":[",
             (unsigned long long)words[3], (unsigned long long)words[4]);
     bool comma = false;
-    for (UInt32 row = 0U; row < 4096U; ++row) {
-        const uint64_t *values = words + 5U + row * 9U;
+    for (UInt32 row = 0U; row < 8192U; ++row) {
+        const uint64_t *values = words + 5U + row * 11U;
         if (values[0] == 0U) continue;
         fprintf(file, "%s[", comma ? "," : "");
-        for (UInt32 column = 0U; column < 9U; ++column) {
+        for (UInt32 column = 0U; column < 11U; ++column) {
             if (column == 7U) fprintf(file, ",\"%016llx\"", (unsigned long long)values[column]);
             else fprintf(file, "%s%llu", column == 0U ? "" : ",", (unsigned long long)values[column]);
         }
@@ -56,9 +56,9 @@ static bool mr_trace_write(FILE *file, const uint64_t *words) {
 MRProbeHalTraceResult mr_probe_hal_trace_save(AudioDeviceID device, const char *path) {
     CFDataRef data = NULL;
     MRProbeHalTraceResult result = mr_trace_read(device, &data);
-    /* v2 has five UInt64 header fields and 4096 nine-word rows. CFData's byte
+    /* v3 has five UInt64 header fields and 8192 eleven-word rows. CFData's byte
      * pointer has no UInt64 alignment contract, so copy before interpreting it. */
-    const size_t expected = (5U + 4096U * 9U) * sizeof(uint64_t);
+    const size_t expected = (5U + 8192U * 11U) * sizeof(uint64_t);
     uint64_t *words = NULL;
     if (result.stage == NULL && CFDataGetLength(data) != (CFIndex)expected)
         result = mr_trace_result("hal_trace_payload_size", noErr, EINVAL);
@@ -68,7 +68,7 @@ MRProbeHalTraceResult mr_probe_hal_trace_save(AudioDeviceID device, const char *
         else memcpy(words, CFDataGetBytePtr(data), expected);
     }
     if (data != NULL) CFRelease(data);
-    if (result.stage == NULL && (words[0] != 2U || words[1] != 8U || words[2] != 4096U))
+    if (result.stage == NULL && (words[0] != 3U || words[1] != 10U || words[2] != 8192U))
         result = mr_trace_result("hal_trace_payload_version", noErr, EINVAL);
     if (result.stage == NULL) {
         FILE *file = fopen(path, "wx");

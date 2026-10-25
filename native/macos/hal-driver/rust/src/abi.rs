@@ -412,10 +412,10 @@ pub(crate) unsafe extern "C" fn mr_hal_core_timestamp(
 ///
 /// # Safety
 /// The registry and buffer remain live for this synchronous call. `samples`
-/// contains `frames * stream_channels` exclusively writable samples in the current
-/// native stream format. Float32 buffers must be float-aligned; packed integer
-/// buffers require only byte alignment.
-/// The SDK's `WriteMix` operation supplies this main buffer for in-place use;
+/// contains `frames * stream_channels` exclusively writable samples. `MixOutput`
+/// supplies canonical Float32; `ReadInput` uses the current native stream format.
+/// Float32 buffers must be float-aligned; packed integer buffers need byte alignment.
+/// The SDK supplies this main buffer for synchronous in-place use;
 /// engine/shared transport storage must never be supplied as this buffer.
 pub(crate) unsafe extern "C" fn mr_hal_core_io(
     registry: *mut Registry,

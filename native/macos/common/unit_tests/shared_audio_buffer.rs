@@ -204,6 +204,10 @@ impl Buffer {
     fn stats(&self) -> SharedAudioBufferStats {
         unsafe { mr_shared_audio_buffer_stats(self.pointer) }
     }
+    fn read_coverage(&self, start: u64, samples: &mut [f32], coverage: &mut [bool]) -> u32 {
+        // SAFETY: this owner retains the mapping; each reader owns disjoint output slices.
+        unsafe { read_with_frame_coverage(self.pointer, start, samples, coverage) }
+    }
 }
 impl Drop for Buffer {
     fn drop(&mut self) {
@@ -301,6 +305,52 @@ fn pcm_bits_activity_and_counters_roundtrip() {
             SharedAudioBufferStats::default()
         );
     }
+}
+
+#[test]
+fn frame_coverage_distinguishes_committed_zero_missing_wrap_and_epoch_retirement() {
+    let buffer = Buffer::new(8, 2);
+    assert!(buffer.write(6, &[0.0, -0.0, 0.25, -0.25]));
+    assert!(buffer.write(9, &[0.5, -0.5]));
+    let mut samples = [9.0; 14];
+    let mut coverage = [true; 7];
+    let read = |samples: &mut [f32], coverage: &mut [bool]| {
+        // SAFETY: Buffer owns the initialized mapping and disjoint output slices.
+        unsafe { read_with_frame_coverage(buffer.pointer, 5, samples, coverage) }
+    };
+    assert_eq!(read(&mut samples, &mut coverage), 3);
+    assert_eq!(coverage, [false, true, true, false, true, false, false]);
+    assert_eq!(
+        samples.map(f32::to_bits),
+        [
+            0.0_f32, 0.0, 0.0, -0.0, 0.25, -0.25, 0.0, 0.0, 0.5, -0.5, 0.0, 0.0, 0.0, 0.0
+        ]
+        .map(f32::to_bits)
+    );
+    assert_eq!(buffer.stats().read_frames, 7);
+    assert_eq!(buffer.stats().missing_frames, 4);
+    let mut legacy = [9.0; 14];
+    assert_eq!(buffer.read(5, &mut legacy), 3);
+    assert_eq!(legacy.map(f32::to_bits), samples.map(f32::to_bits));
+    // SAFETY: the owner excludes writes while requesting retirement.
+    unsafe {
+        mr_shared_audio_buffer_request_epoch(buffer.pointer);
+    }
+    assert_eq!(read(&mut samples, &mut coverage), 0);
+    assert_eq!(samples.map(f32::to_bits), [0; 14]);
+    assert_eq!(coverage, [false; 7]);
+    // SAFETY: no producer is active; the owner opens the next timeline.
+    assert_eq!(
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
+        2
+    );
+    assert!(buffer.write(6, &[0.75; 2]));
+    assert_eq!(read(&mut samples, &mut coverage), 1);
+    assert_eq!(coverage, [false, true, false, false, false, false, false]);
+    let before = buffer.stats();
+    assert_eq!(read(&mut samples[..12], &mut coverage), 0);
+    assert_eq!(coverage, [false; 7]);
+    assert_eq!(buffer.stats(), before);
 }
 
 #[test]
@@ -688,6 +738,49 @@ fn packed_end_overflow_and_same_epoch_stamp_aba_are_rejected() {
             0
         );
     }
+}
+
+#[test]
+fn concurrent_bulk_readers_report_only_complete_frames_during_ring_replacement() {
+    const CHANNELS: usize = 8;
+    const FRAMES: u32 = 20_000;
+    let buffer = Buffer::new(64, u32::try_from(CHANNELS).unwrap());
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            for frame in 0..FRAMES {
+                let samples = std::array::from_fn::<_, CHANNELS, _>(|channel| {
+                    f32::from_bits(0x3f00_0000 + frame * 16 + u32::try_from(channel).unwrap())
+                });
+                assert!(buffer.write(u64::from(frame), &samples));
+            }
+        });
+        for _ in 0..2 {
+            scope.spawn(|| {
+                for _ in 0..FRAMES {
+                    let start = buffer.stats().published_through_frame.saturating_sub(16);
+                    let mut samples = [0.0; 16 * CHANNELS];
+                    let mut coverage = [false; 16];
+                    let available = buffer.read_coverage(start, &mut samples, &mut coverage);
+                    assert_eq!(
+                        available as usize,
+                        coverage.iter().filter(|valid| **valid).count()
+                    );
+                    for (index, frame) in samples.chunks_exact(CHANNELS).enumerate() {
+                        for (channel, sample) in frame.iter().enumerate() {
+                            let expected = if coverage[index] {
+                                0x3f00_0000
+                                    + u32::try_from(start + index as u64).unwrap() * 16
+                                    + u32::try_from(channel).unwrap()
+                            } else {
+                                0
+                            };
+                            assert_eq!(sample.to_bits(), expected);
+                        }
+                    }
+                }
+            });
+        }
+    });
 }
 
 #[test]

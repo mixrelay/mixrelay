@@ -8,24 +8,26 @@ import { analyseProbeReference } from './probe-pcm-reference.mjs';
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 
 export function analyseHalIo(trace, signalWindow = null) {
-  assert.ok([1, 2].includes(trace.version), 'Unsupported HAL trace version');
-  assert.equal(trace.capacity, trace.version === 1 ? 2048 : 4096, 'Unexpected HAL trace capacity');
+  assert.ok([1, 2, 3].includes(trace.version), 'Unsupported HAL trace version');
+  assert.equal(trace.capacity, { 1: 2048, 2: 4096, 3: 8192 }[trace.version], 'Unexpected HAL trace capacity');
   assert.ok(integer(trace.issued) && integer(trace.dropped) && trace.dropped <= trace.issued);
   assert.ok(Array.isArray(trace.rows) && trace.rows.length <= trace.capacity);
   if (signalWindow) assert.ok(integer(signalWindow.start) && integer(signalWindow.end) && signalWindow.end > signalWindow.start);
   const sequences = new Set();
   const rows = trace.rows.map(row => {
-    assert.ok(Array.isArray(row) && row.length === (trace.version === 1 ? 8 : 9) && row.slice(0, 7).every(integer));
+    assert.ok(Array.isArray(row) && row.length === ({ 1: 8, 2: 9, 3: 11 }[trace.version]) && row.slice(0, 7).every(integer));
     const [sequence, render, frame, frames, accepted, available, zeroFrames, hash] = row;
     assert.ok(sequence > 0 && sequence <= trace.issued && !sequences.has(sequence), 'Invalid or repeated observation sequence');
     assert.ok(render <= 1 && accepted <= 1 && frames <= 0xffffffff && available <= frames && zeroFrames <= frames);
     assert.ok(Number.isSafeInteger(frame + frames) && typeof hash === 'string' && /^[0-9a-f]{16}$/.test(hash));
-    const client = trace.version === 2 ? row[8] : null;
+    const client = trace.version >= 2 ? row[8] : null;
     assert.ok(client === null || (integer(client) && client <= 0xffffffff));
     sequences.add(sequence);
+    const processing = trace.version === 3 ? { hostStart: row[9], hostEnd: row[10] } : null;
+    if (processing) assert.ok(integer(processing.hostStart) && integer(processing.hostEnd) && processing.hostEnd >= processing.hostStart, 'Invalid processing host counters');
     const overlap = !signalWindow ? 'unknown' : frame >= signalWindow.end || frame + frames <= signalWindow.start
       ? 'outside' : frame >= signalWindow.start && frame + frames <= signalWindow.end ? 'full' : 'partial';
-    return { sequence, client, render: render === 1, frame, frames, accepted: accepted === 1, available, zeroFrames, hash, signalOverlap: overlap };
+    return { sequence, client, render: render === 1, frame, frames, accepted: accepted === 1, available, zeroFrames, hash, signalOverlap: overlap, ...(processing ? { processing } : {}) };
   }).sort((a, b) => a.sequence - b.sequence);
   const writeClients = new Set(rows.filter(row => row.render).map(row => row.client));
   const writes = new Map();

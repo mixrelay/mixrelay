@@ -90,6 +90,9 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 편집기의 `GraphReadback`은 읽기 전용 `ControlPort`로 그래프 선택과 적용 revision을 확인한다.
 `GraphApplicationQueue`는 확인한 문서·사용자 초안·변경 요청의 순서를 소유한다.
 조회 결과는 큐가 선택·취소 상태를 다시 확인한 뒤 화면에 전달한다.
+`TelemetryHub`는 스트림이 끊기면 캐시를 무효화하고 마지막 엔진 incarnation을 전달한다.
+revision 확인은 처음 받은 push 이후 읽기 응답으로 되돌아가지 않으며, 원래 제한 시간 안에서
+같은 엔진의 새 상태를 기다린다. 다른 incarnation은 `engine_replaced`로 종료한다.
 
 HAL의 `ClientMix`는 등록된 클라이언트별 PCM 큐와 등록·제거·교체 수명을 소유한다.
 `MixOutput`은 해당 클라이언트의 canonical Float32 출력을 큐에 게시하고, `ReadInput`은 같은
@@ -100,6 +103,9 @@ HAL의 `ClientMix`는 등록된 클라이언트별 PCM 큐와 등록·제거·�
 `Registry`는 장치의 시작 참조를 세고 최초 시작·최종 종료를 네이티브 런타임에 요청한다.
 최초 시작은 모든 큐의 PCM 타임라인을 초기화한다. 다른 클라이언트의 시작·정지는 게시된 PCM을
 지우지 않으며, 등록된 출력 클라이언트가 직접 StartIO를 받아야 한다는 조건을 두지 않는다.
+다중 큐 합산은 고정 크기 복사 scratch와 프레임별 coverage를 사용한다. 공통 전송 계층이
+frame stamp·epoch를 검사하고 구간마다 읽기 통계를 갱신한다. 유효한 디지털 무음과 누락을
+구분하며, 콜백에서 큐를 할당하거나 다른 클라이언트를 기다리지 않는다.
 
 `HalIoContext`는 기존 공유 매핑의 클럭·epoch·producer activity를 게시한다.
 공유 PCM 링은 현재 매핑 형식의 수명 메타데이터를 보존하며 클라이언트 PCM의 저장소로 사용하지 않는다.

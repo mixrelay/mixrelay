@@ -3,16 +3,33 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::io_outcome::IoOutcome;
 
-// A complete 48 kHz installed probe retained up to 3,886 observations across
-// 128/512-frame clients. Longer sessions still report overwritten rows explicitly.
-const CAPACITY: usize = 4096;
-const FIELDS: usize = 8;
+// The installed 128/512-frame client pair exceeded 4,096 rows before collection.
+// Keep its early signal window as well; longer sessions report overwrites explicitly.
+const CAPACITY: usize = 8192;
+const FIELDS: usize = 10;
 
 pub(crate) struct IoTrace {
     enabled: AtomicBool,
     next: AtomicU64,
     dropped: AtomicU64,
     rows: Box<[Row]>,
+    clock: fn() -> u64,
+}
+
+pub(crate) struct CallbackStart(u64);
+
+#[cfg(target_os = "macos")]
+fn callback_clock() -> u64 {
+    unsafe extern "C" {
+        fn mach_absolute_time() -> u64;
+    }
+    // SAFETY: this non-blocking counter read has no pointer or lifecycle preconditions.
+    unsafe { mach_absolute_time() }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn callback_clock() -> u64 {
+    0
 }
 
 struct Row {
@@ -32,6 +49,10 @@ pub(crate) struct Observation<'a> {
 
 impl IoTrace {
     pub(crate) fn new() -> Result<Self, std::collections::TryReserveError> {
+        Self::with_clock(callback_clock)
+    }
+
+    fn with_clock(clock: fn() -> u64) -> Result<Self, std::collections::TryReserveError> {
         let mut rows = Vec::new();
         rows.try_reserve_exact(CAPACITY)?;
         rows.extend((0..CAPACITY).map(|_| Row {
@@ -43,6 +64,7 @@ impl IoTrace {
             next: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
             rows: rows.into_boxed_slice(),
+            clock,
         })
     }
 
@@ -61,13 +83,22 @@ impl IoTrace {
         self.enabled.load(Ordering::Acquire)
     }
 
-    pub(crate) fn record(&self, observation: Observation<'_>) {
+    pub(crate) fn begin(&self) -> Option<CallbackStart> {
+        self.enabled().then(|| CallbackStart((self.clock)()))
+    }
+
+    pub(crate) fn record(&self, observation: Observation<'_>, start: Option<CallbackStart>) {
+        let Some(start) = start else {
+            return;
+        };
+        let end = (self.clock)();
         if !self.enabled() || observation.channels == 0 {
             return;
         }
         let id = self.next.fetch_add(1, Ordering::Relaxed).saturating_add(1);
         if id > u64::MAX / 2 {
-            self.dropped.fetch_add(1, Ordering::Relaxed);
+            // A snapshot acquiring this count must also see the reserved next ID.
+            self.dropped.fetch_add(1, Ordering::Release);
             self.enabled.store(false, Ordering::Release);
             return;
         }
@@ -86,7 +117,7 @@ impl IoTrace {
                 .compare_exchange(previous, id * 2 - 1, Ordering::SeqCst, Ordering::SeqCst)
                 .is_err()
         {
-            self.dropped.fetch_add(1, Ordering::Relaxed);
+            self.dropped.fetch_add(1, Ordering::Release);
             return;
         }
         let mut zero_frames = 0;
@@ -106,6 +137,8 @@ impl IoTrace {
             zero_frames,
             hash,
             u64::from(observation.client),
+            start.0,
+            end,
         ];
         // SeqCst cells make a snapshot's two sequence reads bracket every field;
         // an overwritten or still-publishing row is refused instead of mixed.
@@ -116,15 +149,17 @@ impl IoTrace {
     }
 
     /// Fixed-size, native-endian `UInt64` payload: version, fields, capacity, issued,
-    /// dropped, then (sequence, render, frame, frames, accepted, available, zeros, hash, client).
+    /// dropped, then (sequence, render, frame, frames, accepted, available, zeros,
+    /// hash, client, `host_start`, `host_end`). Host counters bracket processing, excluding tracing.
     pub(crate) fn snapshot(&self) -> Vec<u8> {
-        let mut words = vec![
-            2,
-            FIELDS as u64,
-            CAPACITY as u64,
-            self.next.load(Ordering::Acquire),
-            self.dropped.load(Ordering::Acquire),
-        ];
+        // Acquire drops first: each dropped reservation precedes the issued bound.
+        let dropped = self.dropped.load(Ordering::Acquire);
+        let issued = self.next.load(Ordering::Acquire);
+        self.snapshot_at(issued, dropped)
+    }
+
+    fn snapshot_at(&self, issued: u64, dropped: u64) -> Vec<u8> {
+        let mut words = vec![3, FIELDS as u64, CAPACITY as u64, issued, dropped];
         for row in &self.rows {
             let before = row.sequence.load(Ordering::SeqCst);
             let fields = row
@@ -132,7 +167,9 @@ impl IoTrace {
                 .each_ref()
                 .map(|cell| cell.load(Ordering::SeqCst));
             let after = row.sequence.load(Ordering::SeqCst);
-            if before != 0 && before & 1 == 0 && before == after {
+            // Callbacks continue during this control-thread copy. Later reservations
+            // are outside its declared prefix, even when their row is already complete.
+            if before != 0 && before & 1 == 0 && before == after && before / 2 <= issued {
                 words.push(before / 2);
                 words.extend(fields);
             } else {
@@ -156,26 +193,64 @@ mod tests {
     }
 
     #[test]
+    fn a_callback_published_after_the_snapshot_bound_cannot_escape_the_declared_prefix() {
+        let trace = IoTrace::with_clock(|| 1234).unwrap();
+        trace.set_enabled(true);
+        let observation = Observation {
+            render: true,
+            client: 42,
+            frame: 0,
+            channels: 1,
+            samples: &[0.5],
+            outcome: IoOutcome::completed(1),
+        };
+        trace.record(observation, trace.begin());
+        let issued = trace.next.load(Ordering::Acquire);
+        trace.record(
+            Observation {
+                frame: 1,
+                ..observation
+            },
+            trace.begin(),
+        );
+        let bytes = trace.snapshot_at(issued, 0);
+        let words: Vec<_> = bytes
+            .chunks_exact(8)
+            .map(|word| u64::from_ne_bytes(word.try_into().unwrap()))
+            .collect();
+        let sequences: Vec<_> = words[5..]
+            .chunks_exact(FIELDS + 1)
+            .filter_map(|row| (row[0] != 0).then_some(row[0]))
+            .collect();
+        assert_eq!(words[3], 1);
+        assert_eq!(sequences, [1]);
+    }
+
+    #[test]
     fn disabled_and_enabled_callback_evidence_never_allocates() {
-        let trace = IoTrace::new().unwrap();
+        let trace = IoTrace::with_clock(|| 1234).unwrap();
         let pcm = [0.25, -0.25, 0.0, 0.0];
         for enabled in [false, true] {
             trace.set_enabled(enabled);
             let measured = allocation_counter::measure(|| {
-                trace.record(Observation {
-                    render: false,
-                    client: 0,
-                    frame: 64,
-                    channels: 2,
-                    samples: &pcm,
-                    outcome: IoOutcome::completed(1),
-                });
+                trace.record(
+                    Observation {
+                        render: false,
+                        client: 0,
+                        frame: 64,
+                        channels: 2,
+                        samples: &pcm,
+                        outcome: IoOutcome::completed(1),
+                    },
+                    trace.begin(),
+                );
             });
             assert_eq!(measured.count_total, 0);
             let actual = words(&trace);
             assert_eq!(actual[3], u64::from(enabled));
             if enabled {
                 assert_eq!(&actual[5..12], &[1, 0, 64, 2, 1, 1, 1]);
+                assert_eq!(&actual[14..16], &[1234, 1234]);
             }
         }
     }
@@ -185,14 +260,17 @@ mod tests {
         let trace = IoTrace::new().unwrap();
         trace.set_enabled(true);
         for frame in 0..CAPACITY as u64 + 3 {
-            trace.record(Observation {
-                render: true,
-                client: 42,
-                frame,
-                channels: 1,
-                samples: &[0.5],
-                outcome: IoOutcome::completed(1),
-            });
+            trace.record(
+                Observation {
+                    render: true,
+                    client: 42,
+                    frame,
+                    channels: 1,
+                    samples: &[0.5],
+                    outcome: IoOutcome::completed(1),
+                },
+                trace.begin(),
+            );
         }
         let actual = words(&trace);
         assert_eq!(actual[3], CAPACITY as u64 + 3);

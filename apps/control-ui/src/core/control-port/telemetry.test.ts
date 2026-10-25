@@ -85,7 +85,7 @@ it('invalidates on incarnation change and silence, then retries without acceptin
   expect(hub.current()?.generation).toBe(1);
   await vi.advanceTimersByTimeAsync(2000);
   expect(hub.current()).toBeUndefined();
-  expect(receive).toHaveBeenLastCalledWith(undefined);
+  expect(receive).toHaveBeenLastCalledWith(undefined, 'replacement');
   expect(close).toHaveBeenCalledOnce();
   await vi.advanceTimersByTimeAsync(5000);
   expect(open).toHaveBeenCalledTimes(2);

@@ -120,6 +120,45 @@ fn replacement_preserves_registration_but_starts_an_empty_pcm_timeline() {
 }
 
 #[test]
+fn tiled_mix_preserves_sparse_frame_coverage_across_wrap_and_channel_remapping() {
+    for (render, capture) in [(2, 2), (2, 7), (7, 2), (64, 64)] {
+        let mixer = mixer(render, capture);
+        // Span a ring wrap and both sides of successive copy-tile boundaries.
+        let start = 16_368;
+        let first = vec![0.125; 31 * render as usize];
+        let second = vec![0.25; 33 * render as usize];
+        assert!(mixer.render(42, start, &first, 31).accepted);
+        assert!(mixer.render(43, start + 30, &second, 33).accepted);
+        // Digital zero contributes valid coverage after a one-frame hole at 63.
+        assert!(
+            mixer
+                .render(44, start + 64, &vec![0.0; render as usize], 1)
+                .accepted
+        );
+        let mut output = vec![9.0; 67 * capture as usize];
+        assert_eq!(mixer.capture(start, &mut output, 67).available, 64);
+        for (frame, samples) in output.chunks_exact(capture as usize).enumerate() {
+            let expected: f32 = match frame {
+                0..30 => 0.125,
+                30 => 0.375,
+                31..63 => 0.25,
+                _ => 0.0,
+            };
+            for (channel, sample) in samples.iter().enumerate() {
+                assert_eq!(
+                    sample.to_bits(),
+                    if channel < render as usize {
+                        expected.to_bits()
+                    } else {
+                        0
+                    }
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn single_and_multiple_client_callback_transfers_never_allocate_or_free() {
     for (capture, contributors) in [(2, 1), (2, 2), (4, 1), (4, 2)] {
         let mixer = mixer(2, capture);
@@ -141,5 +180,58 @@ fn single_and_multiple_client_callback_transfers_never_allocate_or_free() {
         assert_eq!(usage.count_total, 0);
         assert_eq!(usage.bytes_total, 0);
         assert_eq!(usage.count_current, 0);
+    }
+}
+
+#[test]
+#[ignore = "offline client mixing throughput measurement; run explicitly with --release --ignored --nocapture"]
+fn client_mixing_throughput() {
+    const CYCLES: u64 = 2000;
+    const FRAMES: u32 = 512;
+    for (render, capture, contributors) in [(2, 2, 1), (2, 2, 2), (2, 2, 8), (2, 7, 2), (64, 64, 2)]
+    {
+        let mut mixer = ClientMix::new(
+            Geometry {
+                endpoint_id: [1; 16],
+                render_channels: render,
+                capture_channels: capture,
+            },
+            16_384,
+        )
+        .unwrap();
+        for client in 1..=contributors {
+            assert!(mixer.register(client));
+        }
+        let input = vec![0.125; (FRAMES * render) as usize];
+        let mut output = vec![0.0; (FRAMES * capture) as usize];
+        let start = std::time::Instant::now();
+        for cycle in 0..CYCLES {
+            let frame = cycle * u64::from(FRAMES);
+            for client in 1..=contributors {
+                assert!(mixer.render(client, frame, &input, FRAMES).accepted);
+            }
+            assert_eq!(mixer.capture(frame, &mut output, FRAMES).available, FRAMES);
+            std::hint::black_box(&output);
+        }
+        let elapsed = start.elapsed();
+        assert!(
+            output
+                .chunks_exact(capture as usize)
+                .all(|frame| frame
+                    .iter()
+                    .enumerate()
+                    .all(|(channel, sample)| sample.to_bits()
+                        == if channel < render as usize {
+                            0.125 * f32::from(u16::try_from(contributors).unwrap())
+                        } else {
+                            0.0
+                        }
+                        .to_bits()))
+        );
+        println!(
+            "client_mix arch={} render={render} capture={capture} contributors={contributors} cycles={CYCLES} frames={FRAMES} elapsed_us={}",
+            std::env::consts::ARCH,
+            elapsed.as_micros()
+        );
     }
 }

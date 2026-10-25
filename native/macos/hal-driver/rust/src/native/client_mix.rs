@@ -11,6 +11,10 @@ use crate::{abi::Geometry, io_outcome::IoOutcome};
 const MAX_CLIENTS: usize = 256;
 // Match the driver registry's existing mapping admission bound for private PCM storage.
 const MAX_PCM_BYTES: usize = 1 << 30;
+// A copy tile bounds stack scratch to 8 KiB at the supported 64-channel width.
+// It does not change the device quantum, timeline or queue capacity.
+const COPY_FRAMES: usize = 32;
+const MAX_CHANNELS: usize = 64;
 
 struct Queue {
     pointer: NonNull<SharedAudioBuffer>,
@@ -75,6 +79,13 @@ impl Queue {
                 samples.as_mut_ptr(),
                 frames,
             )
+        }
+    }
+
+    fn read_with_coverage(&self, frame: u64, samples: &mut [f32], coverage: &mut [bool]) {
+        // SAFETY: the retained queue outlives the exclusive callback scratch slices.
+        unsafe {
+            buffer::read_with_frame_coverage(self.pointer.as_ptr(), frame, samples, coverage);
         }
     }
 }
@@ -228,23 +239,34 @@ impl ClientMix {
         let Some(first) = sources.next().and_then(|client| client.queue.as_ref()) else {
             return IoOutcome::completed(0);
         };
-        let mut available = [false; crate::formats::MAX_BUFFER_FRAMES];
-        let mut scratch = [0.0; 64];
         let render_channels = self.geometry.render_channels as usize;
-        let mut mix = |queue: &Queue| {
-            for (index, destination) in output.chunks_exact_mut(channels).enumerate() {
-                let supplied =
-                    queue.read(frame + index as u64, &mut scratch[..render_channels], 1) == 1;
-                available[index] |= supplied;
-                for (destination, sample) in destination.iter_mut().zip(&scratch[..render_channels])
-                {
-                    *destination += sample;
-                }
-            }
-        };
         if render_channels == channels && sources.clone().next().is_none() {
             return IoOutcome::completed(first.read(frame, output, frames));
         }
+        let mut available = [false; crate::formats::MAX_BUFFER_FRAMES];
+        let mut scratch = [0.0; COPY_FRAMES * MAX_CHANNELS];
+        let mut coverage = [false; COPY_FRAMES];
+        let mut mix = |queue: &Queue| {
+            for (tile, destinations) in output.chunks_mut(COPY_FRAMES * channels).enumerate() {
+                let offset = tile * COPY_FRAMES;
+                let count = destinations.len() / channels;
+                queue.read_with_coverage(
+                    frame + offset as u64,
+                    &mut scratch[..count * render_channels],
+                    &mut coverage[..count],
+                );
+                for (index, (destination, samples)) in destinations
+                    .chunks_exact_mut(channels)
+                    .zip(scratch.chunks_exact(render_channels))
+                    .enumerate()
+                {
+                    available[offset + index] |= coverage[index];
+                    for (destination, sample) in destination.iter_mut().zip(samples) {
+                        *destination += sample;
+                    }
+                }
+            }
+        };
         mix(first);
         for client in sources {
             if let Some(queue) = &client.queue {

@@ -65,7 +65,7 @@ it('native state and meters share one raw channel; reads still go to the engine'
   ]);
   source.invoke.mockRejectedValue(new Error('closed'));
   source.channel.onmessage(new ArrayBuffer(3));
-  expect(receive).toHaveBeenLastCalledWith(undefined);
+  expect(receive).toHaveBeenLastCalledWith(undefined, 'a');
   source.channel.onmessage({});
   stop();
   stopMeters();

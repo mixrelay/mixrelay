@@ -20,20 +20,20 @@ function snapshot(activeRevision: number, submittedRevision = 2): ControlStateSn
     editors: [],
   };
 }
-function port(initial?: ControlStateSnapshot) {
+function port(initial?: ControlStateSnapshot, incarnation = 'engine') {
   let listener!: StateListener;
   const close = vi.fn();
   const getGraphStatus = vi.fn().mockResolvedValue(snapshot(1).graph);
   const subscribeState = vi.fn((receive: StateListener) => {
     listener = receive;
-    receive(initial);
+    receive(initial, incarnation);
     return close;
   });
   return {
     getGraphStatus,
     subscribeState,
     close,
-    receive: (state?: ControlStateSnapshot) => listener(state),
+    receive: (state?: ControlStateSnapshot, engine = incarnation) => listener(state, engine),
   };
 }
 
@@ -111,16 +111,42 @@ it('falls back only while push is unavailable and completes an immediate snapsho
   expect(ready.close).toHaveBeenCalledOnce();
 });
 
-it('rejects revision supersession, lost push, deadline, cancellation and fallback errors', async () => {
+it('resumes a fresh revision from the same engine after a stream interruption without polling', async () => {
+  const source = port(snapshot(1));
+  const waiting = waitForPushedRevision(source, 2, new AbortController().signal, 10_000);
+  source.receive();
+  await vi.advanceTimersByTimeAsync(7000);
+  expect(source.getGraphStatus).not.toHaveBeenCalled();
+  expect(source.close).not.toHaveBeenCalled();
+  source.receive(snapshot(2));
+  await waiting;
+  expect(source.close).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('rejects replacement even when its revision matches and retains the original deadline on loss', async () => {
+  const source = port(snapshot(1));
+  const waiting = waitForPushedRevision(source, 2, new AbortController().signal, 1000);
+  const replaced = expect(waiting).rejects.toThrow('engine_replaced');
+  source.receive();
+  source.receive(snapshot(2), 'replacement');
+  await replaced;
+  const lost = port(snapshot(1));
+  const expires = waitForPushedRevision(lost, 2, new AbortController().signal, 1000);
+  const expired = expect(expires).rejects.toThrow('graph_apply_timeout');
+  await vi.advanceTimersByTimeAsync(750);
+  lost.receive();
+  await vi.advanceTimersByTimeAsync(250);
+  await expired;
+  expect(lost.getGraphStatus).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('rejects revision supersession, deadline, cancellation and fallback errors', async () => {
   const stale = port(snapshot(3, 3));
   await expect(waitForPushedRevision(stale, 2, new AbortController().signal, 1000)).rejects.toThrow(
     'graph_revision_stale',
   );
-  const source = port(snapshot(1));
-  const waiting = waitForPushedRevision(source, 2, new AbortController().signal, 1000);
-  const lost = expect(waiting).rejects.toThrow('control_unavailable');
-  source.receive();
-  await lost;
   const timeout = waitForPushedRevision(port(snapshot(1)), 2, new AbortController().signal, 1000);
   const expired = expect(timeout).rejects.toThrow('graph_apply_timeout');
   await vi.advanceTimersByTimeAsync(1000);

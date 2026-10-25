@@ -2,8 +2,8 @@ import type { ControlPort, GraphRuntimeStatus } from './types';
 
 type Port = Pick<ControlPort, 'subscribeState' | 'getGraphStatus'>;
 
-/** Pending mutations wait for state changes. Reads run only while push is unavailable;
- * receiving push fences an already running fallback read before it can confirm an edit. */
+/** Pending mutations wait for fresh state from the same engine. Reads run before the
+ * first push; a stream interruption waits for reconnection within the original deadline. */
 export function waitForPushedRevision(
   port: Port,
   revision: number,
@@ -13,7 +13,8 @@ export function waitForPushedRevision(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let done = false;
-    let pushed = false;
+    let observedPush = false;
+    let incarnation: string | undefined;
     let generation = 0;
     let pending = false;
     let unsubscribe: (() => void) | undefined;
@@ -36,7 +37,8 @@ export function waitForPushedRevision(
     };
     const schedulePoll = (delay = 200) => {
       clearTimeout(pollTimer);
-      if (!done && !pushed && !pending) pollTimer = setTimeout(() => void poll(), delay);
+      if (!done && !observedPush && !pending)
+        pollTimer = setTimeout(() => void poll(), delay);
     };
     const poll = async () => {
       pending = true;
@@ -56,15 +58,18 @@ export function waitForPushedRevision(
       aborted();
       return;
     }
-    unsubscribe = port.subscribeState?.((state) => {
+    unsubscribe = port.subscribeState?.((state, engineIncarnation) => {
       if (done) return;
       generation += 1;
-      if (pushed && !state) {
-        finish(failure('control_unavailable'));
+      if (incarnation && engineIncarnation && incarnation !== engineIncarnation) {
+        finish(failure('engine_replaced'));
         return;
       }
-      pushed = Boolean(state);
-      if (state) receive(state.graph);
+      incarnation = engineIncarnation ?? incarnation;
+      if (state) {
+        observedPush = true;
+        receive(state.graph);
+      }
       schedulePoll(0);
     });
     if (done) unsubscribe?.();

@@ -22,6 +22,8 @@ export interface ControlStateSnapshot {
 export interface ControlTelemetry extends MeterTelemetry {
   state?: ControlStateSnapshot | null;
 }
+/** Undefined state invalidates cached observations. The incarnation names the last
+ * observed engine; only a fresh snapshot can confirm a pending graph revision. */
 export type StateListener = (
   state: ControlStateSnapshot | undefined,
   engineIncarnation?: string,
@@ -77,7 +79,7 @@ export class TelemetryHub {
     if (packet.engineIncarnation !== this.incarnation) {
       this.incarnation = packet.engineIncarnation;
       this.snapshot = undefined;
-      for (const listener of this.listeners) listener.state?.(undefined);
+      for (const listener of this.listeners) listener.state?.(undefined, this.incarnation);
     }
     if (packet.state && (!this.snapshot || packet.state.generation > this.snapshot.generation)) {
       this.snapshot = packet.state;
@@ -96,7 +98,7 @@ export class TelemetryHub {
     this.snapshot = undefined;
     clearTimeout(this.watchdog);
     for (const listener of [...this.listeners]) {
-      listener.state?.(undefined);
+      listener.state?.(undefined, this.incarnation);
       if (listener.window) {
         this.listeners.delete(listener);
         if (notifyMeters) listener.ended?.();

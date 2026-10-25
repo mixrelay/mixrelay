@@ -38,7 +38,7 @@ test('an incomplete snapshot and partial signal overlap remain explicit', () => 
 });
 
 test('invalid schemas and duplicate sequences cannot become trace evidence', () => {
-  assert.throws(() => analyseHalIo({ ...trace([]), version: 3 }));
+  assert.throws(() => analyseHalIo({ ...trace([]), version: 4 }));
   assert.throws(() => analyseHalIo(trace([[1, 0, 100, 8, 1, 9, 0, a]])));
   assert.throws(() => analyseHalIo(trace([[1, 0, 100, 8, 1, 8, 0, a], [1, 1, 100, 8, 1, 8, 0, a]])));
 });
@@ -60,6 +60,17 @@ test('an empty or rejected oversized callback remains observable instead of bein
   const result = analyseHalIo(trace([[1, 0, 100, 0, 1, 0, 0, a], [2, 1, 100, 8192, 0, 0, 0, b]]));
   assert.equal(result.emptyTransfers, 1);
   assert.equal(result.writeRejections[0].frames, 8192);
+});
+
+test('v3 retains processing host counters without attributing OS scheduling time to the driver', () => {
+  const input = { version: 3, capacity: 8192, issued: 2, dropped: 0, rows: [
+    [1, 1, 100, 8, 1, 8, 0, a, 42, 9000, 9020],
+    [2, 0, 100, 8, 1, 4, 4, b, 0, 9100, 9107],
+  ] };
+  const result = analyseHalIo(input, window);
+  assert.deepEqual(result.captureShortReads[0].processing, { hostStart: 9100, hostEnd: 9107 });
+  assert.equal(result.writeClients[0], 42);
+  assert.throws(() => analyseHalIo({ ...input, rows: [[1, 0, 100, 8, 1, 8, 0, a, 0, 9100, 9000]] }));
 });
 
 test('the active signal window follows original output coordinates and excludes lead and tail', () => {

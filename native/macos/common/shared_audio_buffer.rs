@@ -481,6 +481,58 @@ pub unsafe extern "C" fn mr_shared_audio_buffer_read(
     if range_end(start_frame, frame_count).is_none() || (frame_count != 0 && samples.is_null()) {
         return 0;
     }
+    // SAFETY: the ABI caller supplies the complete exclusive destination.
+    unsafe { read_frames(buffer, start_frame, samples, frame_count, None) }
+}
+
+/// Reads PCM and marks each committed frame, including valid digital silence.
+/// Invalid ranges or mismatched slice lengths return silence and no coverage.
+///
+/// # Safety
+/// A non-null buffer must reference a live initialized mapping with immutable
+/// geometry. The output slices must be disjoint from that mapping.
+pub unsafe fn read_with_frame_coverage(
+    buffer: *mut SharedAudioBuffer,
+    start_frame: u64,
+    samples: &mut [f32],
+    coverage: &mut [bool],
+) -> u32 {
+    coverage.fill(false);
+    let Some(buffer) = (unsafe { buffer.as_ref() }) else {
+        samples.fill(0.0);
+        return 0;
+    };
+    let Ok(frame_count) = u32::try_from(coverage.len()) else {
+        samples.fill(0.0);
+        return 0;
+    };
+    if coverage.len().checked_mul(buffer.channels as usize) != Some(samples.len())
+        || range_end(start_frame, frame_count).is_none()
+    {
+        samples.fill(0.0);
+        return 0;
+    }
+    // SAFETY: checked geometry covers both exclusive slices; the caller retains the mapping.
+    unsafe {
+        read_frames(
+            buffer,
+            start_frame,
+            samples.as_mut_ptr(),
+            frame_count,
+            Some(coverage),
+        )
+    }
+}
+
+// SAFETY: samples holds frame_count * channels writable values, and optional
+// coverage holds frame_count writable flags, all disjoint from the live mapping.
+unsafe fn read_frames(
+    buffer: &SharedAudioBuffer,
+    start_frame: u64,
+    samples: *mut f32,
+    frame_count: u32,
+    mut coverage: Option<&mut [bool]>,
+) -> u32 {
     let channels = buffer.channels as usize;
     let epoch = buffer.epoch.load(Ordering::Acquire);
     let mut available = 0;
@@ -505,6 +557,9 @@ pub unsafe extern "C" fn mr_shared_audio_buffer_read(
                 fence(Ordering::Acquire);
                 if cell.load(Ordering::Acquire) == expected {
                     available += 1;
+                    if let Some(coverage) = &mut coverage {
+                        coverage[frame] = true;
+                    }
                     continue;
                 }
             }
@@ -521,6 +576,9 @@ pub unsafe extern "C" fn mr_shared_audio_buffer_read(
             }
         }
         available = 0;
+        if let Some(coverage) = &mut coverage {
+            coverage.fill(false);
+        }
     }
     buffer
         .read_frames

@@ -209,8 +209,9 @@ impl Device {
     /// The caller holds an IO pin, excluding format/scratch replacement for this call.
     ///
     /// # Safety
-    /// `samples` owns `frames * direction_channels` native samples for this synchronous
-    /// operation. Float32 is aligned; integer storage is packed bytes. The device's IO
+    /// `samples` owns `frames * direction_channels` samples for this synchronous call:
+    /// canonical Float32 for client output, native format for capture. Float32 is
+    /// aligned; integer storage is packed bytes. The device's IO
     /// pin stays held, `alive` was checked after acquiring it, and no other reference
     /// aliases the host's operation buffer. Removal cannot release the runtime until
     /// this pin drains.
@@ -234,6 +235,7 @@ impl Device {
         let count = frames as usize * channels as usize;
         let format = self.capture_format.format();
         if render || format == SampleFormat::Float32 {
+            let started = self.io_trace.begin();
             if render {
                 // SAFETY: the HAL main buffer is exclusive, aligned Float32 in this format;
                 // the IO pin fixes its width and format until the callback returns.
@@ -243,16 +245,21 @@ impl Device {
             // SAFETY: the IO pin fixes the native runtime and the caller's buffer.
             let outcome =
                 unsafe { (self.native.io)(runtime, render, client, frame, samples.cast(), frames) };
-            if self.io_trace.enabled() {
+            if started.is_some() {
                 // SAFETY: the Float32 buffer has count initialized samples after native IO.
-                self.io_trace.record(Observation {
-                    render,
-                    client,
-                    frame,
-                    channels: channels as usize,
-                    samples: unsafe { std::slice::from_raw_parts(samples.cast::<f32>(), count) },
-                    outcome,
-                });
+                self.io_trace.record(
+                    Observation {
+                        render,
+                        client,
+                        frame,
+                        channels: channels as usize,
+                        samples: unsafe {
+                            std::slice::from_raw_parts(samples.cast::<f32>(), count)
+                        },
+                        outcome,
+                    },
+                    started,
+                );
             }
             return outcome.accepted;
         }
