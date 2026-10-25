@@ -12,8 +12,7 @@ systemctl --user import-environment DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP
 dbus-update-activation-environment --systemd DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP
 systemctl --user start mixrelay-qa-display.service pipewire.service wireplumber.service
 systemctl --user is-active mixrelay-qa-display.service pipewire.service wireplumber.service
-# The VM owns this fresh keyring and is deleted after the job.
-printf '\n' | gnome-keyring-daemon --unlock --components=secrets
+node scripts/e2e/guest-keyring.mjs --disposable-environment
 openbox --sm-disable > /home/qa/openbox.log 2>&1 &
 window_manager=$!
 trap 'kill "$window_manager" 2>/dev/null || true' EXIT

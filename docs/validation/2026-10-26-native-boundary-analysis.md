@@ -191,3 +191,28 @@ ARK의 `ECSharedQueue::read` 0x14694와 daemon의 0x100025810은 frontier를 호
 수정본은 스트림을 다시 연결한 뒤 같은 엔진의 새 상태만 받아들인다. 엔진 교체·revision 추월·
 원래 제한 시간 만료는 실패이며 변경 명령을 재전송하지 않는다. 기존 제한 시간을 늘리지 않았다.
 이 결함과 설치 실패의 최종 인과 확인에는 수정본 설치 검증이 필요하다.
+
+## Debian VM의 이전 버전 credential 대기
+
+`e5a53f98` 실행 [40238734115](https://github.com/mixrelay/mixrelay/actions/runs/40238734115)의
+Debian x64는 신규 설치의 모든 시나리오를 통과했지만 업그레이드 준비 중 이전 버전
+`f7575aa`의 그래프 조회가 멈췄다. 후보 설치 전 단계다. 해시를 대조한 이전 버전 ELF와 스택에서
+runtime 7621의 main thread가 `NativeCredentials::read`의 저장소 잠금을 보유한 채
+`get_password`의 Secret Service Prompt 응답을 기다림을 확인했다. editor의 공통 D-Bus
+`select` 프레임만으로 같은 credential 대기라고 판단하지 않는다.
+
+VM journal은 22:15:16의 GNOME 키링 client/session assertion, 기존 데몬 종료와 재활성화,
+22:15:26의 password prompt 시작을 기록했다. VM 준비의 `printf '\n'`은 빈 암호가 아니다.
+[GNOME 입력 처리](https://github.com/GNOME/gnome-keyring/blob/main/daemon/gkd-main.c#L410)는
+개행을 암호에 포함하며, 입력 없는 EOF는 암호를 공급하지 않은 것으로 처리한다.
+재시작 뒤 LF 암호의 키링 잠금이 이전 버전의 Prompt를 유발했다는 것은 이 절차와 로그에 따른
+추론이다. 당시 collection의 실제 잠금 속성은 수집하지 않았다.
+
+VM 전용 `guest-keyring.mjs`는 NUL을 전달해 빈 C 문자열 암호를 공급한다. 기본 collection의
+존재·unlocked 상태와 빈 암호의 저장 형식을 확인하고 준비 오류는 OS·경계·단계로 보고한다.
+[GNOME unlock 절차](https://github.com/GNOME/gnome-keyring/blob/main/daemon/dbus/gkd-secret-unlock.c#L519)는
+빈 암호를 먼저 시도하므로 이 키링은 데몬 재시작 뒤에도 password prompt가 필요 없다.
+개인 환경·다른 세션·기존 키링은 변경 전에 거부하며 앱의 credential을 만들지 않는다.
+키링 준비 책임은 세션의 디스플레이·오디오 서비스 조립과 분리했다. 오디오 콜백과 설치 합격 조건은
+바꾸지 않았고 고정 대기·재시도를 추가하지 않았다. LF를 전달하는 대조 구현은 회귀 시험에 실패하며
+수정 구현은 통과한다. 로컬 시험은 주입한 프로세스 경계를 사용하고 실제 credential bus에 접근하지 않는다.
