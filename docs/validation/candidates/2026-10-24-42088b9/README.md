@@ -11,7 +11,7 @@
 - Native CI 13개 대상: [40102929155](https://github.com/mixrelay/mixrelay/actions/runs/40102929155), 모두 통과.
 - Linux VM 부팅 7개 대상: [40102929262](https://github.com/mixrelay/mixrelay/actions/runs/40102929262), 모두 통과.
 - Ubuntu ARM 설치본 진단: [40104329016](https://github.com/mixrelay/mixrelay/actions/runs/40104329016), 새 설치·업그레이드 UI 실패, 정리 통과([원시 inventory](ubuntu-arm-focused-inventory.md)).
-- 13개 대상 전체 설치본 검증: [40107306863](https://github.com/mixrelay/mixrelay/actions/runs/40107306863), 진행 중.
+- 13개 대상 전체 설치본 검증: [40107306863](https://github.com/mixrelay/mixrelay/actions/runs/40107306863), 10개 통과·3개 실패, 미실행 0개([원시 inventory](full-inventory.md)).
 
 ## 읽기 요청의 생존 확인
 
@@ -33,7 +33,7 @@ Ubuntu ARM 새 설치는 Recorder 메뉴에 초점을 요청하다 AT-SPI 응답
 녹음, 제거와 정리는 통과했다. 편집 앱 로그에는 두 모드 모두 `list_audio_devices`와
 `control_apply_graph` 등의 `response_timeout`이 남았다. 읽기 생존 응답 외의 원인을 조사한다.
 
-진행 중인 전체 실행에서는 macOS 26 ARM 새 설치의 PCM 누락 684·반복 256·손상 428프레임을
+전체 실행에서는 macOS 26 ARM 새 설치의 PCM 누락 684·반복 256·손상 428프레임을
 기록했다. 업그레이드는 기준 PKG의 설치 스크립트 실패로 후속 시나리오가 차단됐다.
 PCM 조건과 설치 실패 판정을 유지하며, 다음 실행은 Installer의 상세 오류도 수집한다.
 macOS 26 Intel도 새 설치에서 PCM 누락·반복 각 256프레임으로 실패했다. 업그레이드는 통과했다.

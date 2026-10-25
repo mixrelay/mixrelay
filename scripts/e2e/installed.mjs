@@ -498,6 +498,10 @@ export async function qualifyMode({
       });
   } catch (error) {
     report.error = error.message;
+    report.errorEvidence = evidence('prerequisite.failure.json', {
+      message: error.message, stack: error.stack,
+      cause: error.cause && { message: error.cause.message, stack: error.cause.stack, code: error.cause.code },
+    });
   } finally {
     const cleanupFailed = (error) => {
       report.cleanup = 'failed';

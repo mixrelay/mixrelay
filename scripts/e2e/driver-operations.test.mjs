@@ -52,6 +52,21 @@ test('Driver transport uncertainty and other server failures never resubmit a mu
   }
 });
 
+test('a lost Driver reply identifies the attempted action without replaying it', async () => {
+  let calls = 0;
+  const observations = [];
+  const driver = driverOperations({ now: () => 42, observe: item => observations.push(item),
+    request: async () => {
+      calls++;
+      throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+    } });
+  await assert.rejects(driver({ action: 'configure', expectedRevision: 7 }),
+    /Driver PUT configure transport failed \(ECONNRESET\): socket hang up/);
+  assert.equal(calls, 1);
+  assert.deepEqual(observations, [{ at: 42, action: 'configure', method: 'PUT',
+    failure: 'transport', code: 'ECONNRESET', message: 'socket hang up' }]);
+});
+
 test('persistent Driver ingress rejection is bounded for reads and mutations', async () => {
   for (const command of [undefined, { action: 'configure', expectedRevision: 7 }]) {
     let elapsed = 0, calls = 0;

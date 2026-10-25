@@ -96,6 +96,17 @@ The optional `targets` input accepts comma-separated hosted target IDs for diagn
 Unselected targets remain unexecuted in the full gate. Use all targets for release
 qualification.
 
+A full dispatch publishes `Installed candidate / full support contract` as pending
+on the suite commit and then records the complete gate verdict. This exposes a failed
+installed run beside the PR's source checks. Focused dispatches preserve that status.
+The candidate record and reports identify the installer source separately.
+
+The disposable Arch guest records SIGKILL and SIGXCPU generation in its own tracefs
+instance. `guest-signal-trace.log` includes sender context, target fields and per-CPU
+overrun counts; setup has a separate log. The collector removes its instance and any
+tracefs mount it created after collecting evidence. A collection or cleanup failure
+fails the VM job. This diagnostic does not restart a failed Driver or replay a mutation.
+
 For host diagnosis, `independent_audio_control=true` builds unmodified BlackHole
 v0.7.1 at commit `e2b22aaaba4e507a097131704bf96dabc004d9cf` after candidate removal.
 It uses the same permission-authorized probe and saves its raw PCM and callback

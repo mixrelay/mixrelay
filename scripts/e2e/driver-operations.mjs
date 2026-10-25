@@ -5,12 +5,20 @@ export function driverOperations({ request, now = Date.now, wait = delay, observ
   return async command => {
     const deadline = now() + timeoutMs;
     const exchange = async value => {
-      const reply = await request('/api/v1/driver', {
-        method: value === undefined ? 'GET' : 'PUT',
-        body: value === undefined ? undefined : JSON.stringify(value),
-        headers: { host: 'mixrelay-driver', ...(value === undefined ? {} : { 'content-type': 'application/json' }) },
-        timeoutMs: Math.min(15000, Math.max(1, deadline - now())),
-      });
+      const method = value === undefined ? 'GET' : 'PUT';
+      let reply;
+      try {
+        reply = await request('/api/v1/driver', {
+          method,
+          body: value === undefined ? undefined : JSON.stringify(value),
+          headers: { host: 'mixrelay-driver', ...(value === undefined ? {} : { 'content-type': 'application/json' }) },
+          timeoutMs: Math.min(15000, Math.max(1, deadline - now())),
+        });
+      } catch (error) {
+        const action = value?.action ?? 'read';
+        observe({ at: now(), action, method, failure: 'transport', code: error.code, message: error.message });
+        throw new Error(`Driver ${method} ${action} transport failed (${error.code ?? 'unknown'}): ${error.message}`, { cause: error });
+      }
       if (reply.status === 503 && reply.body === 'Driver control ingress is full') {
         observe({ at: now(), action: value?.action ?? 'read', status: reply.status, reason: reply.body });
         return null;

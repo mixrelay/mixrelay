@@ -48,3 +48,12 @@ test('Linux stack collection releases only its own stopped tracee after reaping 
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stderr);
 });
+
+test('disposable VM signal tracing preserves sender evidence and releases owned tracefs state', () => {
+  const result = spawnSync('python3', [fileURLToPath(new URL('./guest-signal-trace.test.py', import.meta.url))], {
+    encoding: 'utf8', timeout: 10000,
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+});

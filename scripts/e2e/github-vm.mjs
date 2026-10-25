@@ -429,12 +429,21 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
         ? 'Checking the actual OS and desktop audio prerequisites'
         : 'Installing the exact candidate and running the shared suite',
     );
+    const traceSignals = !smoke && target.id === 'arch-rolling-x64';
+    const traceCommand = action =>
+      `sudo -n python3 /home/qa/workspace/scripts/e2e/guest-signal-trace.py ${action} --disposable-environment`;
+    if (traceSignals) {
+      await ssh([traceCommand('start')], { log: join(output, 'guest-signal-trace-setup.log') });
+    }
     const result = await ssh(
       [
         `env ${identity.join(' ')} bash /home/qa/workspace/scripts/e2e/guest-session.sh ${smoke ? '--smoke ' : ''}${target.id}`,
       ],
       { timeout: 5400000, allowFailure: true, log: join(output, 'guest-suite.log') },
     );
+    const traceStopped = traceSignals
+      ? await ssh([traceCommand('stop')], { allowFailure: true, log: join(output, 'guest-signal-trace.log') })
+      : { code: 0 };
     const collected = await command(
       'scp',
       [
@@ -455,6 +464,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
       'Guest suite failed; see guest-suite.log and qualification report',
     );
     assert.equal(collected.code, 0, 'Guest evidence collection failed');
+    assert.equal(traceStopped.code, 0, 'Guest signal trace cleanup failed; see guest-signal-trace.log');
     return session;
   } catch (error) {
     session.error = error.message;
