@@ -5,13 +5,14 @@ set -euo pipefail
 source /etc/os-release
 if [[ "$ID" == arch ]]; then
   pacman -Syu --noconfirm --needed xorg-server-xvfb dbus pipewire pipewire-audio \
-    pipewire-pulse wireplumber gnome-keyring libsecret libarchive openbox sudo python-atspi python-gobject gtk3 gdb strace
+    pipewire-pulse wireplumber gnome-keyring glib2 libsecret libarchive openbox sudo python-atspi python-gobject gtk3 gdb strace
 else
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   apt-get install -y --no-install-recommends xvfb dbus-x11 dbus-user-session pipewire pipewire-bin \
-    pipewire-pulse wireplumber gnome-keyring libsecret-tools libarchive-tools openbox sudo python3-pyatspi gir1.2-gtk-3.0 gdb strace
+    pipewire-pulse wireplumber gnome-keyring libglib2.0-bin libsecret-tools libarchive-tools openbox sudo python3-pyatspi gir1.2-gtk-3.0 gdb strace
 fi
+command -v gdbus gnome-keyring-daemon >/dev/null
 loginctl enable-linger qa
 install -d -m 0700 -o qa -g qa /home/qa/.config /home/qa/.config/systemd /home/qa/.config/systemd/user
 sudo -u qa test -w /home/qa/.config
