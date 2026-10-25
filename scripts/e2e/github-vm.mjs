@@ -96,6 +96,18 @@ export function cloudNetwork() {
   };
 }
 
+export function guestIdentity(env, accelerator) {
+  assert.equal(env.GITHUB_ACTIONS, 'true');
+  assert.ok(['kvm', 'tcg'].includes(accelerator));
+  return ['GITHUB_ACTIONS', 'GITHUB_REPOSITORY', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA']
+    .map(name => {
+      const value = env[name] ?? '';
+      assert.match(value, /^[A-Za-z0-9/._-]+$/);
+      return `${name}=${value}`;
+    }).concat(`MIXRELAY_E2E_VM_ACCELERATOR=${accelerator}`,
+      env.MIXRELAY_E2E_CONTROL_TRACE === 'true' ? ['MIXRELAY_E2E_CONTROL_TRACE=true'] : []);
+}
+
 export function qemuArguments({
   cpuArch,
   accelerator,
@@ -417,15 +429,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
       await copyCandidates(command, sshOptions, port, directory);
     }
     // Forward only public run identity. Workflow tokens and host environment stay outside the VM.
-    const identity = ['GITHUB_REPOSITORY', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA'].map(
-      (name) => {
-        const value = process.env[name] ?? '';
-        assert.match(value, /^[A-Za-z0-9/._-]+$/);
-        return `${name}=${value}`;
-      },
-    );
-    identity.push(`MIXRELAY_E2E_VM_ACCELERATOR=${session.accelerator}`);
-    if (process.env.MIXRELAY_E2E_CONTROL_TRACE === 'true') identity.push('MIXRELAY_E2E_CONTROL_TRACE=true');
+    const identity = guestIdentity(process.env, session.accelerator);
     phase(
       smoke
         ? 'Checking the actual OS and desktop audio prerequisites'

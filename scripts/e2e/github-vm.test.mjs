@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { cloudConfig, cloudNetwork, command, guestCpuCount, guestDiskSize, qemuArguments } from './github-vm.mjs';
+import { cloudConfig, cloudNetwork, command, guestCpuCount, guestDiskSize, guestIdentity, qemuArguments } from './github-vm.mjs';
+
+test('disposable guest diagnostics receive CI identity without workflow credentials or shell input', () => {
+  const env = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'mixrelay/mixrelay', GITHUB_RUN_ID: '42',
+    GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: 'a'.repeat(40), MIXRELAY_E2E_CONTROL_TRACE: 'true', GH_TOKEN: 'private' };
+  const identity = guestIdentity(env, 'tcg');
+  assert.ok(identity.includes('GITHUB_ACTIONS=true'));
+  assert.ok(identity.includes('MIXRELAY_E2E_CONTROL_TRACE=true'));
+  assert.ok(identity.includes('MIXRELAY_E2E_VM_ACCELERATOR=tcg'));
+  assert.equal(identity.some(value => value.includes('private') || value.includes('GH_TOKEN')), false);
+  assert.throws(() => guestIdentity({ ...env, GITHUB_SHA: 'head; command' }, 'tcg'));
+  assert.throws(() => guestIdentity({ ...env, GITHUB_ACTIONS: undefined }, 'tcg'));
+});
 
 test('guest progress reaches the live console and raw evidence without masking a nonzero exit', async t => {
   const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
