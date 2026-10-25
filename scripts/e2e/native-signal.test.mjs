@@ -48,7 +48,7 @@ test('system-wide tracing is ready before the original measurement and stops aft
   const before = process.env.GITHUB_ACTIONS;
   process.env.GITHUB_ACTIONS = 'true';
   t.after(() => { if (before === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = before; });
-  for (const failed of [false, true]) {
+  for (const [failed, ready] of [[false, 'Recording started.'], [true, 'Starting recording with the System Trace template. Targeting All Processes.\nCtrl-C to stop the recording\n']]) {
     const phases = [];
     const child = new EventEmitter();
     child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
@@ -61,7 +61,7 @@ test('system-wide tracing is ready before the original measurement and stops aft
       start(program, args) {
         assert.equal(program, 'xcrun'); assert.ok(args.includes('--all-processes'));
         assert.equal(args.includes('--launch'), false);
-        queueMicrotask(() => { phases.push('ready'); child.stdout.emit('data', Buffer.from('Recording started.')); });
+        queueMicrotask(() => { phases.push('ready'); child.stdout.emit('data', Buffer.from(ready)); });
         return child;
       },
       wait: async read => { await Promise.resolve(); assert.equal(read(), true); },

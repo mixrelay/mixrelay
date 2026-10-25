@@ -213,14 +213,14 @@ export async function withMacosSchedulerTrace(directory, measure, {
     await wait(() => {
       assert.ifError(failure);
       assert.equal(closed, false, 'System Trace exited before measurement');
-      return log.includes('Recording started');
+      return log.includes('Recording started') || log.includes('Ctrl-C to stop the recording');
     }, 'System Trace readiness', { timeoutMs: 30000 });
     result = await measure();
     assert.equal(closed, false, 'System Trace ended before measurement completed');
   } catch (error) { errors.push(error); }
   try {
     if (!closed) child.kill('SIGINT');
-    await wait(() => closed, 'System Trace finalization', { timeoutMs: 30000 });
+    await wait(() => closed, 'System Trace finalization', { timeoutMs: 90000 });
     assert.ifError(failure);
   } catch (error) {
     errors.push(error);
