@@ -12,7 +12,8 @@ else
   apt-get install -y --no-install-recommends xvfb dbus-x11 dbus-user-session pipewire pipewire-bin \
     pipewire-pulse wireplumber gnome-keyring libglib2.0-bin libsecret-tools libarchive-tools openbox sudo python3-pyatspi gir1.2-gtk-3.0 gdb strace
 fi
-command -v gdbus gnome-keyring-daemon >/dev/null
+command -v gdbus >/dev/null
+command -v gnome-keyring-daemon >/dev/null
 loginctl enable-linger qa
 install -d -m 0700 -o qa -g qa /home/qa/.config /home/qa/.config/systemd /home/qa/.config/systemd/user
 sudo -u qa test -w /home/qa/.config
