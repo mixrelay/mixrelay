@@ -23,7 +23,8 @@ fn native_clients_follow_all_graphs_direction_union_without_changing_driver_geom
                 });
             }
         }
-        let composed = compose(&registry, &graphs, 1, context(), &GraphCompiler::default()).unwrap();
+        let composed =
+            compose(&registry, &graphs, 1, context(), &GraphCompiler::default()).unwrap();
         let plan = RenderPlan::prepare(&composed.execution).unwrap();
         assert_eq!(plan.source_bindings().len(), usize::from(read));
         assert_eq!(plan.sink_bindings().len(), usize::from(write));
