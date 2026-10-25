@@ -2,19 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { analyseStereo, analyseRf64, macosProbeCommand, nativeSignal, runNativeAudioCases, stopSignalProcesses, waitForSignalBoundary } from './native-signal.mjs';
+import { EventEmitter } from 'node:events';
+import { analyseStereo, analyseRf64, macosProbeCommand, nativeSignal, runNativeAudioCases, stopSignalProcesses, waitForSignalBoundary, withMacosSchedulerTrace } from './native-signal.mjs';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { analyseSystemMix } from './system-capture.mjs';
 
-test('scheduler diagnosis wraps exactly the original LaunchServices measurement without another signal or changed audio settings', () => {
+test('the LaunchServices measurement retains one original signal and unchanged audio settings', () => {
   const ordinary = macosProbeCommand('/probe.app', '/evidence', 'native-uid');
-  const traced = macosProbeCommand('/probe.app', '/evidence', 'native-uid', true);
   assert.equal(ordinary.program, 'open');
-  assert.equal(traced.program, 'xcrun');
-  assert.deepEqual(traced.args.slice(traced.args.indexOf('/usr/bin/open') + 1), ordinary.args);
-  assert.ok(traced.args.includes('System Trace'));
   assert.equal(ordinary.args.filter(arg => arg === '--seconds').length, 1);
   assert.equal(ordinary.args[ordinary.args.indexOf('--seconds') + 1], '3');
   assert.equal(ordinary.args.some(arg => /buffer|warmup|retry/.test(arg)), false);
@@ -31,16 +28,49 @@ test('a scheduler trace cannot turn measured PCM loss into acceptance', async t 
   try {
     await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
       schedulerTrace: true, snapshot() {}, diagnostics() {},
+      trace: async (_, measure) => { calls.push('trace-start'); measure(); calls.push('trace-stop'); },
       execute(program) {
         calls.push(program);
         if (program === 'zsh') return '/probe.app';
-        if (program === 'xcrun') writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
+        if (program === 'open') writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
       },
     }), /missingFrames/);
-    assert.deepEqual(calls, ['zsh', 'xcrun', 'pkill']);
+    assert.deepEqual(calls, ['zsh', 'trace-start', 'open', 'trace-stop', 'pkill']);
   } finally {
     if (before === undefined) delete process.env.GITHUB_ACTIONS;
     else process.env.GITHUB_ACTIONS = before;
+  }
+});
+
+test('system-wide tracing is ready before the original measurement and stops after success or failure', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-system-trace-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const before = process.env.GITHUB_ACTIONS;
+  process.env.GITHUB_ACTIONS = 'true';
+  t.after(() => { if (before === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = before; });
+  for (const failed of [false, true]) {
+    const phases = [];
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    child.kill = signal => { phases.push(signal); child.emit('close', 0, null); };
+    const work = withMacosSchedulerTrace(directory, () => {
+      phases.push('measure');
+      if (failed) throw new Error('original measurement failed');
+      return 42;
+    }, {
+      start(program, args) {
+        assert.equal(program, 'xcrun'); assert.ok(args.includes('--all-processes'));
+        assert.equal(args.includes('--launch'), false);
+        queueMicrotask(() => { phases.push('ready'); child.stdout.emit('data', Buffer.from('Recording started.')); });
+        return child;
+      },
+      wait: async read => { await Promise.resolve(); assert.equal(read(), true); },
+    });
+    if (failed) await assert.rejects(work, /original measurement failed/);
+    else assert.equal(await work, 42);
+    assert.deepEqual(phases, ['ready', 'measure', 'SIGINT']);
+    // The diagnostic output name is reused only after this invocation has finished.
+    rmSync(join(directory, 'scheduler.log'));
   }
 });
 

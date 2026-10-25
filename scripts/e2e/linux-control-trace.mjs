@@ -18,6 +18,11 @@ export function controlTraceEvent(line) {
   return { code, statuses, outcomes };
 }
 
+export function controlTraceStatuses(line) {
+  return [...line.replace(/\\+"/g, '"').matchAll(/"status"\s*:\s*([1-5][0-9]{2})\b/g)]
+    .map(match => Number(match[1]));
+}
+
 export async function startLinuxControlTrace(output) {
   assert.equal(process.platform, 'linux');
   assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Control tracing requires a disposable CI guest');
@@ -32,8 +37,10 @@ export async function startLinuxControlTrace(output) {
   const pid = owners[0];
   const file = join(output, 'control-response-trace.jsonl');
   writeFileSync(file, JSON.stringify({ event: 'starting', pid: Number(pid), scope: 'UI-only diagnostic' }) + '\n', { flag: 'wx' });
-  const child = spawn('sudo', ['-n', 'strace', '-f', '-ttt', '-s', '65536', '-e', 'trace=write,writev', '-p', pid],
+  // UnixStream::write uses send(MSG_NOSIGNAL), exposed as sendto on Linux.
+  const child = spawn('sudo', ['-n', 'strace', '-f', '-ttt', '-s', '65536', '-e', 'trace=write,writev,sendto,sendmsg', '-p', pid],
     { stdio: ['ignore', 'ignore', 'pipe'] });
+  const statuses = {};
   let attached = false, closed = false, failure, partial = '';
   const note = event => appendFileSync(file, JSON.stringify(event) + '\n');
   child.on('error', error => { failure = error; });
@@ -51,6 +58,7 @@ export async function startLinuxControlTrace(output) {
       if (end < 0) break;
       const line = partial.slice(0, end); partial = partial.slice(end + 1);
       if (line.includes(`Process ${pid} attached`)) attached = true;
+      for (const status of controlTraceStatuses(line)) statuses[status] = (statuses[status] ?? 0) + 1;
       const event = controlTraceEvent(line);
       if (event) note({ event: 'response', at: new Date().toISOString(), ...event });
       if (/strace:.*(?:Operation not permitted|Permission denied|invalid system call)/.test(line)) {
@@ -61,6 +69,7 @@ export async function startLinuxControlTrace(output) {
   const stop = async () => {
     await stopSignalProcesses([child]);
     await waitForSignalBoundary(() => closed, 'Control trace pipe close', { timeoutMs: 5000 });
+    note({ event: 'status-counts', statuses });
     assert.ifError(failure);
     // Detaching must leave the original controller alive before native audio starts.
     assert.ok(readFileSync(`/proc/${pid}/cmdline`).length > 0, 'Tracing lost the owned controller');
