@@ -89,6 +89,10 @@ Dispatch `candidate-e2e.yml` on the source branch with `linux_build_run` and
 `macos_candidate_tag`. The selector checks the Linux workflow identity, successful build,
 matching source records and all four artifact hashes. The suite revision is recorded
 separately, so test-tool fixes can exercise existing installers without rebuilding them.
+The suite also compares the complete installer source tree with its checked-out commit.
+Only documentation, `scripts/e2e/` and the two qualification workflows may differ.
+Product code, package recipes, build tools, executable modes and submodule differences
+require new installers. The artifact preserves the comparison in `suite-source.json`.
 The resulting `installed-e2e-evidence` artifact contains the exact candidate, raw
 per-environment evidence and `inventory.md`, including failed and unexecuted scenarios.
 This diagnostic workflow runs the full gate but cannot create a publication receipt.
@@ -96,9 +100,10 @@ The optional `targets` input accepts comma-separated hosted target IDs for diagn
 Unselected targets remain unexecuted in the full gate. Use all targets for release
 qualification.
 
-A full dispatch publishes `Installed candidate / full support contract` as pending
-on the suite commit and then records the complete gate verdict. This exposes a failed
-installed run beside the PR's source checks. Focused dispatches preserve that status.
+An in-repository PR marks `Installed candidate / full support contract` pending on its source head
+until installed evidence exists. A full dispatch marks its suite commit pending and
+then records the complete gate verdict. This exposes a failed installed run beside
+the PR's source checks. Focused dispatches preserve that status.
 The candidate record and reports identify the installer source separately.
 
 The disposable Arch guest records SIGKILL and SIGXCPU generation in its own tracefs
