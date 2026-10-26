@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -60,4 +60,23 @@ test('a failed resume retains both PCM and observer errors', async t => {
     assert.match(error.message, /PCM failed.*did not acknowledge observing/);
     return true;
   });
+});
+
+test('additional source measurements retain separate pause receipts without replacing required PCM evidence', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-observation-receipts-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const boundary = permissionObservation(directory, () => true, { wait: async () => {
+    const command = JSON.parse(readFileSync(join(directory, 'permission-observation.command.json')));
+    writeFileSync(join(directory, 'permission-observation.ack.json'), JSON.stringify({ ...command, at: new Date().toISOString() }));
+  } });
+  await boundary(() => {});
+  const original = readFileSync(join(directory, 'native-permission-observation.json'), 'utf8');
+  const generations = [];
+  for (const order of ['silent-audible', 'audible-silent']) {
+    const receiptDirectory = join(directory, order); mkdirSync(receiptDirectory);
+    await boundary(() => {}, { receiptDirectory });
+    generations.push(JSON.parse(readFileSync(join(receiptDirectory, 'native-permission-observation.json'))).paused.generation);
+  }
+  assert.notEqual(generations[0], generations[1]);
+  assert.equal(readFileSync(join(directory, 'native-permission-observation.json'), 'utf8'), original);
 });

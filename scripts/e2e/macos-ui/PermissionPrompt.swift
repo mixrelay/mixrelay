@@ -12,7 +12,7 @@ enum PermissionPrompt {
 
     static func belongsToQualification(_ labels: [String]) -> Bool {
         labels.contains { text in
-            ["mixrelay", "mrroundtripprobe"].contains { text.localizedCaseInsensitiveContains($0) }
+            ["mixrelay", "mrroundtripprobe", "mrsourcecontrol"].contains { text.localizedCaseInsensitiveContains($0) }
         }
     }
 
@@ -28,6 +28,7 @@ enum PermissionPrompt {
         else if text.contains("system audio") { capability = "system-audio" }
         else { return nil }
         let subject = text.contains("mixrelay-engine-service") ? "engine"
+            : ["source-control", "source control", "mrsourcecontrol"].contains(where: text.contains) ? "source-control"
             : text.contains("qualification.probe") || text.contains("mrroundtripprobe") ? "probe" : "desktop"
         return "\(owner):\(subject):\(capability)"
     }

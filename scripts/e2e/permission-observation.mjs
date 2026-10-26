@@ -25,7 +25,7 @@ export function permissionObservation(directory, alive, { now = Date.now, wait =
       await wait(100);
     }
   }
-  return async measure => {
+  return async (measure, { receiptDirectory = directory } = {}) => {
     const errors = [];
     const receipt = {};
     let result;
@@ -35,7 +35,7 @@ export function permissionObservation(directory, alive, { now = Date.now, wait =
     } catch (error) { errors.push(error); }
     try { receipt.resumed = await transition('observing'); }
     catch (error) { errors.push(error); }
-    writeFileSync(join(directory, 'native-permission-observation.json'), JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx' });
+    writeFileSync(join(receiptDirectory, 'native-permission-observation.json'), JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx' });
     if (errors.length === 1) throw errors[0];
     if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join('; '));
     return result;
