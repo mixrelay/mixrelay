@@ -5,6 +5,25 @@
 OS·CPU별 지원 범위와 같은 사용자 시나리오의 확인·부분·미확인 결과는
 [OS별 지원·검증 인벤토리](platform-matrix.md)에서 비교한다. 각 결과의 실행 날짜·빌드는 아래 기록을 따른다.
 
+## 2026-10-26 공유 source의 관찰·PCM·clock 발행 경계
+
+`a47b164`의 공증 후보는 source CI 13개와 VM 준비 7개·UI 검사를 통과했으나
+[설치본 집중 실행 40292248302](https://github.com/mixrelay/mixrelay/actions/runs/40292248302)의
+macOS 26 ARM·27 ARM은 모두 실패했다. 외부 무음·유음 대조 8개 중 7개는 통과했고
+무음 payload 오류는 0이었지만, 네 종료 녹음 모두 식별 가능한 유음 누락이 있었다.
+26 ARM 새 설치의 뒤 순서는 소스 callback·게시 누락도 따로 기록했다.
+구간·판정·분석 한계는 [후속 native 경계 분석](2026-10-26-native-boundary-analysis.md)을 따른다.
+
+현재 후속 소스는 정상적인 소비자 snapshot 경합과 실제 grant 만료를 구별한다.
+생산자 epoch 승인 뒤의 재관찰 의존성을 없애고, PCM을 확정한 쓰기와 그 clock credit을
+같은 producer claim으로 묶었다. 새 epoch의 native metadata는 일관되게 초기화하며
+재무장 실패 때 기존 진단값을 보존한다. 포맷 승인 중에는 master 신원도 보존한다.
+
+관련 Rust·네이티브 검사 966개와 스크립트 625개가 통과했다. 실제 공유 mapping에서
+소비자 갱신 중 converter 준비, 부분 입력의 실제 PCM 공급량과 credit, 실패한 쓰기,
+중지·새 epoch와 native rate를 확인했다. 이전의 잘못된 post-reset 관찰을 재주입하면
+회귀가 `Stale` 오류로 실패하는 것도 확인했다. 새 설치본과 13개 전체 수락은 아직 미완료다.
+
 ## 2026-10-26 가상 입력의 PCM 전송·수명 분리
 
 최종 전체 설치본 판정은 아직 미통과다. [실행 40251947994](https://github.com/mixrelay/mixrelay/actions/runs/40251947994)는

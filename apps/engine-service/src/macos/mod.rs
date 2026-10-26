@@ -598,7 +598,21 @@ fn next_native_pace(
             );
         }
     }
-    pacers.select_application_master(None);
+    // Master selection follows graph identity. A producer format rearm can
+    // temporarily hide native running state without removing the selected source.
+    let retained = pacers.selected_application.filter(|(token, kind)| {
+        plan.source_bindings().iter().any(|binding| {
+            let candidate = if binding.virtual_endpoint_id().is_some() {
+                SourceKind::Virtual
+            } else if binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture {
+                SourceKind::Application
+            } else {
+                return false;
+            };
+            candidate == *kind && binding_token(binding) == *token
+        })
+    });
+    pacers.select_application_master(retained);
     (Pace::Unknown, 0)
 }
 

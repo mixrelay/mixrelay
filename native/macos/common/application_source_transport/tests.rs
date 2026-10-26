@@ -6,6 +6,7 @@ use super::*;
 use crate::{
     application_clock::{mr_application_clock_publish_consumer, mr_application_clock_request_rate},
     create_shared_memory,
+    shared_audio_buffer::mr_shared_audio_buffer_try_begin_epoch,
     source_control::SourceAttachment,
 };
 use std::{
@@ -212,7 +213,7 @@ fn reset_exhaustion_keeps_local_cursor_and_releases_producer_claim() {
 }
 
 #[test]
-fn busy_producer_and_racing_consumer_defer_without_mutating_local_state() {
+fn busy_producer_defers_and_consumer_publication_does_not_revoke_the_grant() {
     let (mapping, mut producer) = fixture();
     let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
     let claim = ProducerClaim::acquire(mapping.clock()).unwrap();
@@ -228,11 +229,24 @@ fn busy_producer_and_racing_consumer_defer_without_mutating_local_state() {
         .consumer_sequence
         .fetch_add(1, Ordering::AcqRel);
     assert!(producer.clock().is_none());
+    assert_eq!(producer.observe_clock(), SourceClockRead::Deferred);
+    let previous = producer.owned_epoch;
+    let epoch = producer.begin_epoch(format, 48_000).unwrap();
+    assert_ne!(epoch, previous);
+    assert_eq!(producer.observe_clock(), SourceClockRead::Deferred);
+    assert!(producer.record_source_faults(epoch, 0));
+    assert!(producer.write(&[0.25; 256], 128));
     mapping
         .clock()
         .consumer_sequence
         .fetch_add(1, Ordering::Release);
-    assert!(producer.clock().is_some());
+    let SourceClockRead::Ready(snapshot) = producer.observe_clock() else {
+        panic!("consumer publication must become observable after commit")
+    };
+    assert_eq!(snapshot.epoch, epoch);
+    assert_eq!(snapshot.produced_frames, 128);
+    mapping.clock().producer_lease.store(8, Ordering::Release);
+    assert_eq!(producer.observe_clock(), SourceClockRead::Revoked);
 }
 
 #[test]
@@ -446,4 +460,62 @@ fn concurrent_target_and_cursor_snapshots_are_coherent() {
             }
         }
     });
+}
+
+#[test]
+fn clocked_writes_publish_only_committed_pcm_credit_and_stop_preserves_position() {
+    let (mapping, mut producer) = fixture();
+    // SAFETY: the fixture owns this initialized clock and serializes its consumer.
+    let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
+    assert!(producer.begin_epoch(format, 24_000).is_some());
+    assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 0);
+    let measured = allocation_counter::measure(|| {
+        assert!(producer.write_clocked_pcm(&[0.25; 48], 24, &[100; 24]));
+        assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 12);
+        assert!(producer.write_clocked_pcm(&[0.0; 32], 16, &[200; 16]));
+        assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 20);
+        let claim = ProducerClaim::acquire(mapping.clock()).unwrap();
+        assert!(!producer.write_clocked_pcm(&[0.5; 16], 8, &[300; 8]));
+        assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 20);
+        assert_eq!(producer.next_frame, 40);
+        drop(claim);
+        let mut pcm = [9.0; 80];
+        // SAFETY: this retained ring has two channels and the complete exclusive destination.
+        assert_eq!(
+            unsafe {
+                crate::shared_audio_buffer::mr_shared_audio_buffer_read(
+                    mapping.buffer.as_ptr(),
+                    0,
+                    pcm.as_mut_ptr(),
+                    40,
+                )
+            },
+            40
+        );
+        assert!(
+            pcm[..48]
+                .iter()
+                .all(|sample| sample.to_bits() == 0.25_f32.to_bits())
+        );
+        assert!(
+            pcm[48..]
+                .iter()
+                .all(|sample| sample.to_bits() == 0.0_f32.to_bits())
+        );
+        producer.stop_native();
+        assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 20);
+        assert_eq!(mapping.clock().native_running.load(Ordering::Acquire), 0);
+        assert!(producer.write_clocked_pcm(&[], 0, &[]));
+        assert_eq!(mapping.clock().native_running.load(Ordering::Acquire), 0);
+        assert!(producer.begin_epoch(format, 96_000).is_some());
+        assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 0);
+        assert_eq!(
+            mapping.clock().native_sample_rate.load(Ordering::Acquire),
+            96_000
+        );
+        assert_eq!(mapping.clock().native_running.load(Ordering::Acquire), 0);
+        assert!(producer.write_clocked_pcm(&[0.375; 4], 2, &[400; 2]));
+        assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 4);
+    });
+    assert_eq!(measured.count_total, 0);
 }

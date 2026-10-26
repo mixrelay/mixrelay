@@ -125,6 +125,18 @@ HAL 번들에 선언하며 엔진은 audio-server UID의 grant 게시와 console
 시간 credit은 게시된 PCM과 native playhead 범위로 제한한다. 타임스탬프는 worker가 깨어난
 시각이 아니라 native anchor와 프레임 좌표에서 구한다. 같은 클록의 master만 SRC를 우회한다.
 
+공유 source의 `SourceClockRead`는 준비된 snapshot·소비자 갱신 중의 보류·생산자 grant 만료를
+구분한다. 보류는 cursor와 생산자를 유지한다. `begin_epoch`는 소비자 snapshot 재조회 없이
+게시한 생산자 epoch를 반환한다. clock 관찰·epoch 승인·native 메타데이터는
+`application_source_transport::clock`이, PCM·획득 시각·fault 발행은 전송 소유자가 담당한다.
+
+가상 입력의 `write_clocked_pcm`은 같은 producer claim 아래 PCM을 먼저 쓰고, 성공한 출력
+프레임에 대응하는 native 단위 credit만 게시한다. SRC에 남은 입력은 credit에 포함하지 않는다.
+변환기는 준비된 출력을 유한 횟수로 배출하고 미완료 쓰기를 보존한다. 새 native epoch의
+초기 credit 0과 native rate는 ring epoch보다 먼저 게시하며, 재무장 실패 시 이전 진단값으로
+되돌리고 승인은 해제한다. native 중지는 마지막 credit을 보존한다. master 선택은 그래프의
+소스 신원을 따르므로 포맷 승인 중의 일시적인 비실행 상태로 선택을 해제하지 않는다.
+
 `macos::external_io`는 native·application·virtual source 선택과 각 provider의 epoch·읽기를
 담당한다. `VirtualEndpointTransport` 입력은 이 shared source를 사용하고 native 입력 IOProc을
 만들지 않는다. 물리 입력·명시적 `AudioDeviceInput`과 출력은 기존 native 어댑터를 사용한다.

@@ -1,7 +1,9 @@
 //! One pump's leased producer endpoint. Storage ownership is shared with the
 //! registry implementation; the producer guard serializes remote lease changes.
 
+mod clock;
 mod ffi;
+pub use clock::{SourceClockRead, SourceClockSnapshot};
 pub use ffi::{
     TransportError, TransportErrorCode, mr_application_source_transport_attach,
     mr_application_source_transport_clock, mr_application_source_transport_connect,
@@ -12,43 +14,21 @@ pub use ffi::{
 };
 
 use crate::{
-    application_clock::{ApplicationClock, FRAME_MASK},
+    application_clock::ApplicationClock,
     application_source_mapping::Mapping,
     shared_audio_buffer::{
-        mr_shared_audio_buffer_channels, mr_shared_audio_buffer_stats,
-        mr_shared_audio_buffer_try_begin_epoch, mr_shared_audio_buffer_write,
+        mr_shared_audio_buffer_channels, mr_shared_audio_buffer_stats, mr_shared_audio_buffer_write,
     },
 };
 use std::sync::atomic::Ordering;
 
-/// Coherent consumer observation and the local producer position.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[repr(C)]
-pub struct SourceClockSnapshot {
-    /// Requested generation and sample rate, encoded by the clock contract.
-    pub format_word: u64,
-    /// Current mapping-local stream generation.
-    pub epoch: u64,
-    /// Frames accepted from this producer in the current generation.
-    pub produced_frames: u64,
-    /// Frames consumed in this generation, or zero for a stale consumer tuple.
-    pub consumed_frames: u64,
-    /// Accumulated consumer callback frames.
-    pub consumer_ticks: u64,
-    /// Whether the consumer is running in this generation.
-    pub consumer_running: u32,
-    /// Whether the source drives the graph clock.
-    pub clock_master: u32,
-    pub target_backlog_frames: u32,
-    pub consumer_burst_frames: u32,
-    pub starvation_episodes: u64,
-    pub starvation_frames: u64,
-    pub rebuffer_frames: u64,
-    pub overwrite_skips: u64,
-    pub insufficient_headroom: u32,
+#[derive(Clone, Copy)]
+enum Publication {
+    PcmOnly,
+    NativeCredit,
 }
 
-/// Opaque C handle exclusively owned by one desktop pump until its join/drop.
+/// Opaque C handle exclusively owned by one source pump until its join/drop.
 /// Other processes share mapping atomics, never references to this local owner.
 pub struct SourceTransport {
     mapping: Mapping,
@@ -105,109 +85,27 @@ impl SourceTransport {
             && self.mapping.clock().producer_lease.load(Ordering::Acquire) == self.owned_lease
     }
 
-    #[must_use]
-    pub fn clock(&self) -> Option<SourceClockSnapshot> {
-        let clock = self.mapping.clock();
-        let sequence = clock.consumer_sequence.load(Ordering::Acquire);
-        let format = clock.format_word.load(Ordering::Acquire);
-        let position = clock.consumer_position.load(Ordering::Acquire);
-        let ticks = clock.consumer_ticks.load(Ordering::Acquire);
-        let running = clock.consumer_running.load(Ordering::Acquire);
-        let target = clock.target_backlog_frames.load(Ordering::Acquire);
-        if sequence & 1 != 0
-            || sequence != clock.consumer_sequence.load(Ordering::Acquire)
-            || format != clock.format_word.load(Ordering::Acquire)
-            || !self.owns_stream()
-        {
-            return None;
-        }
-        let current = position >> 48 == self.owned_epoch;
-        Some(SourceClockSnapshot {
-            format_word: format,
-            epoch: self.owned_epoch,
-            produced_frames: self.next_frame,
-            consumed_frames: if current { position & FRAME_MASK } else { 0 },
-            consumer_ticks: ticks,
-            consumer_running: if current { running } else { 0 },
-            clock_master: clock.clock_master.load(Ordering::Acquire),
-            target_backlog_frames: if current { target } else { 0 },
-            consumer_burst_frames: clock.consumer_burst_frames.load(Ordering::Acquire),
-            starvation_episodes: clock.starvation_episodes.load(Ordering::Acquire),
-            starvation_frames: clock.starvation_frames.load(Ordering::Acquire),
-            rebuffer_frames: clock.rebuffer_frames.load(Ordering::Acquire),
-            overwrite_skips: clock.overwrite_skips.load(Ordering::Acquire),
-            insufficient_headroom: clock.insufficient_headroom.load(Ordering::Acquire),
-        })
-    }
-
-    pub fn reset(&mut self, format: u64, native_rate: u32) -> bool {
-        if format == 0 || !(8000..=192_000).contains(&native_rate) {
-            return false;
-        }
-        let clock = self.mapping.clock();
-        let Some(_claim) = ProducerClaim::acquire(clock) else {
-            return false;
-        };
-        if !self.owns_stream() || clock.format_word.load(Ordering::Acquire) != format {
-            return false;
-        }
-        flush_source_faults(clock, &mut self.pending_source_faults);
-        clock.acknowledged_format.store(0, Ordering::Release);
-        clock.native_running.store(0, Ordering::Release);
-        // SAFETY: the claim excludes registry replacement and all other producers.
-        // Only this producer rearms; the consumer retains its independent cursor.
-        let epoch = unsafe { mr_shared_audio_buffer_try_begin_epoch(self.mapping.buffer.as_ptr()) };
-        if epoch == 0 {
-            return false;
-        }
-        self.owned_epoch = epoch;
-        self.next_frame = 0;
-        clock
-            .native_sample_rate
-            .store(native_rate, Ordering::Release);
-        clock.producer_burst_frames.store(0, Ordering::Release);
-        clock.converter_burst_frames.store(0, Ordering::Release);
-        clock.publication_drought_frames.store(0, Ordering::Release);
-        clock.acknowledged_format.store(format, Ordering::Release);
-        true
-    }
-
-    pub fn publish_measurements(&self, producer: u32, converter: u32, drought: u32) {
-        let clock = self.mapping.clock();
-        let Some(_claim) = ProducerClaim::acquire(clock) else {
-            return;
-        };
-        if self.owns_stream() {
-            clock
-                .producer_burst_frames
-                .fetch_max(producer, Ordering::Release);
-            clock
-                .converter_burst_frames
-                .fetch_max(converter, Ordering::Release);
-            clock
-                .publication_drought_frames
-                .fetch_max(drought, Ordering::Release);
-        }
-    }
-
-    pub fn publish_native(&self, frames: u64, running: bool) {
-        let clock = self.mapping.clock();
-        let Some(_claim) = ProducerClaim::acquire(clock) else {
-            return;
-        };
-        if self.owns_stream() {
-            clock.native_frames.store(frames, Ordering::Release);
-            clock
-                .native_running
-                .store(u32::from(running), Ordering::Release);
-        }
-    }
-
     fn write(&mut self, samples: &[f32], frames: u32) -> bool {
         self.write_pcm(samples, frames, None)
     }
 
     pub fn write_pcm(&mut self, samples: &[f32], frames: u32, times: Option<&[u64]>) -> bool {
+        self.write_prepared(samples, frames, times, Publication::PcmOnly)
+    }
+
+    /// Publishes native-unit frame credit only after the timed PCM commits, under
+    /// the same producer claim. Credit cannot expose an unwritten source interval.
+    pub fn write_clocked_pcm(&mut self, samples: &[f32], frames: u32, times: &[u64]) -> bool {
+        self.write_prepared(samples, frames, Some(times), Publication::NativeCredit)
+    }
+
+    fn write_prepared(
+        &mut self,
+        samples: &[f32],
+        frames: u32,
+        times: Option<&[u64]>,
+        publication: Publication,
+    ) -> bool {
         // SAFETY: mapping attachment validated this immutable channel geometry.
         let channels = unsafe { mr_shared_audio_buffer_channels(self.mapping.buffer.as_ptr()) };
         if frames > self.mapping.capacity() || samples.len() != frames as usize * channels as usize
@@ -225,6 +123,26 @@ impl SourceTransport {
         {
             return false;
         }
+        let Some(next) = self.next_frame.checked_add(u64::from(frames)) else {
+            return false;
+        };
+        let credit = match publication {
+            Publication::PcmOnly => None,
+            Publication::NativeCredit => {
+                let native_rate = clock.native_sample_rate.load(Ordering::Acquire);
+                let graph_rate = acknowledged & u64::from(u32::MAX);
+                if !(8_000..=192_000).contains(&native_rate)
+                    || !(8_000..=192_000).contains(&graph_rate)
+                {
+                    return false;
+                }
+                let credit = u128::from(next) * u128::from(native_rate) / u128::from(graph_rate);
+                let Ok(credit) = u64::try_from(credit) else {
+                    return false;
+                };
+                Some(credit)
+            }
+        };
         flush_source_faults(clock, &mut self.pending_source_faults);
         if times.is_some_and(|times| times.len() != frames as usize) {
             return false;
@@ -251,7 +169,12 @@ impl SourceTransport {
             )
         };
         if written {
-            self.next_frame += u64::from(frames);
+            self.next_frame = next;
+            if let Some(credit) = credit.filter(|_| frames != 0) {
+                // Release makes committed PCM visible before any graph clock credit.
+                clock.native_frames.store(credit, Ordering::Release);
+                clock.native_running.store(1, Ordering::Release);
+            }
         }
         written
     }

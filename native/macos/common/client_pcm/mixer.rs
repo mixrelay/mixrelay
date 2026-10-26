@@ -68,7 +68,7 @@ impl ClientPcmMixer {
         let capacity = u64::from(queues.iter().map(ClientPcmReader::capacity).min()?);
         let oldest = first.max(published.saturating_sub(capacity));
         let timeline = (clock.incarnation, clock.epoch, clock.anchor, clock.rate);
-        let discontinuity = self.timeline != Some(timeline) || self.next < oldest;
+        let discontinuity = !self.is_current(clock) || self.next < oldest;
         if discontinuity {
             self.timeline = Some(timeline);
             self.next = oldest;
@@ -135,6 +135,12 @@ impl ClientPcmMixer {
         }
         Ok(())
     }
+    /// Whether pending converted PCM still belongs to the active native timeline.
+    #[must_use]
+    pub fn is_current(&self, clock: ClientPcmClock) -> bool {
+        self.timeline == Some((clock.incarnation, clock.epoch, clock.anchor, clock.rate))
+    }
+
     pub fn commit(&mut self, window: MixWindow) {
         self.next = window.first + u64::from(window.frames);
         self.discontinuity = false;

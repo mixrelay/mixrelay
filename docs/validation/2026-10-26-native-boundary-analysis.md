@@ -460,3 +460,64 @@ PCM 행이 없는 거절도 남는지 확인한다. Freeze 시험은 이전 PCM�
 외부 대조가 실패해도 녹음을 종료·검사하며 두 오류를 모두 남긴다.
 회귀 시험은 이전 실행의 524프레임 손실·128프레임 삽입 무음과, 무음 중 56프레임 과거 유음
 재생을 포함한다. 제품의 캐시 반복 원인 수정과 전체 13개 수락은 아직 완료하지 않았다.
+
+
+## a47b164 공유 입력 설치본과 발행 경계의 후속 수정
+
+제품·시험 소스 `a47b164a6a58f69abfc913954d0969f250fb2d58`의
+[집중 실행 40292248302](https://github.com/mixrelay/mixrelay/actions/runs/40292248302)은
+macOS 26 ARM·27 ARM 모두 실패했다. 전체 13개 수락 실행은 아니다.
+PKG는 69,506,808바이트이며 SHA-256은
+`21f07bb515c515086dac4e463b6da2a1f7808d2b2a861a02bd1d8c2e2dd5b7b4`다.
+공증 `3d7a9a86-8ebf-4d17-b0e2-ab87c8bae5e7`은 Accepted·staple·validate를 통과했고,
+같은 소스의 Linux 후보는 빌드 `40290474611`에서 성공했다.
+[Native CI](https://github.com/mixrelay/mixrelay/actions/runs/40290468513)의 13개 대상,
+VM 준비 7개와 UI 검사 성공은 이 설치본 실패를 대체하지 않는다.
+
+새 설치·업그레이드 각각에서 같은 from_os → recorder 그래프와 두 입력 순서를 유지했다.
+결과는 다음과 같다. 녹음 누락은 종료 RF64에서 식별 가능한 유음 codeword의 프레임 수다.
+
+| 환경·설치 | 외부 무음→유음 / 유음→무음 | 녹음 유음 누락: 앞 순서 / 뒤 순서 |
+| --- | --- | --- |
+| 26 ARM 새 설치 | 통과 / 실패 | 21 / 1,759 |
+| 26 ARM 업그레이드 | 통과 / 통과 | 115,517 / 144,000 |
+| 27 ARM 새 설치 | 통과 / 통과 | 144,000 / 144,000 |
+| 27 ARM 업그레이드 | 통과 / 통과 | 144,000 / 144,000 |
+
+8개 대조의 무음 payload 오류는 0이었다. 26 ARM 새 설치의 뒤 순서에는 input·output callback
+sample 좌표가 각각 1,256프레임 점프했고 소스 게시도 그 구간에서 빠졌다. 외부 유음 1,024프레임이
+달랐으며, native 공급 기록의 빈 구간은 합계 2,280프레임이다. 게시되지 않은 소스와
+엔진의 녹음 손실을 같은 결함으로 합치지 않는다. 이 실패 판정은 유지한다.
+
+26 ARM 새 설치에서는 첫 순서의 외부 source 게시·읽기·payload가 모두 완전한데도 녹음에서
+21프레임이 빠졌다. 업그레이드와 27 ARM의 외부 대조가 통과한 경우에도 녹음은 실패했다.
+따라서 외부 HAL 대조 성공만으로 새 엔진 입력·녹음을 수락할 수 없다. 공유 source worker가
+실제로 실행됐고 식별 가능한 입력 PCM도 녹음에 전달됐으므로 grant 연결 전체를 실패로
+분류하지 않는다. 네 녹음의 원본·SHA와 engine 로그는 실행별 target artifact에 보존했다.
+
+모든 설치 경로의 엔진 로그에 `hal_shared_pcm` / `source_pump`의 `Stale` 종료가 있다.
+기존 코드의 두 경로가 같은 오류를 낼 수 있었다. `SourceTransport::clock()`은 소비자 sequence
+갱신 중에도 `None`을 반환하는데 worker는 이를 만료로 처리했다. 또한 converter 생성은
+생산자 reset을 완료한 뒤 소비자 clock을 다시 요구했다. 그 관찰이 보류되면 새 epoch와
+이전 converter가 남을 수 있었다. 당시 로그만으로 둘 중 마지막 분기를 구별하지는 못한다.
+
+현재 소스는 관찰 결과를 `Ready`·`Deferred`·`Revoked`로 나누고, reset이 확정한 epoch를
+직접 반환한다. 실제 공유 consumer sequence를 갱신 중으로 고정한 회귀에서 이전의
+post-reset 관찰 의존성을 재주입하면 `Err(Stale)`로 실패했다. 복원한 구현은 같은 조건에서
+새 epoch와 PCM을 유지했다. 초기의 정상 snapshot, 보류, 실제 lease 교체도 구별한다.
+
+추가로 worker는 변환 PCM을 flush하기 전에 native credit을 게시했다. 현재는 source 전송의
+같은 producer claim에서 PCM을 먼저 확정하고 그 출력에 대응하는 credit만 게시한다.
+21·5·23·79프레임 입력 조각에서 실제 공유 ring의 공급량과 credit을 대조하며, SRC에 남은
+입력을 준비된 PCM으로 세지 않는다. 변환 출력의 배출과 보류 쓰기도 유한하게 유지한다.
+
+새 epoch의 초기 native rate·credit 0은 ring epoch release보다 먼저 게시한다. ring 재무장 실패 시
+기존 rate·position은 복원하고 running·승인은 해제한다. 기존 C ABI의 실패한 재무장 계약을 유지했다.
+포맷 재승인 동안 master 신원도 유지하며, 끝난 worker는 다음 완전한 grant 목록에서 회수·교체한다.
+clock 관찰·epoch 승인과 PCM 발행의 소유 구현을 나눴다.
+
+후속 소스의 관련 Rust·네이티브 검사 966개와 스크립트 625개가 통과했다.
+기존 benchmark·자식 fixture·설치 장치 soak의 기본 실행 제외는 유지했다.
+설치본 필수 시나리오의 skip 0은 최종 13개 실행에서 판정한다.
+관련 all-targets clippy·fmt·crate 계층 검사도 별도로 확인한다.
+이 후속 코드의 설치본과 같은 네 파일을 사용하는 13개 전체 검증은 아직 남아 있다.

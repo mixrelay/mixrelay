@@ -1,3 +1,4 @@
+mod handoff;
 use super::*;
 use mixrelay_macos_transport::{
     application_clock::VERSION,
@@ -70,7 +71,9 @@ fn shared_client_pcm_preserves_signal_and_silence_across_independent_reader_gaps
     registry.read_audio(token, &mut output, 128, 48_000);
     assert!(registry.set_clock_master(token, true));
     let clock = transport.clock().unwrap();
-    let mut converter = Converter::new(&mut transport, clock, (48_000, 2, 16_384)).unwrap();
+    let mut converter = Converter::new(&mut transport, clock, (48_000, 2, 16_384))
+        .unwrap()
+        .unwrap();
     let (writer, queues) = client_grants();
     let mut mixer = ClientPcmMixer::default();
     let mut scratch = [0.0; 256];
@@ -116,7 +119,6 @@ fn shared_client_pcm_preserves_signal_and_silence_across_independent_reader_gaps
             converter.push(&mut transport, &mut input, &times).unwrap();
             assert!(converter.flush(&mut transport).unwrap());
             mixer.commit(window);
-            transport.publish_native(u64::from(block + 1) * 128, true);
             transport.publish_measurements(128, 128, 0);
             let read = registry.read_at(token, &mut output, 48_000, times[0]);
             // Eight initial silent blocks establish the existing consumer latency

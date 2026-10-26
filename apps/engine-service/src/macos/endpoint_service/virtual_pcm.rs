@@ -126,7 +126,11 @@ impl VirtualPcm {
         let mut endpoints = self.endpoints.lock();
         endpoints.retain(|id, endpoint| {
             groups.get(id).is_some_and(|queues| {
-                endpoint.channels == queues[0].capture_channels()
+                endpoint
+                    .worker
+                    .as_ref()
+                    .is_some_and(|worker| !worker.is_finished())
+                    && endpoint.channels == queues[0].capture_channels()
                     && endpoint.capacity == queues[0].capacity()
             })
         });

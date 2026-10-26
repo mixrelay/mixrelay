@@ -1,7 +1,7 @@
 //! One bounded virtual-input reader owns mixing, conversion and publication.
 use super::{Error, converter::Converter, scheduling::Scheduling};
 use mixrelay_macos_transport::{
-    application_source_transport::SourceTransport,
+    application_source_transport::{SourceClockRead, SourceTransport},
     client_pcm::{ClientPcmMixer, ClientPcmReader, MixError, MixWindow},
 };
 use mixrelay_realtime::{Timebase, host_time};
@@ -24,7 +24,6 @@ pub(super) struct Pump {
     times: Vec<u64>,
     mixer: ClientPcmMixer,
     converter: Option<Converter>,
-    native_frames: u64,
 }
 impl Pump {
     pub(super) fn prepare(
@@ -52,7 +51,6 @@ impl Pump {
             times,
             mixer: ClientPcmMixer::default(),
             converter: None,
-            native_frames: 0,
         })
     }
     pub(super) fn run(mut self) -> Result<(), Error> {
@@ -69,21 +67,32 @@ impl Pump {
                         }
                     });
                 }
+                let clock = match self.transport.observe_clock() {
+                    SourceClockRead::Ready(clock) => clock,
+                    SourceClockRead::Deferred => {
+                        std::thread::sleep(Duration::from_micros(250));
+                        continue;
+                    }
+                    SourceClockRead::Revoked => return Err(Error::Stale),
+                };
                 let now = host_time();
                 let Some(window) = self.mixer.window(&self.queues, |anchor| {
                     timebase.nanoseconds(now.saturating_sub(anchor))
                 }) else {
-                    if self
-                        .queues
-                        .iter()
-                        .any(|queue| queue.clock().is_some_and(|clock| !clock.running))
-                    {
-                        self.transport.publish_native(self.native_frames, false);
+                    if let Some(native) = self.queues.iter().find_map(ClientPcmReader::clock) {
+                        if !native.running {
+                            self.transport.stop_native();
+                        } else if self.mixer.is_current(native)
+                            && let Some(converter) = self.converter.as_mut()
+                            && converter.acknowledged(clock)
+                        {
+                            // Drain a deferred final output even when no new native input arrived.
+                            let _ = converter.flush(&mut self.transport)?;
+                        }
                     }
                     std::thread::sleep(Duration::from_micros(250));
                     continue;
                 };
-                let clock = self.transport.clock().ok_or(Error::Stale)?;
                 if clock.format_word == 0 {
                     std::thread::sleep(Duration::from_micros(250));
                     continue;
@@ -98,7 +107,7 @@ impl Pump {
         })();
         // Complete demotion before conversion buffers and VM mappings leave scope.
         let demoted = scheduling.finish();
-        self.transport.publish_native(self.native_frames, false);
+        self.transport.stop_native();
         result.and(demoted)
     }
     fn configure(
@@ -120,18 +129,17 @@ impl Pump {
             );
             let result = scheduling.outside(|| {
                 scheduling.retune(window.clock.rate);
-                let converter = Converter::new(&mut self.transport, clock, native)?;
+                let Some(converter) = Converter::new(&mut self.transport, clock, native)? else {
+                    return Ok::<bool, Error>(false);
+                };
                 self.converter = Some(converter);
-                Ok::<(), Error>(())
+                Ok(true)
             });
-            match result {
-                Ok(()) => {}
-                // A changed format retains this native window for the next
-                // current producer acknowledgment; PCM is not advanced here.
-                Err(Error::Stale) => return Ok(false),
-                Err(error) => return Err(error),
+            // Deferred format acknowledgment keeps this native window and
+            // cannot leave an old converter attached to a newly committed epoch.
+            if !result? {
+                return Ok(false);
             }
-            self.native_frames = 0;
         }
         Ok(true)
     }
@@ -164,8 +172,6 @@ impl Pump {
         }
         converter.push(&mut self.transport, input, &self.times[..frames])?;
         self.mixer.commit(window);
-        self.native_frames += u64::from(window.frames);
-        self.transport.publish_native(self.native_frames, true);
         let graph_rate = clock.format_word & u64::from(u32::MAX);
         let producer = u32::try_from(
             (u64::from(window.frames) * graph_rate).div_ceil(u64::from(window.clock.rate)),
