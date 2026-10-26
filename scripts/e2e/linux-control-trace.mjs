@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { appendFileSync, lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { stopSignalProcesses, waitForSignalBoundary } from './native-signal.mjs';
+import { stopSignalProcesses, waitForSignalBoundary } from './signal-process.mjs';
 
 // Discard syscall payloads. Preserve only fixed protocol identifiers and outcomes;
 // arguments, graph contents, credentials and arbitrary error text are never saved.

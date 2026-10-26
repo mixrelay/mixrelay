@@ -25,12 +25,14 @@ permission_source="$repo_root/native/macos/engine-service/src/MRMicrophonePermis
 activity_source="$repo_root/native/macos/hal-driver/tests/MRProbeActivity.m"
 trace_source="$repo_root/native/macos/hal-driver/tests/MRProbeHalTrace.c"
 trace_header="${trace_source%.c}.h"
+authorization_source="$repo_root/native/macos/hal-driver/tests/MRProbeAuthorization.c"
+authorization_header="${authorization_source%.c}.h"
 binary="$repo_root/target/macos-probes/MRRoundTripProbe"
-if [[ ! -x "$binary" || "$source_file" -nt "$binary" || "$permission_source" -nt "$binary" || "$activity_source" -nt "$binary" || "$trace_source" -nt "$binary" || "$trace_header" -nt "$binary" ]]; then
+if [[ ! -x "$binary" || "$source_file" -nt "$binary" || "$permission_source" -nt "$binary" || "$activity_source" -nt "$binary" || "$trace_source" -nt "$binary" || "$trace_header" -nt "$binary" || "$authorization_source" -nt "$binary" || "$authorization_header" -nt "$binary" ]]; then
   mkdir -p "${binary:h}"
   clang -std=c17 -O2 -mmacosx-version-min=14.2 \
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Werror \
-    -fblocks "$source_file" "$permission_source" "$activity_source" "$trace_source" -framework CoreAudio -framework CoreFoundation \
+    -fblocks "$source_file" "$permission_source" "$activity_source" "$trace_source" "$authorization_source" -framework CoreAudio -framework CoreFoundation \
     -framework AVFoundation -framework Security -framework Foundation -o "$binary"
 fi
 prepare_bundle=false

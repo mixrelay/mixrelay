@@ -5,7 +5,8 @@ import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync,
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { invoke } from '../lab/macos-installed-capture-acceptance.mjs';
-import { analyseRf64, stopSignalProcesses } from './native-signal.mjs';
+import { analyseRf64 } from './native-signal.mjs';
+import { stopSignalProcesses } from './signal-process.mjs';
 import { controlRecorder } from './recorder-control.mjs';
 
 export function analyseSystemMix(bytes) {

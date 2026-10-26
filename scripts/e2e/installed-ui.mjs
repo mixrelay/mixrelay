@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawnLogged } from './package.mjs';
+import { permissionObservation } from './permission-observation.mjs';
 
 // First-use audio consent can still be outstanding while Quit drains native work.
 // Keep the observer running until shutdown and removal have both been attempted.
@@ -27,6 +28,7 @@ export async function startInstalledUi(os, output) {
   const completed = new Promise(resolveExit => child.once('close', (code, signal) => resolveExit({ code, signal })));
   const alive = () => !spawnError && child.exitCode === null && child.signalCode === null;
   return {
+    measurementBoundary: os === 'macos' ? permissionObservation(directory, alive) : measure => measure(),
     async ready() {
       const deadline = Date.now() + (process.env.MIXRELAY_E2E_VM_ACCELERATOR === 'tcg' ? 900000 : 300000);
       while (!existsSync(join(directory, 'installed-ui.ready')) && alive() && Date.now() < deadline) await delay(100);

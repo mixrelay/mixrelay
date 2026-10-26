@@ -149,6 +149,16 @@ int main(void) {
     assert(mr_probe_measurement_main(2, arguments) == 2);
     assert(queries == 1 && requests == 0);
     assert(measurements == 0);
+    char *consent[] = {"probe", "--authorize-input", "--json"};
+    current = 3; requests = queries = 0;
+    assert(mr_probe_measurement_main(3, consent) == 0);
+    assert(queries == 1 && requests == 0 && measurements == 0);
+    current = 0; decision = 3; requests = queries = 0;
+    assert(mr_probe_measurement_main(3, consent) == 0);
+    assert(queries == 2 && requests == 1 && measurements == 0);
+    current = 2; requests = queries = 0;
+    assert(mr_probe_measurement_main(3, consent) == 2);
+    assert(queries == 1 && requests == 0 && measurements == 0);
     MROptions options = {0};
     char *help[] = {"probe", "--help"};
     assert(mr_options(2, help, &options) == 0);
@@ -160,6 +170,7 @@ int main(void) {
   execFileSync('xcrun', ['clang', '-std=c17', '-O2', '-mmacosx-version-min=14.2',
     '-Wall', '-Wextra', '-Wpedantic', '-Wconversion', '-Wsign-conversion', '-Wshadow', '-Werror',
     fixture, fileURLToPath(new URL('../../native/macos/hal-driver/tests/MRProbeHalTrace.c', import.meta.url)),
+    fileURLToPath(new URL('../../native/macos/hal-driver/tests/MRProbeAuthorization.c', import.meta.url)),
     '-framework', 'CoreAudio', '-framework', 'CoreFoundation', '-o', executable]);
   execFileSync(executable, [], { timeout: 10000 });
 });

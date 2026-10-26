@@ -7,6 +7,44 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareMacosUiRunner } from '../e2e/macos-ui-runner.mjs';
 
+test('native observation control acknowledges only between scans and preserves the exact request token', t => {
+  assert.equal(process.platform, 'darwin');
+  const directory = mkdtempSync(join(tmpdir(), 'mr-observer-control-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const fixture = join(directory, 'main.swift');
+  writeFileSync(fixture, `
+import Foundation
+let directory = URL(fileURLWithPath: CommandLine.arguments[1])
+let control = PermissionObservationControl(directory: directory)
+let command = directory.appendingPathComponent("permission-observation.command.json")
+let acknowledgement = directory.appendingPathComponent("permission-observation.ack.json")
+let initial = try control.shouldObserve()
+precondition(initial)
+for (generation, phase, expected) in [("lowercase-token", "paused", false), ("resume-token", "observing", true)] {
+    try JSONSerialization.data(withJSONObject: ["generation": generation, "phase": phase]).write(to: command, options: .atomic)
+    let observed = try control.shouldObserve()
+    precondition(observed == expected)
+    let bytes = try Data(contentsOf: acknowledgement)
+    let state = try JSONSerialization.jsonObject(with: bytes) as! [String: String]
+    precondition(state["generation"] == generation && state["phase"] == phase)
+    precondition(ISO8601DateFormatter().date(from: state["at"]!) != nil)
+    let unchanged = try control.shouldObserve()
+    let unchangedBytes = try Data(contentsOf: acknowledgement)
+    precondition(unchanged == expected && unchangedBytes == bytes)
+}
+try Data("{\\\"generation\\\":\\\"invalid\\\",\\\"phase\\\":\\\"unrecognized\\\"}".utf8).write(to: command, options: .atomic)
+do { _ = try control.shouldObserve(); fatalError("Invalid commands cannot resume scans") }
+catch is DecodingError {}
+`);
+  const source = fileURLToPath(new URL('../e2e/macos-ui/PermissionObservationControl.swift', import.meta.url));
+  const executable = join(directory, 'observer-control');
+  const built = spawnSync('xcrun', ['swiftc', '-swift-version', '5', source, fixture, '-o', executable],
+    { encoding: 'utf8', timeout: 120000 });
+  assert.equal(built.status, 0, built.stderr);
+  const result = spawnSync(executable, [directory], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('native WebKit preference bridge changes the real feature and rejects absent keys and invalid objects', t => {
   assert.equal(process.platform, 'darwin');
   const directory = mkdtempSync(join(tmpdir(), 'mr-webkit-feature-'));

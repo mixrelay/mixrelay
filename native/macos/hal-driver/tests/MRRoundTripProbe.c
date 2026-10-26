@@ -11,6 +11,7 @@
 // position directly, each channel carries independent content (a mix of channels never
 // reproduces another channel), and any recorded channel can locate the signal.
 #include "MRProbeHalTrace.h"
+#include "MRProbeAuthorization.h"
 #include <CoreAudio/CoreAudio.h>
 #include <CoreAudio/AudioServerPlugIn.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -37,36 +38,6 @@ static const double MR_LEAD_SECONDS = 0.1;  // silence before the signal
 static const double MR_TAIL_SECONDS = 1.5;  // recording after the signal, for slow paths
 static const double MR_TIMING_SECONDS = 0.1;
 
-extern long mr_microphone_authorization_status(void);
-extern void mr_microphone_request_authorization(void);
-typedef struct MRInputAuthorization {
-    long initial, final;
-    bool requested;
-} MRInputAuthorization;
-
-// Finish GUI consent before I/O; a nongraphical CLI retains CoreAudio's broker.
-static bool mr_authorize_input(double timeout, MRInputAuthorization *result) {
-    result->initial = result->final = mr_microphone_authorization_status();
-    result->requested = result->initial == 0;
-    if (result->requested) {
-        mach_timebase_info_data_t timebase;
-        mach_timebase_info(&timebase);
-        const uint64_t start = mach_absolute_time();
-        mr_microphone_request_authorization();
-        for (;;) {
-            result->final = mr_microphone_authorization_status();
-            if (result->final != 0) break;
-            const double elapsed = (double)(mach_absolute_time() - start) *
-                (double)timebase.numer / (double)timebase.denom / 1e9;
-            if (elapsed >= timeout) break;
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
-        }
-    }
-    if (result->final == 3 || result->final == 4) return true;
-    fprintf(stderr, "input recording authorization was not granted before I/O (initial %ld, final %ld)\n",
-            result->initial, result->final);
-    return false;
-}
 // Impulse mode measures paths that change samples (asynchronous clocks, sample-rate
 // conversion, gain), where no exact copy exists. It plays 32-frame pulses whose spacing
 // varies pseudo-randomly around 0.25 s, finds each arrival at half its own received peak,
@@ -1655,6 +1626,7 @@ static int mr_self_test(void) {
 static void mr_usage(FILE *stream) {
     fprintf(stream,
             "usage: MRRoundTripProbe --list | --self-test\n"
+            "       MRRoundTripProbe --authorize-input --json (consent only; no device I/O)\n"
             "       MRRoundTripProbe --transport DEVICE_UID\n"
             "       MRRoundTripProbe --latency DEVICE_UID (read-only device/stream/safety)\n"
             "       MRRoundTripProbe [--json] [--impulse] [--timing] [--seconds 1-120] [--channels 1-64] "
@@ -1872,6 +1844,8 @@ static int mr_failure(bool json, const char *stage, OSStatus status, int error) 
 }
 
 int main(int argc, char **argv) {
+    const int authorization_status = mr_authorization_command(argc, argv);
+    if (authorization_status >= 0) return authorization_status;
     MROptions options = {.seconds = 5.0, .channels = MR_MAX_CHANNELS};
     const int status = mr_options(argc, argv, &options);
     if (status >= 0) return status;
@@ -1882,9 +1856,10 @@ int main(int argc, char **argv) {
     const MRReported out_reported = mr_reported(probe->output, kAudioObjectPropertyScopeOutput);
     const MRReported in_reported = mr_reported(probe->input, kAudioObjectPropertyScopeInput);
     if (options.json) printf("{");
-    if (options.json) printf("\"inputAuthorization\":{\"initial\":%ld,\"final\":%ld,\"requested\":%s},",
-                             authorization.initial, authorization.final,
-                             authorization.requested ? "true" : "false");
+    if (options.json) {
+        mr_print_input_authorization(stdout, &authorization);
+        printf(",");
+    }
     mr_describe("output", probe->output, kAudioObjectPropertyScopeOutput, options.json);
     mr_describe("input", probe->input, kAudioObjectPropertyScopeInput, options.json);
     if (options.json) printf("\"channels\":%u,\"seconds\":%.1f,", probe->channels, options.seconds);

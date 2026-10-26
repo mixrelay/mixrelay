@@ -3,11 +3,22 @@ import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { EventEmitter } from 'node:events';
-import { analyseStereo, analyseRf64, macosProbeCommand, nativeSignal, runNativeAudioCases, stopSignalProcesses, waitForSignalBoundary, withMacosSchedulerTrace } from './native-signal.mjs';
+import { analyseStereo, analyseRf64, nativeSignal, runNativeAudioCases } from './native-signal.mjs';
+import { macosProbeCommand } from './macos-native-signal.mjs';
+import { withMacosSchedulerTrace } from './macos-scheduler-trace.mjs';
+import { stopSignalProcesses, waitForSignalBoundary } from './signal-process.mjs';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { analyseSystemMix } from './system-capture.mjs';
+
+function consentFixture(program, args, directory) {
+  if (program !== 'open' || !args.includes('--authorize-input')) return false;
+  writeFileSync(join(directory, 'native-probe-authorization.json'), JSON.stringify({
+    inputAuthorization: { initial: 3, final: 3, requested: false },
+  }));
+  return true;
+}
 
 test('the LaunchServices measurement retains one original signal and unchanged audio settings', () => {
   const ordinary = macosProbeCommand('/probe.app', '/evidence', 'native-uid');
@@ -17,25 +28,82 @@ test('the LaunchServices measurement retains one original signal and unchanged a
   assert.equal(ordinary.args.some(arg => /buffer|warmup|retry/.test(arg)), false);
 });
 
+test('real consent precedes observer suspension and the single finite signal retains its failure', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-consent-measurement-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const events = [];
+  let observing = true;
+  await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
+    snapshot() {}, diagnostics() {},
+    measurementBoundary: async measure => {
+      events.push('pause acknowledged'); observing = false;
+      try { return await measure(); }
+      finally { observing = true; events.push('resume acknowledged'); }
+    },
+    execute(program, args) {
+      if (program === 'zsh') return '/probe.app';
+      if (program !== 'open') return;
+      if (args.includes('--authorize-input')) {
+        assert.equal(observing, true, 'Real privacy dialogs must remain observable');
+        assert.equal(args.includes('--capture-file'), false);
+        assert.equal(args.some(arg => arg.startsWith('io.mixrelay.audio.endpoint.')), false);
+        events.push('consent granted');
+        writeFileSync(join(directory, 'native-probe-authorization.json'), JSON.stringify({
+          inputAuthorization: { initial: 0, final: 3, requested: true },
+        }));
+      } else {
+        assert.equal(observing, false, 'AX scans must stop before finite PCM begins');
+        events.push('one finite signal');
+        writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify({
+          inputAuthorization: { initial: 3, final: 3, requested: false }, activityProtection: true,
+          complete: true, channelOrder: true, missingFrames: 6724,
+          repeatedFrames: 0, corruptFrames: 2984, nonfiniteSamples: 0, receivedFrames: 137276,
+        }));
+      }
+    },
+  }), /missingFrames/);
+  assert.equal(observing, true);
+  assert.deepEqual(events, ['consent granted', 'pause acknowledged', 'one finite signal', 'resume acknowledged']);
+});
+
+test('denied consent never suspends permission handling or starts native audio', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-denied-consent-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const events = [];
+  await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
+    snapshot() {}, diagnostics() {},
+    measurementBoundary: () => assert.fail('Denied consent cannot enter measurement'),
+    execute(program, args) {
+      events.push(program);
+      if (program === 'zsh') return '/probe.app';
+      if (program !== 'open') return;
+      assert.ok(args.includes('--authorize-input'));
+      writeFileSync(join(directory, 'native-probe-authorization.json'), JSON.stringify({ inputAuthorization: { final: 2 } }));
+    },
+  }), /macOS probe authorization failed/);
+  assert.deepEqual(events, ['zsh', 'open', 'pkill']);
+});
+
 test('a scheduler trace cannot turn measured PCM loss into acceptance', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'mr-scheduler-diagnostic-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const before = process.env.GITHUB_ACTIONS;
   process.env.GITHUB_ACTIONS = 'true';
-  const measured = { inputAuthorization: { final: 3 }, activityProtection: true, complete: true,
+  const measured = { inputAuthorization: { initial: 3, final: 3, requested: false }, activityProtection: true, complete: true,
     channelOrder: true, missingFrames: 128, repeatedFrames: 0, corruptFrames: 128, nonfiniteSamples: 0, receivedFrames: 143872 };
   const calls = [];
   try {
     await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
       schedulerTrace: true, snapshot() {}, diagnostics() {},
-      trace: async (_, measure) => { calls.push('trace-start'); measure(); calls.push('trace-stop'); },
-      execute(program) {
+      trace: async (_, measure) => { calls.push('trace-start'); try { measure(); } finally { calls.push('trace-stop'); } },
+      execute(program, args) {
         calls.push(program);
+        if (consentFixture(program, args, directory)) return;
         if (program === 'zsh') return '/probe.app';
         if (program === 'open') writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
       },
     }), /missingFrames/);
-    assert.deepEqual(calls, ['zsh', 'trace-start', 'open', 'trace-stop', 'pkill']);
+    assert.deepEqual(calls, ['zsh', 'open', 'trace-start', 'open', 'trace-stop', 'pkill']);
   } finally {
     if (before === undefined) delete process.env.GITHUB_ACTIONS;
     else process.env.GITHUB_ACTIONS = before;
@@ -50,8 +118,9 @@ test('a native property failure retains its procedure and OSStatus and is never 
     const calls = [];
     await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
       snapshot() {}, diagnostics() {},
-      execute(program) {
+      execute(program, args) {
         calls.push(program);
+        if (consentFixture(program, args, directory)) return;
         if (program === 'zsh') return '/probe.app';
         if (program === 'open') {
           writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify({
@@ -65,7 +134,7 @@ test('a native property failure retains its procedure and OSStatus and is never 
       assert.equal(error.cause, processFailed ? original : undefined);
       return true;
     });
-    assert.deepEqual(calls, ['zsh', 'open', 'pkill']);
+    assert.deepEqual(calls, ['zsh', 'open', 'open', 'pkill']);
   }
 });
 
@@ -194,12 +263,13 @@ test('a stalled stream fails within its bound and a process failure is never ret
 test('failed Mac PCM keeps the original verdict and collects host load only after the single signal ends', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'mr-native-failure-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const measured = { inputAuthorization: { final: 3 }, activityProtection: true, complete: true,
+  const measured = { inputAuthorization: { initial: 3, final: 3, requested: false }, activityProtection: true, complete: true,
     channelOrder: true, missingFrames: 128, repeatedFrames: 0, corruptFrames: 0, nonfiniteSamples: 0, receivedFrames: 48000 };
   const phases = [];
   await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
     execute(program, args) {
       phases.push(program);
+      if (consentFixture(program, args, directory)) return;
       if (program === 'zsh') return '/probe.app';
       if (program === 'open') {
         assert.equal(args[args.indexOf('--capture-file') + 1], join(directory, 'native-signal.f32'));
@@ -208,19 +278,19 @@ test('failed Mac PCM keeps the original verdict and collects host load only afte
     },
     snapshot() { phases.push('snapshot'); },
     diagnostics(output) {
-      assert.deepEqual(phases, ['zsh', 'open', 'pkill', 'snapshot']);
+      assert.deepEqual(phases, ['zsh', 'open', 'open', 'pkill', 'snapshot']);
       assert.deepEqual(JSON.parse(readFileSync(join(output, 'native-probe.stdout.json'))), measured);
       phases.push('diagnostics');
       throw new Error('diagnostic collection unavailable');
     },
   }), /missingFrames/);
-  assert.deepEqual(phases, ['zsh', 'open', 'pkill', 'snapshot', 'diagnostics']);
+  assert.deepEqual(phases, ['zsh', 'open', 'open', 'pkill', 'snapshot', 'diagnostics']);
 });
 
 test('installed audio stops recording before post-signal observers, retaining the original PCM failure', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'mr-audio-order-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const measured = { inputAuthorization: { final: 3 }, activityProtection: true, complete: true,
+  const measured = { inputAuthorization: { initial: 3, final: 3, requested: false }, activityProtection: true, complete: true,
     channelOrder: true, missingFrames: 636, repeatedFrames: 0, corruptFrames: 636, nonfiniteSamples: 0, receivedFrames: 143364 };
   let recording = true;
   const phases = [], verdicts = [];
@@ -229,7 +299,8 @@ test('installed audio stops recording before post-signal observers, retaining th
       try {
         await nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
           ...observers,
-          execute(program) {
+          execute(program, args) {
+            if (consentFixture(program, args, directory)) return;
             if (program === 'zsh') return '/probe.app';
             if (program === 'open') {
               phases.push('finite signal');

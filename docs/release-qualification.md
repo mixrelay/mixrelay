@@ -266,6 +266,15 @@ device or starting I/O. This follows [Apple's capture authorization procedure](h
 Denied, restricted or unresolved authorization fails measurement. A nongraphical CLI keeps
 CoreAudio's existing broker path; installed E2E requires the GUI's authorized status. The probe
 records its initial and final status and whether it requested consent in `inputAuthorization`.
+Installed E2E first launches that same signed bundle with `--authorize-input --json`.
+This command completes consent without querying or opening audio devices and saves
+`native-probe-authorization.json`. The observer then acknowledges a fresh pause token
+between AX scans before the original finite measurement starts. It performs no AX scans
+until the harness requests observation again. Each transition requires its own matching
+acknowledgement within 30 seconds; a stale acknowledgement or exited observer fails the case.
+`native-permission-observation.json` preserves both transitions. The measurement must
+retain the granted status without requesting consent again. Success and failure both
+resume observation; PCM and observer failures are retained together.
 MixRelay's first-use microphone and system-audio dialogs continue through the UI observer.
 The signal still starts with its original first frame and runs for the complete requested
 duration; the probe performs no preliminary audio run.
@@ -295,12 +304,13 @@ export MIXRELAY_E2E_MACOS_UI_TOOLS="$PWD/installed-ui-tools"
 
 The signed observer's identity and TCC restart PIDs are included in the target artifact.
 The macOS UI observer handles first-use audio consent and
-remains active through Quit and removal. macOS `AUDIO-11` exercises free whole-system
+remains alive through Quit and removal. macOS `AUDIO-11` exercises free whole-system
 capture. After recording the UI screenshot, accessibility tree and committed graph,
 macOS minimizes the editor window and measures background native audio while the engine
 graph runs at 48kHz/128 frames. The duplex probe records its own native buffer size;
-it does not change that setting. `installed-ui-audio-phase.json` records the editor state. The consent observer remains
-active. The system-capture graph is prepared before its two owned tone apps start.
+it does not change that setting. `installed-ui-audio-phase.json` records the editor state.
+Permission observation resumes after the duplex probe, before system-capture consent.
+The system-capture graph is prepared before its two owned tone apps start.
 Recording starts after both channels produce live graph meters within 30 seconds.
 `whole-system-ready.json` preserves those observations, including a readiness failure.
 Their failures and missing evidence prevent qualification. API results alone

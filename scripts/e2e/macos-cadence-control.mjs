@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { stopSignalProcesses, waitForSignalBoundary } from './native-signal.mjs';
+import { stopSignalProcesses, waitForSignalBoundary } from './signal-process.mjs';
 
 export function launchCadenceControl(binary, directory, spawnChild = spawn) {
   const file = join(directory, 'cadence-control.jsonl');

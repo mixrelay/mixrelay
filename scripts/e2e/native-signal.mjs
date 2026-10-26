@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
+import { stopSignalProcesses, waitForSignalBoundary } from './signal-process.mjs';
+import { macosSignal } from './macos-native-signal.mjs';
+import { withMacosSchedulerTrace } from './macos-scheduler-trace.mjs';
 import { rawPcmArgs } from '../lab/pipewire-cli.mjs';
 import { collectMacosLoad, snapshotMacosProcesses } from './collect-macos.mjs';
 
@@ -55,38 +57,6 @@ export function analyseRf64(bytes) {
   assert.ok(data, 'Missing finalized recording data');
   assert.deepEqual(sizes, { riff: BigInt(bytes.length - 8), data: BigInt(data.length), frames: BigInt(data.length / 8) }, 'Unfinalized RF64 sizes');
   return { format, ...analyseStereo(data) };
-}
-
-export async function stopSignalProcesses(children, graceMs = 5000) {
-  const live = child => child.exitCode === null && child.signalCode === null;
-  const wait = child => new Promise(resolve => {
-    if (!live(child)) { resolve(); return; }
-    const done = () => { clearTimeout(timer); child.removeListener('exit', done); resolve(); };
-    const timer = setTimeout(done, graceMs);
-    child.once('exit', done);
-  });
-  const failures = [];
-  for (const child of children.filter(Boolean)) {
-    if (live(child)) child.kill('SIGTERM');
-    await wait(child);
-    if (live(child)) {
-      child.kill('SIGKILL');
-      await wait(child);
-      failures.push(live(child) ? 'Native signal process did not stop after SIGKILL' : 'Native signal process required SIGKILL');
-    }
-  }
-  if (failures.length) throw new Error(failures.join('; '));
-}
-
-export async function waitForSignalBoundary(read, description, {
-  timeoutMs = 30000, now = Date.now, wait = delay,
-} = {}) {
-  const deadline = now() + timeoutMs;
-  for (;;) {
-    assert.ok(now() < deadline, `${description} did not complete before its deadline`);
-    if (read()) return;
-    await wait(50);
-  }
 }
 
 async function linuxSignal(device, directory) {
@@ -148,9 +118,9 @@ async function linuxSignal(device, directory) {
 }
 
 export async function nativeSignal(device, directory, os, { execute = execFileSync, diagnostics = collectMacosLoad,
-  snapshot = snapshotMacosProcesses, schedulerTrace = false, trace = withMacosSchedulerTrace } = {}) {
+  snapshot = snapshotMacosProcesses, schedulerTrace = false, trace = withMacosSchedulerTrace, measurementBoundary = measure => measure() } = {}) {
   if (os === 'linux') return linuxSignal(device, directory);
-  try { return await macosSignal(device, directory, execute, snapshot, schedulerTrace, trace); }
+  try { return await macosSignal(device, directory, { execute, snapshot, schedulerTrace, trace, measurementBoundary }); }
   catch (error) {
     try { diagnostics(directory); }
     catch (diagnosticError) { console.error(`Native PCM failure diagnostics: ${diagnosticError.message}`); }
@@ -175,102 +145,6 @@ export async function runNativeAudioCases({ measure, finalize, directory,
       }
     }
   }
-}
-
-export function macosProbeCommand(bundle, directory, uid) {
-  const args = ['-W', '-n', '-g', '--stdout', join(directory, 'native-probe.stdout.json'),
-    '--stderr', join(directory, 'native-probe.stderr.log'), bundle, '--args', '--json', '--timing',
-    '--capture-file', join(directory, 'native-signal.f32'),
-    '--hal-trace-file', join(directory, 'native-hal-io.json'), '--seconds', '3', '--channels', '2', uid];
-  return { program: 'open', args, timeout: 60000 };
-}
-
-// Record the running system independently of LaunchServices: profiling `open`
-// alone can end before the launched application starts its measurement.
-export async function withMacosSchedulerTrace(directory, measure, {
-  start = spawn, wait = waitForSignalBoundary,
-} = {}) {
-  assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Scheduler diagnosis requires a disposable hosted Mac');
-  const child = start('xcrun', ['xctrace', 'record', '--template', 'System Trace', '--no-prompt',
-    '--all-processes', '--output', join(directory, 'scheduler.trace'), '--time-limit', '45s', '--window', '45s'],
-  { stdio: ['ignore', 'pipe', 'pipe'] });
-  let log = '', closed = false, failure;
-  const errors = [];
-  child.on('error', error => { failure = error; });
-  child.once('close', (code, signal) => {
-    closed = true;
-    if (code !== 0) failure = new Error(`System Trace exited with code ${code}, signal ${signal}`);
-  });
-  const observe = bytes => {
-    if (log.length + bytes.length > 1024 * 1024) {
-      failure = new Error('System Trace exceeded its bounded diagnostic output');
-      child.kill('SIGINT');
-    } else log += bytes.toString();
-  };
-  child.stdout.on('data', observe);
-  child.stderr.on('data', observe);
-  let result;
-  try {
-    await wait(() => {
-      assert.ifError(failure);
-      assert.equal(closed, false, 'System Trace exited before measurement');
-      return log.includes('Recording started') || log.includes('Ctrl-C to stop the recording');
-    }, 'System Trace readiness', { timeoutMs: 30000 });
-    result = await measure();
-    assert.equal(closed, false, 'System Trace ended before measurement completed');
-  } catch (error) { errors.push(error); }
-  try {
-    if (!closed) child.kill('SIGINT');
-    await wait(() => closed, 'System Trace finalization', { timeoutMs: 90000 });
-    assert.ifError(failure);
-  } catch (error) {
-    errors.push(error);
-    try { await stopSignalProcesses([child]); } catch (stopError) { errors.push(stopError); }
-  } finally {
-    writeFileSync(join(directory, 'scheduler.log'), log, { flag: 'wx' });
-  }
-  if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join('; '));
-  return result;
-}
-
-async function macosSignal(device, directory, execFileSync, snapshot, schedulerTrace, trace) {
-  const uid = device.nativeDeviceIds.find(id => id.startsWith('io.mixrelay.audio.endpoint.'));
-  assert.ok(uid, 'Missing canonical CoreAudio device identity');
-  const bundle = execFileSync('zsh', ['scripts/probe-macos-roundtrip.sh', '--prepare-bundle', 'io.mixrelay.qualification.probe'],
-    { encoding: 'utf8', timeout: 60000 }).trim();
-  const stdout = join(directory, 'native-probe.stdout.json');
-  let processFailure;
-  try {
-    if (schedulerTrace) assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Scheduler diagnosis requires a disposable hosted Mac');
-    const command = macosProbeCommand(bundle, directory, uid);
-    const measure = () => execFileSync(command.program, command.args, { timeout: command.timeout });
-    if (schedulerTrace) await trace(directory, measure);
-    else measure();
-  } catch (error) {
-    processFailure = error;
-  } finally {
-    const executable = `${bundle}/Contents/MacOS/MRRoundTripProbe`;
-    const pattern = `^${executable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`;
-    try { execFileSync('pkill', ['-TERM', '-f', pattern], { timeout: 5000 }); }
-    catch (error) { if (error.status !== 1) throw error; }
-  }
-  let measured;
-  try { measured = JSON.parse(readFileSync(stdout, 'utf8')); }
-  catch (error) { throw new Error('Native macOS probe result could not be read', { cause: processFailure ?? error }); }
-  if (measured.error) {
-    const { stage, osStatus, errno } = measured.error;
-    throw new Error(`Native macOS probe failed: stage=${stage} osStatus=${osStatus} errno=${errno}`, { cause: processFailure });
-  }
-  if (processFailure) throw processFailure;
-  try { snapshot(directory); }
-  catch (error) { console.error(`Native post-signal process snapshot: ${error.message}`); }
-  assert.equal(measured.inputAuthorization?.final, 3, 'Probe recording consent must precede native I/O');
-  assert.equal(measured.activityProtection, true, 'Finite measurement must retain its native activity');
-  assert.equal(measured.complete, true);
-  assert.equal(measured.channelOrder, true);
-  for (const field of ['missingFrames', 'repeatedFrames', 'corruptFrames', 'nonfiniteSamples']) assert.equal(measured[field], 0, field);
-  assert.ok(measured.receivedFrames >= 24000);
-  writeFileSync(join(directory, 'native-signal.json'), JSON.stringify(measured, null, 2) + '\n', { flag: 'wx' });
 }
 
 export function analyseRecording(path) { return analyseRf64(readFileSync(path)); }

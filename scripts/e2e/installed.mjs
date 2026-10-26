@@ -455,12 +455,15 @@ export async function qualifyMode({
       directory: output,
       measure: (diagnostics) => scenario('AUDIO-01', async () => {
         await nativeSignal(device, output, target.os, { ...diagnostics,
+          measurementBoundary: ui.measurementBoundary,
           schedulerTrace: Boolean(!baselineDirectory && process.env.MIXRELAY_E2E_SCHEDULER_TRACE === 'true') });
         return [
           {
             file: 'native-signal.json',
             sha256: digest(readFileSync(join(output, 'native-signal.json'))),
           },
+          ...(target.os === 'macos' ? ['native-probe-authorization.json', 'native-permission-observation.json']
+            .map(file => ({ file, sha256: digest(readFileSync(join(output, file))) })) : []),
         ];
       }),
       finalize: () => scenario('REC-02', async () => {
