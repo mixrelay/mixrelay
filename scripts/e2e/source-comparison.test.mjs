@@ -9,12 +9,13 @@ import { analyseSourceComparison } from './source-comparison-analysis.mjs';
 import { recordSourceComparison } from './source-comparison-recording.mjs';
 import { prepareSourceComparison } from './prepare-source-comparison.mjs';
 import { compareMacosSources } from './macos-source-comparison.mjs';
+import { probeRangeHash } from './probe-signal.mjs';
 
 function fixture(order) {
   const plan = sourceComparisonPlan(order), source = sourceComparisonPcm(plan), frames = Math.ceil(plan.frames / 512) * 512;
   const capture = Buffer.alloc(frames * 8); source.copy(capture);
   const metrics = { sourceFrames: plan.frames, recordedFrames: frames, origin: 100000, hasOrigin: true,
-    rate: 48000, channels: 2, bufferFrames: 512, inputCallbacks: frames / 512, outputCallbacks: frames / 512,
+    rate: 48000, channels: 2, bufferFrames: 512, timestampPeriod: 16384, inputCallbacks: frames / 512, outputCallbacks: frames / 512,
     invalidBuffers: 0, invalidTimestamps: 0, overflow: 0, droppedChunks: 0, activityProtection: true,
     completed: true, captureSaved: true, traceSaved: true, traceDisabled: true,
     nativeStatus: { create: 0, start: 0, stop: 0, destroy: 0 }, inputAuthorization: { initial: 3, final: 3, requested: false } };
@@ -67,7 +68,7 @@ test('a 48-frame previous-period replay in audible PCM is retained as an exact f
   const result = analyse(data);
   assert.equal(result.passed, false);
   assert.equal(result.segments[0].wrongFrames, 48);
-  assert.deepEqual(result.segments[0].differences, [{ start, end: start + 48, recordedStart: start }]);
+  assert.deepEqual(result.segments[0].differences, [{ start, end: start + 48, recordedStart: start, matchesPreviousTimestampPeriod: true }]);
 });
 
 test('callback host time must advance even when the source is silent', () => {
@@ -117,8 +118,14 @@ test('both fixed source orders run once with the same executable and retain a fa
     writeFileSync(output, JSON.stringify(data.metrics));
     writeFileSync(args[args.indexOf('--stderr') + 1], `timebase,125,3\n${data.rows.map(row => row.join(',')).join('\n')}\n`);
     writeFileSync(args.at(-2), data.capture);
-    writeFileSync(args.at(-1), JSON.stringify({ version: 3, capacity: 8192, issued: 1, dropped: 0,
-      rows: [[1, 1, 100000, 512, 1, 512, 512, '0000000000000000', 3, 10, 11]] }));
+    const rows = [];
+    for (let first = 0; first < data.metrics.recordedFrames; first += 512) {
+      const full = data.plan.segments.find(segment => first >= segment.start && first + 512 <= segment.end);
+      const hash = full?.kind === 'audible' ? probeRangeHash(first, 512, 2) : '51d88627df287325';
+      for (const render of [1, 0]) rows.push([rows.length + 1, render, 100000 + first, 512, 1, 512,
+        full?.kind === 'audible' ? 0 : 512, hash, render ? 3 : 0, 10 + first, 11 + first]);
+    }
+    writeFileSync(args.at(-1), JSON.stringify({ version: 3, capacity: 8192, issued: rows.length, dropped: 0, rows }));
   };
   await assert.rejects(compareMacosSources({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.test'] }, join(directory, 'evidence'), {
     execute, prepare: () => bundle, measurementBoundary: async (measure, options) => { receipts.push(options.receiptDirectory); return measure(); },

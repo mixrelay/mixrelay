@@ -94,6 +94,16 @@ export function analyseSourceComparison(plan, source, metrics, timing, capture) 
         difference.end++;
       }
     }
+    const period = metrics.timestampPeriod;
+    if (Number.isSafeInteger(period) && period > 0) for (const difference of result.differences) {
+      const earlierStart = difference.start - period, earlierEnd = difference.end - period;
+      if (!plan.segments.some(segment => segment.kind === 'audible' && earlierStart >= segment.start && earlierEnd <= segment.end)) continue;
+      let matches = true;
+      for (let frame = 0; frame < difference.end - difference.start && matches; frame++) for (let channel = 0; channel < 2; channel++)
+        matches &&= capture.readUInt32LE((difference.recordedStart + frame) * 8 + channel * 4)
+          === source.readUInt32LE((earlierStart + frame) * 8 + channel * 4);
+      difference.matchesPreviousTimestampPeriod = matches;
+    }
     result.passed = [result.input, result.output].every(side => side.missingFrames === 0 && side.duplicateFrames === 0)
       && result.wrongFrames === 0 && result.nonfiniteSamples === 0;
     return result;

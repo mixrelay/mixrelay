@@ -7,6 +7,7 @@ import { analyseHalIo } from './analyse-hal-io.mjs';
 import { prepareSourceComparison } from './prepare-source-comparison.mjs';
 import { sourceComparisonPlan, sourceComparisonPcm, sourceOrders } from './source-comparison-plan.mjs';
 import { analyseSourceComparison } from './source-comparison-analysis.mjs';
+import { analyseSourceNative } from './source-comparison-native.mjs';
 
 const save = (directory, file, value) => writeFileSync(join(directory, file), JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 
@@ -45,11 +46,13 @@ export async function compareMacosSources(device, directory, { measurementBounda
         const metrics = JSON.parse(readFileSync(join(output, 'native.json'), 'utf8'));
         assert.equal(metrics.error, undefined, 'Native source comparison failed before drain');
         const analysis = analyseSourceComparison(plan, source, metrics, readFileSync(join(output, 'timing.csv'), 'utf8'), readFileSync(join(output, 'capture.f32')));
-        const trace = analyseHalIo(JSON.parse(readFileSync(join(output, 'hal-io.json'), 'utf8')));
+        const rawTrace = JSON.parse(readFileSync(join(output, 'hal-io.json'), 'utf8'));
+        const trace = analyseHalIo(rawTrace), native = analyseSourceNative(rawTrace, plan, source, metrics.origin);
         const traceComplete = trace.retention.issued > 0 && trace.retention.writerDropped === 0
           && trace.retention.notRetainedRecentRows === 0 && trace.retention.observationsBeyondCapacity === 0;
-        save(output, 'analysis.json', { ...analysis, trace, traceComplete });
-        results.push({ order, passed: analysis.passed && traceComplete, segments: analysis.segments,
+        const passed = analysis.passed && traceComplete && native.nativeEvidenceComplete;
+        save(output, 'analysis.json', { ...analysis, passed, callbackAndPayloadPassed: analysis.passed, trace, traceComplete, native });
+        results.push({ order, passed, segments: analysis.segments,
           traceRetention: trace.retention });
       } catch (error) { errors.push({ order, boundary: 'evidence_analysis', message: error.message }); }
       // A timed-out LaunchServices wait may leave the app running. Reap it before any further IO.
