@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { sourceComparisonPlan, sourceComparisonPcm, sourceOrders } from './source-comparison-plan.mjs';
 import { analyseSourceNative } from './source-comparison-native.mjs';
 import { analyseSourceComparison } from './source-comparison-analysis.mjs';
+import { analyseSourceRecording } from './source-recording-analysis.mjs';
 
 const { values, positionals } = parseArgs({ allowPositionals: true,
   options: { help: { type: 'boolean' }, output: { type: 'string' } } });
@@ -28,8 +29,10 @@ else {
       callbackAndPayload: analyseSourceComparison(plan, source, metrics, readFileSync(join(directory, 'timing.csv'), 'utf8'), readFileSync(join(directory, 'capture.f32'))),
       ...analyseSourceNative(trace, plan, source, metrics.origin) };
   });
+  const recording = readFileSync(join(positionals[0], 'recording.wav'));
   const result = { analysisRevision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-    qualificationReplacement: false, reports };
+    qualificationReplacement: false, reports,
+    recording: { recordingSha256: createHash('sha256').update(recording).digest('hex'), ...analyseSourceRecording(recording) } };
   const json = JSON.stringify(result, null, 2) + '\n';
   if (values.output) writeFileSync(values.output, json, { flag: 'wx' });
   else process.stdout.write(json);

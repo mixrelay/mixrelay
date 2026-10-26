@@ -127,10 +127,9 @@ jobs:
           MATRIX: ${{ steps.baseline.outputs.matrix }}
           CONTROL_TRACE: ${{ inputs.linux_control_trace }}
           SCHEDULER_TRACE: ${{ inputs.macos_scheduler_trace }}
-          SOURCE_COMPARISON: ${{ inputs.macos_source_comparison }}
           TARGET_IDS: ${{ inputs.targets }}
         run: |
-          if [[ ( "$CONTROL_TRACE" == true || "$SCHEDULER_TRACE" == true || "$SOURCE_COMPARISON" == true ) && -z "$TARGET_IDS" ]]; then
+          if [[ ( "$CONTROL_TRACE" == true || "$SCHEDULER_TRACE" == true ) && -z "$TARGET_IDS" ]]; then
             echo 'Additional diagnosis requires explicit target IDs; full qualification uses the required suite'
             exit 1
           fi

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compareMacosSources } from './macos-source-comparison.mjs';
+import { analyseSourceRecording } from './source-recording-analysis.mjs';
 
 // Keep the same from_os graph active through both source orders and finalize its take.
 export async function recordSourceComparison({ api, controlTake, recorderPath, revision,
@@ -24,6 +26,10 @@ export async function recordSourceComparison({ api, controlTake, recorderPath, r
       writeFileSync(join(directory, 'recording-stop.json'), JSON.stringify(stopped, null, 2) + '\n', { flag: 'wx' });
       assert.equal(stopped.state, 'stopped');
       assert.equal(stopped.error, null);
+      const bytes = readFileSync(join(directory, 'recording.wav'));
+      const analysis = { recordingSha256: createHash('sha256').update(bytes).digest('hex'), ...analyseSourceRecording(bytes) };
+      writeFileSync(join(directory, 'recording-analysis.json'), JSON.stringify(analysis, null, 2) + '\n', { flag: 'wx' });
+      assert.ok(analysis.passed, 'Engine recording lost, repeated or changed source PCM; see recording-analysis.json');
     } catch (error) { errors.push(error); }
   }
   if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join('; '));
