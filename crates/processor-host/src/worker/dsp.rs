@@ -127,6 +127,9 @@ pub(crate) fn process_packet(
         plugin.process(frames)
     };
     if let Err(error) = result {
+        if let Some(cause) = error.native_cause() {
+            shared.header().process_faults.record_native(cause);
+        }
         shared.header().process_faults.record(error.kind());
         plugin.bypass(frames);
     }

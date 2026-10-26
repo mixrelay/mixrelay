@@ -258,6 +258,7 @@ fn fail_worker(
     tracing::warn!(
         os = std::env::consts::OS,
         boundary = "native_processor",
+        native_format = control.native_format(),
         phase,
         cause,
         pid,
@@ -276,6 +277,23 @@ fn report_process_faults(
     observer: &mut crate::process_fault::FaultObserver,
 ) {
     let header = control.shared.header();
+    if let Some(fault) = observer.native_failure(&header.process_faults) {
+        let native_code = match fault {
+            truce_rack_core::ProcessFault::NativeStatus(code) => Some(code),
+            _ => None,
+        };
+        tracing::warn!(
+            os = std::env::consts::OS,
+            boundary = "native_processor",
+            native_format = control.native_format(),
+            phase = "process",
+            cause = "first_native_process_failure",
+            ?fault,
+            native_code,
+            instance_id = header.instance_id,
+            "hosted processor native failure detail"
+        );
+    }
     for delta in observer
         .observe(&header.process_faults)
         .into_iter()
@@ -284,6 +302,7 @@ fn report_process_faults(
         tracing::warn!(
             os = std::env::consts::OS,
             boundary = "native_processor",
+            native_format = control.native_format(),
             phase = delta.kind.phase(),
             cause = delta.kind.cause(),
             instance_id = header.instance_id,

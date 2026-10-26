@@ -48,7 +48,7 @@ const WORKER_START_TIMEOUT: Duration = Duration::from_secs(15);
 /// Each independently hosted processor receives its own bounded capture opportunity.
 pub const PROCESSOR_STATE_TIMEOUT: Duration = Duration::from_secs(5);
 const SHARED_MAGIC: u64 = 0x4d52_5653_5433_3031;
-const SHARED_VERSION: u32 = 10;
+const SHARED_VERSION: u32 = 11;
 const PARAMETER_CAPACITY: usize = 4096;
 const STATE_CAPACITY: usize = mixrelay_processor_state::MAX_STATE_BYTES;
 const STATE_OK: u32 = 0;

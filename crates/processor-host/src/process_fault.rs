@@ -1,6 +1,7 @@
 //! Fixed native failure counters, observed and reported by the parent monitor outside DSP.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+mod native;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FaultKind {
@@ -49,13 +50,19 @@ impl FaultKind {
 #[repr(C)]
 pub(super) struct ProcessFaults {
     counts: [AtomicU64; FaultKind::ALL.len()],
+    native: native::FirstFailure,
 }
 
 impl ProcessFaults {
     pub(super) fn new() -> Self {
         Self {
             counts: std::array::from_fn(|_| AtomicU64::new(0)),
+            native: native::FirstFailure::new(),
         }
+    }
+
+    pub(super) fn record_native(&self, error: &truce_rack_core::Error) {
+        self.native.record(error);
     }
 
     pub(super) fn record(&self, kind: FaultKind) {
@@ -82,9 +89,22 @@ pub(super) struct FaultDelta {
 #[derive(Default)]
 pub(super) struct FaultObserver {
     reported: [u64; FaultKind::ALL.len()],
+    native_reported: bool,
 }
 
 impl FaultObserver {
+    pub(super) fn native_failure(
+        &mut self,
+        faults: &ProcessFaults,
+    ) -> Option<truce_rack_core::ProcessFault> {
+        if self.native_reported {
+            return None;
+        }
+        let fault = faults.native.read()?;
+        self.native_reported = true;
+        Some(fault)
+    }
+
     pub(super) fn observe(
         &mut self,
         faults: &ProcessFaults,

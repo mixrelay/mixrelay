@@ -61,7 +61,8 @@ impl HostedExternalProcessor {
             block_frames,
         };
         let (shared, control) = shared_transport::create(&shared_path, layout)?;
-        let control = Arc::new(HostedProcessorControl::new(control));
+        let control =
+            Arc::new(HostedProcessorControl::new(control).with_format(entry.rack.locator.format));
         if let Err(error) = state::write_worker_config(
             &config_path,
             format.sample_rate,

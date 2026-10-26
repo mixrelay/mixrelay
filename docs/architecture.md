@@ -213,6 +213,9 @@ creator와 DSP의 native 호출 진행은 서로 다른 고정 lane에 게시한
 부모의 명시 응답 요청이 없으면 이 timeout 대상이 아니다. native 오류·불량 PCM과 늦은 wet 응답은
 블록 좌표가 맞는 dry 경로로 대체하며 다른 인스턴스의 실행을 중지하지 않는다.
 형식 어댑터는 native instance·processing·editor를 각각 소유하고 RT 이벤트 저장소는 준비 때 확보한다.
+부모 control owner는 catalog의 플러그인 형식을 보존한다. 첫 typed process 실패와 native 상태값은
+고정 크기 공유 슬롯에 한 번 게시하고, 부모 monitor가 OS·형식·단계·인스턴스와 함께 기록한다.
+원인과 상태값은 release/acquire로 함께 확정하며 오류 개수는 독립 계수로 계속 관찰한다.
 
 ## 크레이트를 만들 때
 - 플랫폼 중립 크레이트는 `crates/`, OS 어댑터는 `native/<os>/`, 실행 파일은 `apps/`에 둔다. 이름은 `mixrelay-<역할>`이다. 기존 C 라이브러리 바인딩만 담는 새 크레이트는 `-sys`로 끝낸다(M-FFI-NAMING).

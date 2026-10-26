@@ -286,6 +286,7 @@ impl Drop for ProcessorControlRegistration {
 }
 
 pub(super) struct HostedProcessorControl {
+    native_format: Option<crate::RackFormat>,
     pub(super) shared: ControlMailbox,
     // Keep this after `shared`: its Drop unlinks only after the mailbox mapping closes.
     transport_file_cleanup: SharedTransportFileCleanup,
@@ -299,6 +300,7 @@ pub(super) struct HostedProcessorControl {
 impl HostedProcessorControl {
     pub(super) fn new(shared: ControlMailbox) -> Self {
         Self {
+            native_format: None,
             shared,
             transport_file_cleanup: SharedTransportFileCleanup::default(),
             input_writer: Mutex::new(()),
@@ -307,6 +309,16 @@ impl HostedProcessorControl {
             last_retry: Mutex::new(None),
             timing: timing::TimingMetrics::default(),
         }
+    }
+
+    pub(super) fn with_format(mut self, format: crate::RackFormat) -> Self {
+        self.native_format = Some(format);
+        self
+    }
+
+    pub(super) fn native_format(&self) -> &'static str {
+        self.native_format
+            .map_or("unknown", crate::RackFormat::argument)
     }
 
     pub(super) fn own_transport_file(&self, path: PathBuf) {

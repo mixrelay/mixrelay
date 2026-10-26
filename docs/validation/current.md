@@ -26,7 +26,7 @@ macOS 15 ARM 통과, 15 Intel·26 Intel 실패다. 선택한 세 대상의 정�
 큐의 저장량·그래프 따라잡기 범위를 함께 바꾸고 재생 지연 목표는 callback burst로 유지한다.
 macOS 전체 workspace의 lib·bin 시험과 실패 수정 후 영향 범위 재검사를 완료했다.
 전체 소스의 strict all-targets clippy·fmt·미사용 의존·크레이트 계층 검사도 통과했다.
-AU 35개, CLAP 69개, VST3 111개와 실제 child crash·hang 격리 192개가 통과했다.
+AU 35개, CLAP 69개, VST3 111개와 실제 child crash·hang 격리와 오류 관찰을 포함한 processor-host 196개가 통과했다.
 Linux 코드는 정적 확인과 pure 회귀를 마쳤으나 실제 Linux native 실행은 아직 미확인이다.
 AU·LV2 별도 manifest 시험과 Linux C callback fixture는 OS별 필수 source gate에 연결했다.
 

@@ -62,6 +62,13 @@ pub(crate) enum ProcessFailure {
 }
 
 impl ProcessFailure {
+    pub(crate) const fn native_cause(&self) -> Option<&truce_rack_core::Error> {
+        match self {
+            Self::Native(error) => Some(error),
+            _ => None,
+        }
+    }
+
     pub(crate) const fn kind(&self) -> crate::process_fault::FaultKind {
         use crate::process_fault::FaultKind;
         match self {
