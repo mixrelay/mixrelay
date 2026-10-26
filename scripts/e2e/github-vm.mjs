@@ -17,6 +17,7 @@ import { createServer } from 'node:net';
 import { arch, availableParallelism, platform } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { finished } from 'node:stream/promises';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadContract } from '../support-contract.mjs';
@@ -169,6 +170,11 @@ export function command(program, args, { timeout = 60000, log, allowFailure = fa
     const child = spawn(program, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     activeCommands.add(child);
     const stream = log && createWriteStream(log, { flags: 'a' });
+    // Observe write errors immediately and retain the flush result until the child closes.
+    const logFinished = stream ? finished(stream).then(() => null, error => {
+      child.kill('SIGKILL');
+      return error;
+    }) : Promise.resolve(null);
     let output = '',
       settled = false;
     for (const pipe of [child.stdout, child.stderr])
@@ -186,11 +192,14 @@ export function command(program, args, { timeout = 60000, log, allowFailure = fa
       clearTimeout(timer);
       stream?.end();
       activeCommands.delete(child);
-      if (interrupted) reject(new Error('VM job was interrupted'));
-      else if (error) reject(error);
-      else if (code !== 0 && !allowFailure)
-        reject(new Error(`${program} exited ${code}; ${log ? `see ${log}` : output.slice(-2000)}`));
-      else resolvePromise({ code, output: output.trim() });
+      // Child close drains its pipes; the evidence file has a separate flush lifetime.
+      logFinished.then(logError => {
+        if (interrupted) reject(new Error('VM job was interrupted'));
+        else if (error || logError) reject(error ?? logError);
+        else if (code !== 0 && !allowFailure)
+          reject(new Error(`${program} exited ${code}; ${log ? `see ${log}` : output.slice(-2000)}`));
+        else resolvePromise({ code, output: output.trim() });
+      });
     };
     child.once('error', (error) => complete(error));
     child.once('close', (code) => complete(null, code));

@@ -17,6 +17,25 @@ fn mixer(render: u32, capture: u32) -> ClientMix {
 }
 
 #[test]
+fn private_queue_epoch_exhaustion_replaces_grants_without_reusing_old_pcm() {
+    let mut mixer = mixer(2, 2);
+    let mut clock = crate::clock::Clock::new(48_000, 1, 1).unwrap();
+    let revision = mixer.revision();
+    for generation in 0..=u64::from(u16::MAX) {
+        clock.running = false;
+        assert!(clock.start(generation + 1));
+        assert!(mixer.publish_clock(&clock, true));
+    }
+    assert!(mixer.revision() > revision);
+    let mut output = [9.0; 256];
+    assert_eq!(mixer.capture(0, &mut output, 128).available, 0);
+    assert_eq!(output.map(f32::to_bits), [0.0_f32.to_bits(); 256]);
+    assert!(mixer.render(42, 0, &[0.375; 256], 128).accepted);
+    assert_eq!(mixer.capture(0, &mut output, 128).available, 128);
+    assert_eq!(output.map(f32::to_bits), [0.375_f32.to_bits(); 256]);
+}
+
+#[test]
 fn a_prepared_client_output_survives_missing_postmix_cycles_and_different_capture_widths() {
     let mixer = mixer(2, 2);
     let source: Vec<_> = (0..1024_u16)

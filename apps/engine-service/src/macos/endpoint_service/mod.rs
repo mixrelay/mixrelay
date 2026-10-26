@@ -1,8 +1,9 @@
-//! Graph-owned application source attachments behind the dispatch/XPC ABI adapter.
+//! Graph source registries and authenticated attachments behind the dispatch/XPC ABI adapter.
 mod dispatch;
 mod source;
 #[cfg(test)]
 mod tests;
+mod virtual_pcm;
 mod xpc;
 use dispatch::Dispatch;
 pub use mixrelay_macos_transport::source_registry::SourceClock;
@@ -13,6 +14,7 @@ static SERVICE: OnceLock<Service> = OnceLock::new();
 static START_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 struct Service {
     sources: SourceRegistry,
+    virtual_pcm: virtual_pcm::VirtualPcm,
     peers: parking_lot::Mutex<xpc::Peers>,
     dispatch: parking_lot::Mutex<Option<Dispatch>>,
 }
@@ -23,8 +25,21 @@ pub fn source_registry() -> Option<&'static SourceRegistry> {
     SERVICE.get().map(|service| &service.sources)
 }
 
-/// Starts graph-owned application-source XPC. Driver inventory and basic loopback
-/// are owned by the independent Driver service and are never created here.
+/// The independent registry for authenticated virtual-device PCM; no application grants.
+#[must_use]
+pub fn virtual_source_registry() -> Option<&'static SourceRegistry> {
+    SERVICE.get().map(|service| &service.virtual_pcm.sources)
+}
+
+/// Drains virtual input workers on engine shutdown, outside the graph's realtime owner.
+pub fn stop_virtual_sources() {
+    if let Some(service) = SERVICE.get() {
+        service.virtual_pcm.clear();
+    }
+}
+
+/// Starts graph source XPC for console-owned application producers and HAL PCM grants.
+/// The independent Driver service owns inventory and basic loopback.
 #[unsafe(no_mangle)]
 pub extern "C" fn mr_engine_service_start() -> i32 {
     let _start = START_LOCK.lock();
@@ -32,6 +47,7 @@ pub extern "C" fn mr_engine_service_start() -> i32 {
         && SERVICE
             .set(Service {
                 sources: SourceRegistry::new(),
+                virtual_pcm: virtual_pcm::VirtualPcm::new(),
                 peers: parking_lot::Mutex::new(xpc::Peers::default()),
                 dispatch: parking_lot::Mutex::new(None),
             })

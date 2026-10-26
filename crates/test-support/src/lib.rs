@@ -17,11 +17,31 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 /// Ownership cannot be cloned or transferred to an arbitrary filesystem path.
 pub struct FixtureDir(PathBuf);
 
+#[derive(Clone, Copy)]
+enum FixtureKind {
+    Artifacts,
+    Ipc,
+}
+
 impl FixtureDir {
     /// Creates an isolated fixture under `target/test-artifacts`.
     /// # Errors
     /// Rejects unsafe labels and reports directory creation failures.
     pub fn new(label: &str) -> io::Result<Self> {
+        Self::create(label, FixtureKind::Artifacts)
+    }
+
+    /// Creates a checkout-local socket fixture under `target/.ipc`. Its fixed
+    /// suffix keeps PID/counter growth out of the Unix socket path budget.
+    /// # Errors
+    /// Rejects invalid labels, checkouts too long for a 12-byte socket filename,
+    /// and directory creation failures.
+    pub fn ipc(label: &str) -> io::Result<Self> {
+        Self::create(label, FixtureKind::Ipc)
+    }
+
+    fn create(label: &str, kind: FixtureKind) -> io::Result<Self> {
+        let ipc = matches!(kind, FixtureKind::Ipc);
         if label.is_empty()
             || !label
                 .bytes()
@@ -44,7 +64,7 @@ impl FixtureDir {
                 "fixture Cargo target must remain inside its checkout",
             ));
         }
-        let root = target.join("test-artifacts");
+        let root = target.join(if ipc { ".ipc" } else { "test-artifacts" });
         fs::create_dir_all(&root)?;
         let root = root.canonicalize()?;
         if !root.starts_with(&workspace) {
@@ -53,14 +73,35 @@ impl FixtureDir {
                 "fixture directory must remain inside its checkout",
             ));
         }
-        for _ in 0..128 {
-            let path = root.join(format!(
-                "{label}-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
+        // macOS allows 103 pathname bytes; leave a separator and 12-byte socket
+        // name after label, hyphen and the eight-byte hexadecimal fixture suffix.
+        if ipc && root.as_os_str().as_encoded_bytes().len() + label.len() + 23 > 103 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "checkout path exceeds the Unix socket fixture budget",
             ));
+        }
+        for _ in 0..128 {
+            let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+            let name = if ipc {
+                let [a, b, c, d, ..] = sequence.to_le_bytes();
+                let suffix =
+                    std::process::id().wrapping_mul(0x9e37_79b9) ^ u32::from_le_bytes([a, b, c, d]);
+                format!("{label}-{suffix:08x}")
+            } else {
+                format!("{label}-{}-{sequence}", std::process::id())
+            };
+            let path = root.join(name);
             match fs::create_dir(&path) {
-                Ok(()) => return Ok(Self(path)),
+                Ok(()) => {
+                    let fixture = Self(path);
+                    #[cfg(unix)]
+                    if ipc {
+                        use std::os::unix::fs::PermissionsExt;
+                        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700))?;
+                    }
+                    return Ok(fixture);
+                }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(error),
             }
@@ -108,6 +149,32 @@ impl Drop for FixtureDir {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn socket_fixture_has_a_fixed_short_name_private_permissions_and_owned_cleanup() {
+        let path = {
+            let directory = FixtureDir::ipc("ipc").unwrap();
+            assert_eq!(directory.file_name().unwrap().as_encoded_bytes().len(), 12);
+            assert!(
+                directory
+                    .join("engine.sock")
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .len()
+                    <= 103
+            );
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(
+                    directory.metadata().unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+            }
+            directory.path().to_owned()
+        };
+        assert!(!path.exists());
+    }
 
     #[test]
     fn owned_nested_artifacts_are_removed_on_scope_exit() {

@@ -12,17 +12,16 @@ pub(crate) fn record_sources(
     completed: bool,
     epoch: u64,
 ) {
-    let Some(sources) = sources else { return };
     let _ = processor.acknowledge_content_latency();
-    for source in processor
-        .plan()
-        .source_bindings()
-        .iter()
-        .filter(|source| source.kind() == NodeKind::ApplicationCapture)
-    {
+    for source in processor.plan().source_bindings().iter().filter(|source| {
+        source.kind() == NodeKind::ApplicationCapture || source.virtual_endpoint_id().is_some()
+    }) {
         let id = source.node_id().as_str();
+        let Some(sources) = super::super::binding_sources(source, sources) else {
+            continue;
+        };
         sources.record_content_latency(
-            super::super::source_token(id),
+            super::super::binding_token(source),
             processor.plan().revision(),
             epoch,
             completed && processor.binding_content_latency_ready(id, true),
@@ -36,14 +35,14 @@ pub(super) fn append_observations(
     pending: bool,
     observations: &mut BTreeMap<String, Observation>,
 ) {
-    let Some(sources) = sources else { return };
-    for source in plan
-        .source_bindings()
-        .iter()
-        .filter(|source| source.kind() == NodeKind::ApplicationCapture)
-    {
+    for source in plan.source_bindings().iter().filter(|source| {
+        source.kind() == NodeKind::ApplicationCapture || source.virtual_endpoint_id().is_some()
+    }) {
         let id = source.node_id().as_str();
-        let Some(snapshot) = sources.content_latency(super::super::source_token(id)) else {
+        let Some(sources) = super::super::binding_sources(source, sources) else {
+            continue;
+        };
+        let Some(snapshot) = sources.content_latency(super::super::binding_token(source)) else {
             continue;
         };
         let context = snapshot.context;
@@ -53,7 +52,9 @@ pub(super) fn append_observations(
             Observation {
                 // Registry leases are unique, bounded to 48 bits. Reserve the high bit
                 // to keep source identities separate from native device owner counters.
-                identity: (1 << 63) | context.lease,
+                identity: (1 << 63)
+                    | (u64::from(source.virtual_endpoint_id().is_some()) << 62)
+                    | context.lease,
                 epoch: context.epoch,
                 graph_epoch: context.graph_epoch,
                 generation: context.format,

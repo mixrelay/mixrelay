@@ -42,6 +42,16 @@ pub struct TransportError {
     /// POSIX error, or zero when no system call failed.
     pub system_error: i32,
 }
+impl std::fmt::Display for TransportError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "source transport {:?} (system {})",
+            self.code, self.system_error
+        )
+    }
+}
+impl std::error::Error for TransportError {}
 
 unsafe extern "C" {
     // This single platform glue operation owns the XPC blocks-based connection.
@@ -51,7 +61,7 @@ unsafe extern "C" {
 // SAFETY: attachment contains one uniquely owned descriptor from the source
 // codec/registry. The registry's published backing object is never truncated;
 // its headers remain immutable while producer and consumer use atomic payloads.
-unsafe fn attach(
+pub(super) unsafe fn attach(
     attachment: &mut SourceAttachment,
     capacity: u32,
     channels: u32,

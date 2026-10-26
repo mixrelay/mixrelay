@@ -20,17 +20,17 @@ async fn a_missing_socket_directory_is_a_bind_failure() {
         .await
         .unwrap_err();
     assert!(matches!(error, ControlServiceError::Bind { .. }));
-    let fixture = fixture(line!());
+    let fixture = fixture();
     assert!(
-        ControlService::bind(Ok(fixture.path().join("ipc")))
+        ControlService::bind(Ok(fixture.path().to_owned()))
             .await
             .is_ok()
     );
 }
 
 /// An isolated socket directory; never the session's real one.
-fn fixture(line: u32) -> mixrelay_test_support::FixtureDir {
-    mixrelay_test_support::FixtureDir::new(&format!("engine-ipc-{line}")).expect("fixture")
+fn fixture() -> mixrelay_test_support::FixtureDir {
+    mixrelay_test_support::FixtureDir::ipc("eng").expect("fixture")
 }
 
 fn backend() -> Arc<dyn ControlBackend> {
@@ -180,8 +180,8 @@ async fn request(address: &std::path::Path, bytes: &[u8]) -> Vec<u8> {
 
 #[tokio::test]
 async fn occupied_control_address_rejects_admission_and_leaves_listener_alive() {
-    let fixture = fixture(line!());
-    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+    let fixture = fixture();
+    let service = ControlService::bind_in(fixture.path())
         .await
         .expect("first owner");
     let address = service.listener.path().to_path_buf();
@@ -203,8 +203,8 @@ async fn occupied_control_address_rejects_admission_and_leaves_listener_alive() 
 
 #[tokio::test]
 async fn dropping_admission_after_startup_failure_releases_the_address() {
-    let fixture = fixture(line!());
-    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+    let fixture = fixture();
+    let service = ControlService::bind_in(fixture.path())
         .await
         .expect("reservation");
     let address = service.listener.path().to_path_buf();
@@ -223,8 +223,8 @@ async fn dropping_admission_after_startup_failure_releases_the_address() {
 
 #[tokio::test]
 async fn public_service_keeps_existing_routes_and_stops_observation_once() {
-    let fixture = fixture(line!());
-    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+    let fixture = fixture();
+    let service = ControlService::bind_in(fixture.path())
         .await
         .expect("reservation");
     let address = service.listener.path().to_path_buf();
@@ -280,8 +280,8 @@ async fn accepted_transaction_finishes_after_observation_stops() {
             "committed"
         }),
     );
-    let fixture = fixture(line!());
-    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+    let fixture = fixture();
+    let service = ControlService::bind_in(fixture.path())
         .await
         .expect("reservation");
     let address = service.listener.path().to_path_buf();
@@ -339,8 +339,8 @@ async fn incomplete_ingress_cannot_hold_any_platform_service_open() {
             }
         }),
     );
-    let fixture = fixture(line!());
-    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+    let fixture = fixture();
+    let service = ControlService::bind_in(fixture.path())
         .await
         .expect("reservation");
     let address = service.listener.path().to_path_buf();
@@ -377,8 +377,8 @@ async fn incomplete_ingress_cannot_hold_any_platform_service_open() {
 
 #[tokio::test]
 async fn signal_failure_still_stops_observation_and_releases_the_endpoint() {
-    let fixture = fixture(line!());
-    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+    let fixture = fixture();
+    let service = ControlService::bind_in(fixture.path())
         .await
         .expect("reservation");
     let address = service.listener.path().to_path_buf();
@@ -405,8 +405,8 @@ async fn signal_failure_still_stops_observation_and_releases_the_endpoint() {
 async fn disconnected_operation_receipt_drains_before_control_service_returns() {
     let started = Arc::new(AtomicBool::new(false));
     let released = Arc::new(AtomicBool::new(false));
-    let fixture = fixture(line!());
-    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+    let fixture = fixture();
+    let service = ControlService::bind_in(fixture.path())
         .await
         .expect("reservation");
     let address = service.listener.path().to_path_buf();

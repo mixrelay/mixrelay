@@ -31,6 +31,8 @@ test('guest progress reaches the live console and raw evidence without masking a
   assert.match(progress, /native failure\n/);
   assert.equal(readFileSync(log, 'utf8'), progress);
   await assert.rejects(command(process.execPath, ['-e', 'process.exitCode = 7']), /exited 7/);
+  await assert.rejects(command(process.execPath, ['-e', "process.stdout.write('evidence');"],
+    { log: directory, allowFailure: true }), error => error.code === 'EISDIR');
 });
 
 test('cloud guest has a locked account and a job-specific SSH key', () => {

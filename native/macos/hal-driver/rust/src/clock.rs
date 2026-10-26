@@ -27,6 +27,9 @@ pub(crate) struct Clock {
 }
 
 impl Clock {
+    pub(crate) fn transport_epoch(&self) -> (u64, u64) {
+        (self.seed, self.anchor)
+    }
     pub(crate) fn new(rate: u32, numerator: u32, denominator: u32) -> Option<Self> {
         (crate::formats::SAMPLE_RATES.contains(&rate) && numerator > 0 && denominator > 0)
             .then_some(Self {

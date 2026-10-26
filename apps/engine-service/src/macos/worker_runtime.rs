@@ -20,7 +20,7 @@ use mixrelay_realtime::{
 
 /// Clock IDs `next_native_pace` reports for the pacing master.
 pub(super) const HARDWARE_CLOCK: u64 = 2;
-pub(super) const APPLICATION_CLOCK: u64 = 3;
+pub(super) const SHARED_SOURCE_CLOCK: u64 = 3;
 
 /// Polling interval when no device callback can wake the worker (app capture or timer
 /// pacing, or no wakeup semaphore).
@@ -35,7 +35,7 @@ pub(super) enum Path {
     /// The graph moved into a device `IOProc` (direct rendering).
     Direct,
     Hardware,
-    Application,
+    SharedSource,
     Timer,
 }
 
@@ -43,7 +43,7 @@ pub(super) enum Path {
 struct Counts {
     direct: u64,
     hardware: u64,
-    application: u64,
+    shared_source: u64,
     timer: u64,
     idle_waits: u64,
     timeouts: u64,
@@ -85,7 +85,7 @@ fn log(window: &Window) {
     tracing::info!(
         direct = counts.direct,
         hardware_blocks = counts.hardware,
-        application_blocks = counts.application,
+        shared_source_blocks = counts.shared_source,
         timer_blocks = counts.timer,
         idle_waits = counts.idle_waits,
         wait_timeouts = counts.timeouts,
@@ -212,7 +212,7 @@ impl WorkerRuntime {
         let count = match path {
             Path::Direct => &mut self.counts.direct,
             Path::Hardware => &mut self.counts.hardware,
-            Path::Application => &mut self.counts.application,
+            Path::SharedSource => &mut self.counts.shared_source,
             Path::Timer => &mut self.counts.timer,
         };
         *count += 1;
@@ -221,7 +221,7 @@ impl WorkerRuntime {
     }
 
     /// Waits for frame credit. A device clock wakes the worker from its callback; other
-    /// masters (app capture in another process, timer) are polled.
+    /// masters (shared source producers, timer) are polled.
     pub(super) fn wait_for_credit(&mut self, clock_id: u64) {
         self.counts.idle_waits += 1;
         let Some(wake) = self.wake.filter(|_| clock_id == HARDWARE_CLOCK) else {

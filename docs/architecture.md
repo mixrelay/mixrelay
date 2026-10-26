@@ -110,6 +110,27 @@ HAL의 `Clock`은 host 시각에서 nominal timestamp를 계산하고 period·�
 frame stamp·epoch를 검사하고 구간마다 읽기 통계를 갱신한다. 유효한 디지털 무음과 누락을
 구분하며, 콜백에서 큐를 할당하거나 다른 클라이언트를 기다리지 않는다.
 
+HAL의 클라이언트 PCM은 `client_pcm`의 공유 VM에 저장한다. `ClientMix`가 endpoint 전체의
+clock publication과 membership revision을 소유하고, 개별 writer가 PCM·유효 범위·retirement를
+게시한다. 독자는 incarnation·전체 native epoch·anchor·rate·membership이 일치한 창만 사용한다.
+등록 변경 중인 snapshot이나 끝나지 않은 clock publication에서는 cursor를 진행하지 않는다.
+`control::native::pcm`은 엔진 lease가 살아 있을 때만 별도 XPC peer로 완전한 grant 목록을 보낸다.
+Driver 서비스는 장치 인벤토리의 소유자로 유지한다. coreaudiod의 engine Mach-service 접근은
+HAL 번들에 선언하며 엔진은 audio-server UID의 grant 게시와 console 사용자 source 요청을 구분한다.
+
+엔진의 `endpoint_service::virtual_pcm`은 가상 입력 source registry와 endpoint별 pump 수명을
+소유한다. `ClientPcmMixer`는 native sample 좌표의 큐 합산과 forward cursor만 관리하고,
+`Converter`는 기존 SRC·포맷 승인·보류 출력을, `Scheduling`은 worker 정책과 제어 작업의
+실시간 밖 실행을 맡는다. 외부 HAL 독자의 부분 읽기는 이 cursor를 변경하지 않는다.
+시간 credit은 게시된 PCM과 native playhead 범위로 제한한다. 타임스탬프는 worker가 깨어난
+시각이 아니라 native anchor와 프레임 좌표에서 구한다. 같은 클록의 master만 SRC를 우회한다.
+
+`macos::external_io`는 native·application·virtual source 선택과 각 provider의 epoch·읽기를
+담당한다. `VirtualEndpointTransport` 입력은 이 shared source를 사용하고 native 입력 IOProc을
+만들지 않는다. 물리 입력·명시적 `AudioDeviceInput`과 출력은 기존 native 어댑터를 사용한다.
+정지한 virtual source의 남은 PCM은 읽지 않으며, 연결 전 포맷 요청은 허용한다. 장치·client의
+제거는 grant 무효화와 worker 종료·join을 거친 뒤 VM·변환 버퍼를 회수한다.
+
 `HalIoContext`는 기존 공유 매핑의 클럭·epoch·producer activity를 게시한다.
 공유 PCM 링은 현재 매핑 형식의 수명 메타데이터를 보존하며 클라이언트 PCM의 저장소로 사용하지 않는다.
 이 소유자는 PCM의 복사·합산이나 채널 변환 scratch를 관리하지 않는다.

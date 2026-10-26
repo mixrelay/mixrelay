@@ -82,7 +82,10 @@ pub(super) fn specs(document: &GraphDocument) -> BTreeMap<String, Spec> {
             (true, endpoint.capture, "/capture"),
             (false, endpoint.render, "/render"),
         ] {
-            if let Some(stream) = stream {
+            // Owned virtual inputs use the HAL's timestamped shared client queues.
+            // Only output clients enter CoreAudio; input-size cache state is not shared
+            // between the engine's graph quantum and external application readers.
+            if !input && let Some(stream) = stream {
                 selected.insert(
                     format!("{}{suffix}", node.id.as_str()),
                     Spec {
@@ -140,32 +143,22 @@ mod tests {
     };
     use std::sync::Arc;
 
-    fn assert_single_input_owner(selected: BTreeMap<String, Spec>, format: RenderFormat) {
-        use super::super::{MacDevices, device_tests::wait_until, simulated::SimulatedHost};
+    fn assert_no_native_owners(selected: BTreeMap<String, Spec>, format: RenderFormat) {
+        use super::super::{MacDevices, simulated::SimulatedHost};
         let host = SimulatedHost::new();
-        let uid = selected.values().next().unwrap().native_uid().unwrap();
-        host.plug(uid.to_str().unwrap(), 2, 48_000, 0.25);
         let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
         let resources = MacDevices::with_host(status, 48_000, 128, host.clone());
         let (owners, cache) = resources
             .prepare_device_set(&BTreeMap::new(), selected, format)
             .unwrap();
-        assert_eq!(owners.0.len(), 1);
-        assert!(
-            owners
-                .0
-                .values()
-                .all(|device| device.input && device.ready())
-        );
+        assert!(owners.0.is_empty());
         assert!(owners.1.is_empty());
-        assert_eq!(cache.len(), 1);
-        assert_eq!(host.registrations(), 1);
-        drop((owners, cache, resources));
-        wait_until(|| host.registrations() == 0);
+        assert!(cache.is_empty());
+        assert_eq!(host.registrations(), 0);
     }
 
     #[test]
-    fn qualification_recorder_opens_only_a_native_input_without_changing_driver_geometry() {
+    fn qualification_recorder_uses_shared_virtual_input_without_changing_driver_geometry() {
         let document: GraphDocument = serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../crates/audio-graph/src/fixtures/qualification-stereo.json"
@@ -199,25 +192,19 @@ mod tests {
         )
         .unwrap();
         let selected = specs(&composed.document);
-        let native = &composed.native_devices[&canonical.id];
-        assert_eq!(selected.len(), 1);
-        let input = &selected[&format!("{}/capture", native.as_str())];
-        assert!(input.input);
-        assert_eq!(input.channels, 2);
-        assert_eq!(
-            input.selector,
-            DeviceSelector::PersistentUid {
-                uid: endpoint_uid(parse_endpoint_id(canonical.id.as_str()).unwrap()),
-            }
+        assert!(composed.native_devices.contains_key(&canonical.id));
+        assert!(
+            selected.is_empty(),
+            "a graph recorder must not create a CoreAudio input reader"
         );
         assert!(aggregate_members(&selected).is_empty());
         assert_eq!(registry.get(&canonical.id), Some(&canonical));
         assert_eq!(endpoint.spec, canonical);
-        assert_single_input_owner(selected, context.format);
+        assert_no_native_owners(selected, context.format);
     }
 
     #[test]
-    fn driver_clients_attach_native_capture_input_and_render_output_to_one_stable_uid() {
+    fn driver_output_clients_keep_native_uid_while_capture_uses_shared_queues() {
         let mut document: GraphDocument = serde_json::from_value(serde_json::json!({
             "schemaVersion": 2, "revision": 1, "nodes": [{
                 "id":"driver", "type":"virtual_endpoint",
@@ -233,20 +220,11 @@ mod tests {
             document.nodes[0].config = NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
         }
         let selected = specs(&document);
-        assert_eq!(selected.len(), 2);
-        assert!(selected["driver/capture"].input);
-        assert_eq!(selected["driver/capture"].channels, 3);
+        assert_eq!(selected.len(), 1);
+        assert!(!selected.contains_key("driver/capture"));
         assert!(!selected["driver/render"].input);
         assert_eq!(selected["driver/render"].channels, 7);
         let uid = endpoint_uid([1; 16]);
-        assert_eq!(
-            selected["driver/capture"]
-                .native_uid()
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            uid
-        );
         assert_eq!(
             selected["driver/render"]
                 .native_uid()

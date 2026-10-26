@@ -10,6 +10,7 @@ use std::{
 
 type Handle = *mut c_void;
 type Callback = unsafe extern "C" fn(Handle);
+mod pcm;
 
 unsafe extern "C" {
     static _dispatch_source_type_timer: c_char;
@@ -83,6 +84,8 @@ impl Drop for Connection {
 pub(super) struct Native {
     timer: Timer,
     queue: Dispatch,
+    pcm: pcm::Publisher,
+    pcm_pending: std::sync::atomic::AtomicBool,
 }
 
 struct Timer(Dispatch);
@@ -127,11 +130,20 @@ impl Native {
     ) -> Option<Self> {
         let queue = queue?;
         let timer = timer(queue.0.as_ptr())?;
-        Some(Self { timer, queue })
+        Some(Self {
+            timer,
+            queue,
+            pcm: pcm::Publisher::new(),
+            pcm_pending: std::sync::atomic::AtomicBool::new(false),
+        })
     }
 
     pub(super) fn publish(&self, owner: &'static Control<Self>) {
         let context = ptr::from_ref(owner).cast_mut().cast();
+        // SAFETY: the leaked owner retains this serial queue and registry until
+        // process exit. Concurrent SDK control calls only enqueue the PCM event.
+        let signal = unsafe { crate::control_signal::ControlSignal::new(context, request_pcm) };
+        let _ = owner.registry.control_signal.set(signal);
         // SAFETY: Box::leak pins the complete owner before any enqueue. Timer and
         // XPC callbacks share this serial queue; initialization occurs there too.
         unsafe {
@@ -150,6 +162,10 @@ impl Native {
 
 impl Backend for Native {
     type Connection = Connection;
+
+    fn publish_pcm(&self, registry: &crate::registry::Registry) {
+        self.pcm.publish(registry, self.queue.0.as_ptr());
+    }
 
     fn connect(&self, owner: *const c_void, generation: u64) -> Option<Connection> {
         // SAFETY: the owner's only caller is Control::open on this queue. Its
@@ -232,6 +248,38 @@ unsafe extern "C" fn start(context: Handle) {
 unsafe extern "C" fn tick(context: Handle) {
     // SAFETY: timer's context is the leaked owner; delivery is serial with XPC.
     unsafe { &*context.cast::<Control<Native>>() }.tick();
+}
+
+unsafe extern "C" fn request_pcm(context: *const c_void) {
+    // SAFETY: only the immutable queue handle is read concurrently; Publisher's
+    // RefCells are accessed exclusively by the subsequently enqueued callback.
+    let owner = unsafe { &*context.cast::<Control<Native>>() };
+    // Coalesce concurrent SDK control events; registry mutexes publish the actual
+    // membership, so the flag only owns one pending dispatch callback.
+    if owner
+        .backend
+        .pcm_pending
+        .swap(true, std::sync::atomic::Ordering::AcqRel)
+    {
+        return;
+    }
+    unsafe {
+        dispatch_async_f(
+            owner.backend.queue.0.as_ptr(),
+            context.cast_mut(),
+            pcm_changed,
+        );
+    };
+}
+
+unsafe extern "C" fn pcm_changed(context: Handle) {
+    // SAFETY: the process-lifetime owner receives this event on its serial queue.
+    let owner = unsafe { &*context.cast::<Control<Native>>() };
+    owner
+        .backend
+        .pcm_pending
+        .store(false, std::sync::atomic::Ordering::Release);
+    owner.backend.publish_pcm(&owner.registry);
 }
 
 unsafe extern "C" fn event(context: *const c_void, generation: u64, message: Handle) {

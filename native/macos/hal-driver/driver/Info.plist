@@ -21,6 +21,7 @@
 	<key>AudioServerPlugIn_MachServices</key>
 	<array>
 		<string>io.mixrelay.audio.driver</string>
+		<string>io.mixrelay.audio.engine</string>
 	</array>
 	<key>CFPlugInFactories</key>
 	<dict>

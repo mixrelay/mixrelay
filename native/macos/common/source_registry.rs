@@ -1,4 +1,4 @@
-//! Application-source mapping ownership and single-consumer clock policy.
+//! Shared-source mapping ownership and single-consumer clock policy.
 //! Control publishes immutable slot pointers; callbacks only claim atomics.
 //! Old producer mappings stay isolated after replacement and are reclaimed on
 //! control after local readers drain, never on an audio callback.
@@ -355,6 +355,20 @@ impl Default for SourceRegistry {
     }
 }
 impl SourceRegistry {
+    /// Selects pacing authority without changing PCM, format, or producer ownership.
+    pub fn set_clock_master(&self, token: u64, master: bool) -> bool {
+        let read = self.read(token);
+        let Some(source) = read.source() else {
+            return false;
+        };
+        // Release publishes the pacing choice to the producer before its next conversion.
+        source
+            .mapping
+            .clock()
+            .clock_master
+            .store(u32::from(master), Ordering::Release);
+        true
+    }
     #[must_use]
     pub fn new() -> Self {
         Self::with_clock(Box::new(SystemSchedulingClock))
@@ -806,16 +820,7 @@ pub unsafe extern "C" fn mr_engine_source_registry_set_clock_master(
     let Some(registry) = (unsafe { registry.as_ref() }) else {
         return false;
     };
-    let read = registry.read(token);
-    let Some(source) = read.source() else {
-        return false;
-    };
-    source
-        .mapping
-        .clock()
-        .clock_master
-        .store(u32::from(master), Ordering::Release);
-    true
+    registry.set_clock_master(token, master)
 }
 /// # Safety
 /// Registry is live; samples has frames*channels writable floats and does not

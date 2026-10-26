@@ -9,6 +9,7 @@ mod abi;
 mod clock;
 mod control;
 mod control_session;
+mod control_signal;
 mod device;
 mod input_latency;
 #[cfg(target_os = "macos")]

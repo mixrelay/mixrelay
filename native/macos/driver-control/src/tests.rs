@@ -80,14 +80,25 @@ fn external_daw_rate_is_returned_without_mutating_the_stored_intent() {
 }
 
 #[test]
-fn packaged_hal_allows_only_the_independent_driver_mach_service() {
+fn packaged_hal_allows_inventory_and_engine_pcm_mach_services() {
     let plist = include_str!("../../hal-driver/driver/Info.plist");
     let (_, services) = plist
         .split_once("<key>AudioServerPlugIn_MachServices</key>")
         .unwrap();
     let (_, services) = services.split_once("<array>").unwrap();
     let (services, _) = services.split_once("</array>").unwrap();
-    assert_eq!(services.trim(), "<string>io.mixrelay.audio.driver</string>");
+    let entries: Vec<_> = services
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    assert_eq!(
+        entries,
+        [
+            "<string>io.mixrelay.audio.driver</string>",
+            "<string>io.mixrelay.audio.engine</string>"
+        ]
+    );
 }
 
 #[test]

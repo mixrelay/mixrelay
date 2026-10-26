@@ -15,11 +15,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+use external_io::source_token;
+#[cfg(test)]
+use mixrelay_audio_engine::ExternalIo;
 use mixrelay_audio_engine::{
-    BlockProcessor, ExternalBinding, ExternalIo, PeakMeterBank, ProcessorExchange, RenderPlan,
+    BlockProcessor, ExternalBinding, PeakMeterBank, ProcessorExchange, RenderPlan,
 };
 use mixrelay_audio_graph::{CompileContext, CompileLimits, GraphCompiler, RenderFormat};
-use mixrelay_audio_io::process::{ProcessCycle, ProcessReport, TransferOutcome};
+#[cfg(test)]
+use mixrelay_audio_io::process::TransferOutcome;
+use mixrelay_audio_io::process::{ProcessCycle, ProcessReport};
 use mixrelay_engine_service::{
     EngineGraphController, EngineGraphControllerConfig, control_service::ControlService,
     default_peak_meter_bank, endpoint_service, session::AdapterRuntimeStatus,
@@ -33,226 +39,10 @@ pub(super) fn adapter_profile() -> mixrelay_engine_service::session::AdapterProf
 
 use endpoint_backend::MacVirtualEndpointBackend;
 
-unsafe extern "C" {
-    fn mr_engine_service_source_clock(token: u64, snapshot: *mut ApplicationClockSnapshot) -> bool;
-    fn mr_engine_service_set_source_clock_master(token: u64, master: bool) -> bool;
-}
-
-struct MacEngineExternalIo<'a> {
-    sources: Option<&'a mixrelay_macos_transport::source_registry::SourceRegistry>,
-    alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment,
-    capture_time: Option<u64>,
-    align_inputs: bool,
-    devices: &'a super::macos_devices::DeviceSet,
-    /// The admitted cycle's one host label for all of its device transfers.
-    host: u64,
-}
-
-impl<'a> MacEngineExternalIo<'a> {
-    fn new(devices: &'a super::macos_devices::DeviceSet) -> Self {
-        Self {
-            sources: endpoint_service::source_registry(),
-            devices,
-            host: 0,
-            alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment::default(),
-            capture_time: None,
-            align_inputs: false,
-        }
-    }
-
-    fn source_active(&self, binding: &ExternalBinding) -> bool {
-        let id = binding.node_id().as_str();
-        self.devices.binding_present(id, true)
-            || (binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture
-                && self
-                    .sources
-                    .and_then(|sources| sources.clock(source_token(id)))
-                    .is_some_and(|clock| clock.running != 0))
-    }
-}
-
-impl ExternalIo for MacEngineExternalIo<'_> {
-    fn source_epoch(&self, binding: &ExternalBinding) -> Option<u64> {
-        application_epoch(binding, self.sources)
-    }
-
-    fn begin_cycle(
-        &mut self,
-        cycle: &ProcessCycle,
-        controls: mixrelay_audio_engine::ExternalControlState<'_>,
-    ) -> mixrelay_audio_engine::CycleAdmission {
-        self.host = self.devices.graph_host();
-        for (binding, enabled) in controls.sources() {
-            self.devices
-                .set_binding_active(binding.node_id().as_str(), true, enabled);
-        }
-        for (binding, enabled) in controls.sinks() {
-            self.devices
-                .set_binding_active(binding.node_id().as_str(), false, enabled);
-        }
-        let mut active = 0;
-        let mut latest = None;
-        let mut source_period = None;
-        let count = controls
-            .sources()
-            .filter(|(binding, enabled)| {
-                *enabled && binding.is_routed_source() && self.source_active(binding)
-            })
-            .count();
-        self.devices
-            .reserve_capture_alignment(cycle.sample_rate, cycle.frames, count > 0);
-        for (binding, enabled) in controls
-            .sources()
-            .filter(|(binding, enabled)| *enabled && binding.is_routed_source())
-        {
-            let _ = enabled;
-            let id = binding.node_id().as_str();
-            let token = source_token(id);
-            let time = self.devices.capture_time(id, cycle.frames).or_else(|| {
-                self.sources
-                    .and_then(|sources| sources.source_time(token, cycle.sample_rate, cycle.frames))
-            });
-            if self.source_active(binding) {
-                active += 1;
-            }
-            if let Some(time) = time {
-                latest = Some(latest.map_or(time, |old: u64| old.min(time)));
-            }
-            source_period = source_period.or_else(|| {
-                self.sources
-                    .and_then(|sources| sources.source_period(token))
-            });
-        }
-        self.align_inputs = active > 0;
-        self.capture_time = if self.align_inputs {
-            // A source without valid coordinates remains silent independently;
-            // it must not hold every other route in startup priming forever.
-            let period = self
-                .devices
-                .frame_period(cycle.sample_rate)
-                .or(source_period)
-                .unwrap_or(1e9 / f64::from(cycle.sample_rate));
-            self.alignment.begin(*cycle, latest, period)
-        } else {
-            None
-        };
-        mixrelay_audio_engine::CycleAdmission::Process
-    }
-
-    fn read_source(
-        &mut self,
-        binding: &ExternalBinding,
-        destination: &mut [f32],
-        cycle: &ProcessCycle,
-    ) -> TransferOutcome {
-        if self.align_inputs && binding.is_routed_source() {
-            if let Some(time) = self.capture_time {
-                if let Some(outcome) = self.devices.read_aligned(
-                    binding.node_id().as_str(),
-                    destination,
-                    (self.host, time, cycle.sample_rate),
-                ) {
-                    return outcome;
-                }
-                let token = source_token(binding.node_id().as_str());
-                let available = if let Some(sources) = self.sources {
-                    sources.read_audio_time(
-                        token,
-                        destination,
-                        cycle.frames,
-                        mixrelay_macos_transport::source_registry::content_latency::ReadTiming {
-                            rate: cycle.sample_rate,
-                            first_nanos: Some(time),
-                            host_ticks: Some(self.host),
-                        },
-                    )
-                } else {
-                    destination.fill(0.0);
-                    0
-                };
-                return TransferOutcome {
-                    source_sample_faults: self
-                        .sources
-                        .map_or(0, |sources| sources.take_source_faults(token)),
-                    ..TransferOutcome::complete(available)
-                };
-            }
-            destination.fill(0.0);
-            return TransferOutcome {
-                activity: mixrelay_audio_io::process::InputActivity::Priming,
-                ..TransferOutcome::complete(0)
-            };
-        }
-        if let Some(outcome) = self
-            .devices
-            .read(binding.node_id().as_str(), destination, self.host)
-        {
-            return outcome;
-        }
-        read_application(binding, destination, cycle, self.sources, Some(self.host))
-    }
-
-    fn write_sink(
-        &mut self,
-        binding: &ExternalBinding,
-        source: &[f32],
-        _cycle: &ProcessCycle,
-    ) -> TransferOutcome {
-        self.devices
-            .write(binding.node_id().as_str(), source, self.host)
-            .unwrap_or_else(|| TransferOutcome::complete(0))
-    }
-}
-
-fn application_epoch(
-    binding: &ExternalBinding,
-    sources: Option<&mixrelay_macos_transport::source_registry::SourceRegistry>,
-) -> Option<u64> {
-    (binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture).then(|| {
-        sources
-            .and_then(|sources| sources.clock(source_token(binding.node_id().as_str())))
-            .filter(|clock| clock.running != 0)
-            .map_or(0, |clock| clock.epoch)
-    })
-}
-
-fn read_application(
-    binding: &ExternalBinding,
-    destination: &mut [f32],
-    cycle: &ProcessCycle,
-    sources: Option<&mixrelay_macos_transport::source_registry::SourceRegistry>,
-    host: Option<u64>,
-) -> TransferOutcome {
-    let token = source_token(binding.node_id().as_str());
-    let available = if let Some(sources) = sources {
-        sources.read_audio_time(
-            token,
-            destination,
-            cycle.frames,
-            mixrelay_macos_transport::source_registry::content_latency::ReadTiming {
-                rate: cycle.sample_rate,
-                first_nanos: None,
-                host_ticks: host,
-            },
-        )
-    } else {
-        destination.fill(0.0);
-        0
-    };
-    TransferOutcome {
-        source_sample_faults: sources.map_or(0, |sources| sources.take_source_faults(token)),
-        ..TransferOutcome::complete(available)
-    }
-}
-
-fn source_token(source_id: &str) -> u64 {
-    let mut hash = 14_695_981_039_346_656_037_u64;
-    for byte in source_id.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(1_099_511_628_211);
-    }
-    if hash == 0 { 1 } else { hash }
-}
+mod external_io;
+use external_io::{
+    MacEngineExternalIo, application_epoch, binding_sources, binding_token, read_application,
+};
 
 fn prepare_runtime() -> AdapterRuntimeStatus {
     // The processing domain is independent of each endpoint's native rate.
@@ -282,6 +72,7 @@ pub(super) async fn run() -> Result<(), String> {
         mixrelay_engine_service::config_directory(),
     );
     let result = run_owned(signals, tripped).await;
+    endpoint_service::stop_virtual_sources();
     let retired = super::macos_devices::MacDevices::finish_retirement();
     // A killed controller cannot run its own Quit handler. Its OS-owned lease
     // still releases, so the surviving engine finalizes recordings and then
@@ -498,6 +289,8 @@ fn run_audio_worker(
     let result = (|| {
         while !runtime_status.stop_requested() {
             if runtime_status.checkpoint() {
+                timeline.reset();
+                pacers = NativePacers::default();
                 runtime.off_realtime(|| std::thread::sleep(Duration::from_millis(1)));
                 timeline.deadline = Instant::now();
                 continue;
@@ -623,7 +416,7 @@ fn process_worker_block(
     block.runtime.render_at(wake_period);
     block.runtime.record(match clock_id {
         worker_runtime::HARDWARE_CLOCK => worker_runtime::Path::Hardware,
-        worker_runtime::APPLICATION_CLOCK => worker_runtime::Path::Application,
+        worker_runtime::SHARED_SOURCE_CLOCK => worker_runtime::Path::SharedSource,
         _ => worker_runtime::Path::Timer,
     });
     let mut io = MacEngineExternalIo::new(block.devices);
@@ -685,7 +478,7 @@ impl RouteClock {
             if let Some(ready) = devices.clock_synchronized(id, input) {
                 result.synchronized &= ready;
                 result.independent_idle = false;
-            } else if let Some(clock) = application_clock(id) {
+            } else if let Some(clock) = binding_clock(binding) {
                 result.synchronized &= clock.synchronized != 0
                     && clock.graph_rate == processor.plan().format().sample_rate;
                 result.independent_idle &= clock.running == 0;
@@ -698,28 +491,28 @@ impl RouteClock {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SourceKind {
+    Application,
+    Virtual,
+}
+
 #[derive(Default)]
 struct NativePacers {
     hardware: HardwarePacer,
     application: ApplicationPacer,
-    selected_application: Option<u64>,
+    selected_application: Option<(u64, SourceKind)>,
 }
 impl NativePacers {
-    fn select_application_master(&mut self, token: Option<u64>) {
+    fn select_application_master(&mut self, token: Option<(u64, SourceKind)>) {
         if token != self.selected_application
             && let Some(previous) = self.selected_application
         {
-            // SAFETY: bounded registry lookup plus atomic publication only.
-            unsafe {
-                mr_engine_service_set_source_clock_master(previous, false);
-            }
+            set_source_master(previous, false);
         }
         self.selected_application = token;
         if let Some(token) = token {
-            // Idempotent reassertion also covers re-created producer slots.
-            unsafe {
-                mr_engine_service_set_source_clock_master(token, true);
-            }
+            set_source_master(token, true);
         }
     }
 }
@@ -729,10 +522,27 @@ impl Drop for NativePacers {
     }
 }
 
-fn application_clock(id: &str) -> Option<ApplicationClockSnapshot> {
-    let mut clock = ApplicationClockSnapshot::default();
-    // SAFETY: caller storage is fixed-size; registry reads bounded atomics.
-    unsafe { mr_engine_service_source_clock(source_token(id), &raw mut clock) }.then_some(clock)
+fn set_source_master((token, kind): (u64, SourceKind), master: bool) {
+    let sources = match kind {
+        SourceKind::Virtual => endpoint_service::virtual_source_registry(),
+        SourceKind::Application => endpoint_service::source_registry(),
+    };
+    if let Some(sources) = sources {
+        sources.set_clock_master(token, master);
+    }
+}
+
+fn binding_clock(binding: &ExternalBinding) -> Option<ApplicationClockSnapshot> {
+    let clock = binding_sources(binding, endpoint_service::source_registry())?
+        .clock(binding_token(binding))?;
+    Some(ApplicationClockSnapshot {
+        epoch: clock.epoch,
+        native_frames: clock.native_frames,
+        native_rate: clock.native_rate,
+        graph_rate: clock.graph_rate,
+        running: clock.running,
+        synchronized: clock.synchronized,
+    })
 }
 
 fn next_native_pace(
@@ -768,15 +578,20 @@ fn next_native_pace(
     devices.set_clock_master(None);
     devices.set_graph_quantum(format.block_frames);
     for binding in plan.source_bindings() {
-        let id = binding.node_id().as_str();
-        if binding.virtual_endpoint_id().is_none()
-            && let Some(clock) = application_clock(id)
+        if let Some(clock) = binding_clock(binding)
             && clock.running != 0
         {
-            pacers.select_application_master(Some(source_token(id)));
+            pacers.select_application_master(Some((
+                binding_token(binding),
+                if binding.virtual_endpoint_id().is_some() {
+                    SourceKind::Virtual
+                } else {
+                    SourceKind::Application
+                },
+            )));
             return (
                 pacers.application.next(
-                    (source_token(id), clock),
+                    (binding_token(binding), clock),
                     (format.sample_rate, format.block_frames, capacity),
                 ),
                 3,

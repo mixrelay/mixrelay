@@ -39,6 +39,7 @@ pub(crate) struct IoOperation {
 }
 
 pub(crate) struct Registry {
+    pub(crate) control_signal: std::sync::OnceLock<crate::control_signal::ControlSignal>,
     pub(crate) native: NativeOps,
     pub(crate) client_identity_gate: Mutex<()>,
     pub(crate) transport: crate::transport::Transport,
@@ -80,6 +81,7 @@ impl Registry {
         inspection: crate::transport::ProcessInspection,
     ) -> Self {
         Self {
+            control_signal: std::sync::OnceLock::new(),
             native,
             transport: crate::transport::Transport::with_inspection(inspection),
             inspection,
@@ -498,6 +500,9 @@ impl Registry {
         if !add {
             self.reclaim();
         }
+        if let Some(signal) = self.control_signal.get() {
+            signal.notify();
+        }
         OK
     }
 
@@ -533,6 +538,9 @@ impl Registry {
         drop(device);
         if count == 0 {
             self.host.changed(id, RUNNING);
+            if let Some(signal) = self.control_signal.get() {
+                signal.notify();
+            }
         }
         OK
     }

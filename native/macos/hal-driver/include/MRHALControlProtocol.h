@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 /* Engine application-source transport and wake service only.
- * HAL inventory/control connects to the Driver service (io.mixrelay.audio.driver). */
+ * HAL inventory/control connects to Driver; client PCM grants connect to Engine. */
 #define MR_ENGINE_SERVICE_NAME "io.mixrelay.audio.engine"
 
 enum {

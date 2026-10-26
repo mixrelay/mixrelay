@@ -4,6 +4,31 @@
 안정성 경계 후속 대조·구현: 2026-10-17(KST), 기준 커밋 `4a9b064a`, 형식 snapshot 보호 `139b3cef`, 늦은 입력 합류 `df523ee`, 앱 재실행 `cf6d868`, 정렬 경로 범위 `fdd2859`, 최초 PCM 승인·획득 시각 지연 측정 `4252373`, 단일 입력의 시각 읽기·PCM epoch·발행 묶음 `981f8b8`.
 이 문서는 연구 근거이며 별도 제품 backlog가 아니다. 제품 범위와 진행 상태는 [product.md](/Volumes/dev/mixrelay/docs/product.md:396), 설치본 검증 결과는 [current.md](/Volumes/dev/mixrelay/docs/validation/current.md)를 따른다.
 
+## 2026-10-26 가상 입력과 엔진 제어의 추가 대조
+
+같은 Loopback 2.5.0 / ARK 13.5.2의 보관된 함수 본문을 가상 장치 전송뿐 아니라
+그래프 변경·중지·Mute·우회·gain·소스 회수 경계까지 대조했다. 정적 함수 분석이며
+Loopback의 모든 실행 분기나 MixRelay 설치본의 성공을 뜻하지 않는다.
+
+| 경계 | 확인한 Loopback 절차 | MixRelay의 적용·판정 |
+| --- | --- | --- |
+| 자체 가상 장치 입력 | `ECGKAudiodDevice::processIO` `0x1000490b8`은 client queue를 읽고 graph cycle을 실행한다. 자체 endpoint의 classic pass-through도 일반 native input context와 구분한다 | `VirtualEndpointTransport` 입력을 HAL client 공유 VM → 독립 mixer → 기존 SRC/source registry로 연결했다. 외부 HAL 독자와 엔진 입력의 cursor를 분리했다. 실제 설치 환경의 grant 연결·PCM 수락은 남아 있다 |
+| 그래프 갱신·DSP 관찰 | `GKAudioGraph::updateFromConfig` `0x100075048`과 `performIOCycle` `0x100076358`은 같은 graph queue를 요구한다. 제거는 link 해제, node stop/invalidate, collection 제거, ordered routing 교체 순서다 | 기존 compiled-plan publication·callback pin·control retirement를 유지한다. Loopback의 graph queue 안 할당·잠금을 CoreAudio callback에 옮기지 않는다 |
+| 정지·우회·Mute | graph stop은 source/player/clock을 정지한다. bypass는 `wantsToProcessBypassed`에 따라 node stop과 입력 전달을 선택한다. GK volume mute는 연결·실행을 유지하고 목표 gain을 0으로 바꾼다 | 기존 enabled·muted·effect bypass의 별도 상태를 재확인했다. UI Off와 Loopback 내부 필드가 같은 계약이라고 추정하지 않는다 |
+| gain 전환 | `PRMSmoother.reset` `0x100079028`은 초기화 뒤 current를 보존하고 target을 바꾼다. classic ACP의 input/pass-through gain은 별도의 block 곱셈이다 | 기존 effect current/target과 5ms 전환을 유지한다. 모든 Loopback gain 경로가 같은 smoothing을 쓴다고 일반화하지 않는다 |
+| 외부 소스 회수 | producer `0x100022148`, consumer, stop `0x100022054`가 같은 node lock을 쓰며 stop은 queue를 nil로 만든다. 늦은 producer는 queue가 있을 때만 쓴다 | 기존 reader pin·generation 보호를 유지하고 새 공유 grant에도 retirement·incarnation·endpoint 전체 clock gate를 적용했다. 모든 callback drain이나 재시작 generation 계약을 Loopback의 해당 lock만으로 증명하지 않는다 |
+
+가상 큐 전달은 Loopback의 Mach/MIG memory-entry grant 방식에서 소유권 분리를 참고했다.
+MixRelay는 기존 XPC 제어 채널로 VM grant를 전달한다. 프로토콜과 private API를 복사하지 않았다.
+무음도 유효한 PCM 구간이며 미게시 프레임·clock 변경·유효한 0을 구분한다. source가 늦어도
+다른 client를 기다리지 않고, membership 교체 중에는 현재 창을 보존해 완전한 목록을 기다린다.
+
+이 변경은 가상 입력 경계에 한정한다. 모든 물리 출력의 과부하, 여러 graph의 sample-atomic 전환,
+명시적 `AudioDeviceInput`으로 선택한 자체 장치까지 해결됐다는 근거는 아니다.
+원시 함수 발췌·주소·hash는 로컬 진단의 `loopback-virtual-endpoint-transport-20261026`,
+`loopback-virtual-queue-permissions-20261026`, `loopback-engine-controls-20261026`에 보존했다.
+PCM 손상과 설치본 수락의 구체 근거는 [native 경계 분석](../validation/2026-10-26-native-boundary-analysis.md)을 따른다.
+
 ## 2026-10-17 안정성 경계 대조
 
 Loopback 2.5.0의 `arkaudiod`, ACP, ARK 배포 바이너리에서 추출한 함수 본문을

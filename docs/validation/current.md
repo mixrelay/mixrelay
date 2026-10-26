@@ -5,6 +5,37 @@
 OS·CPU별 지원 범위와 같은 사용자 시나리오의 확인·부분·미확인 결과는
 [OS별 지원·검증 인벤토리](platform-matrix.md)에서 비교한다. 각 결과의 실행 날짜·빌드는 아래 기록을 따른다.
 
+## 2026-10-26 가상 입력의 PCM 전송·수명 분리
+
+최종 전체 설치본 판정은 아직 미통과다. [실행 40251947994](https://github.com/mixrelay/mixrelay/actions/runs/40251947994)는
+13개 중 11개 통과·macOS 26 ARM/27 ARM 2개 실패였고, 제거는 13개 모두 통과했다.
+후속 `7bfc05df` 집중 실행도 macOS 26 ARM이 실패했다. macOS 27 ARM의 job 성공은
+종료 녹음에서 발견된 유음 누락을 검사하지 못한 결과이므로 수락 근거로 쓰지 않는다.
+[원본 PCM·종료 녹음 분석](2026-10-26-native-boundary-analysis.md)에 구간·해시·제한을 기록했다.
+
+현재 소스는 `VirtualEndpointTransport` 입력의 CoreAudio IOProc을 없애고 HAL client별
+공유 VM을 엔진의 독립 source로 전달한다. HAL 외부 독자와 엔진은 각각 native frame 좌표로
+읽는다. 전체 clock publication·membership·retirement가 맞지 않으면 창을 진행하지 않는다.
+물리 native 입력·출력 경로는 별도로 유지한다. 구조와 소유자는 [architecture.md](../architecture.md),
+참고한 함수와 적용 한계는 [Loopback 대조](../research/loopback-engine-comparison.md)에 둔다.
+
+관련 단위 검사 957개가 통과했다. 신호·무음 양 순서, ring wrap, 독립 부분 독자,
+endpoint clock 전환, client 추가 중 보류, 16비트 ring epoch 소진 뒤 grant 교체,
+실제 SRC/source-registry 전달의 PCM 비트 일치·실시간 할당 0을 포함한다.
+기존 serial benchmark·자식 프로세스 fixture·설치 장치 soak의 ignore는 이 집계와 구분한다.
+설치본의 필수 시나리오를 skip하도록 변경하지 않았다.
+
+관련 5개 패키지의 all-targets clippy, fmt, crate 계층·지원 계약 검사와 `pnpm check:native`가
+통과했다. 네이티브 검사는 C ABI sanitizer fixture와 ARM·Intel HAL 번들 factory/COM을 포함하며
+장치를 초기화하거나 설치하지 않았다. 오프라인 release 합산은 512프레임 × 2,000회에서
+2→2채널 client 1·2·8개의 총 시간이 각각 5,640·18,003·77,367µs였고,
+2→7채널 client 2개는 20,742µs, 64→64채널 client 2개는 320,688µs였다.
+이전 측정과 시스템 부하를 통제한 비교가 아니므로 성능 향상 수치로 쓰지 않는다.
+
+VM 실행 도구는 자식 pipe의 close 뒤 증거 파일의 flush까지 기다리고 파일 쓰기 오류도 실패로
+전달한다. 스크립트 검사 625개는 skip 없이 통과했다. 이 소스의 새 설치·업그레이드,
+coreaudiod sandbox → XPC grant 전달과 13개 환경의 같은 후보 수락은 아직 확인하지 않았다.
+
 ## 2026-10-24 Ubuntu ARM 부팅 복구와 동일 후보 설치본 검증
 
 최신 후보는 소스 `c5259184`의 공증 PKG·CPU별 DEB·동일 x64 실행 파일을 담은 Arch 패키지다.

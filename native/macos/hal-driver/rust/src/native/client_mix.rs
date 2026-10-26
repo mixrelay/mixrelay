@@ -1,101 +1,22 @@
 //! Control-owned client PCM queues and capture mixing independent of postmix callbacks.
-use mixrelay_macos_transport::shared_audio_buffer::{self as buffer, SharedAudioBuffer};
-use std::{
-    alloc::{Layout, alloc_zeroed, dealloc},
-    ptr::NonNull,
-    sync::atomic::{AtomicBool, Ordering},
+use crate::{abi::Geometry, clock::Clock, io_outcome::IoOutcome};
+use mixrelay_macos_transport::{
+    client_pcm::{
+        ClientPcmClockOwner, ClientPcmSnapshot, ClientPcmTimeline, ClientPcmWriter as Queue,
+        MAX_CLIENTS_PER_ENDPOINT as MAX_CLIENTS, MAX_PCM_BYTES_PER_ENDPOINT as MAX_PCM_BYTES,
+    },
+    endpoint_transport::EndpointTransportConfig,
+    shared_audio_buffer as buffer,
+};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
-use crate::{abi::Geometry, io_outcome::IoOutcome};
-
-const MAX_CLIENTS: usize = 256;
-// Match the driver registry's existing mapping admission bound for private PCM storage.
-const MAX_PCM_BYTES: usize = 1 << 30;
 // A copy tile bounds stack scratch to 8 KiB at the supported 64-channel width.
 // It does not change the device quantum, timeline or queue capacity.
 const COPY_FRAMES: usize = 32;
 const MAX_CHANNELS: usize = 64;
-
-struct Queue {
-    pointer: NonNull<SharedAudioBuffer>,
-    layout: Layout,
-}
-
-// All shared cells are atomic. One serialized MixOutput producer owns each client queue;
-// capture readers borrow it concurrently. Control drains device IO before dropping it.
-unsafe impl Send for Queue {}
-unsafe impl Sync for Queue {}
-
-impl Queue {
-    fn new(capacity: u32, channels: u32) -> Option<Self> {
-        let bytes = buffer::mr_shared_audio_buffer_required_bytes(capacity, channels);
-        let layout = Layout::from_size_align(bytes, align_of::<SharedAudioBuffer>()).ok()?;
-        if bytes == 0 {
-            return None;
-        }
-        // SAFETY: control owns the complete allocation before any callback sees it.
-        let memory = NonNull::new(unsafe { alloc_zeroed(layout) })?;
-        let pointer = unsafe {
-            buffer::mr_shared_audio_buffer_initialize(
-                memory.as_ptr().cast(),
-                bytes,
-                capacity,
-                channels,
-            )
-        };
-        let Some(pointer) = NonNull::new(pointer) else {
-            // SAFETY: initialization did not transfer allocation ownership.
-            unsafe { dealloc(memory.as_ptr(), layout) };
-            return None;
-        };
-        Some(Self { pointer, layout })
-    }
-
-    fn begin(&self) -> bool {
-        // SAFETY: the device control owner excludes IO during this epoch transition.
-        unsafe { buffer::mr_shared_audio_buffer_try_begin_epoch(self.pointer.as_ptr()) != 0 }
-    }
-
-    fn write(&self, frame: u64, samples: &[f32], frames: u32) -> bool {
-        // SAFETY: the retained queue and complete interleaved input belong to this callback.
-        unsafe {
-            let epoch = buffer::mr_shared_audio_buffer_stats(self.pointer.as_ptr()).epoch;
-            buffer::mr_shared_audio_buffer_write(
-                self.pointer.as_ptr(),
-                epoch,
-                frame,
-                samples.as_ptr(),
-                frames,
-            )
-        }
-    }
-
-    fn read(&self, frame: u64, samples: &mut [f32], frames: u32) -> u32 {
-        // SAFETY: the retained queue and exclusive complete output belong to this callback.
-        unsafe {
-            buffer::mr_shared_audio_buffer_read(
-                self.pointer.as_ptr(),
-                frame,
-                samples.as_mut_ptr(),
-                frames,
-            )
-        }
-    }
-
-    fn read_with_coverage(&self, frame: u64, samples: &mut [f32], coverage: &mut [bool]) {
-        // SAFETY: the retained queue outlives the exclusive callback scratch slices.
-        unsafe {
-            buffer::read_with_frame_coverage(self.pointer.as_ptr(), frame, samples, coverage);
-        }
-    }
-}
-
-impl Drop for Queue {
-    fn drop(&mut self) {
-        // SAFETY: control drains all callback pins before retiring this allocation.
-        unsafe { dealloc(self.pointer.as_ptr().cast(), self.layout) };
-    }
-}
 
 struct Client {
     id: u32,
@@ -107,6 +28,13 @@ pub(super) struct ClientMix {
     clients: Vec<Client>,
     geometry: Geometry,
     capacity: u32,
+    revision: u64,
+    clock: Arc<ClientPcmClockOwner>,
+}
+impl Drop for ClientMix {
+    fn drop(&mut self) {
+        self.clock.retire();
+    }
 }
 
 impl ClientMix {
@@ -117,6 +45,8 @@ impl ClientMix {
             clients,
             geometry,
             capacity,
+            revision: 1,
+            clock: Arc::new(ClientPcmClockOwner::new().ok()?),
         })
     }
 
@@ -125,7 +55,10 @@ impl ClientMix {
     }
 
     pub(super) fn register(&mut self, id: u32) -> bool {
-        if self.clients.len() == MAX_CLIENTS || self.clients.iter().any(|client| client.id == id) {
+        if self.revision == u64::MAX
+            || self.clients.len() == MAX_CLIENTS
+            || self.clients.iter().any(|client| client.id == id)
+        {
             return false;
         }
         let bytes = buffer::mr_shared_audio_buffer_required_bytes(
@@ -144,11 +77,15 @@ impl ClientMix {
         let queue = if self.geometry.render_channels == 0 {
             None
         } else {
-            let Some(queue) = Queue::new(self.capacity, self.geometry.render_channels) else {
+            let Some(queue) =
+                Queue::with_clock(self.configuration(), id, Arc::clone(&self.clock)).ok()
+            else {
                 return false;
             };
             Some(queue)
         };
+        self.revision += 1;
+        self.clock.publish_membership(self.revision);
         self.clients.push(Client {
             id,
             rendered: AtomicBool::new(false),
@@ -160,23 +97,68 @@ impl ClientMix {
     pub(super) fn remove(&mut self, id: u32) {
         if let Some(index) = self.clients.iter().position(|client| client.id == id) {
             self.clients.remove(index);
+            self.revision = self.revision.saturating_add(1);
+            self.clock.publish_membership(self.revision);
         }
     }
 
-    pub(super) fn begin_device_io(&mut self) -> bool {
+    fn configuration(&self) -> EndpointTransportConfig {
+        EndpointTransportConfig {
+            endpoint_id: self.geometry.endpoint_id,
+            capacity_frames: self.capacity,
+            render_channels: self.geometry.render_channels,
+            capture_channels: self.geometry.capture_channels,
+        }
+    }
+
+    pub(super) fn publish_clock(&mut self, clock: &Clock, rearm: bool) -> bool {
+        let config = self.configuration();
+        let (epoch, anchor) = clock.transport_epoch();
+        let Some(publication) = self.clock.begin(ClientPcmTimeline {
+            epoch,
+            anchor,
+            rate: clock.rate,
+            running: clock.running,
+        }) else {
+            return false;
+        };
         for client in &mut self.clients {
-            if let Some(queue) = &client.queue
-                && !queue.begin()
+            if let Some(queue) = &mut client.queue
+                && !publication.configure(queue, rearm)
             {
-                let Some(queue) = Queue::new(self.capacity, self.geometry.render_channels) else {
+                if !rearm || self.revision == u64::MAX {
+                    return false;
+                }
+                let Ok(mut replacement) =
+                    Queue::with_clock(config, client.id, Arc::clone(&self.clock))
+                else {
                     return false;
                 };
-                client.queue = Some(queue);
+                if !publication.configure(&mut replacement, true) {
+                    return false;
+                }
+                client.queue = Some(replacement);
+                self.revision += 1;
+                self.clock.publish_membership(self.revision);
             }
-            // Device control excludes callbacks while opening the new timeline.
-            client.rendered.store(false, Ordering::Relaxed);
+            if rearm {
+                client.rendered.store(false, Ordering::Relaxed);
+            }
         }
+        publication.commit();
         true
+    }
+
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub(super) fn append_snapshot(&self, snapshot: &mut ClientPcmSnapshot) -> bool {
+        self.clients.iter().all(|client| {
+            client
+                .queue
+                .as_ref()
+                .is_none_or(|queue| snapshot.push(queue))
+        })
     }
 
     pub(super) fn replacement(&self, geometry: Geometry, capacity: u32) -> Option<Self> {
@@ -186,6 +168,8 @@ impl ClientMix {
                 return None;
             }
         }
+        next.revision = self.revision.checked_add(1)?;
+        next.clock.publish_membership(next.revision);
         Some(next)
     }
 

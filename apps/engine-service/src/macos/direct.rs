@@ -42,6 +42,18 @@ struct CallbackIo<'a> {
 }
 impl ExternalIo for CallbackIo<'_> {
     fn source_epoch(&self, binding: &ExternalBinding) -> Option<u64> {
+        // The native binding owns its clock and continuity. A registry epoch
+        // belongs only to a source actually read from the shared transport.
+        let native = self
+            .bindings
+            .iter()
+            .any(|map| map.input && map.id == binding.node_id().as_str())
+            || self.bridged.is_some_and(|(devices, _)| {
+                devices.binding_present(binding.node_id().as_str(), true)
+            });
+        if native {
+            return None;
+        }
         super::application_epoch(binding, super::endpoint_service::source_registry())
     }
 

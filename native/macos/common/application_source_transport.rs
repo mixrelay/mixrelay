@@ -78,6 +78,25 @@ impl Drop for ProducerClaim<'_> {
 }
 
 impl SourceTransport {
+    /// Creates one producer directly from the owning registry on control.
+    /// # Errors
+    /// Propagates registry admission and transport attachment failures.
+    pub fn create(
+        registry: &crate::source_registry::SourceRegistry,
+        request: &crate::source_control::SourceRequest,
+    ) -> std::io::Result<Self> {
+        use std::os::fd::IntoRawFd;
+        let attachment = registry.attach(request)?;
+        let mut raw = crate::source_control::SourceAttachment {
+            descriptor: attachment.descriptor.into_raw_fd(),
+            mapped_size: attachment.mapped_size,
+            producer_lease: attachment.producer_lease,
+            source_epoch: attachment.source_epoch,
+        };
+        // SAFETY: the registry owns this immutable backing object and grants one producer lease.
+        unsafe { ffi::attach(&mut raw, request.capacity_frames, request.channels) }
+            .map_err(std::io::Error::other)
+    }
     fn owns_stream(&self) -> bool {
         // SAFETY: the mapping owns the validated buffer for the entire borrow;
         // statistics touch only shared atomics, never local producer state.
@@ -86,7 +105,8 @@ impl SourceTransport {
             && self.mapping.clock().producer_lease.load(Ordering::Acquire) == self.owned_lease
     }
 
-    fn clock(&self) -> Option<SourceClockSnapshot> {
+    #[must_use]
+    pub fn clock(&self) -> Option<SourceClockSnapshot> {
         let clock = self.mapping.clock();
         let sequence = clock.consumer_sequence.load(Ordering::Acquire);
         let format = clock.format_word.load(Ordering::Acquire);
@@ -120,7 +140,7 @@ impl SourceTransport {
         })
     }
 
-    fn reset(&mut self, format: u64, native_rate: u32) -> bool {
+    pub fn reset(&mut self, format: u64, native_rate: u32) -> bool {
         if format == 0 || !(8000..=192_000).contains(&native_rate) {
             return false;
         }
@@ -152,7 +172,7 @@ impl SourceTransport {
         true
     }
 
-    fn publish_measurements(&self, producer: u32, converter: u32, drought: u32) {
+    pub fn publish_measurements(&self, producer: u32, converter: u32, drought: u32) {
         let clock = self.mapping.clock();
         let Some(_claim) = ProducerClaim::acquire(clock) else {
             return;
@@ -170,7 +190,7 @@ impl SourceTransport {
         }
     }
 
-    fn publish_native(&self, frames: u64, running: bool) {
+    pub fn publish_native(&self, frames: u64, running: bool) {
         let clock = self.mapping.clock();
         let Some(_claim) = ProducerClaim::acquire(clock) else {
             return;
@@ -187,10 +207,11 @@ impl SourceTransport {
         self.write_pcm(samples, frames, None)
     }
 
-    fn write_pcm(&mut self, samples: &[f32], frames: u32, times: Option<&[u64]>) -> bool {
+    pub fn write_pcm(&mut self, samples: &[f32], frames: u32, times: Option<&[u64]>) -> bool {
         // SAFETY: mapping attachment validated this immutable channel geometry.
         let channels = unsafe { mr_shared_audio_buffer_channels(self.mapping.buffer.as_ptr()) };
-        if samples.len() != frames as usize * channels as usize {
+        if frames > self.mapping.capacity() || samples.len() != frames as usize * channels as usize
+        {
             return false;
         }
         let clock = self.mapping.clock();
@@ -235,7 +256,7 @@ impl SourceTransport {
         written
     }
 
-    fn record_source_faults(&mut self, epoch: u64, count: u64) -> bool {
+    pub fn record_source_faults(&mut self, epoch: u64, count: u64) -> bool {
         if epoch != self.owned_epoch || !self.owns_stream() {
             return false;
         }

@@ -33,6 +33,7 @@ trait Backend {
     fn connect(&self, owner: *const c_void, generation: u64) -> Option<Self::Connection>;
     fn resume(&self, connection: &Self::Connection);
     fn send(&self, connection: &Self::Connection, request: Request);
+    fn publish_pcm(&self, _registry: &Registry) {}
 }
 
 struct Control<B: Backend> {
@@ -98,6 +99,7 @@ impl<B: Backend> Control<B> {
             self.registry.clear_latencies();
         }
         self.registry.tick();
+        self.backend.publish_pcm(&self.registry);
         let action = self.session.borrow_mut().tick();
         self.request_replacement();
         let authority = self.session.borrow().authority();

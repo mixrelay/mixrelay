@@ -18,6 +18,8 @@ use crate::io_outcome::IoOutcome;
 use crate::registry::Registry;
 mod client_mix;
 use client_mix::ClientMix;
+mod pcm_snapshot;
+pub(crate) use pcm_snapshot::client_snapshot;
 
 #[repr(C)]
 #[derive(Default)]
@@ -178,12 +180,15 @@ unsafe extern "C" fn replace(
     let previous = unsafe { &*runtime.io.context.get() };
     let context = unsafe { &mut *candidate.context.get() };
     context.inherit_lifecycle(previous);
-    let Some(clients) = runtime
+    let Some(mut clients) = runtime
         .clients
         .replacement(unsafe { *geometry }, candidate.capacity)
     else {
         return false;
     };
+    if !clients.publish_clock(&clock, true) {
+        return false;
+    }
     if !candidate.bind() {
         return false;
     }
@@ -204,7 +209,7 @@ unsafe extern "C" fn start(runtime: *mut c_void, now: u64) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     let mut clock = runtime.clock.clone();
     if !clock.start(now)
-        || !runtime.clients.begin_device_io()
+        || !runtime.clients.publish_clock(&clock, true)
         || !unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) }
     {
         return false;
@@ -217,6 +222,7 @@ unsafe extern "C" fn start(runtime: *mut c_void, now: u64) -> bool {
 unsafe extern "C" fn stop(runtime: *mut c_void) {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     runtime.clock.running = false;
+    let _ = runtime.clients.publish_clock(&runtime.clock, false);
     unsafe {
         mr_hal_io_clock_state(runtime.io.context.get(), runtime.clock.rate, false);
         mr_hal_io_set_render_activity(runtime.io.context.get(), 1);
@@ -234,13 +240,16 @@ unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32) -> bool {
     if !clock.set_rate(rate, unsafe { mach_absolute_time() }) {
         return false;
     }
-    let Some(clients) = runtime
+    let Some(mut clients) = runtime
         .clients
         .replacement(runtime.clients.geometry(), runtime.io.capacity)
     else {
         return false;
     };
     if runtime.clock.running && !unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) } {
+        return false;
+    }
+    if !clients.publish_clock(&clock, true) {
         return false;
     }
     runtime.clients = clients;
@@ -327,7 +336,16 @@ unsafe extern "C" fn client(runtime: *mut c_void, client: u32, action: u32) -> b
     // SAFETY: registry control holds the device freeze, draining every IO pin.
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     match crate::io_outcome::ClientChange::from_raw(action) {
-        Some(crate::io_outcome::ClientChange::Register) => runtime.clients.register(client),
+        Some(crate::io_outcome::ClientChange::Register) => {
+            if !runtime.clients.register(client) {
+                return false;
+            }
+            if !runtime.clients.publish_clock(&runtime.clock, false) {
+                runtime.clients.remove(client);
+                return false;
+            }
+            true
+        }
         Some(crate::io_outcome::ClientChange::Remove) => {
             runtime.clients.remove(client);
             true

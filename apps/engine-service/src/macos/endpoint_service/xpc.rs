@@ -39,19 +39,43 @@ impl Drop for Owned {
 }
 struct Peer {
     object: Owned,
+    role: Role,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Role {
+    Application,
+    AudioServer,
 }
 #[derive(Default)]
 pub(super) struct Peers {
     values: Vec<Peer>,
 }
 
-fn authorized(peer: Object) -> bool {
+fn authorized(peer: Object) -> Option<Role> {
     if peer.is_null() {
-        return false;
+        return None;
     }
     // SAFETY: the listener supplies a retained live peer for this control call.
     let uid = unsafe { xpc_connection_get_euid(peer) };
-    std::fs::metadata("/dev/console").is_ok_and(|metadata| metadata.uid() == uid)
+    if std::fs::metadata("/dev/console").is_ok_and(|metadata| metadata.uid() == uid) {
+        return Some(Role::Application);
+    }
+    let mut account = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    let mut buffer = [0_u8; 4096];
+    let mut result = std::ptr::null_mut();
+    // SAFETY: the system account lookup fills only the supplied storage; its pointer
+    // is read only when both status and result confirm a complete account record.
+    let status = unsafe {
+        libc::getpwnam_r(
+            c"_coreaudiod".as_ptr(),
+            account.as_mut_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            &raw mut result,
+        )
+    };
+    (status == 0 && !result.is_null() && unsafe { (*result).pw_uid } == uid)
+        .then_some(Role::AudioServer)
 }
 
 /// # Safety
@@ -61,9 +85,9 @@ pub(crate) unsafe extern "C" fn mr_engine_service_accept_peer(peer: Object) -> b
     let Some(service) = SERVICE.get() else {
         return false;
     };
-    if !authorized(peer) {
+    let Some(role) = authorized(peer) else {
         return false;
-    }
+    };
     let mut peers = service.peers.lock();
     if peers.values.iter().any(|entry| entry.object.raw() == peer) {
         return true;
@@ -74,7 +98,15 @@ pub(crate) unsafe extern "C" fn mr_engine_service_accept_peer(peer: Object) -> b
     let Some(object) = Owned::new(unsafe { xpc_retain(peer) }) else {
         return false;
     };
-    peers.values.push(Peer { object });
+    if role == Role::AudioServer
+        && peers
+            .values
+            .iter()
+            .any(|peer| peer.role == Role::AudioServer)
+    {
+        return false;
+    }
+    peers.values.push(Peer { object, role });
     true
 }
 
@@ -116,22 +148,42 @@ pub(crate) unsafe extern "C" fn mr_engine_service_peer_event(peer: Object, event
         return;
     }
     if unsafe { xpc_get_type(event) } == (&raw const _xpc_type_error).cast() {
-        service
-            .peers
-            .lock()
+        let mut peers = service.peers.lock();
+        let was_audio_server = peers
             .values
-            .retain(|entry| entry.object.raw() != peer);
+            .iter()
+            .any(|entry| entry.object.raw() == peer && entry.role == Role::AudioServer);
+        peers.values.retain(|entry| entry.object.raw() != peer);
+        drop(peers);
+        if was_audio_server {
+            service.virtual_pcm.clear();
+        }
         return;
     }
-    if !service
+    let role = service
         .peers
         .lock()
         .values
         .iter()
-        .any(|entry| entry.object.raw() == peer)
-    {
+        .find(|entry| entry.object.raw() == peer)
+        .map(|entry| entry.role);
+    let Some(role) = role else {
         // SAFETY: peer remains retained through this listener callback.
         unsafe { xpc_connection_cancel(peer) };
+        return;
+    };
+    if role == Role::AudioServer {
+        // SAFETY: event is live for this dispatch callback. Only the authenticated
+        // audio-server role can publish grants, and cannot request application leases.
+        let result =
+            unsafe { mixrelay_macos_transport::client_pcm::ClientPcmSnapshot::decode(event) }
+                .map_err(super::virtual_pcm::Error::from)
+                .and_then(|queues| service.virtual_pcm.replace(queues));
+        if let Err(error) = result {
+            tracing::error!(boundary = "hal_shared_pcm", stage = "grant_snapshot", %error, "virtual input snapshot rejected");
+            // SAFETY: cancellation asks the producer to reconnect and resubmit a complete list.
+            unsafe { xpc_connection_cancel(peer) };
+        }
         return;
     }
     if let Some(response) = source_reply(event) {
