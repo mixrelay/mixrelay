@@ -561,3 +561,44 @@ clock 관찰·epoch 승인과 PCM 발행의 소유 구현을 나눴다.
 현재 probe는 완전한 최종 callback까지 보존한 뒤 audio owner가 저장을 닫으며 구간 안의
 overflow는 계속 실패로 처리한다. 원래 강한 PCM·완료 assertion은 유지하고 integrity counter도
 JSON에 기록한다. 버퍼 용량·오디오 quantum·허용 오차는 바꾸지 않았다.
+
+## `f27da5c` 전체 설치본과 주기별 실행
+
+[전체 실행 40315961318](https://github.com/mixrelay/mixrelay/actions/runs/40315961318)의
+candidate digest는 `a61afd75f278479af78cac1010bba1f267de2ace59583ab2e0062c590c642431`이다.
+macOS PKG SHA-256은 `9f07a01a1449b765b838d10ab2ea692e185c911e07f21e3240db913c861eba5f`다.
+13개 중 Linux 7개와 macOS 14·26·27 ARM이 통과했고 15 ARM·15 Intel·26 Intel은 실패했다.
+제거는 13개 모두 통과했고 필수 시나리오 skip은 0이다. source CI도 13개 통과했다.
+Arch의 첫 소스 검사는 컴파일 전 Docker Hub DNS timeout이었고 재실행에서 통과했다.
+
+| 환경 | 외부 PCM·콜백 | 종료 녹음 |
+| --- | --- | --- |
+| 14·26·27 ARM | 새 설치·업그레이드의 무음·유음 양 순서 모두 통과 | 각 유음 144,000프레임, 누락·중복·식별 불가 유음·nonfinite 0 |
+| 15 ARM | 업그레이드 유음→무음의 무음 좌표 1,824프레임 누락 | 네 유음 구간 모두 누락·중복·삽입 공백 0 |
+| 15 Intel | 새 설치의 무음→유음 콜백 612·1,024·1,504프레임 누락, 업그레이드에는 48,308프레임의 콜백 좌표 점프 | 새 설치 유음 누락 3,140프레임은 소스의 미게시 구간과 일치, 업그레이드는 완전함 |
+| 26 Intel | 새 설치 AUDIO-01·REC-02와 외부 대조 실패 | 새 설치의 source 녹음이 packet queue overrun으로 실패 종료; 보존 파일의 오프라인 분석상 두 유음 구간은 완전함 |
+
+15 ARM의 문제 콜백 간격은 약 40,813.79µs, 본문은 13.5µs였다. 소스 callback의 최대
+본문은 343.2µs, 보존된 HAL 작업 본문 최대는 약 312.3µs다. CoreAudio는 같은 구간에
+`Deadline is prior to Start time`과 `Audio IO Overload`를 기록했다. TCC 관찰은 이미 해당
+측정 경계에서 중지돼 있었고 stack sample은 사건 이후다. 이 기록만으로 특정 작업이
+호스트를 지연시켰다고 단정하지 않는다. 원시 시각과 인과 한계는 로컬 진단의
+`40315961318/macos-15-arm-timing-cause.json`에 보존했다.
+
+같은 엔진은 10초에 공유 source로 24,105번 그래프를 실행했다. 선언한 worker period는
+48kHz에서 128프레임이므로 10초의 주기는 3,750개다. 연속 playhead의 작은 변화가 즉시
+작업을 풀어 불필요한 실행을 만들었다. Loopback ACP `0x1a748`의 완료 주기 계산과 비교해,
+host-clock 투영을 `virtual_pcm::cadence`로 분리하고 기존 128프레임 경계로 제한했다.
+같은 상수가 실시간 period 계산에도 쓰인다. mixer는 native 좌표의 forward cursor를 유지해
+늦게 깨어난 뒤에도 보존된 PCM을 순서대로 배출한다. 기존 부분 게시·늦은 입력 합류·정렬
+검사도 유지한다. 각 CoreAudio stall의 원인이 이 실행 빈도였다는 런타임 증명은 아직 없다.
+
+실제 공유 VM 회귀는 sample마다 poll한 뒤 1,024프레임 늦은 wake를 주입한다.
+수정 전 1,032회, 수정 후 16회 처리하며 같은 2,048프레임을 비트·순서 일치로 전달한다.
+실시간 할당은 0이다. 관련 Rust·네이티브 1,028개, 스크립트 626개와 all-targets clippy·fmt·
+크레이트 계층 검사가 통과했다. 버퍼 확대·허용 오차·실시간 예산 변경은 포함하지 않는다.
+
+녹음기는 admission 실패 뒤 수락한 prefix를 배출하고 파일을 마무리한 다음 Failed를
+게시한다. 설치 시험도 이 terminal 상태의 파일·해시·분석을 보존한다. 원래 오류는 독립적으로
+실패 목록에 남아 유음이 완전해도 통과할 수 없다. 합성 회귀는 완전한 유음과 packet queue
+overrun을 함께 주고 이 조건을 확인한다. 후속 후보의 설치본 수락은 아직 미완료다.

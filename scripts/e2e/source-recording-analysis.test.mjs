@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -95,4 +95,31 @@ test('recording finalization retains the native failure and the independent reco
   const analysis = JSON.parse(readFileSync(join(directory, 'recording-analysis.json')));
   assert.equal(analysis.orders[0].missingFrames, 524);
   assert.equal(analysis.recordingSha256, createHash('sha256').update(bytes).digest('hex'));
+});
+
+test('a terminal failed take retains its finalized PCM evidence and cannot pass on complete payload', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-recording-failed-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const bytes = take(), actions = [];
+  let state = 'stopped';
+  await assert.rejects(recordSourceComparison({ directory, recorderPath: 'recorder', revision: 7,
+    api: async () => ({ state, path: join(directory, 'recording.wav'),
+      error: state === 'failed' ? 'recorder packet queue overrun' : null }),
+    controlTake: async request => {
+      actions.push(request.request.action);
+      state = 'recording';
+      return { state, error: null };
+    }, compare: async () => {
+      writeFileSync(join(directory, 'recording.wav'), bytes);
+      state = 'failed';
+    } }), AggregateError);
+  assert.equal(existsSync(join(directory, 'recording-analysis.json')), true,
+    'the recorder already closed its failed take, so its PCM must remain analysable');
+  const stopped = JSON.parse(readFileSync(join(directory, 'recording-stop.json')));
+  assert.equal(stopped.state, 'failed');
+  assert.equal(stopped.error, 'recorder packet queue overrun');
+  const analysis = JSON.parse(readFileSync(join(directory, 'recording-analysis.json')));
+  assert.equal(analysis.passed, true);
+  assert.equal(analysis.recordingSha256, createHash('sha256').update(bytes).digest('hex'));
+  assert.deepEqual(actions, ['record']);
 });

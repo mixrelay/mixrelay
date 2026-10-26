@@ -29,6 +29,24 @@ MixRelay는 기존 XPC 제어 채널로 VM grant를 전달한다. 프로토콜�
 `loopback-virtual-queue-permissions-20261026`, `loopback-engine-controls-20261026`에 보존했다.
 PCM 손상과 설치본 수락의 구체 근거는 [native 경계 분석](../validation/2026-10-26-native-boundary-analysis.md)을 따른다.
 
+## 2026-10-26 실행 주기와 지연된 worker
+
+ACP의 `___28-[ACPStableIOClock startIO:]_block_invoke_2` `0x1a748`은 현재 host 시각을
+sample 좌표로 바꾸고 `frameCount`로 나눈 완료 주기를 구한다. 다음 절대 주기를 먼저 예약한 뒤
+현재 주기 좌표로 작업을 한 번 호출한다. [함수 본문](/Volumes/dev/loopback/ghidra/export/ACP/decompiled.c:19263)을
+직접 대조했다. 이는 callback 버퍼 크기·HAL zero timestamp period와 별개의 실행 절차다.
+
+MixRelay의 `virtual_pcm::cadence`는 기존 worker period인 128프레임의 완료 좌표를
+`ClientPcmMixer`에 전달한다. mixer는 native 좌표의 PCM·cursor를 소유하고 host 시각 투영은
+cadence가 담당한다. 지연된 worker는 보존된 구간을 순서대로 읽는다. Loopback 타이머의
+지난 tick을 재실행하지 않는 동작을 PCM 폐기로 옮기지 않는다. 실시간 정책의 40% 계산 예산·
+80% constraint와 preemptible 설정, HAL callback·저장 용량은 이 변경으로 바뀌지 않는다.
+
+공유 VM 회귀에서 sample마다 poll할 때 발생하던 1,032회의 처리는 16회가 됐다.
+같은 2,048프레임을 비트·순서 손실 없이 전달했고 실시간 할당은 0이었다.
+이는 불필요한 처리 횟수의 개선이다. 설치본의 모든 CoreAudio 지연이 이 실행 빈도에서
+발생했다거나 CPU 사용량이 같은 비율로 줄었다는 증거는 아니다.
+
 ## 2026-10-17 안정성 경계 대조
 
 Loopback 2.5.0의 `arkaudiod`, ACP, ARK 배포 바이너리에서 추출한 함수 본문을

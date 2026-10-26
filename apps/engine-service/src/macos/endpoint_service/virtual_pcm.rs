@@ -1,4 +1,5 @@
 //! Authenticated HAL grants and independently paced virtual-device source owners.
+mod cadence;
 mod converter;
 mod pump;
 mod scheduling;

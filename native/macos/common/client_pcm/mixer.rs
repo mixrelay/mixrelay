@@ -35,10 +35,12 @@ impl std::error::Error for MixError {}
 impl ClientPcmMixer {
     /// Selects published PCM no later than the current native playhead. A stalled
     /// client contributes silence at its unpublished positions, without holding peers.
+    /// `playhead` projects the supplied coherent clock into an eligible native-frame
+    /// frontier. A missing projection leaves the cursor unchanged.
     pub fn window(
         &mut self,
         queues: &[ClientPcmReader],
-        now_nanos: impl Fn(u64) -> u64,
+        playhead: impl Fn(ClientPcmClock) -> Option<u64>,
     ) -> Option<MixWindow> {
         let mut clocks = queues
             .iter()
@@ -59,10 +61,7 @@ impl ClientPcmMixer {
             first = first.min(candidate.first?);
             clock.through = clock.through.max(candidate.through);
         }
-        let playhead = u64::try_from(
-            u128::from(now_nanos(clock.anchor)) * u128::from(clock.rate) / 1_000_000_000,
-        )
-        .ok()?;
+        let playhead = playhead(clock)?;
         let published = clock.through;
         clock.through = clock.through.min(playhead);
         let capacity = u64::from(queues.iter().map(ClientPcmReader::capacity).min()?);

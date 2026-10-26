@@ -1,5 +1,5 @@
 //! One bounded virtual-input reader owns mixing, conversion and publication.
-use super::{Error, converter::Converter, scheduling::Scheduling};
+use super::{Error, cadence, converter::Converter, scheduling::Scheduling};
 use mixrelay_macos_transport::{
     application_source_transport::{SourceClockRead, SourceTransport},
     client_pcm::{ClientPcmMixer, ClientPcmReader, MixError, MixWindow},
@@ -76,8 +76,11 @@ impl Pump {
                     SourceClockRead::Revoked => return Err(Error::Stale),
                 };
                 let now = host_time();
-                let Some(window) = self.mixer.window(&self.queues, |anchor| {
-                    timebase.nanoseconds(now.saturating_sub(anchor))
+                let Some(window) = self.mixer.window(&self.queues, |clock| {
+                    cadence::frame(
+                        timebase.nanoseconds(now.saturating_sub(clock.anchor)),
+                        clock.rate,
+                    )
                 }) else {
                     if let Some(native) = self.queues.iter().find_map(ClientPcmReader::clock) {
                         if !native.running {

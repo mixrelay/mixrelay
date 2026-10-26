@@ -98,9 +98,7 @@ impl AlignedInput {
             self.publish_callbacks();
             self.nanos
                 .store(self.playhead * 1_000_000_000 / 48_000, Ordering::Relaxed);
-            while let Some(window) = self.mixer.window(&self.queues, |_| {
-                (self.playhead * 1_000_000_000).div_ceil(48_000)
-            }) {
+            while let Some(window) = self.mixer.window(&self.queues, |_| Some(self.playhead)) {
                 self.transfer(window);
                 self.capture();
             }

@@ -121,7 +121,10 @@ HAL 번들에 선언하며 엔진은 audio-server UID의 grant 게시와 console
 엔진의 `endpoint_service::virtual_pcm`은 가상 입력 source registry와 endpoint별 pump 수명을
 소유한다. `ClientPcmMixer`는 native sample 좌표의 큐 합산과 forward cursor만 관리하고,
 `Converter`는 기존 SRC·포맷 승인·보류 출력을, `Scheduling`은 worker 정책과 제어 작업의
-실시간 밖 실행을 맡는다. 외부 HAL 독자의 부분 읽기는 이 cursor를 변경하지 않는다.
+실시간 밖 실행을 맡는다. `cadence`는 coherent native clock을 완료된 128프레임 주기의
+좌표로 투영한다. 이 주기는 worker의 실시간 정책과 같은 상수를 사용한다. 늦게 깨어나도
+mixer의 forward cursor로 보존된 PCM을 순서대로 배출한다. 외부 HAL 독자의 부분 읽기는
+이 cursor를 변경하지 않는다.
 시간 credit은 게시된 PCM과 native playhead 범위로 제한한다. 타임스탬프는 worker가 깨어난
 시각이 아니라 native anchor와 프레임 좌표에서 구한다. 같은 클록의 master만 SRC를 우회한다.
 

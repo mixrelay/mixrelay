@@ -9,7 +9,7 @@ pub(super) struct Scheduling {
 }
 impl Scheduling {
     pub(super) fn new() -> Self {
-        let period = Duration::from_secs_f64(128.0 / 48_000.0);
+        let period = Duration::from_secs_f64(f64::from(super::cadence::FRAMES) / 48_000.0);
         let realtime = RealtimeThread::promote(period, period * 2 / 5, period * 4 / 5)
             .inspect_err(|error| tracing::warn!(boundary = "virtual_pcm_schedule", %error, "virtual input uses standard scheduling"))
             .ok();
@@ -20,7 +20,8 @@ impl Scheduling {
     }
     pub(super) fn retune(&self, rate: u32) {
         if let Some(realtime) = &self.realtime {
-            let period = Duration::from_secs_f64(128.0 / f64::from(rate));
+            let period =
+                Duration::from_secs_f64(f64::from(super::cadence::FRAMES) / f64::from(rate));
             realtime.retune(period, period * 2 / 5, period * 4 / 5);
         }
     }

@@ -233,7 +233,7 @@ fn membership_handoff_keeps_the_window_until_all_client_grants_arrive() {
     assert!(first.write(100, &[0.125; 256], 128));
     let old = vec![reader(&first)];
     let mut mixer = ClientPcmMixer::default();
-    let window = mixer.window(&old, |_| 1_000_000_000).unwrap();
+    let window = mixer.window(&old, |_| Some(48_000)).unwrap();
     owner.publish_membership(2);
     let mut joined = ClientPcmWriter::with_clock(config, 8, owner.clone()).unwrap();
     let publication = owner.begin(timeline).unwrap();
@@ -247,13 +247,13 @@ fn membership_handoff_keeps_the_window_until_all_client_grants_arrive() {
         Err(MixError::Changed)
     );
     assert_eq!(output.map(f32::to_bits), [0.0_f32.to_bits(); 256]);
-    assert!(mixer.window(&old, |_| 1_000_000_000).is_none());
+    assert!(mixer.window(&old, |_| Some(48_000)).is_none());
     let current = vec![reader(&first), reader(&joined)];
-    let current_window = mixer.window(&current, |_| 1_000_000_000).unwrap();
+    let current_window = mixer.window(&current, |_| Some(48_000)).unwrap();
     assert_eq!(current_window.first, window.first);
     assert!(current_window.discontinuity);
     ClientPcmMixer::mix(&current, current_window, &mut output, &mut scratch).unwrap();
     assert_eq!(output.map(f32::to_bits), [0.375_f32.to_bits(); 256]);
     mixer.commit(current_window);
-    assert!(mixer.window(&current, |_| 1_000_000_000).is_none());
+    assert!(mixer.window(&current, |_| Some(48_000)).is_none());
 }

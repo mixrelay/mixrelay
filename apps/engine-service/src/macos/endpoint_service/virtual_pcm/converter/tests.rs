@@ -106,7 +106,7 @@ fn shared_client_pcm_preserves_signal_and_silence_across_independent_reader_gaps
                 let _ = writer.read(frame + 36, &mut scratch[..72], 36);
             }
             let window = mixer
-                .window(&queues, |_| (frame + 128).div_ceil(48_000) * 1_000_000_000)
+                .window(&queues, |_| Some((frame + 128).div_ceil(48_000) * 48_000))
                 .unwrap();
             assert_eq!(window.first, frame);
             let expected = input;
