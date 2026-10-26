@@ -1,30 +1,7 @@
 import assert from 'node:assert/strict';
 
-// MRRoundTripProbe's integer-coded signal, before lead/tail placement.
-export function probeSampleBits(frame, channel) {
-  let value = ((Math.floor(frame / 4) >>> 0) ^ Math.imul(channel + 1, 0x9e3779b9)) >>> 0;
-  value ^= value >>> 16;
-  value = Math.imul(value, 0x7feb352d);
-  value ^= value >>> 15;
-  value = Math.imul(value, 0x846ca68b);
-  value ^= value >>> 16;
-  const payload = (value >>> ((frame % 4) * 8)) & 255;
-  let code = ((payload << 6) | channel) - 8192;
-  if (code >= 0) code++;
-  const magnitude = Math.abs(code), exponent = 31 - Math.clz32(magnitude);
-  return ((code < 0 ? 0x80000000 : 0) | ((exponent + 112) << 23)
-    | ((magnitude - 2 ** exponent) << (23 - exponent))) >>> 0;
-}
-
-export function probeRangeHash(start, frames, channels) {
-  let hash = 0xcbf29ce484222325n;
-  for (let frame = start; frame < start + frames; frame++) {
-    for (let channel = 0; channel < channels; channel++) {
-      hash = BigInt.asUintN(64, (hash ^ BigInt(probeSampleBits(frame, channel))) * 0x100000001b3n);
-    }
-  }
-  return hash.toString(16).padStart(16, '0');
-}
+import { probeSampleBits } from './probe-signal.mjs';
+import { analyseNativeReference } from './probe-native-reference.mjs';
 
 export function analyseProbeReference(trace, metrics, timing, pcm) {
   assert.equal(metrics.sameDevice, true, 'Reference requires the same native device');
@@ -44,13 +21,7 @@ export function analyseProbeReference(trace, metrics, timing, pcm) {
   assert.ok(first && (first.flags & 1), 'Missing valid output origin');
   const origin = first.sample - first.first;
   const start = origin + Math.trunc(metrics.output.rate * 0.1), end = start + metrics.signalFrames;
-  const writeClients = new Set(trace.rows.filter(row => row[1] === 1).map(row => row[8] ?? null));
-  const writes = trace.rows.filter(row => row[1] === 1 && row[2] >= start && row[2] + row[3] <= end);
-  const differences = [];
-  for (const row of writeClients.size <= 1 ? writes : []) {
-    const expected = probeRangeHash(row[2] - origin, row[3], channels);
-    if (row[7] !== expected) differences.push({ sequence: row[0], frame: row[2], frames: row[3], observed: row[7], expected });
-  }
+  const native = analyseNativeReference(trace, { origin, start, end, channels });
   const inputDifferences = [];
   for (const row of rows.filter(row => row.side === 'input')) {
     assert.ok((row.flags & 1) && row.first + row.frames <= metrics.recordedFrames, 'Invalid input capture coordinates');
@@ -77,14 +48,24 @@ export function analyseProbeReference(trace, metrics, timing, pcm) {
     flush();
   }
   for (const mismatch of inputDifferences) {
+    const period = metrics.input.timestampPeriod;
+    if (Number.isSafeInteger(period) && period > 0 && mismatch.deviceStart - period >= start) {
+      let matches = true;
+      for (let frame = 0; frame < mismatch.frames && matches; frame++) {
+        for (let channel = 0; channel < channels; channel++) {
+          const bits = pcm.readUInt32LE(((mismatch.recordedStart + frame) * channels + channel) * 4);
+          matches &&= bits === probeSampleBits(mismatch.deviceStart + frame - origin - period, channel);
+        }
+      }
+      // A bit match records displacement only; it does not identify the host's cache implementation.
+      mismatch.matchesPreviousTimestampPeriod = matches;
+    }
     mismatch.retainedCaptureRows = trace.rows.filter(row => row[1] === 0
       && row[2] < mismatch.deviceEnd && row[2] + row[3] > mismatch.deviceStart);
     mismatch.retainedWriteRows = trace.rows.filter(row => row[1] === 1
       && row[2] < mismatch.deviceEnd && row[2] + row[3] > mismatch.deviceStart);
   }
-  return { origin, signalWindow: { start, end }, nativeWrites: {
-    comparisonStatus: writeClients.size <= 1 ? 'single_output' : 'inapplicable_multiple_client_mix',
-    comparedRows: writeClients.size <= 1 ? writes.length : 0, writeClients: [...writeClients], differences }, inputDifferences,
+  return { origin, signalWindow: { start, end }, ...native, inputDifferences,
     limitations: ['Reference applies to the integer-coded default probe signal and its original timing/capture files.',
       'Native trace retention and missing epoch labels still limit attribution. This comparison does not change qualification.'] };
 }

@@ -63,6 +63,7 @@ export function analyseHalIo(trace, signalWindow = null) {
       'Rows do not include epochs. Equal coordinates alone do not prove the same timeline.',
       'Partial signal overlap does not locate zeros or unavailable frames inside that overlap.',
       'Unpaired or unretained rows do not establish that native IO was absent.',
+      'Tracing starts after registry admission; invalid-stream, frozen-device and inactive early returns are not traced.',
     ],
   };
 }

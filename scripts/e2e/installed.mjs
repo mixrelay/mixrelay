@@ -157,7 +157,8 @@ export async function qualifyMode({
         scope,
         status: 'failed',
         error: error.message,
-        evidence: [evidence(`${id}.failure.json`, { message: error.message, stack: error.stack })],
+        evidence: [evidence(`${id}.failure.json`, { message: error.message, stack: error.stack,
+          measurementFailure: error.measurementFailure })],
       });
       console.log(`${targetId}: ${id}: failed: ${error.message.slice(0, 500)}`);
       if (id === 'GRAPH-01' && target.os === 'linux') {

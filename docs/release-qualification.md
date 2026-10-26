@@ -292,6 +292,15 @@ and WebContent samples run after `REC-02` finalizes the recording. Diagnostic to
 must not suspend threads or consume CPU while that recording is still being measured.
 Collection preserves the PCM failure and never repeats the signal.
 
+PCM failures retain all four counters in `measurementFailure`, with `os=macos`,
+`backend=CoreAudio` and `boundary=os_roundtrip`. This boundary identifies the
+measurement, without assigning the fault to the driver or the client.
+`macos-probe-verdict.mjs` owns acceptance; the process runner owns launch and cleanup.
+Offline reference analysis also checks HAL capture hashes when the retained output
+contains one reference signal and only digital silence from other clients.
+It reports exact previous-period PCM matches and trace admission limits without
+changing the original qualification verdict.
+
 For a hosted diagnostic job, prepare these tools before invoking the installed runner:
 
 ```sh

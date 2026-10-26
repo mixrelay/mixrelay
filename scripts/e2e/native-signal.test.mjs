@@ -61,7 +61,14 @@ test('real consent precedes observer suspension and the single finite signal ret
         }));
       }
     },
-  }), /missingFrames/);
+  }), error => {
+    assert.match(error.message, /macOS\/CoreAudio\/os_roundtrip/);
+    assert.match(error.message, /missingFrames=6724/);
+    assert.match(error.message, /corruptFrames=2984/);
+    assert.deepEqual(error.measurementFailure, { os: 'macos', backend: 'CoreAudio', boundary: 'os_roundtrip',
+      missingFrames: 6724, repeatedFrames: 0, corruptFrames: 2984, nonfiniteSamples: 0 });
+    return true;
+  });
   assert.equal(observing, true);
   assert.deepEqual(events, ['consent granted', 'pause acknowledged', 'one finite signal', 'resume acknowledged']);
 });
@@ -82,6 +89,35 @@ test('denied consent never suspends permission handling or starts native audio',
     },
   }), /macOS probe authorization failed/);
   assert.deepEqual(events, ['zsh', 'open', 'pkill']);
+});
+
+test('observation and cleanup failures retain the original PCM boundary and every failure', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-combined-pcm-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
+    snapshot() {}, diagnostics() {},
+    measurementBoundary: async measure => {
+      try { return await measure(); }
+      catch (error) { throw new AggregateError([error, new Error('observer resume failed')], `${error.message}; observer resume failed`); }
+    },
+    execute(program, args) {
+      if (program === 'zsh') return '/probe.app';
+      if (consentFixture(program, args, directory)) return;
+      if (program === 'pkill') throw new Error('probe cleanup failed');
+      if (program === 'open') writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify({
+        inputAuthorization: { initial: 3, final: 3, requested: false }, activityProtection: true,
+        complete: true, channelOrder: true, missingFrames: 84, repeatedFrames: 84,
+        corruptFrames: 0, nonfiniteSamples: 0, receivedFrames: 143916,
+      }));
+    },
+  }), error => {
+    assert.equal(error.errors.length, 2);
+    assert.equal(error.errors[0].errors.length, 2);
+    assert.match(error.message, /missingFrames=84.*observer resume failed.*probe cleanup failed/);
+    assert.equal(error.measurementFailure.repeatedFrames, 84);
+    assert.equal(error.measurementFailure.boundary, 'os_roundtrip');
+    return true;
+  });
 });
 
 test('a scheduler trace cannot turn measured PCM loss into acceptance', async t => {

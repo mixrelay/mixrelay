@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { verifyMeasurement } from './macos-probe-verdict.mjs';
 
 export function macosProbeCommand(bundle, directory, uid) {
   const args = ['-W', '-n', '-g', '--stdout', join(directory, 'native-probe.stdout.json'),
@@ -24,24 +25,13 @@ function readMeasurement(path, processFailure) {
   return measured;
 }
 
-function verifyMeasurement(measured) {
-  assert.equal(measured.inputAuthorization?.final, 3, 'Probe recording consent must precede native I/O');
-  assert.equal(measured.inputAuthorization?.initial, 3, 'The unchanged signed probe must retain its preflight consent');
-  assert.equal(measured.inputAuthorization?.requested, false, 'Finite PCM cannot request consent while observation is paused');
-  assert.equal(measured.activityProtection, true, 'Finite measurement must retain its native activity');
-  assert.equal(measured.complete, true);
-  assert.equal(measured.channelOrder, true);
-  for (const field of ['missingFrames', 'repeatedFrames', 'corruptFrames', 'nonfiniteSamples']) assert.equal(measured[field], 0, field);
-  assert.ok(measured.receivedFrames >= 24000);
-}
-
 export async function macosSignal(device, directory, { execute, snapshot, schedulerTrace, trace, measurementBoundary }) {
   const uid = device.nativeDeviceIds.find(id => id.startsWith('io.mixrelay.audio.endpoint.'));
   assert.ok(uid, 'Missing canonical CoreAudio device identity');
   const bundle = execute('zsh', ['scripts/probe-macos-roundtrip.sh', '--prepare-bundle', 'io.mixrelay.qualification.probe'],
     { encoding: 'utf8', timeout: 60000 }).trim();
   const stdout = join(directory, 'native-probe.stdout.json');
-  let measured;
+  let measured, measurementFailure;
   const errors = [];
   try {
     try {
@@ -58,7 +48,8 @@ export async function macosSignal(device, directory, { execute, snapshot, schedu
       try { execute(command.program, command.args, { timeout: command.timeout }); }
       catch (error) { processFailure = error; }
       measured = readMeasurement(stdout, processFailure);
-      verifyMeasurement(measured);
+      try { verifyMeasurement(measured); }
+      catch (error) { measurementFailure = error.measurementFailure; throw error; }
     };
     await measurementBoundary(() => schedulerTrace ? trace(directory, measure) : measure());
   } catch (error) { errors.push(error); }
@@ -72,7 +63,10 @@ export async function macosSignal(device, directory, { execute, snapshot, schedu
       catch (error) { console.error(`Native post-signal process snapshot: ${error.message}`); }
     }
   }
-  if (errors.length === 1) throw errors[0];
-  if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join('; '));
+  if (errors.length) {
+    const failure = errors.length === 1 ? errors[0] : new AggregateError(errors, errors.map(error => error.message).join('; '));
+    if (measurementFailure) failure.measurementFailure = measurementFailure;
+    throw failure;
+  }
   writeFileSync(join(directory, 'native-signal.json'), JSON.stringify(measured, null, 2) + '\n', { flag: 'wx' });
 }
