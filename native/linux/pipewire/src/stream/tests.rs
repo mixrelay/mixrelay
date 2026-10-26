@@ -160,7 +160,7 @@ fn delayed_capture_retains_four_seconds_at_the_highest_product_rate() {
     ];
     for role in roles {
         let mut ring = PcmRing::new(2, role.retention_frames()).unwrap();
-        let input: Vec<f32> = (0..192_000 * 4)
+        let input: Vec<f32> = (0_u32..192_000 * 4)
             .flat_map(|frame| {
                 let sample = if (frame / 192_000).is_multiple_of(2) {
                     0.0

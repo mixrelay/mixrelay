@@ -61,8 +61,18 @@ fn extreme_rate_ratio_latches_only_its_source_and_never_touches_pcm_or_mapper() 
     assert_eq!(allocation.count_total, 0);
     assert_eq!(failed, Some(budget::failure(&cycle, 192_000)));
     assert_eq!(affected.failure(), failed);
-    assert!(affected.input.iter().all(|sample| *sample == 0.25));
-    assert!(affected.output.iter().all(|sample| *sample == 0.75));
+    assert!(
+        affected
+            .input
+            .iter()
+            .all(|sample| sample.to_bits() == 0.25_f32.to_bits())
+    );
+    assert!(
+        affected
+            .output
+            .iter()
+            .all(|sample| sample.to_bits() == 0.75_f32.to_bits())
+    );
     let mapped = affected
         .mapper
         .map(ProcessCycle {
@@ -81,5 +91,9 @@ fn extreme_rate_ratio_latches_only_its_source_and_never_touches_pcm_or_mapper() 
     assert_eq!(mapped.first_frame, 0);
     assert_eq!(mapped.frames, 512);
     assert_eq!(peer.failure(), None);
-    assert!(peer.output[..128].iter().all(|sample| *sample == 0.25));
+    assert!(
+        peer.output[..128]
+            .iter()
+            .all(|sample| sample.to_bits() == 0.25_f32.to_bits())
+    );
 }

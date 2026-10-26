@@ -27,8 +27,17 @@ macOS 15 ARM 통과, 15 Intel·26 Intel 실패다. 선택한 세 대상의 정�
 macOS 전체 workspace의 lib·bin 시험과 실패 수정 후 영향 범위 재검사를 완료했다.
 전체 소스의 strict all-targets clippy·fmt·미사용 의존·크레이트 계층 검사도 통과했다.
 AU 35개, CLAP 69개, VST3 111개와 실제 child crash·hang 격리와 오류 관찰을 포함한 processor-host 196개가 통과했다.
-Linux 코드는 정적 확인과 pure 회귀를 마쳤으나 실제 Linux native 실행은 아직 미확인이다.
+격리된 Ubuntu ARM 컨테이너에서 Linux workspace lib·bin 1,837개가 통과했다.
+기존 ignore 5개는 직렬 release 성능 측정이며 필수 설치본 시나리오와 구분한다.
+LV2는 실제 Lilv fixture를 포함해 54개가 ignore 없이 통과했고, 별도 manifest의 strict
+all-targets clippy도 통과했다. PipeWire C callback의 ASan·UBSan과 공통 PCM C fixture도 통과했다.
+컨테이너에는 호스트 소스·오디오 장치를 연결하지 않았으며 설치된 제품은 변경하지 않았다.
 AU·LV2 별도 manifest 시험과 Linux C callback fixture는 OS별 필수 source gate에 연결했다.
+
+`44f6594`의 macOS 소스 CI 6개와 Ubuntu ARM을 포함한 VM 부팅 7개는 통과했다.
+같은 소스의 Linux CI 7개는 장치 ID 로그의 없는 `Display` 구현을 요구해 컴파일에서 실패했다.
+기존 `as_str()`를 사용하는 후속 소스로 위 로컬 Linux 검사를 완료했다. 최종 HEAD의
+13개 소스 CI와 같은 설치본의 전체 수락은 별도로 확인해야 한다.
 
 저장량을 늘린 뒤 기존 macOS bridge 회귀가 지연 목표 상한 8,192프레임을 넘는 결과로 실패했다.
 `maximum_target_frames`를 저장 용량에서 분리한 뒤 같은 기대값으로 통과했다.

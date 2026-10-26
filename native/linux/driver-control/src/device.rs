@@ -198,7 +198,11 @@ impl DeviceRuntime {
         // This control-only flag deduplicates diagnostics; native owners publish the faults.
         if !self.reported_process_failure.load(Ordering::Relaxed) {
             if let Some(cause) = processing_failure {
-                tracing::warn!(device_id = %self.config.spec.id, ?cause, "PipeWire device processing failed");
+                tracing::warn!(
+                    device_id = self.config.spec.id.as_str(),
+                    ?cause,
+                    "PipeWire device processing failed"
+                );
                 self.reported_process_failure.store(true, Ordering::Relaxed);
             } else {
                 for (direction, stream) in [("render", &self.render), ("capture", &self.capture)] {
@@ -206,8 +210,12 @@ impl DeviceRuntime {
                         .as_ref()
                         .and_then(StreamProperties::buffer_return_error)
                     {
-                        tracing::warn!(device_id = %self.config.spec.id, direction, native_code,
-                            "PipeWire buffer return failed");
+                        tracing::warn!(
+                            device_id = self.config.spec.id.as_str(),
+                            direction,
+                            native_code,
+                            "PipeWire buffer return failed"
+                        );
                         self.reported_process_failure.store(true, Ordering::Relaxed);
                         break;
                     }
@@ -259,8 +267,11 @@ fn wait_for_native_tuple(
             break;
         }
         if let Some(cause) = driver.process_failure() {
-            tracing::error!(device_id = %id, ?cause,
-                "PipeWire device processing failed before admission");
+            tracing::error!(
+                device_id = id.as_str(),
+                ?cause,
+                "PipeWire device processing failed before admission"
+            );
             return Err(DriverError::Backend(format!(
                 "native device processing failed before admission: {cause:?}"
             )));

@@ -91,6 +91,10 @@ pub(super) struct Features {
 }
 
 impl Features {
+    #[expect(
+        clippy::unnecessary_box_returns,
+        reason = "Native feature data and URID handles retain pointers into this allocation"
+    )]
     pub(super) fn new() -> Box<Self> {
         // Build in two passes so the `Box`'s heap address is stable
         // before we record interior pointers.

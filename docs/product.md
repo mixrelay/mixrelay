@@ -502,24 +502,24 @@ Driver 실행부·엔진·가상 장치 종료, 명시적 재연결 전 중지 �
 
 | ID | 책임·소유자 | procedure 대조와 구현 | TODO 상태 | 완료 조건 |
 | --- | --- | --- | --- | --- |
-| E1 | PCM·버퍼·주기 / native transport·macOS worker | 누적 credit 전체를 획득 frontier로 전달, 절대 native 주기 대기, 최대 192kHz에서도 최소 4초 저장량 준비 | 구현·개별 회귀 완료, 통합 검사 중 | 무음·유음, 부분 게시·지연·ring 끝·초과의 실제 PCM 보존과 RT 할당 0 |
+| E1 | PCM·버퍼·주기 / native transport·macOS worker | 누적 credit 전체를 획득 frontier로 전달, 절대 native 주기 대기, 최대 192kHz에서도 최소 4초 저장량 준비 | macOS·Ubuntu ARM 소스 회귀 완료, 설치본 수락 대기 | 무음·유음, 부분 게시·지연·ring 끝·초과의 실제 PCM 보존과 RT 할당 0 |
 | E2 | 그래프 / audio-engine | GKAudioGraph update/perform/stop/remove와 plan publication·retirement 대조. 미사용 병렬 엔진 제거, meter·processor exchange·render ownership 분리 | 185개 소스 회귀 완료 | 실제 publication·rollback·Off/Mute·off-RT 회수 계약 유지 |
 | E3 | macOS 앱 입력 / process-tap | Stop 실패 때 delivery 차단, callback 배출 후 재시작, 이전 PCM·clock 철회, 제어 절차별 OSStatus 관찰 | 65개 native 회귀·Desktop 오류 표시 회귀 완료 | 실패한 Start/Stop·late callback이 다른 세션이나 새 PCM으로 전파되지 않음 |
 | E4 | macOS HAL / HAL registry·client mix | 실제 stream 시작 성공 후 running 게시, tags/header 포함 용량 admission, client 수명·configuration 거래 분리 | 133개 소스 회귀 완료 | 시작·예약 실패 때 기존 client·revision·PCM 보존 |
 | E5 | 녹음 / recorder transport·RecordingStream | 4초 packet 저장량, 부분 byte 쓰기 뒤 완전한 frame prefix 확정, flush→truncate→header finalize 책임 분리 | 47개 파일 회귀·저장량 회귀 완료 | 원래 쓰기 오류와 후속 정리 오류 보존, Failed 유지 |
-| E6 | Linux / PipeWire stream·graph driver | 입력 저장과 출력 quantum 분리. queue 반환·clock 교체·frame budget 실패를 개별 owner에 고정하고 제어측 회수 | 구현·정적 확인 완료, Linux 실행 대기 | Rust·실제 C callback fixture·ASan/UBSan·서비스 recovery 검증 |
+| E6 | Linux / PipeWire stream·graph driver | 입력 저장과 출력 quantum 분리. queue 반환·clock 교체·frame budget 실패를 개별 owner에 고정하고 제어측 회수 | Ubuntu ARM Rust·C callback·ASan/UBSan 회귀 완료 | Rust·실제 C callback fixture·ASan/UBSan·서비스 recovery 검증 |
 | E7 | 플러그인 격리 / processor-host | scan/probe와 인스턴스별 child 수명, READY 이후 native hang 감독, 부모 EOF 감시, 원시 native 오류·형식 관찰, 실패한 candidate의 control owner 보존 | 196개 회귀 완료 | crash·abort·hang·late reply 때 독립 peer PCM 유지, 정확한 dry fallback·재시도·child 회수 |
 | E8 | 엔진 조립 / engine-service·session | native 계약·DSP 준비·그래프 게시·제어·저장 거래와 session format/status/telemetry 소유자 분리. Linux pause 위임 보강 | session 45개 회귀 완료 | 기존 거래 순서·rollback·의존 방향 유지, 중복 실행 소유자 제거 |
-| E9 | 종료 / engine-process·worker completion | child 시작 전 reaper 준비, 마지막 실행 계측 발행, typed worker 결과로 control admission 종료, 모든 독립 owner 정리 오류 보존 | reaper 15개·공통/macOS 회귀 완료 | 정상 drain과 실패 종료 모두 정확한 child·오디오 owner 회수 |
+| E9 | 종료 / engine-process·worker completion | child 시작 전 reaper 준비, 마지막 실행 계측 발행, typed worker 결과로 control admission 종료, 모든 독립 owner 정리 오류 보존 | reaper 15개·공통/macOS·Linux 소스 회귀 완료 | 정상 drain과 실패 종료 모두 정확한 child·오디오 owner 회수 |
 | E10 | AU / render·transport·activation | 현재 입력 block extent만 callback에 노출, 정지 후 refcon 수명 유지, native OSStatus·geometry typed 오류 전달 | 35개 회귀·strict clippy 완료 | 정상·오류 경로 RT 할당 0, 렌더 뒤 PCM borrow 철회 |
 | E11 | VST3 / module·instance·event exchange | 필수 module hook 검증, COM 이벤트·포인터 저장소 준비, checked bus 범위와 typed 오류 전달 | 111개 회귀·strict clippy 완료 | 잘못된 native 이벤트·geometry의 무할당 거절, 출력 이벤트 전달 |
 | E12 | CLAP / processing·events·state | 4,096개+pending 입력 저장소 준비, header 검증, 입력 초과·start 거절의 typed 오류 전달 | 69개 회귀·strict clippy 완료 | 초과 입력 전에 native 호출 차단, 출력 prefix 보존, RT 할당 0 |
-| E13 | LV2 / atoms·ports·instance | 정렬된 포트별 Atom 저장소·전체 용량·payload 범위 검증, 초과 입력의 명시 오류 | pure 12개·전체 타입/strict 검사 완료, Linux native 실행 대기 | 격리된 Lilv fixture 5개도 필수 실행, 실제 PCM·state·다중 bus 검증 |
-| E14 | 최종 수락 / 통합 담당 | 모든 변경을 한 HEAD로 통합해 회귀·성능·서명·설치 검증 | macOS 통합 회귀 완료, Linux·설치본 수락 미완료 | 동일 최종 네 설치 파일로 13개 대상·필수 skip 0·정리 성공 |
+| E13 | LV2 / atoms·ports·instance | 정렬된 포트별 Atom 저장소·전체 용량·payload 범위 검증, 초과 입력의 명시 오류 | Linux 54개·strict clippy 완료 | 격리된 Lilv fixture 5개도 필수 실행, 실제 PCM·state·다중 bus 검증 |
+| E14 | 최종 수락 / 통합 담당 | 모든 변경을 한 HEAD로 통합해 회귀·성능·서명·설치 검증 | macOS·Ubuntu ARM 소스 회귀 완료, 전체 CI·설치본 수락 대기 | 동일 최종 네 설치 파일로 13개 대상·필수 skip 0·정리 성공 |
 
 | 영역 | 남은 확인·구현 |
 | --- | --- |
-| Driver 안정성 | 엔진 재시작·앱 재실행 시 일시정지·그래프·가상 장치 설정 보존, 비정상 종료 복구 재시도·종료 우선, 지연 lease 만료·이전 엔진 보고 차단을 소스 시험으로 확인. Linux 실시간 실패 원인·출력 release 오류 코드는 원자 mailbox로 비실시간 기록(공통 mailbox 시험 완료, Linux 빌드 확인은 남음). 가상 장치 I/O 버퍼의 오디오 설정 추종과 재시작·비정상 종료 복구의 설치본 확인은 남음(설치·업데이트 후 첫 연결은 2026-10-13 설치본에서 해결 확인) |
+| Driver 안정성 | 엔진 재시작·앱 재실행 시 일시정지·그래프·가상 장치 설정 보존, 비정상 종료 복구 재시도·종료 우선, 지연 lease 만료·이전 엔진 보고 차단을 소스 시험으로 확인. Linux 실시간 실패 원인·출력 release 오류 코드는 원자 mailbox로 비실시간 기록(공통 mailbox·Ubuntu ARM 소스 시험 완료). 가상 장치 I/O 버퍼의 오디오 설정 추종과 재시작·비정상 종료 복구의 설치본 확인은 남음(설치·업데이트 후 첫 연결은 2026-10-13 설치본에서 해결 확인) |
 | 실시간 실행·제어 프로토콜 | [설계](design/realtime-and-control-protocol.md)의 실행 경로 계측, 대체 워커 분리·실시간화, 설치본 앱 캡처·플러그인 지연 측정과 측정 기반 지연 정책, push 제어 프로토콜(통합 상태 push·packed 미터·웹뷰 credit·실행부↔편집 앱 연결 다중화는 소스 적용; 설치본 검증은 남음), 128채널(앱 캡처 pump·플러그인 DSP의 실시간·이벤트 깨우기는 소스 적용) |
 | 녹음 앱 지연 보고 | [설계](design/audio-content-latency.md)의 측정 기반 입력 지연 보고(가상·하드웨어 입력과 앱 캡처 경로의 측정·발행·엔진 전용 판정은 소스 적용). 설치본에서 하드웨어 입력 → 가상 장치 경로의 보고(751프레임)와 경로 제거 시 해제를 확인(`scripts/lab/macos-latency-acceptance.mjs`). 보고값과 실제 지연의 일치는 빌드 전 경로 테스트(브리지·direct 조합, 48프레임 이내)로 검증. coreaudiod에는 변경 표시값만 보고. 앱 캡처는 획득 시각을 보존한 PCM의 실제 나이를 측정하며 가변 콜백·SRC 입력 샘플레이트 변경 경로 테스트를 포함. 시각 미확인 경로는 0으로 보고하며 앱 캡처 지연의 설치본 확인은 남음 |
 | 최신 개발 설치본 | Linux 최신 DEB 설치·런처의 Driver/엔진 시작·Free 화면·소유자 종료는 검증 완료. macOS 2026-10-17 14:28 Universal PKG(`981f8b8`)의 설치·엔진 일치와 Loopback → 엔진 → 가상 장치 왕복 20/20 정렬·지연 변동 0.9프레임·보고 오차 2.09프레임을 확인. 설치 앱의 캡처→가상 출력은 양쪽 채널 약 0.05·fault 0, 기본 가상 장치 왕복은 144,000프레임 비트 일치·누락/중복/손상/추가 지연 0. 녹음 입력은 앞선 13:28 설치본에서 통과했으며 최신 설치본에서 별도 재측정하지 않음. 소스의 전체 Rust 2,306개·엄격 clippy 통과. LG HDR 4K는 CoreAudio 단독 시작도 실패하는 현 장치 상태의 예외로 두며, SDQHD·built-in 출력 통과와 구분함. 앱 캡처 복구의 실제 장애 경계·플러그인·UI 경합의 설치본 확인도 남음 |

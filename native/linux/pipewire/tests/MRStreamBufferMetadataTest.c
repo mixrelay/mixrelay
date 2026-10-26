@@ -122,6 +122,7 @@ static void test_return_failure_isolates_the_acquisition(void) {
 static void test_capture_clock_replacement_fences_old_pcm(void) {
     MRPWStream stream = { .channels = 2, .sample_rate = 48000 };
     initialize_transfer_observations(&stream);
+    atomic_init(&stream.state, PW_STREAM_STATE_STREAMING);
     struct spa_io_position position = {0};
     position.clock.rate = SPA_FRACTION(1, 48000);
     position.clock.id = 1;
