@@ -176,7 +176,7 @@ fn callback_evidence_distinguishes_missing_capture_from_published_digital_silenc
         .chunks_exact(8)
         .map(|value| u64::from_ne_bytes(value.try_into().unwrap()))
         .collect();
-    let rows: Vec<_> = words[5..]
+    let rows: Vec<_> = words[14..]
         .chunks_exact(11)
         .filter(|row| row[0] != 0)
         .collect();

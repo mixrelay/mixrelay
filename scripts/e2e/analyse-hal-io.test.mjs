@@ -38,7 +38,7 @@ test('an incomplete snapshot and partial signal overlap remain explicit', () => 
 });
 
 test('invalid schemas and duplicate sequences cannot become trace evidence', () => {
-  assert.throws(() => analyseHalIo({ ...trace([]), version: 4 }));
+  assert.throws(() => analyseHalIo({ ...trace([]), version: 5 }));
   assert.throws(() => analyseHalIo(trace([[1, 0, 100, 8, 1, 9, 0, a]])));
   assert.throws(() => analyseHalIo(trace([[1, 0, 100, 8, 1, 8, 0, a], [1, 1, 100, 8, 1, 8, 0, a]])));
 });
@@ -77,4 +77,16 @@ test('the active signal window follows original output coordinates and excludes 
   const timing = 'input recording consent complete\nside,first,sampleTime,hostTime,frames,flags,callbackEnter,callbackExit\noutput,512,20512,9000,512,3,1,2\n';
   assert.deepEqual(probeSignalWindow({ output: { rate: 48000 }, signalFrames: 144000 }, timing), { start: 24800, end: 168800 });
   assert.equal(probeSignalWindow({ output: { rate: 48000 }, signalFrames: 144000 }, ''), null);
+});
+
+test('v4 exposes pre-native SDK and registry failures even when no PCM row was emitted', () => {
+  const admission = { read: 6, write: 0, timestamp: 2, extent: 2, stream: 1, frozen: 1,
+    inactive: 0, native: 0, lastRejectedTimestampBits: '7ff8000000000000' };
+  const input = { version: 4, capacity: 8192, issued: 0, dropped: 0, rows: [], admission };
+  const result = analyseHalIo(input);
+  assert.deepEqual(result.admission, admission);
+  assert.equal(result.retention.retainedRows, 0);
+  assert.ok(result.limitations.some(line => line.includes('not an atomic transaction')));
+  assert.throws(() => analyseHalIo({ ...input, admission: { ...admission, timestamp: -1 } }));
+  assert.throws(() => analyseHalIo({ ...input, admission: { ...admission, lastRejectedTimestampBits: 0 } }));
 });

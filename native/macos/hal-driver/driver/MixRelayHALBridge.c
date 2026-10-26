@@ -176,13 +176,19 @@ static OSStatus end_io(AudioServerPlugInDriverRef driver, AudioObjectID device, 
 }
 static OSStatus do_io_impl(AudioServerPlugInDriverRef driver, AudioObjectID device, AudioObjectID stream, UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle, void *main_buffer, void *secondary) {
     (void)secondary;
-    if (!valid(driver) || cycle == NULL || main_buffer == NULL) return kAudioHardwareBadObjectError;
+    if (!valid(driver)) return kAudioHardwareBadObjectError;
     const bool render = operation == kAudioServerPlugInIOOperationMixOutput;
+    if (cycle == NULL || main_buffer == NULL) {
+        if (render || operation == kAudioServerPlugInIOOperationReadInput) {
+            const double time = cycle == NULL ? __builtin_nan("") : render ? cycle->mOutputTime.mSampleTime : cycle->mInputTime.mSampleTime;
+            (void)mr_hal_core_io_sample_time(gCore, device, stream, render, client, time, main_buffer, frames);
+        }
+        return kAudioHardwareBadObjectError;
+    }
     if (!render && operation != kAudioServerPlugInIOOperationReadInput) return noErr;
     if (render) mr_hal_core_render_client(gCore, device, client);
-    uint64_t frame;
-    if (!mr_hal_io_sample_frame(render ? cycle->mOutputTime.mSampleTime : cycle->mInputTime.mSampleTime, &frame)) return kAudioHardwareIllegalOperationError;
-    return mr_hal_core_io(gCore, device, stream, render, client, frame, main_buffer, frames) ? noErr : kAudioHardwareIllegalOperationError;
+    const double sample_time = render ? cycle->mOutputTime.mSampleTime : cycle->mInputTime.mSampleTime;
+    return mr_hal_core_io_sample_time(gCore, device, stream, render, client, sample_time, main_buffer, frames) ? noErr : kAudioHardwareIllegalOperationError;
 }
 
 static OSStatus do_io(AudioServerPlugInDriverRef driver, AudioObjectID device, AudioObjectID stream, UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle, void *main_buffer, void *secondary) {

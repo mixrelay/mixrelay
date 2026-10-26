@@ -782,8 +782,12 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_set(
             return BAD_OBJECT;
         };
         let _control = crate::device::lock(&device.control);
-        let _freeze = device.freeze();
-        device.io_trace.set_enabled(enabled);
+        let freeze = device.freeze();
+        device.io_trace.set_enabled(false);
+        drop(freeze);
+        if enabled {
+            device.io_trace.enable_after_reset();
+        }
         return 0;
     }
     let bytes = unsafe { std::slice::from_raw_parts(input.cast::<u8>(), size as usize) };

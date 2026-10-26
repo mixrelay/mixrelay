@@ -32,6 +32,19 @@ test('native evidence distinguishes fully published silence from the other silen
   }
 });
 
+test('a v4 pre-native rejection remains a failure even when every retained PCM row matches', () => {
+  const data = fixture();
+  data.trace.version = 4;
+  data.trace.admission = { read: 5, write: 20, timestamp: 0, extent: 0, stream: 0,
+    frozen: 1, inactive: 0, native: 0, lastRejectedTimestampBits: '0000000000000000' };
+  const result = analyse(data);
+  assert.equal(result.admission.frozen, 1);
+  assert.equal(result.nativeEvidenceComplete, false);
+  assert.ok(result.segments.every(segment => segment.captureDifferences.length === 0));
+  data.trace.admission.frozen = 0;
+  assert.equal(analyse(data).nativeEvidenceComplete, true);
+});
+
 test('zero-valued native input with no supplied frames cannot establish valid silence', () => {
   const data = fixture(), read = data.trace.rows.find(row => row[1] === 0);
   read[5] = 0;

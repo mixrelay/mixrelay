@@ -430,9 +430,6 @@ pub(crate) unsafe extern "C" fn mr_hal_core_io(
     let Some(registry) = (unsafe { registry.as_ref() }) else {
         return false;
     };
-    if samples.is_null() || frames as usize > crate::formats::MAX_BUFFER_FRAMES {
-        return false;
-    }
     unsafe {
         registry.io(crate::registry::IoOperation {
             device,
@@ -443,5 +440,41 @@ pub(crate) unsafe extern "C" fn mr_hal_core_io(
             samples,
             frames,
         })
+    }
+}
+
+/// Projects the SDK's sample coordinate without discarding rejected requests.
+/// # Safety
+/// Registry and operation-buffer extents obey `mr_hal_core_io`'s contract.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mr_hal_core_io_sample_time(
+    registry: *mut Registry,
+    device: u32,
+    stream: u32,
+    render: bool,
+    client: u32,
+    sample_time: f64,
+    samples: *mut c_void,
+    frames: u32,
+) -> bool {
+    let _audio = crate::transport::AudioScope::enter();
+    let mut frame = 0;
+    // SAFETY: the decoder writes one retained stack value, touching no PCM.
+    if !unsafe {
+        mixrelay_macos_transport::hal_io::mr_hal_io_sample_frame(sample_time, &raw mut frame)
+    } {
+        // SAFETY: registry lifetime is retained by the host for this callback.
+        if let Some(registry) = unsafe { registry.as_ref() }
+            && let Some(device) = registry.pin(device).filter(|pin| pin.id == device)
+        {
+            device.io_trace.reject_timestamp(sample_time, render);
+        }
+        return false;
+    }
+    // SAFETY: the forwarded buffer and retained registry obey the same IO contract.
+    unsafe {
+        mr_hal_core_io(
+            registry, device, stream, render, client, frame, samples, frames,
+        )
     }
 }

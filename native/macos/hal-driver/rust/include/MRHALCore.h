@@ -111,6 +111,8 @@ bool mr_hal_core_timestamp(MRHALCore *, uint32_t device_id, uint64_t now, MRHALC
  * signed16/24/32 are little-endian packed bytes. Internal transport stays Float32. */
 bool mr_hal_core_io(MRHALCore *, uint32_t device_id, uint32_t stream_id,
                    bool render, uint32_t client_id, uint64_t frame, void *, uint32_t frame_count);
+bool mr_hal_core_io_sample_time(MRHALCore *, uint32_t device_id, uint32_t stream_id,
+                   bool render, uint32_t client_id, double sample_time, void *, uint32_t frame_count);
 typedef struct MRHALCorePropertyAddress { uint32_t selector, scope, element; } MRHALCorePropertyAddress;
 typedef struct MRHALCoreNotification { uint32_t object_id; MRHALCorePropertyAddress address; } MRHALCoreNotification;
 bool mr_hal_core_has_property(MRHALCore *, uint32_t, const MRHALCorePropertyAddress *);

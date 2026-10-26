@@ -9,6 +9,7 @@ const CAPACITY: usize = 8192;
 const FIELDS: usize = 10;
 
 pub(crate) struct IoTrace {
+    pub(crate) admission: crate::io_admission::Admission,
     enabled: AtomicBool,
     next: AtomicU64,
     dropped: AtomicU64,
@@ -60,6 +61,7 @@ impl IoTrace {
             fields: std::array::from_fn(|_| AtomicU64::new(0)),
         }));
         Ok(Self {
+            admission: crate::io_admission::Admission::new(),
             enabled: AtomicBool::new(false),
             next: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
@@ -70,6 +72,8 @@ impl IoTrace {
 
     /// Control holds the device freeze, excluding callbacks during reset.
     pub(crate) fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(false, Ordering::Release);
+        self.admission.reset();
         self.next.store(0, Ordering::Relaxed);
         self.dropped.store(0, Ordering::Relaxed);
         for row in &self.rows {
@@ -83,8 +87,31 @@ impl IoTrace {
         self.enabled.load(Ordering::Acquire)
     }
 
+    /// Control retains the device lock and has reset while frozen. Publish after
+    /// releasing that freeze so enabling evidence cannot itself count a frozen IO.
+    pub(crate) fn enable_after_reset(&self) {
+        self.enabled.store(true, Ordering::Release);
+    }
+
     pub(crate) fn begin(&self) -> Option<CallbackStart> {
         self.enabled().then(|| CallbackStart((self.clock)()))
+    }
+
+    pub(crate) fn note(&self, stage: crate::io_admission::Stage) {
+        if self.enabled() {
+            self.admission.note(stage);
+        }
+    }
+
+    pub(crate) fn reject_timestamp(&self, sample_time: f64, render: bool) {
+        if self.enabled() {
+            self.admission.note(if render {
+                crate::io_admission::Stage::Write
+            } else {
+                crate::io_admission::Stage::Read
+            });
+            self.admission.timestamp(sample_time);
+        }
     }
 
     pub(crate) fn record(&self, observation: Observation<'_>, start: Option<CallbackStart>) {
@@ -149,7 +176,7 @@ impl IoTrace {
     }
 
     /// Fixed-size, native-endian `UInt64` payload: version, fields, capacity, issued,
-    /// dropped, then (sequence, render, frame, frames, accepted, available, zeros,
+    /// dropped, admission counters/raw rejected timestamp, then (sequence, render, frame, frames, accepted, available, zeros,
     /// hash, client, `host_start`, `host_end`). Host counters bracket processing, excluding tracing.
     pub(crate) fn snapshot(&self) -> Vec<u8> {
         // Acquire drops first: each dropped reservation precedes the issued bound.
@@ -159,7 +186,8 @@ impl IoTrace {
     }
 
     fn snapshot_at(&self, issued: u64, dropped: u64) -> Vec<u8> {
-        let mut words = vec![3, FIELDS as u64, CAPACITY as u64, issued, dropped];
+        let mut words = vec![4, FIELDS as u64, CAPACITY as u64, issued, dropped];
+        words.extend(self.admission.snapshot());
         for row in &self.rows {
             let before = row.sequence.load(Ordering::SeqCst);
             let fields = row
@@ -218,7 +246,7 @@ mod tests {
             .chunks_exact(8)
             .map(|word| u64::from_ne_bytes(word.try_into().unwrap()))
             .collect();
-        let sequences: Vec<_> = words[5..]
+        let sequences: Vec<_> = words[14..]
             .chunks_exact(FIELDS + 1)
             .filter_map(|row| (row[0] != 0).then_some(row[0]))
             .collect();
@@ -249,8 +277,8 @@ mod tests {
             let actual = words(&trace);
             assert_eq!(actual[3], u64::from(enabled));
             if enabled {
-                assert_eq!(&actual[5..12], &[1, 0, 64, 2, 1, 1, 1]);
-                assert_eq!(&actual[14..16], &[1234, 1234]);
+                assert_eq!(&actual[14..21], &[1, 0, 64, 2, 1, 1, 1]);
+                assert_eq!(&actual[23..25], &[1234, 1234]);
             }
         }
     }
@@ -275,7 +303,7 @@ mod tests {
         let actual = words(&trace);
         assert_eq!(actual[3], CAPACITY as u64 + 3);
         assert_eq!(actual[4], 0);
-        let mut sequences: Vec<_> = actual[5..]
+        let mut sequences: Vec<_> = actual[14..]
             .chunks_exact(FIELDS + 1)
             .map(|row| row[0])
             .collect();

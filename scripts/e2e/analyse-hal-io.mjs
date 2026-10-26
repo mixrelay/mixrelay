@@ -8,14 +8,20 @@ import { analyseProbeReference } from './probe-pcm-reference.mjs';
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 
 export function analyseHalIo(trace, signalWindow = null) {
-  assert.ok([1, 2, 3].includes(trace.version), 'Unsupported HAL trace version');
-  assert.equal(trace.capacity, { 1: 2048, 2: 4096, 3: 8192 }[trace.version], 'Unexpected HAL trace capacity');
+  assert.ok([1, 2, 3, 4].includes(trace.version), 'Unsupported HAL trace version');
+  assert.equal(trace.capacity, { 1: 2048, 2: 4096, 3: 8192, 4: 8192 }[trace.version], 'Unexpected HAL trace capacity');
+  const admission = trace.version === 4 ? trace.admission : null;
+  if (admission) {
+    for (const field of ['read', 'write', 'timestamp', 'extent', 'stream', 'frozen', 'inactive', 'native'])
+      assert.ok(integer(admission[field]), `Invalid HAL admission counter ${field}`);
+    assert.match(admission.lastRejectedTimestampBits, /^[0-9a-f]{16}$/);
+  } else assert.ok(trace.version < 4, 'Missing HAL admission counters');
   assert.ok(integer(trace.issued) && integer(trace.dropped) && trace.dropped <= trace.issued);
   assert.ok(Array.isArray(trace.rows) && trace.rows.length <= trace.capacity);
   if (signalWindow) assert.ok(integer(signalWindow.start) && integer(signalWindow.end) && signalWindow.end > signalWindow.start);
   const sequences = new Set();
   const rows = trace.rows.map(row => {
-    assert.ok(Array.isArray(row) && row.length === ({ 1: 8, 2: 9, 3: 11 }[trace.version]) && row.slice(0, 7).every(integer));
+    assert.ok(Array.isArray(row) && row.length === ({ 1: 8, 2: 9, 3: 11, 4: 11 }[trace.version]) && row.slice(0, 7).every(integer));
     const [sequence, render, frame, frames, accepted, available, zeroFrames, hash] = row;
     assert.ok(sequence > 0 && sequence <= trace.issued && !sequences.has(sequence), 'Invalid or repeated observation sequence');
     assert.ok(render <= 1 && accepted <= 1 && frames <= 0xffffffff && available <= frames && zeroFrames <= frames);
@@ -23,7 +29,7 @@ export function analyseHalIo(trace, signalWindow = null) {
     const client = trace.version >= 2 ? row[8] : null;
     assert.ok(client === null || (integer(client) && client <= 0xffffffff));
     sequences.add(sequence);
-    const processing = trace.version === 3 ? { hostStart: row[9], hostEnd: row[10] } : null;
+    const processing = trace.version >= 3 ? { hostStart: row[9], hostEnd: row[10] } : null;
     if (processing) assert.ok(integer(processing.hostStart) && integer(processing.hostEnd) && processing.hostEnd >= processing.hostStart, 'Invalid processing host counters');
     const overlap = !signalWindow ? 'unknown' : frame >= signalWindow.end || frame + frames <= signalWindow.start
       ? 'outside' : frame >= signalWindow.start && frame + frames <= signalWindow.end ? 'full' : 'partial';
@@ -46,6 +52,7 @@ export function analyseHalIo(trace, signalWindow = null) {
   const recentStart = Math.max(1, trace.issued - trace.capacity + 1);
   const recentRows = rows.filter(row => row.sequence >= recentStart).length;
   return {
+    admission,
     signalWindow,
     retention: { issued: trace.issued, capacity: trace.capacity, writerDropped: trace.dropped,
       retainedRows: rows.length, notRetainedRecentRows: Math.min(trace.issued, trace.capacity) - recentRows,
@@ -63,7 +70,8 @@ export function analyseHalIo(trace, signalWindow = null) {
       'Rows do not include epochs. Equal coordinates alone do not prove the same timeline.',
       'Partial signal overlap does not locate zeros or unavailable frames inside that overlap.',
       'Unpaired or unretained rows do not establish that native IO was absent.',
-      'Tracing starts after registry admission; invalid-stream, frozen-device and inactive early returns are not traced.',
+      admission ? 'Admission counters cover SDK timestamp/extent and registry stream/freeze/inactive/native outcomes; counts are not an atomic transaction and do not locate a rejection in time.'
+        : 'Tracing starts after registry admission; invalid-stream, frozen-device and inactive early returns are not traced.',
     ],
   };
 }

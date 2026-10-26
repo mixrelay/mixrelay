@@ -16,7 +16,7 @@ function coverage(rows, start, end) {
 
 // Available is a count, not a valid prefix. Only a fully supplied read covers its entire range.
 export function analyseSourceNative(trace, plan, source, origin) {
-  assert.equal(trace.version, 3);
+  assert.ok([3, 4].includes(trace.version));
   const summary = analyseHalIo(trace), writes = trace.rows.filter(row => row[1] === 1), reads = trace.rows.filter(row => row[1] === 0);
   assert.equal(source.length, plan.frames * 8);
   assert.ok(Number.isSafeInteger(origin) && origin >= 0);
@@ -38,6 +38,8 @@ export function analyseSourceNative(trace, plan, source, origin) {
   const differences = rows => rows.flatMap(row => row[7] === expected(row) ? [] : [{ sequence: row[0],
     frame: row[2], frames: row[3], observed: row[7], expected: expected(row) }]);
   const retained = summary.retention;
+  const admissionComplete = !summary.admission || ['timestamp', 'extent', 'stream', 'frozen', 'native']
+    .every(stage => summary.admission[stage] === 0);
   const completeRetention = retained.issued > 0 && retained.writerDropped === 0
     && retained.notRetainedRecentRows === 0 && retained.observationsBeyondCapacity === 0;
   const segments = plan.segments.map(segment => {
@@ -61,10 +63,10 @@ export function analyseSourceNative(trace, plan, source, origin) {
       writeCoverage, observedReadCoverage, suppliedReadCoverage, writeDifferences, captureDifferences,
       captureComparedRows: comparedReads.length, unpublishedSourceReads,
       rejectedWrites: sourceWrites.filter(row => !supplied(row)), shortOrRejectedReads: captures.filter(row => !supplied(row)),
-      nativeEvidenceComplete: completeRetention && knownMix && writeCoverage.unobservedFrames === 0
+      nativeEvidenceComplete: admissionComplete && completeRetention && knownMix && writeCoverage.unobservedFrames === 0
         && suppliedReadCoverage.unobservedFrames === 0 && writeDifferences.length === 0 && captureDifferences.length === 0 };
   });
-  return { sourceClient, sourceCandidates: candidates, retention: retained, segments,
+  return { sourceClient, sourceCandidates: candidates, retention: retained, admission: summary.admission, segments,
     nativeEvidenceComplete: segments.every(segment => segment.nativeEvidenceComplete),
     limitations: [...summary.limitations,
       'Source client identity is resolved only when exactly one retained writer has the fixed probe quantum.',

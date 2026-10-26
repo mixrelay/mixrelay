@@ -385,3 +385,32 @@ macOS 26·27 ARM에서 신규 설치·업그레이드마다 두 순서를 한 �
 27 ARM은 신규 설치 136프레임의 누락·반복으로 실패했고 27 ARM 업그레이드는 통과했다.
 REC-02와 제거는 두 대상의 신규 설치·업그레이드 모두 통과했다.
 이 실행은 두 대상의 진단이며 전체 13개 대상의 합격 실행이 아니다.
+
+## SDK 요청과 Registry 입장 경계
+
+Loopback ARK의 `WillDoIOOperation`(0xc390)은 read·mixo·thrd만 선언하며,
+`DoIOOperation`(0xc494)은 read·mixo만 처리한다. 별도의 ProcessInput 훅이나
+NonMixable Float32 형식으로 외부 입력 cache를 보완하는 절차는 확인되지 않았다.
+두 드라이버의 canonical Float32는 interleaved lpcm/flags 9다.
+ARK의 readFromStream(0x1a188)은 큐가 없거나 rate가 다르면 버퍼를 쓰지 않고 성공을 반환한다.
+따라서 Loopback이 모든 실패에서 먼저 버퍼를 지운다는 가정은 성립하지 않는다.
+원시 31개 절차와 소스 대조는 로컬 진단의
+`loopback-hal-read-contract-20261026/findings.md`에 보존했다.
+
+MixRelay의 기존 v3 PCM trace는 Registry 입장 뒤에 시작한다. SDK sample time 거절,
+NULL·과대 버퍼, 잘못된 stream ID, 동결된 장치의 IO 거절은 행을 만들지 않는다.
+읽기 행의 누락만으로 Apple이 DoIOOperation을 호출하지 않았다고 확정할 수 없다.
+이 경계는 실패 설치본 61d525f2와 0ae7aa2 소스에서 같다.
+
+v4 trace는 기존 PCM 행과 처리 host counter를 보존하고, 같은 측정 창의 읽기·쓰기 요청,
+sample time·버퍼 범위·stream·freeze·native 거절과 inactive 반환을 별도로 집계한다.
+SDK의 원래 Float64 sample time은 Rust 경계로 전달하며, 거절한 값의 비트도 보존한다.
+입장 판단은 `io_dispatch`, 집계는 `io_admission`, PCM 행은 `io_trace`가 소유한다.
+제어 조회의 snapshot은 여러 counter를 한 transaction으로 읽지 않으며,
+거절 counter 자체는 실패 시각을 지정하지 않는다. 잘못된 driver 참조나 이미 없는 장치에는
+측정 중인 장치의 counter를 귀속할 수 없다.
+
+로컬 회귀는 fraction·NaN 좌표, NULL·과대 버퍼, stream 불일치와 freeze를 주입해
+PCM 행이 없는 거절도 남는지 확인한다. Freeze 시험은 이전 PCM으로 채운 버퍼가
+거절 시 그대로 남는 현재 동작까지 확인한다. 이 시험은 해당 거절이 설치본의
+56프레임 재생 구간에서 발생했다는 증거가 아니며, PCM 수정 완료를 뜻하지 않는다.

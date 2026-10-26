@@ -894,63 +894,6 @@ impl Registry {
                 (self.native.timestamp)(device.runtime.load(Ordering::Acquire), now, output)
             }
     }
-
-    pub(crate) unsafe fn io(&self, operation: IoOperation) -> bool {
-        let _audio = crate::transport::AudioScope::enter();
-        let IoOperation {
-            device: id,
-            stream,
-            render,
-            client,
-            frame,
-            samples,
-            frames,
-        } = operation;
-        let Some(device) = self.pin(id).filter(|device| device.id == id) else {
-            return false;
-        };
-        let expected = device.id + if render { 2 } else { 1 };
-        if stream != expected {
-            return false;
-        }
-        let Some(_io) = device.io_pin() else {
-            return false;
-        };
-        let channels = if render {
-            device.render_channels.load(Ordering::Acquire)
-        } else {
-            device.capture_channels.load(Ordering::Acquire)
-        };
-        let active = if render {
-            &device.output_active
-        } else {
-            &device.input_active
-        };
-        if !device.alive.load(Ordering::Acquire)
-            || !active.load(Ordering::Acquire)
-            || device.running.load(Ordering::Acquire) == 0
-        {
-            if !render {
-                let bytes = frames as usize
-                    * channels as usize
-                    * device.capture_format.format().bytes_per_sample();
-                unsafe { std::ptr::write_bytes(samples.cast::<u8>(), 0, bytes) };
-            }
-            return true;
-        }
-        unsafe {
-            device.process_io(crate::io_outcome::Transfer {
-                direction: if render {
-                    crate::io_outcome::Direction::ClientOutput(client)
-                } else {
-                    crate::io_outcome::Direction::Capture
-                },
-                frame,
-                samples,
-                frames,
-            })
-        }
-    }
 }
 
 impl Drop for Registry {

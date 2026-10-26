@@ -17,6 +17,8 @@ use crate::registry::{IoOperation, Registry};
 mod clock_property_tests;
 #[path = "inventory_tests.rs"]
 mod inventory_tests;
+#[path = "io_admission/tests.rs"]
+mod io_admission_tests;
 #[path = "native_tests.rs"]
 mod native_tests;
 #[path = "property_catalog_tests.rs"]
