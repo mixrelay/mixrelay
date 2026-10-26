@@ -5,6 +5,37 @@
 OS·CPU별 지원 범위와 같은 사용자 시나리오의 확인·부분·미확인 결과는
 [OS별 지원·검증 인벤토리](platform-matrix.md)에서 비교한다. 각 결과의 실행 날짜·빌드는 아래 기록을 따른다.
 
+## 2026-10-27 보존된 PCM의 획득 범위와 backlog 용량
+
+`a88eada`의 [집중 실행 40329569555](https://github.com/mixrelay/mixrelay/actions/runs/40329569555)은
+macOS 15 ARM 통과, 15 Intel·26 Intel 실패다. 선택한 세 대상의 정리는 모두 통과했다.
+소스 CI 13개·VM 준비 7개·UI 검사는 통과했다. 이 집중 실행은 13개 전체 수락이 아니다.
+
+26 Intel 새 설치의 뒤 순서에서 native output 누락은 1,108프레임이었으나 종료 녹음의 유음
+144,000프레임 중 143,104프레임이 누락됐다. 녹음기는 오류 없이 정상 종료했으므로 이 손실을
+소스 콜백 지연이나 녹음 큐 overrun만으로 설명할 수 없다. 15 Intel 업그레이드의 녹음 누락
+4,032·1,600프레임은 해당 순서의 소스 output 누락과 일치한다.
+
+지연된 그래프가 누적 native credit을 처리할 때 획득 시작점을 한 블록 분량으로만 계산했다.
+버퍼에 남은 과거 PCM을 지나쳐 아직 게시하지 않은 미래 범위를 읽고 있었다. 합성 회귀는
+유음 32,768프레임 중 1,280프레임만 전달하며 실패했다. 후속 소스는 남은 credit 전체를
+획득 어댑터로 넘기고 실제 보존 용량 안에서 읽는다. 절대 native 주기까지 기다려 준비된
+프레임이 없을 때의 250µs 폴링도 줄인다.
+
+사용자 요청에 따라 공통 backlog 정책은 최대 지원 192kHz에서도 최소 4초로 늘렸다.
+큐의 저장량·그래프 따라잡기 범위를 함께 바꾸고 재생 지연 목표는 callback burst로 유지한다.
+macOS 전체 workspace의 lib·bin 시험과 실패 수정 후 영향 범위 재검사를 완료했다.
+전체 소스의 strict all-targets clippy·fmt·미사용 의존·크레이트 계층 검사도 통과했다.
+AU 35개, CLAP 69개, VST3 111개와 실제 child crash·hang 격리 192개가 통과했다.
+Linux 코드는 정적 확인과 pure 회귀를 마쳤으나 실제 Linux native 실행은 아직 미확인이다.
+AU·LV2 별도 manifest 시험과 Linux C callback fixture는 OS별 필수 source gate에 연결했다.
+
+저장량을 늘린 뒤 기존 macOS bridge 회귀가 지연 목표 상한 8,192프레임을 넘는 결과로 실패했다.
+`maximum_target_frames`를 저장 용량에서 분리한 뒤 같은 기대값으로 통과했다.
+긴 checkout에서 소켓을 만들지 못한 Desktop·Driver 시험은 짧은 checkout 내부 IPC fixture를
+사용하며 기존 연결·권한·회수 assertion을 유지한다. 새 설치본의 전체 수락은 아직 미완료다.
+같은 네 설치 파일로 13개 대상, 필수 시나리오 skip 0과 정리 성공을 확인해야 한다.
+
 ## 2026-10-26 전체 설치본의 잔여 실패와 엔진 실행 주기
 
 `f27da5c`의 [전체 실행 40315961318](https://github.com/mixrelay/mixrelay/actions/runs/40315961318)은

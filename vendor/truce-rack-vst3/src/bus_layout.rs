@@ -5,7 +5,6 @@
 use sha2::{Digest, Sha256};
 use std::ptr;
 use truce_rack_core::{
-    buffer::AudioBuffer,
     bus::{Bus, BusKind, BusLayout, ChannelConfig},
     error::{Error, Result},
 };
@@ -13,7 +12,7 @@ use vst3::{
     ComPtr,
     Steinberg::{
         Vst::{
-            AudioBusBuffers, AudioBusBuffers__type0, BusInfo,
+            BusInfo,
             BusInfo_::{BusFlags, BusFlags_},
             BusTypes, BusTypes_, IAudioProcessor, IAudioProcessorTrait, IComponent,
             IComponentTrait, SpeakerArr,
@@ -174,7 +173,7 @@ fn read_buses(
         };
         buses.push(NativeBus {
             bus: Bus {
-                name: super::string128_to_string(&info.name),
+                name: crate::metadata::string128_to_string(&info.name),
                 kind,
                 channels,
             },
@@ -607,75 +606,8 @@ fn validate_public_prefix(
     Ok(())
 }
 
-fn empty_bus() -> AudioBusBuffers {
-    AudioBusBuffers {
-        numChannels: 0,
-        silenceFlags: 0,
-        __field0: AudioBusBuffers__type0 {
-            channelBuffers32: ptr::null_mut(),
-        },
-    }
-}
-
-/// Borrowed sample pointers live only for the synchronous closure. Stack arrays
-/// cover the host's channel/bus limits and replace per-block channel Vec allocation.
-pub(super) fn with_buffers<T>(
-    buffer: &mut AudioBuffer<'_, f32>,
-    native_layout: &NativeLayout,
-    process: impl FnOnce(&mut [AudioBusBuffers], &mut [AudioBusBuffers]) -> T,
-) -> Result<T> {
-    let layout = &native_layout.layout;
-    if layout.inputs.len() > MAX_BUSES
-        || layout.outputs.len() > MAX_BUSES
-        || buffer.num_input_buses() != layout.inputs.len()
-        || buffer.num_output_buses() != layout.outputs.len()
-        || buffer.total_input_channels() > MAX_CHANNELS
-        || buffer.total_output_channels() > MAX_CHANNELS
-    {
-        return Err(invalid(
-            "process buffer topology differs from active layout",
-        ));
-    }
-    let mut input_ptrs = [ptr::null_mut(); MAX_CHANNELS];
-    let mut output_ptrs = [ptr::null_mut(); MAX_CHANNELS];
-    let mut inputs = std::array::from_fn::<_, MAX_BUSES, _>(|_| empty_bus());
-    let mut outputs = std::array::from_fn::<_, MAX_BUSES, _>(|_| empty_bus());
-    let frames = buffer.num_frames();
-    let mut cursor = 0;
-    for (index, expected) in layout.inputs.iter().enumerate() {
-        let channels = buffer.bus_inputs(index);
-        if channels.len() != expected.channels.count() as usize
-            || channels.iter().any(|channel| channel.len() < frames)
-        {
-            return Err(invalid("input bus dimensions differ"));
-        }
-        for (slot, channel) in input_ptrs[cursor..].iter_mut().zip(channels) {
-            *slot = channel.as_ptr().cast_mut();
-        }
-        inputs[index].numChannels = i32::try_from(channels.len()).expect("bounded channel count");
-        inputs[index].__field0.channelBuffers32 = input_ptrs[cursor..].as_mut_ptr();
-        cursor += channels.len();
-    }
-    cursor = 0;
-    for (index, expected) in layout.outputs.iter().enumerate() {
-        let channels = buffer.bus_outputs(index);
-        if channels.len() != expected.channels.count() as usize
-            || channels.iter().any(|channel| channel.len() < frames)
-        {
-            return Err(invalid("output bus dimensions differ"));
-        }
-        for (slot, channel) in output_ptrs[cursor..].iter_mut().zip(channels.iter_mut()) {
-            *slot = channel.as_mut_ptr();
-        }
-        outputs[index].numChannels = i32::try_from(channels.len()).expect("bounded channel count");
-        outputs[index].__field0.channelBuffers32 = output_ptrs[cursor..].as_mut_ptr();
-        cursor += channels.len();
-    }
-    Ok(process(
-        &mut inputs[..layout.inputs.len()],
-        &mut outputs[..layout.outputs.len()],
-    ))
-}
+mod buffers;
+pub(super) use buffers::with_buffers;
 
 #[cfg(test)]
 mod tests;

@@ -61,7 +61,7 @@ impl TapWatchdog {
         now: Instant,
     ) -> bool {
         let audible = session.audible_callbacks.load(Ordering::Relaxed);
-        if !session.running.load(Ordering::Acquire) {
+        if !session.running.load(Ordering::Acquire) || !session.delivering() {
             self.clear(native);
             return false;
         }

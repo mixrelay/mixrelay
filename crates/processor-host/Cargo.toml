@@ -25,6 +25,7 @@ thiserror.workspace = true
 tracing = "0.1.41"
 mixrelay-audio-engine = { path = "../audio-engine" }
 mixrelay-audio-graph = { path = "../audio-graph" }
+mixrelay-audio-io = { path = "../audio-io" }
 mixrelay-control-protocol = { path = "../control-protocol" }
 mixrelay-processor-state = { path = "../processor-state" }
 truce-rack-clap.workspace = true

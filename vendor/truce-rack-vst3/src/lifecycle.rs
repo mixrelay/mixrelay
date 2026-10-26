@@ -9,7 +9,6 @@ use vst3::{
 /// Calls `terminate` if a successfully initialized object exits a partially built load path.
 pub(super) struct InitializedPlugin {
     plugin: ComPtr<IPluginBase>,
-    armed: bool,
 }
 
 impl InitializedPlugin {
@@ -20,22 +19,32 @@ impl InitializedPlugin {
         }
         Ok(Self {
             plugin: plugin.clone(),
-            armed: true,
         })
-    }
-
-    /// Transfer termination responsibility to the complete `Vst3Plugin` owner.
-    pub(super) fn disarm(&mut self) {
-        self.armed = false;
     }
 }
 
 impl Drop for InitializedPlugin {
     fn drop(&mut self) {
-        if self.armed {
-            // SAFETY: this guard is armed only after successful initialize and runs once before
-            // the last retained interface/module owner is dropped on the creator thread.
-            unsafe { self.plugin.terminate() };
+        // SAFETY: this guard exists only after successful initialize and runs once before
+        // the last retained interface/module owner is dropped on the creator thread.
+        unsafe { self.plugin.terminate() };
+    }
+}
+
+/// Terminate the separate controller before its component while all interfaces live.
+pub(super) struct PluginLifetimes {
+    _controller: Option<InitializedPlugin>,
+    _component: InitializedPlugin,
+}
+
+impl PluginLifetimes {
+    pub(super) fn new(component: InitializedPlugin, controller: Option<InitializedPlugin>) -> Self {
+        Self {
+            _controller: controller,
+            _component: component,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

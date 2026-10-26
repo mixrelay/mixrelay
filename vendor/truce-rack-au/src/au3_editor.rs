@@ -1,4 +1,4 @@
-//! AUv3's view-controller property and its asynchronous ownership boundary.
+//! `AUv3`'s view-controller property and its asynchronous ownership boundary.
 
 use std::{
     ptr,
@@ -57,8 +57,14 @@ struct ViewRequest {
 enum RequestState {
     #[default]
     Pending,
-    Completed(Option<usize>),
+    Completed(ViewCompletion),
     Cancelled,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ViewCompletion {
+    Controller(usize),
+    NoCustomView,
 }
 
 impl ViewRequest {
@@ -70,14 +76,18 @@ impl ViewRequest {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if matches!(*state, RequestState::Pending) {
-            *state = RequestState::Completed((raw != 0).then_some(raw));
+            *state = RequestState::Completed(if raw == 0 {
+                ViewCompletion::NoCustomView
+            } else {
+                ViewCompletion::Controller(raw)
+            });
             None
         } else {
             (raw != 0).then_some(raw)
         }
     }
 
-    fn take(&self) -> Option<Option<usize>> {
+    fn take(&self) -> Option<ViewCompletion> {
         let mut state = self
             .state
             .lock()
@@ -98,13 +108,15 @@ impl ViewRequest {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         match std::mem::replace(&mut *state, RequestState::Cancelled) {
-            RequestState::Completed(owned) => owned,
-            RequestState::Pending | RequestState::Cancelled => None,
+            RequestState::Completed(ViewCompletion::Controller(raw)) => Some(raw),
+            RequestState::Completed(ViewCompletion::NoCustomView)
+            | RequestState::Pending
+            | RequestState::Cancelled => None,
         }
     }
 }
 
-/// Requests the AUv3 controller while pumping the worker's main run loop. The callback
+/// Requests the `AUv3` controller while pumping the worker's main run loop. The callback
 /// captures only `ViewRequest`, so a completion after timeout or unit disposal cannot access
 /// the plug-in. Each non-null callback result is a Copy-rule reference, either transferred
 /// to the main-thread waiter or released if the request has been cancelled.
@@ -147,13 +159,15 @@ pub(super) unsafe fn request_view_controller(
     loop {
         if let Some(result) = completion.take() {
             return match result {
-                Some(raw) => {
+                ViewCompletion::Controller(raw) => {
                     // SAFETY: the callback transferred its Copy-rule +1 reference to
                     // the request, and take transfers it to this creator/main thread.
                     unsafe { Retained::from_raw(raw as *mut NSViewController) }
                         .ok_or_else(|| Error::Other("AUv3 controller ownership lost".into()))
                 }
-                None => Err(Error::Other("AUv3 has no custom view controller".into())),
+                ViewCompletion::NoCustomView => {
+                    Err(Error::Other("AUv3 has no custom view controller".into()))
+                }
             };
         }
         if Instant::now() >= deadline {
@@ -232,7 +246,7 @@ mod tests {
     fn completion_transfers_once_and_rejects_late_result() {
         let request = ViewRequest::default();
         assert_eq!(request.complete(41), None);
-        assert_eq!(request.take(), Some(Some(41)));
+        assert_eq!(request.take(), Some(ViewCompletion::Controller(41)));
         assert_eq!(request.complete(42), Some(42));
         assert_eq!(request.take(), None);
         assert_eq!(request.cancel(), None);
@@ -255,7 +269,7 @@ mod tests {
     fn nil_controller_completes_without_retaining() {
         let request = ViewRequest::default();
         assert_eq!(request.complete(0), None);
-        assert_eq!(request.take(), Some(None));
+        assert_eq!(request.take(), Some(ViewCompletion::NoCustomView));
     }
 
     #[test]

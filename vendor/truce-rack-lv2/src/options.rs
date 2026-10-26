@@ -4,7 +4,7 @@ use std::ffi::{CStr, c_void};
 
 use truce_rack_core::error::{Error, Result};
 
-use super::UridMap;
+use crate::features::UridMap;
 
 const OPTIONS_URI: &[u8] = b"http://lv2plug.in/ns/ext/options#options\0";
 const MIN_BLOCK_URI: &[u8] = b"http://lv2plug.in/ns/ext/buf-size#minBlockLength\0";

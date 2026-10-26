@@ -15,9 +15,9 @@ use std::{
 
 use mixrelay_pcm_ring::PcmRing;
 
-// Four maximum native callbacks fit in each bounded PCM queue. Alignment may
-// reserve at most half, leaving room for a producer burst and consumer progress.
-const FIFO_FRAMES: u32 = 16_384;
+// Both native and graph queues retain the same backlog across live rate changes.
+// Their latency targets still follow observed callback bursts, not this capacity.
+const FIFO_FRAMES: u32 = mixrelay_audio_io::retention::RING_FRAMES;
 
 use crate::{
     callback_clock::CallbackClock,

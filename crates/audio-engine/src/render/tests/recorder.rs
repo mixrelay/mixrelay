@@ -1,4 +1,5 @@
 use super::*;
+use mixrelay_audio_recorder::RecorderRegistry;
 use mixrelay_audio_recorder::{Encoding, RecorderAction, RecorderRequest, RecorderState};
 
 fn record_key() -> String {

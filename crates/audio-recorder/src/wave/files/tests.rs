@@ -1,4 +1,4 @@
-use super::{FileFactory, WaveFile};
+use super::{FileFactory, WaveFile, stream::RecordingStream};
 use hound::{SampleFormat, WavSpec};
 use mixrelay_test_support::FixtureDir;
 use std::{
@@ -10,6 +10,8 @@ use std::{
         atomic::{AtomicU8, Ordering},
     },
 };
+
+mod partial;
 
 struct FaultIo {
     file: File,
@@ -37,6 +39,15 @@ impl Seek for FaultIo {
             return Err(io::Error::other("seek failed"));
         }
         self.file.seek(position)
+    }
+}
+
+impl RecordingStream for FaultIo {
+    fn truncate(&mut self, length: u64) -> io::Result<()> {
+        if self.fault.load(Ordering::Relaxed) == 4 {
+            return Err(io::Error::other("truncate failed"));
+        }
+        self.file.set_len(length)
     }
 }
 
@@ -90,4 +101,33 @@ fn write_flush_and_header_seek_faults_report_the_original_file_without_creating_
         }
     }
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 3);
+}
+
+#[test]
+fn prefix_recovery_keeps_both_the_write_fault_and_the_extent_fault() {
+    let directory = FixtureDir::new("rec-recovery-fault").unwrap();
+    let path = directory.join("fault.wav");
+    let failure = Arc::new(AtomicU8::new(0));
+    let mut file = WaveFile::new(
+        &path,
+        WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: SampleFormat::Float,
+        },
+        FaultFiles(Arc::clone(&failure)),
+    )
+    .unwrap();
+    file.write_sample(0.25_f32).unwrap();
+    failure.store(1, Ordering::Relaxed);
+    assert!(
+        file.write_sample(0.5_f32)
+            .unwrap_err()
+            .contains("disk full")
+    );
+    failure.store(4, Ordering::Relaxed);
+    let error = file.finalize().unwrap_err();
+    assert!(error.contains("disk full") && error.contains("truncate failed"));
+    assert!(error.contains(path.to_str().unwrap()));
 }

@@ -132,8 +132,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        AudioLayout, HostedExternalProcessor, HostedProcessorControl, ProcessorControlRegistration,
-        WORKER_FAILED, WORKER_READY,
+        AudioLayout, HostedProcessorControl, WORKER_FAILED, WORKER_READY,
+        control::ProcessorControlRegistration,
+        hosted::HostedExternalProcessor,
         shared_transport::{self, ParentAudio, WorkerAudio, WorkerControl},
     };
 
@@ -186,8 +187,7 @@ mod tests {
         directory: &FixtureDir,
     ) -> HostedExternalProcessor {
         HostedExternalProcessor {
-            child_stdin: None,
-            worker_monitor: None,
+            worker: None,
             shared: None,
             config_path: directory.join("unused-processor-config"),
             layout: AudioLayout {
@@ -384,8 +384,7 @@ mod tests {
         publish_intrinsic_frames(header, Some(5));
 
         let processor = HostedExternalProcessor {
-            child_stdin: None,
-            worker_monitor: None,
+            worker: None,
             shared: Some(parent),
             config_path: config_path.clone(),
             layout,

@@ -1,4 +1,4 @@
-//! Source-local admission failure cursor independent of diagnostic report polling.
+//! Source-local discontinuity cursor independent of diagnostic report polling.
 use mixrelay_audio_io::process::TransferOutcome;
 
 #[derive(Default)]

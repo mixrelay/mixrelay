@@ -153,6 +153,14 @@ impl<'a, S: Sample> AudioBuffer<'a, S> {
         &self.inputs[range.start..range.start + range.len]
     }
 
+    /// Read a bus only when its index and channel range fit the supplied storage.
+    #[must_use]
+    pub fn try_bus_inputs(&self, bus_index: usize) -> Option<&[InputChannel<'a, S>]> {
+        let range = self.bus_inputs.get(bus_index)?;
+        self.inputs
+            .get(range.start..range.start.checked_add(range.len)?)
+    }
+
     /// Mutable output channels for one bus.
     ///
     /// # Panics
@@ -161,6 +169,13 @@ impl<'a, S: Sample> AudioBuffer<'a, S> {
     pub fn bus_outputs(&mut self, bus_index: usize) -> &mut [&'a mut [S]] {
         let range = self.bus_outputs[bus_index];
         &mut self.outputs[range.start..range.start + range.len]
+    }
+
+    /// Mutably borrow a bus only when its index and range fit the supplied storage.
+    pub fn try_bus_outputs(&mut self, bus_index: usize) -> Option<&mut [&'a mut [S]]> {
+        let range = self.bus_outputs.get(bus_index)?;
+        self.outputs
+            .get_mut(range.start..range.start.checked_add(range.len)?)
     }
 
     /// Shortcut: input channels of the main bus (index 0). Most
@@ -194,3 +209,6 @@ impl BusRange {
         Self { start, len }
     }
 }
+
+#[cfg(test)]
+mod tests;

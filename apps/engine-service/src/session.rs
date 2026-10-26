@@ -1,3 +1,16 @@
+//! Publishes adapter observations and composes processing, native format and telemetry owners.
+
+mod format;
+mod native_format;
+mod shutdown;
+mod status;
+mod telemetry;
+mod worker;
+
+pub use crate::worker_join::join as join_worker;
+pub use shutdown::ShutdownSignals;
+pub use worker::AudioWorker;
+
 use std::{
     sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     sync::{Arc, RwLock},
@@ -16,11 +29,6 @@ use crate::{ProcessingControlBackend, RuntimeStatusBackend, SessionFormatBackend
 
 pub mod processing;
 use processing::{ProcessingLease, ProcessingLifecycle, WorkerState};
-
-type DeviceRateSetter = fn(u32) -> Result<(), String>;
-type DeviceRateReader = fn() -> Option<u32>;
-type DeviceFormatSetter = Arc<dyn Fn(RenderFormat) -> Result<(), String> + Send + Sync>;
-type DeviceFormatReader = Arc<dyn Fn() -> Option<RenderFormat> + Send + Sync>;
 
 /// Aggregate capture availability, supplied by native capture owners rather than
 /// inferred from a silent meter. No configured application is also `Ready`.
@@ -50,13 +58,7 @@ pub struct AdapterRuntimeStatus {
     // Pacing authority, synchronization evidence and explicit inactivity are one
     // publication; readers must never combine fields from different clock owners.
     clock_observation: AtomicU32,
-    input_starvations: AtomicU64,
-    output_overflows: AtomicU64,
-    discontinuities: AtomicU64,
-    sample_fault_sources: AtomicU64,
-    sample_fault_inputs: AtomicU64,
-    sample_fault_outputs: AtomicU64,
-    sample_fault_blocks: AtomicU64,
+    telemetry: telemetry::ProcessTelemetry,
     profile: AdapterProfile,
     // Control-plane discovery can narrow capabilities without restarting the
     // engine. Never read/write this lock from the real-time processing path.
@@ -68,11 +70,7 @@ pub struct AdapterRuntimeStatus {
     routing_clock_observation: AtomicU64,
     active_format: AtomicU64,
     failed: AtomicBool,
-    set_device_rate: Option<DeviceRateSetter>,
-    set_device_format: Option<DeviceFormatSetter>,
-    external_format_reader: Option<DeviceFormatReader>,
-    graph_format_control: bool,
-    external_rate_reader: Option<DeviceRateReader>,
+    native: native_format::NativeFormat,
     preferences: Option<Result<SessionPreferences, String>>,
     preferred_format: AtomicU64,
     preferences_error: AtomicBool,
@@ -91,13 +89,7 @@ impl AdapterRuntimeStatus {
             processing: ProcessingLifecycle::default(),
             application_state: AtomicU32::new(0),
             clock_observation: AtomicU32::new(initial_clock),
-            input_starvations: AtomicU64::new(0),
-            output_overflows: AtomicU64::new(0),
-            discontinuities: AtomicU64::new(0),
-            sample_fault_sources: AtomicU64::new(0),
-            sample_fault_inputs: AtomicU64::new(0),
-            sample_fault_outputs: AtomicU64::new(0),
-            sample_fault_blocks: AtomicU64::new(0),
+            telemetry: telemetry::ProcessTelemetry::default(),
             profile,
             discovered_sample_rates: RwLock::new(None),
             endpoint_observation: AtomicU32::new(0),
@@ -108,11 +100,7 @@ impl AdapterRuntimeStatus {
                 block_frames: initial_format.block_frames,
             })),
             failed: AtomicBool::new(false),
-            set_device_rate: None,
-            set_device_format: None,
-            external_format_reader: None,
-            graph_format_control: false,
-            external_rate_reader: None,
+            native: native_format::NativeFormat::default(),
             preferences: None,
             preferred_format: AtomicU64::new(0),
             preferences_error: AtomicBool::new(false),
@@ -188,8 +176,8 @@ impl AdapterRuntimeStatus {
         let writable = observed.is_some()
             && !rates.is_empty()
             && self.profile.capabilities.can_reconfigure_live
-            && self.set_device_rate.is_some()
-            && self.external_rate_reader.is_some();
+            && self.native.has_rate_control()
+            && self.native.follows_rate();
         (observed, rates, writable)
     }
 
@@ -273,44 +261,9 @@ impl AdapterRuntimeStatus {
         self.processing.stop_requested()
     }
 
-    fn sample_faults(&self) -> mixrelay_audio_io::process::SampleFaults {
-        mixrelay_audio_io::process::SampleFaults {
-            source_samples: self.sample_fault_sources.load(Ordering::Relaxed),
-            input_samples: self.sample_fault_inputs.load(Ordering::Relaxed),
-            output_samples: self.sample_fault_outputs.load(Ordering::Relaxed),
-            blocks: self.sample_fault_blocks.load(Ordering::Relaxed),
-        }
-    }
-
     /// Lock-free reporting from the DSP boundary. Zero samples are not failures.
     pub fn record_process(&self, report: mixrelay_audio_io::process::ProcessReport) {
-        self.discontinuities
-            .fetch_add(report.discontinuities, Ordering::Relaxed);
-        self.input_starvations
-            .fetch_add(report.input_starvations, Ordering::Relaxed);
-        self.output_overflows
-            .fetch_add(report.output_overflows, Ordering::Relaxed);
-        for (counter, increment) in [
-            (
-                &self.sample_fault_sources,
-                report.sample_faults.source_samples,
-            ),
-            (
-                &self.sample_fault_inputs,
-                report.sample_faults.input_samples,
-            ),
-            (
-                &self.sample_fault_outputs,
-                report.sample_faults.output_samples,
-            ),
-            (&self.sample_fault_blocks, report.sample_faults.blocks),
-        ] {
-            if increment != 0 {
-                let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                    Some(current.saturating_add(increment))
-                });
-            }
-        }
+        self.telemetry.record(report);
     }
 
     #[must_use]
@@ -321,7 +274,7 @@ impl AdapterRuntimeStatus {
 
     #[must_use]
     pub fn with_format_control(mut self, setter: fn(u32) -> Result<(), String>) -> Self {
-        self.set_device_rate = Some(setter);
+        self.native.set_rate_control(setter);
         self
     }
 
@@ -332,7 +285,7 @@ impl AdapterRuntimeStatus {
         mut self,
         setter: impl Fn(RenderFormat) -> Result<(), String> + Send + Sync + 'static,
     ) -> Self {
-        self.set_device_format = Some(Arc::new(setter));
+        self.native.set_pair_control(Arc::new(setter));
         self
     }
 
@@ -343,7 +296,7 @@ impl AdapterRuntimeStatus {
         mut self,
         reader: impl Fn() -> Option<RenderFormat> + Send + Sync + 'static,
     ) -> Self {
-        self.external_format_reader = Some(Arc::new(reader));
+        self.native.follow_pair(Arc::new(reader));
         self
     }
 
@@ -352,7 +305,7 @@ impl AdapterRuntimeStatus {
     /// The resource backend must stage matching converters and reject fixed-rate devices.
     #[must_use]
     pub fn with_graph_format_control(mut self) -> Self {
-        self.graph_format_control = true;
+        self.native.allow_graph_control();
         self
     }
 
@@ -363,226 +316,8 @@ impl AdapterRuntimeStatus {
     /// overwriting another application's setting with a saved last-observed rate.
     #[must_use]
     pub fn with_observed_rate_following(mut self, reader: fn() -> Option<u32>) -> Self {
-        self.external_rate_reader = Some(reader);
+        self.native.follow_rate(reader);
         self
-    }
-
-    /// Startup/control thread only, before creating the DSP worker. Bad preferences or
-    /// failed native negotiation never prevent the local control service from starting.
-    pub fn restore_preferences(&mut self) -> RenderFormat {
-        let fallback = unpack_format(self.active_format.load(Ordering::Relaxed));
-        let store = SessionPreferences::for_backend(self.profile.capabilities.backend)
-            .map_err(|e| e.to_string());
-        let loaded = store
-            .as_ref()
-            .map_err(Clone::clone)
-            .and_then(|store| store.load().map_err(|e| e.to_string()));
-        self.preferences = Some(store);
-        let requested = match loaded {
-            Ok(Some(format)) => RenderFormat {
-                sample_rate: format.sample_rate,
-                block_frames: format.block_frames,
-            },
-            Ok(None) => return fallback,
-            Err(error) => {
-                self.preferences_error.store(true, Ordering::Release);
-                tracing::warn!(%error, "session preferences not restored");
-                return fallback;
-            }
-        };
-        self.restore_saved_format(requested, fallback)
-    }
-
-    fn restore_saved_format(
-        &self,
-        requested: RenderFormat,
-        fallback: RenderFormat,
-    ) -> RenderFormat {
-        self.preferred_format
-            .store(pack_format(requested), Ordering::Release);
-        if self.external_rate_reader.is_some()
-            && self.set_device_format.is_none()
-            && self.supports_routing_format(requested)
-        {
-            return self.restore_followed_rate(requested, fallback);
-        }
-        // A rate-only own endpoint does not own the DSP buffer preference.
-        // Retain that validated buffer when hardware can run without this HAL.
-        let independent_buffer = self.set_device_rate.is_some() && self.set_device_format.is_none();
-        let fallback = if independent_buffer && self.supports_routing_format(requested) {
-            RenderFormat {
-                block_frames: requested.block_frames,
-                ..fallback
-            }
-        } else {
-            fallback
-        };
-        self.activate_format(fallback);
-        if !self.supports_format(requested) {
-            if independent_buffer && self.supports_routing_format(requested) {
-                self.restore_failed.store(true, Ordering::Release);
-            } else {
-                self.preferences_error.store(true, Ordering::Release);
-            }
-            tracing::warn!(
-                ?requested,
-                "stored session format is unsupported by this adapter"
-            );
-            return fallback;
-        }
-        if let Err(error) = self.restore_native_format(requested, fallback) {
-            self.restore_failed.store(true, Ordering::Release);
-            tracing::warn!(%error, ?requested, "stored native format could not be restored");
-            return fallback;
-        }
-        self.activate_format(requested);
-        requested
-    }
-
-    /// Before any worker starts, restore the client buffer preference but let the
-    /// device retain its own nominal rate. An unpublished device is unavailable,
-    /// not a failed settings write; later observation or hardware routing resolves it.
-    fn restore_followed_rate(&self, saved: RenderFormat, fallback: RenderFormat) -> RenderFormat {
-        let observed = self.external_sample_rate().filter(|rate| {
-            self.profile
-                .capabilities
-                .supported_sample_rates
-                .contains(rate)
-        });
-        let actual = RenderFormat {
-            sample_rate: observed.unwrap_or(fallback.sample_rate),
-            block_frames: saved.block_frames,
-        };
-        if observed.is_some() && actual != saved {
-            let persisted = self.stage_preferences(actual).and_then(|staged| {
-                staged.map_or(Ok(()), |staged| {
-                    staged.commit().map_err(|error| error.to_string())
-                })
-            });
-            self.preferences_error
-                .store(persisted.is_err(), Ordering::Release);
-            self.preferred_format
-                .store(pack_format(actual), Ordering::Release);
-        }
-        self.activate_format(actual);
-        actual
-    }
-
-    fn write_native_format(&self, requested: RenderFormat) -> Result<(), String> {
-        if let Some(setter) = &self.set_device_format {
-            setter(requested)?;
-            let actual = self
-                .external_format_reader
-                .as_ref()
-                .and_then(|reader| reader());
-            self.observe_device_format(actual);
-            if actual != Some(requested) {
-                return Err("native format did not confirm the requested pair".into());
-            }
-            Ok(())
-        } else {
-            self.set_device_rate
-                .map_or(Ok(()), |setter| setter(requested.sample_rate))
-        }
-    }
-
-    fn native_rollback_format(&self, fallback: RenderFormat) -> Result<RenderFormat, String> {
-        if self.set_device_format.is_some() {
-            self.external_format_reader
-                .as_ref()
-                .and_then(|reader| reader())
-                .ok_or_else(|| "native format was unavailable before negotiation".into())
-        } else {
-            Ok(fallback)
-        }
-    }
-
-    fn restore_native_format(
-        &self,
-        requested: RenderFormat,
-        fallback: RenderFormat,
-    ) -> Result<(), String> {
-        let previous = self.native_rollback_format(fallback)?;
-        if let Err(error) = self.write_native_format(requested) {
-            if let Err(rollback) = self.write_native_format(previous) {
-                self.failed.store(true, Ordering::Release);
-                return Err(format!("{error}; rollback failed: {rollback}"));
-            }
-            return Err(error);
-        }
-        Ok(())
-    }
-
-    fn supports_format(&self, format: RenderFormat) -> bool {
-        self.supported_sample_rates().contains(&format.sample_rate)
-            && self
-                .profile
-                .capabilities
-                .supported_block_frames
-                .contains(&format.block_frames)
-    }
-
-    fn supports_routing_format(&self, format: RenderFormat) -> bool {
-        self.profile
-            .capabilities
-            .supported_sample_rates
-            .contains(&format.sample_rate)
-            && self
-                .profile
-                .capabilities
-                .supported_block_frames
-                .contains(&format.block_frames)
-    }
-
-    fn session_issue(
-        &self,
-        format: RenderFormat,
-        observed: RenderFormat,
-        worker_state: WorkerState,
-        clock_issue: Option<SessionIssue>,
-    ) -> Option<SessionIssue> {
-        if worker_state == WorkerState::Failed {
-            Some(SessionIssue::ProcessingFailed)
-        } else if self.failed.load(Ordering::Acquire) {
-            Some(SessionIssue::ReconfigurationFailed)
-        } else if self.application_state.load(Ordering::Acquire) == 2 {
-            Some(SessionIssue::ApplicationAmbiguous)
-        } else if self.application_state.load(Ordering::Acquire) == 1 {
-            Some(SessionIssue::ApplicationUnavailable)
-        } else if self.restore_failed.load(Ordering::Acquire) && self.routing_clock_rate().is_none()
-        {
-            Some(SessionIssue::StoredFormatUnavailable)
-        } else if self.preferences_error.load(Ordering::Acquire) {
-            Some(SessionIssue::PreferencesUnavailable)
-        } else if self.profile.requires_observed_device_rate {
-            if observed.sample_rate == 0 {
-                Some(SessionIssue::DeviceUnavailable)
-            } else if observed.sample_rate != format.sample_rate {
-                Some(SessionIssue::SampleRateMismatch)
-            } else if observed.block_frames != 0 && observed.block_frames != format.block_frames {
-                Some(SessionIssue::BlockSizeMismatch)
-            } else {
-                clock_issue
-            }
-        } else {
-            clock_issue
-        }
-    }
-
-    fn stage_preferences(&self, format: RenderFormat) -> Result<Option<StagedWrite>, String> {
-        self.preferences
-            .as_ref()
-            .map(|store| {
-                store
-                    .as_ref()
-                    .map_err(Clone::clone)?
-                    .stage(SessionFormat {
-                        sample_rate: format.sample_rate,
-                        block_frames: format.block_frames,
-                    })
-                    .map_err(|error| error.to_string())
-            })
-            .transpose()
     }
 
     /// Audio worker only: acknowledge suspension at a block boundary without a lock.
@@ -605,78 +340,6 @@ impl AdapterRuntimeStatus {
         self.failed.store(true, Ordering::Release);
     }
 
-    /// Follow an already-running routing clock without rewriting an unrelated
-    /// virtual endpoint or its saved nominal rate. The caller must publish the
-    /// newly prepared DSP plan before resuming the processing owner.
-    /// # Errors
-    /// Rejects unsupported product geometry or a failed processing suspension.
-    pub fn adopt_routing_clock(
-        &self,
-        requested: RenderFormat,
-    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
-        if !self.supports_routing_format(requested) {
-            return Err(
-                mixrelay_audio_io::HostAudioBackendError::CapabilityUnavailable {
-                    capability: "routing clock format".into(),
-                },
-            );
-        }
-        self.pause_at_boundary()?;
-        self.observe_routing_clock(true, Some(requested.sample_rate));
-        self.failed.store(false, Ordering::Release);
-        Ok(())
-    }
-
-    /// Saves a user-selected DSP buffer while retaining the virtual endpoint's
-    /// own nominal-rate preference. Native hardware buffer negotiation remains
-    /// the prepared device transaction's responsibility; no HAL setter runs here.
-    /// # Errors
-    /// Rejects unsupported geometry, preference staging/commit failures, or a
-    /// processing owner that does not acknowledge suspension.
-    pub fn reconfigure_routing_buffer(
-        &self,
-        requested: RenderFormat,
-    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
-        use mixrelay_audio_io::HostAudioBackendError;
-        if !self.supports_routing_format(requested) {
-            return Err(HostAudioBackendError::CapabilityUnavailable {
-                capability: "routing buffer format".into(),
-            });
-        }
-        let saved = RenderFormat {
-            sample_rate: self.preferred_format().map_or_else(
-                || {
-                    self.endpoint_format_settings()
-                        .0
-                        .unwrap_or(self.profile.initial_format.sample_rate)
-                },
-                |format| format.sample_rate,
-            ),
-            block_frames: requested.block_frames,
-        };
-        let staged = self.stage_preferences(saved).map_err(|message| {
-            self.preferences_error.store(true, Ordering::Release);
-            HostAudioBackendError::BackendFailure { message }
-        })?;
-        self.pause_at_boundary()?;
-        if let Some(staged) = staged {
-            staged.commit().map_err(|error| {
-                self.preferences_error.store(true, Ordering::Release);
-                HostAudioBackendError::BackendFailure {
-                    message: error.to_string(),
-                }
-            })?;
-        }
-        if self.preferences.is_some() {
-            self.preferred_format
-                .store(pack_format(saved), Ordering::Release);
-        }
-        self.observe_routing_clock(true, Some(requested.sample_rate));
-        self.preferences_error.store(false, Ordering::Release);
-        self.failed.store(false, Ordering::Release);
-        Ok(())
-    }
-
     /// Publish an actually activated plan, never a merely requested format.
     pub fn activate_format(&self, format: RenderFormat) {
         self.active_format
@@ -697,17 +360,6 @@ impl AdapterRuntimeStatus {
             });
         }
         Ok(())
-    }
-
-    fn preferred_format(&self) -> Option<SessionFormat> {
-        let value = self.preferred_format.load(Ordering::Acquire);
-        (value != 0).then(|| {
-            let format = unpack_format(value);
-            SessionFormat {
-                sample_rate: format.sample_rate,
-                block_frames: format.block_frames,
-            }
-        })
     }
 }
 
@@ -767,355 +419,19 @@ const fn split_words(value: u64) -> (u32, u32) {
     )
 }
 
-impl AdapterRuntimeStatus {
-    fn capabilities(&self, format: RenderFormat) -> AudioSessionCapabilities {
-        let mut capabilities = self.profile.capabilities.clone();
-        capabilities.supported_sample_rates = self.supported_sample_rates();
-        if let Some(rate) = self.routing_clock_rate() {
-            // This API reports the selected hardware clock. Changing that
-            // device's native rate is a device operation, not an own-HAL write.
-            capabilities.supported_sample_rates = self
-                .profile
-                .capabilities
-                .supported_sample_rates
-                .iter()
-                .copied()
-                .filter(|supported| *supported == rate)
-                .collect();
-        }
-        capabilities.application_capture &= self
-            .profile
-            .application_capture_rates
-            .contains(&format.sample_rate);
-        capabilities.can_reconfigure_live &= self.set_device_rate.is_some()
-            || self.set_device_format.is_some()
-            || self.graph_format_control;
-        capabilities
-    }
-}
-
-impl RuntimeStatusBackend for AdapterRuntimeStatus {
-    fn capabilities_for_format(&self, format: RenderFormat) -> Option<AudioSessionCapabilities> {
-        Some(self.capabilities(format))
-    }
-    fn status(&self, format: RenderFormat) -> AppStatus {
-        let format = if self.set_device_rate.is_some()
-            || self.set_device_format.is_some()
-            || self.external_rate_reader.is_some()
-            || self.external_format_reader.is_some()
-            || self.graph_format_control
-        {
-            unpack_format(self.active_format.load(Ordering::Acquire))
-        } else {
-            format
-        };
-        let observed = self.routing_clock_rate().map_or_else(
-            || unpack_format(self.observed_device_format.load(Ordering::Acquire)),
-            |sample_rate| RenderFormat {
-                sample_rate,
-                block_frames: 0,
-            },
-        );
-        let worker_state = self.processing.state();
-        let clock = ClockObservation::unpack(self.clock_observation.load(Ordering::Acquire));
-        let clock_issue =
-            (!clock.idle && !clock.synchronized).then_some(SessionIssue::ClockNotSynchronized);
-        let observed_device_sample_rate =
-            (observed.sample_rate != 0).then_some(observed.sample_rate);
-        let observed_device_buffer_frames =
-            (observed.block_frames != 0).then_some(observed.block_frames);
-        let issue = self.session_issue(format, observed, worker_state, clock_issue);
-        let capabilities = self.capabilities(format);
-        AppStatus {
-            engine_power: None,
-            processor_timings: Vec::new(),
-            processor_latencies: Vec::new(),
-            failed_processors: Vec::new(),
-            recorder_error: None,
-            protocol_version: PROTOCOL_VERSION,
-            driver_state: match (
-                capabilities.virtual_endpoint,
-                self.endpoint_observation.load(Ordering::Acquire),
-            ) {
-                (true, 1) => DriverState::Ready,
-                (true, 3) => DriverState::Unavailable,
-                (true, 0) => DriverState::InstalledNotLoaded,
-                _ => DriverState::NotInstalled,
-            },
-            // An operational DSP engine is independent from virtual-driver installation.
-            sample_rate: Some(format.sample_rate),
-            buffer_frames: Some(format.block_frames),
-            underruns: self.input_starvations.load(Ordering::Relaxed),
-            overruns: self.output_overflows.load(Ordering::Relaxed),
-            sample_faults: self.sample_faults(),
-            audio_session: Some(AudioSessionStatus {
-                endpoint_preferences_unavailable: false,
-                virtual_endpoint_settings: None,
-                processing_state: match worker_state {
-                    WorkerState::Running if !clock.idle => {
-                        mixrelay_audio_io::process::ProcessingState::Running
-                    }
-                    WorkerState::Stopped | WorkerState::Failed => {
-                        mixrelay_audio_io::process::ProcessingState::Stopped
-                    }
-                    WorkerState::NotStarted | WorkerState::Running => {
-                        mixrelay_audio_io::process::ProcessingState::Idle
-                    }
-                },
-                discontinuities: self.discontinuities.load(Ordering::Relaxed),
-                format: SessionFormat {
-                    sample_rate: format.sample_rate,
-                    block_frames: format.block_frames,
-                },
-                preferred_format: self.preferred_format(),
-                clock_authority: clock.authority,
-                observed_device_sample_rate,
-                observed_device_buffer_frames,
-                issue,
-                transport_latency_frames: self.profile.transport_latency_frames,
-                capabilities,
-            }),
-        }
-    }
-}
-
 impl ProcessingControlBackend for AdapterRuntimeStatus {
+    fn suspend(&self) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
+        self.pause_at_boundary()
+    }
+
+    fn fail_reconfiguration(&self) {
+        Self::fail_reconfiguration(self);
+    }
+
     fn resume(&self) {
         if !self.failed.load(Ordering::Acquire) {
             self.processing.resume();
         }
-    }
-}
-
-impl SessionFormatBackend for AdapterRuntimeStatus {
-    fn external_sample_rate(&self) -> Option<u32> {
-        if let Some(reader) = &self.external_format_reader {
-            let format = reader();
-            self.observe_device_format(format);
-            return format.map(|format| format.sample_rate);
-        }
-        let rate = self.external_rate_reader.and_then(|reader| reader());
-        if self.external_rate_reader.is_some() {
-            self.observe_device_rate(rate);
-        }
-        rate
-    }
-    fn external_format(&self, current: RenderFormat) -> Option<RenderFormat> {
-        if let Some(reader) = &self.external_format_reader {
-            let format = reader();
-            self.observe_device_format(format);
-            format
-        } else {
-            self.external_sample_rate().map(|sample_rate| RenderFormat {
-                sample_rate,
-                ..current
-            })
-        }
-    }
-    fn adopt_external_format(
-        &self,
-        requested: RenderFormat,
-    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
-        use mixrelay_audio_io::HostAudioBackendError;
-        if !self.supports_format(requested)
-            || (self.external_rate_reader.is_none() && self.external_format_reader.is_none())
-        {
-            return Err(HostAudioBackendError::CapabilityUnavailable {
-                capability: "external format following".into(),
-            });
-        }
-        if self.external_format(requested) != Some(requested) {
-            return Err(HostAudioBackendError::BackendFailure {
-                message: "external native format changed during preparation".into(),
-            });
-        }
-        // The device has already changed. Storage failures are warnings, not a reason
-        // to keep processing PCM at the wrong rate. Preserve the last good file.
-        let staged = self.stage_preferences(requested);
-        self.pause_at_boundary()?;
-        if self.external_format(requested) != Some(requested) {
-            return Err(HostAudioBackendError::BackendFailure {
-                message: "external native format changed during suspension".into(),
-            });
-        }
-        let saved = staged.and_then(|staged| {
-            staged.map_or(Ok(()), |staged| {
-                staged.commit().map_err(|error| error.to_string())
-            })
-        });
-        self.preferences_error
-            .store(saved.is_err(), Ordering::Release);
-        if let Err(error) = saved {
-            tracing::warn!(%error, ?requested, "externally accepted format was not saved");
-        }
-        if self.preferences.is_some() {
-            self.preferred_format
-                .store(pack_format(requested), Ordering::Release);
-        }
-        self.restore_failed.store(false, Ordering::Release);
-        // Never call the native setter here. The caller publishes the prepared DSP plan
-        // before resuming; the saved last-accepted format prevents restart undoing the DAW.
-        self.failed.store(false, Ordering::Release);
-        Ok(())
-    }
-    fn reconfigure(
-        &self,
-        current: RenderFormat,
-        requested: RenderFormat,
-    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
-        use mixrelay_audio_io::HostAudioBackendError;
-        if !self.supports_format(requested) || !self.profile.capabilities.can_reconfigure_live {
-            return Err(HostAudioBackendError::CapabilityUnavailable {
-                capability: "requested native session format".into(),
-            });
-        }
-        if self.set_device_rate.is_none()
-            && self.set_device_format.is_none()
-            && !self.graph_format_control
-        {
-            return Err(HostAudioBackendError::CapabilityUnavailable {
-                capability: "live format reconfiguration".into(),
-            });
-        }
-        // Serialize and sync the new preference before suspending audio. The rename is
-        // committed only after the native device has confirmed the requested format.
-        let staged = self.stage_preferences(requested).map_err(|message| {
-            self.preferences_error.store(true, Ordering::Release);
-            HostAudioBackendError::BackendFailure { message }
-        })?;
-        self.pause_at_boundary()?;
-        let previous_native = self
-            .native_rollback_format(current)
-            .map_err(|message| HostAudioBackendError::BackendFailure { message })?;
-        let negotiated = self.write_native_format(requested).and_then(|()| {
-            if let Some(staged) = staged {
-                staged.commit().map_err(|error| {
-                    self.preferences_error.store(true, Ordering::Release);
-                    format!("session preferences could not be committed: {error}")
-                })?;
-            }
-            Ok(())
-        });
-        if let Err(error) = negotiated {
-            if let Err(rollback) = self.write_native_format(previous_native) {
-                self.failed.store(true, Ordering::Release);
-                return Err(HostAudioBackendError::BackendFailure {
-                    message: format!(
-                        "{error}; rollback failed: {rollback}; audio remains suspended"
-                    ),
-                });
-            }
-            return Err(HostAudioBackendError::BackendFailure { message: error });
-        }
-        if self.set_device_format.is_some() {
-            self.observe_device_format(Some(requested));
-        } else if self.set_device_rate.is_some() {
-            self.observe_device_rate(Some(requested.sample_rate));
-        }
-        if self.preferences.is_some() {
-            self.preferred_format
-                .store(pack_format(requested), Ordering::Release);
-        }
-        self.preferences_error.store(false, Ordering::Release);
-        self.restore_failed.store(false, Ordering::Release);
-        self.failed.store(false, Ordering::Release);
-        Ok(())
-    }
-}
-
-/// Control-plane ownership of the audio thread. Bind/startup failures and normal
-/// server shutdown request cancellation and join before platform resources die.
-/// Never construct or destroy this owner on an audio callback. A stuck native
-/// driver call still requires process isolation; Rust cannot safely kill a thread.
-pub struct AudioWorker {
-    status: Arc<AdapterRuntimeStatus>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-pub use crate::worker_join::join as join_worker;
-
-impl AudioWorker {
-    /// Takes ownership of `thread` and its cancellation status until joined off-RT.
-    #[must_use]
-    pub fn new(status: Arc<AdapterRuntimeStatus>, thread: std::thread::JoinHandle<()>) -> Self {
-        Self {
-            status,
-            thread: Some(thread),
-        }
-    }
-
-    /// Requests cancellation and waits for the audio worker to release its owners.
-    /// Must be called off the audio thread.
-    ///
-    /// # Errors
-    /// Returns the worker identity and panic reason if the audio thread panics.
-    pub fn finish(mut self) -> Result<(), String> {
-        self.join()
-    }
-
-    fn join(&mut self) -> Result<(), String> {
-        self.status.request_stop();
-        self.thread.take().map_or(Ok(()), join_worker)
-    }
-}
-
-impl Drop for AudioWorker {
-    fn drop(&mut self) {
-        // Cancellation/startup unwind must still join; finish propagates errors.
-        let _ = self.join();
-    }
-}
-
-/// OS shutdown requests, caught from registration on, awaited on the control runtime and
-/// never the audio thread. Registering before start-up work turns a stop during start-up
-/// into an orderly shutdown instead of a killed process.
-#[cfg(unix)]
-pub struct ShutdownSignals {
-    terminate: tokio::signal::unix::Signal,
-    interrupt: tokio::signal::unix::Signal,
-}
-
-#[cfg(unix)]
-impl ShutdownSignals {
-    /// Must run inside a Tokio runtime.
-    ///
-    /// # Errors
-    /// Returns signal registration failures.
-    pub fn register() -> std::io::Result<Self> {
-        use tokio::signal::unix::{SignalKind, signal};
-        Ok(Self {
-            terminate: signal(SignalKind::terminate())?,
-            interrupt: signal(SignalKind::interrupt())?,
-        })
-    }
-
-    /// Resolves at the first shutdown request, including one received before this call.
-    ///
-    /// # Errors
-    /// Never fails today; kept fallible like other shutdown sources.
-    pub async fn requested(mut self) -> std::io::Result<()> {
-        tokio::select! {
-            _ = self.terminate.recv() => Ok(()),
-            _ = self.interrupt.recv() => Ok(()),
-        }
-    }
-}
-
-#[cfg(not(unix))]
-pub struct ShutdownSignals;
-
-#[cfg(not(unix))]
-impl ShutdownSignals {
-    /// # Errors
-    /// Never fails on this platform.
-    pub fn register() -> std::io::Result<Self> {
-        Ok(Self)
-    }
-
-    /// # Errors
-    /// Returns Ctrl-C registration failures.
-    pub async fn requested(self) -> std::io::Result<()> {
-        tokio::signal::ctrl_c().await
     }
 }
 
@@ -1140,315 +456,8 @@ mod catalog_tests;
 mod routing_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use mixrelay_audio_io::session::AudioBackendKind;
-
-    #[test]
-    fn audio_worker_finish_cancels_and_joins_before_releasing_the_owner() {
-        let status = Arc::new(AdapterRuntimeStatus::new(profile(
-            AudioBackendKind::CoreAudio,
-        )));
-        let weak = Arc::downgrade(&status);
-        let observed = status.clone();
-        let worker = std::thread::spawn(move || {
-            while !observed.stop_requested() {
-                std::thread::yield_now();
-            }
-        });
-        let owner = AudioWorker::new(status, worker);
-
-        assert_eq!(owner.finish(), Ok(()));
-        assert!(weak.upgrade().is_none());
-    }
-
-    #[test]
-    fn audio_worker_finish_preserves_a_panicked_worker_reason() {
-        let status = Arc::new(AdapterRuntimeStatus::new(profile(
-            AudioBackendKind::CoreAudio,
-        )));
-        let weak = Arc::downgrade(&status);
-        let worker = std::thread::Builder::new()
-            .name("failed-audio-worker".into())
-            .spawn(|| panic!("injected audio failure"))
-            .unwrap();
-
-        assert_eq!(
-            AudioWorker::new(status, worker).finish(),
-            Err("failed-audio-worker panicked: injected audio failure".into())
-        );
-        assert!(weak.upgrade().is_none());
-    }
-
-    pub(super) fn profile(backend: AudioBackendKind) -> AdapterProfile {
-        AdapterProfile {
-            initial_format: SessionFormat {
-                sample_rate: 44_100,
-                block_frames: 128,
-            },
-            capabilities: AudioSessionCapabilities {
-                backend,
-                supported_sample_rates: vec![44_100, 48_000, 96_000],
-                supported_block_frames: vec![64, 128, 256],
-                can_reconfigure_live: false,
-                hardware_input: true,
-                hardware_output: false,
-                virtual_endpoint: true,
-                application_capture: true,
-                sample_rate_conversion: false,
-                drift_correction: false,
-            },
-            application_capture_rates: vec![44_100, 96_000],
-            clock_authority: ClockAuthority::AudioServer,
-            transport_latency_frames: None,
-            requires_observed_device_rate: false,
-        }
-    }
-
-    #[test]
-    fn os_label_does_not_invent_device_health_or_supported_io() {
-        for backend in [AudioBackendKind::CoreAudio, AudioBackendKind::PipeWire] {
-            let status = AdapterRuntimeStatus::new(profile(backend));
-            let format = RenderFormat {
-                sample_rate: 44_100,
-                block_frames: 128,
-            };
-            let initial = status.status(format);
-            assert_eq!(initial.driver_state, DriverState::InstalledNotLoaded);
-            let session = initial.audio_session.unwrap();
-            assert_eq!(session.clock_authority, ClockAuthority::AudioServer);
-            assert!(session.capabilities.hardware_input);
-            assert!(!session.capabilities.hardware_output);
-            assert!(session.capabilities.application_capture);
-            status.observe_endpoint(true);
-            assert_eq!(status.status(format).driver_state, DriverState::Ready);
-            status.observe_device_rate(Some(44_100));
-            status.forget_endpoint_observation();
-            let detached = status.status(format);
-            assert_eq!(detached.driver_state, DriverState::InstalledNotLoaded);
-            assert_eq!(
-                detached.audio_session.unwrap().observed_device_sample_rate,
-                None
-            );
-            status.observe_endpoint(false);
-            assert_eq!(
-                status.status(format).driver_state,
-                DriverState::NotInstalled
-            );
-            assert!(
-                !status
-                    .status(RenderFormat {
-                        sample_rate: 48_000,
-                        ..format
-                    })
-                    .audio_session
-                    .unwrap()
-                    .capabilities
-                    .application_capture
-            );
-        }
-    }
-
-    #[test]
-    fn timer_capability_cannot_claim_synchronized_audio() {
-        let mut descriptor = profile(AudioBackendKind::PipeWire);
-        descriptor.clock_authority = ClockAuthority::EngineTimer;
-        let status = AdapterRuntimeStatus::new(descriptor);
-        assert_eq!(
-            status
-                .status(RenderFormat {
-                    sample_rate: 48_000,
-                    block_frames: 128
-                })
-                .audio_session
-                .unwrap()
-                .issue,
-            Some(SessionIssue::ClockNotSynchronized)
-        );
-    }
-
-    #[test]
-    fn processing_owner_and_real_transfer_counters_have_a_lifetime() {
-        let status = AdapterRuntimeStatus::new(profile(AudioBackendKind::PipeWire));
-        let lease = status.begin_processing().unwrap();
-        assert!(status.begin_processing().is_err());
-        status.record_process(mixrelay_audio_io::process::ProcessReport {
-            input_starvations: 3,
-            output_overflows: 2,
-            discontinuities: 4,
-            sample_faults: mixrelay_audio_io::process::SampleFaults {
-                source_samples: 5,
-                input_samples: 6,
-                output_samples: 7,
-                blocks: 2,
-            },
-        });
-        let format = RenderFormat {
-            sample_rate: 48_000,
-            block_frames: 128,
-        };
-        let running = status.status(format);
-        assert_eq!((running.underruns, running.overruns), (3, 2));
-        assert_eq!(running.audio_session.as_ref().unwrap().discontinuities, 4);
-        assert_eq!(running.sample_faults.source_samples, 5);
-        assert_eq!(running.sample_faults.input_samples, 6);
-        assert_eq!(running.sample_faults.output_samples, 7);
-        assert_eq!(running.sample_faults.blocks, 2);
-        assert_eq!(
-            running.audio_session.unwrap().processing_state,
-            mixrelay_audio_io::process::ProcessingState::Running
-        );
-        drop(lease);
-        assert_eq!(
-            status.status(format).audio_session.unwrap().issue,
-            Some(SessionIssue::ProcessingFailed)
-        );
-        assert!(status.begin_processing().is_err());
-    }
-
-    #[test]
-    fn sample_fault_totals_saturate_and_do_not_reset_on_clean_cycles() {
-        let status = AdapterRuntimeStatus::new(profile(AudioBackendKind::PipeWire));
-        let faults = mixrelay_audio_io::process::SampleFaults {
-            source_samples: u64::MAX - 1,
-            input_samples: u64::MAX - 2,
-            output_samples: u64::MAX - 3,
-            blocks: u64::MAX - 4,
-        };
-        status.record_process(mixrelay_audio_io::process::ProcessReport {
-            sample_faults: faults,
-            ..Default::default()
-        });
-        status.record_process(mixrelay_audio_io::process::ProcessReport {
-            sample_faults: mixrelay_audio_io::process::SampleFaults {
-                source_samples: 8,
-                input_samples: 8,
-                output_samples: 8,
-                blocks: 8,
-            },
-            ..Default::default()
-        });
-        status.record_process(mixrelay_audio_io::process::ProcessReport::default());
-        assert_eq!(
-            status
-                .status(RenderFormat {
-                    sample_rate: 48_000,
-                    block_frames: 128
-                })
-                .sample_faults,
-            mixrelay_audio_io::process::SampleFaults {
-                source_samples: u64::MAX,
-                input_samples: u64::MAX,
-                output_samples: u64::MAX,
-                blocks: u64::MAX,
-            }
-        );
-    }
-
-    #[test]
-    fn dropping_worker_cancels_and_joins_native_resource_ownership() {
-        struct NativeResource(Arc<AtomicBool>);
-        impl Drop for NativeResource {
-            fn drop(&mut self) {
-                self.0.store(true, Ordering::Release);
-            }
-        }
-        let status = Arc::new(AdapterRuntimeStatus::new(profile(
-            AudioBackendKind::PipeWire,
-        )));
-        let released = Arc::new(AtomicBool::new(false));
-        let thread_status = status.clone();
-        let thread_released = released.clone();
-        let (ready, receive) = std::sync::mpsc::sync_channel(1);
-        let thread = std::thread::spawn(move || {
-            let _resource = NativeResource(thread_released);
-            let _lease = thread_status.begin_processing().unwrap();
-            ready.send(()).unwrap();
-            while !thread_status.stop_requested() {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        });
-        let owner = AudioWorker::new(status.clone(), thread);
-        receive.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert!(!released.load(Ordering::Acquire));
-        drop(owner);
-        assert!(released.load(Ordering::Acquire));
-        assert_eq!(
-            status
-                .status(RenderFormat {
-                    sample_rate: 48_000,
-                    block_frames: 128
-                })
-                .audio_session
-                .unwrap()
-                .processing_state,
-            mixrelay_audio_io::process::ProcessingState::Stopped
-        );
-        assert_eq!(
-            status
-                .status(RenderFormat {
-                    sample_rate: 48_000,
-                    block_frames: 128
-                })
-                .audio_session
-                .unwrap()
-                .issue,
-            None
-        );
-    }
-
-    #[test]
-    fn unwinding_is_processing_failure_even_if_cancellation_was_requested() {
-        let status = AdapterRuntimeStatus::new(profile(AudioBackendKind::PipeWire));
-        status.observe_endpoint(true);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _lease = status.begin_processing().unwrap();
-            status.request_stop();
-            panic!("native owner failed during shutdown");
-        }));
-        assert!(result.is_err());
-        let report = status.status(RenderFormat {
-            sample_rate: 48_000,
-            block_frames: 128,
-        });
-        // A failed DSP owner must not claim that the installed virtual driver vanished.
-        assert_eq!(report.driver_state, DriverState::Ready);
-        assert_eq!(
-            report.audio_session.unwrap().issue,
-            Some(SessionIssue::ProcessingFailed)
-        );
-    }
-
-    #[test]
-    fn application_availability_recovers_without_hiding_processing_failure() {
-        let status = AdapterRuntimeStatus::new(profile(AudioBackendKind::PipeWire));
-        let format = RenderFormat {
-            sample_rate: 48_000,
-            block_frames: 128,
-        };
-        let lease = status.begin_processing().unwrap();
-        for (state, issue) in [
-            (
-                ApplicationRuntimeState::Waiting,
-                Some(SessionIssue::ApplicationUnavailable),
-            ),
-            (
-                ApplicationRuntimeState::Ambiguous,
-                Some(SessionIssue::ApplicationAmbiguous),
-            ),
-            (ApplicationRuntimeState::Ready, None),
-        ] {
-            status.observe_application_state(state);
-            assert_eq!(status.status(format).audio_session.unwrap().issue, issue);
-        }
-        drop(lease);
-        status.observe_application_state(ApplicationRuntimeState::Waiting);
-        assert_eq!(
-            status.status(format).audio_session.unwrap().issue,
-            Some(SessionIssue::ProcessingFailed)
-        );
-    }
-}
+#[path = "session/tests.rs"]
+mod tests;
 
 #[cfg(all(test, unix))]
 mod shutdown_signal_tests {

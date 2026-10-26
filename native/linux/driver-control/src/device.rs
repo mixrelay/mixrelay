@@ -9,7 +9,10 @@ use mixrelay_audio_io::{
 };
 use mixrelay_driver_control::{DriverDeviceConfig, DriverError};
 use mixrelay_pipewire::{DriverFormat, GraphDriver, NativeStream, StreamProperties, StreamRole};
-use std::time::{Duration, Instant};
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
+};
 
 pub(super) fn capabilities() -> VirtualEndpointCapabilities {
     VirtualEndpointCapabilities {
@@ -72,16 +75,17 @@ impl DevicePreparation {
         let [render_format, capture_format] = requested_formats(config);
         let render_channels = render_format.map_or(0, |format| usize::from(format.channels));
         let capture_channels = capture_format.map_or(0, |format| usize::from(format.channels));
-        let mut input = vec![0.0; render_channels * MAX_FRAMES].into_boxed_slice();
-        let mut output = vec![
-            0.0;
-            if render_channels == capture_channels {
+        let mut input = mixrelay_audio_io::pcm_buffer::zeroed(render_channels * MAX_FRAMES)
+            .map_err(backend)?
+            .into_boxed_slice();
+        let mut output =
+            mixrelay_audio_io::pcm_buffer::zeroed(if render_channels == capture_channels {
                 0
             } else {
                 capture_channels * MAX_FRAMES
-            }
-        ]
-        .into_boxed_slice();
+            })
+            .map_err(backend)?
+            .into_boxed_slice();
         // calloc/mmap can leave zeroed pages uncommitted. Prepare the entire
         // callback storage on control before publishing the native processor.
         mixrelay_pcm_ring::prefault_pcm(&mut input);
@@ -94,6 +98,8 @@ impl DevicePreparation {
             process: Loopback {
                 render: None,
                 capture: None,
+                sample_rate: config.spec.default_sample_rate,
+                failure: None,
                 render_channels,
                 capture_channels,
                 input,
@@ -112,6 +118,7 @@ pub(super) struct DeviceRuntime {
     render: Option<StreamProperties>,
     capture: Option<StreamProperties>,
     driver: GraphDriver<Loopback>,
+    reported_process_failure: AtomicBool,
 }
 
 impl DeviceRuntime {
@@ -159,40 +166,26 @@ impl DeviceRuntime {
         let format =
             DriverFormat::new(preparation.config.spec.default_sample_rate, 128).map_err(backend)?;
         let driver = GraphDriver::open(preparation.process, format).map_err(backend)?;
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            let exact = [
+        wait_for_native_tuple(
+            &driver,
+            &preparation.config.spec.id,
+            [
                 (render.as_ref(), preparation.render_format),
                 (capture.as_ref(), preparation.capture_format),
-            ]
-            .iter()
-            .all(|(properties, requested)| {
-                properties.map_or(requested.is_none(), |properties| {
-                    properties
-                        .native_formats()
-                        .is_some_and(|(_, current)| current == *requested)
-                })
-            });
-            if exact && driver.ready() {
-                break;
-            }
-            if Instant::now() >= deadline {
-                return Err(DriverError::Backend(
-                    "native device tuple readback timed out".into(),
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(2));
-        }
+            ],
+        )?;
         Ok(Self {
             config: preparation.config,
             render,
             capture,
             driver,
+            reported_process_failure: AtomicBool::new(false),
         })
     }
 
     pub(super) fn ready(&self) -> bool {
-        self.driver.ready()
+        self.driver.process_failure().is_none()
+            && self.driver.ready()
             && self.render.iter().chain(self.capture.iter()).all(|stream| {
                 stream
                     .native_formats()
@@ -201,7 +194,28 @@ impl DeviceRuntime {
     }
 
     pub(super) fn failed(&self) -> bool {
-        self.driver.failed()
+        let processing_failure = self.driver.process_failure();
+        // This control-only flag deduplicates diagnostics; native owners publish the faults.
+        if !self.reported_process_failure.load(Ordering::Relaxed) {
+            if let Some(cause) = processing_failure {
+                tracing::warn!(device_id = %self.config.spec.id, ?cause, "PipeWire device processing failed");
+                self.reported_process_failure.store(true, Ordering::Relaxed);
+            } else {
+                for (direction, stream) in [("render", &self.render), ("capture", &self.capture)] {
+                    if let Some(native_code) = stream
+                        .as_ref()
+                        .and_then(StreamProperties::buffer_return_error)
+                    {
+                        tracing::warn!(device_id = %self.config.spec.id, direction, native_code,
+                            "PipeWire buffer return failed");
+                        self.reported_process_failure.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                }
+            }
+        }
+        processing_failure.is_some()
+            || self.driver.failed()
             || self
                 .render
                 .iter()
@@ -225,6 +239,45 @@ impl DeviceRuntime {
             native_formats: NativeDeviceFormats { render, capture },
         })
     }
+}
+
+fn wait_for_native_tuple(
+    driver: &GraphDriver<Loopback>,
+    id: &mixrelay_audio_io::VirtualEndpointId,
+    directions: [(Option<&StreamProperties>, Option<NativeStreamFormat>); 2],
+) -> Result<(), DriverError> {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let exact = directions.iter().all(|(properties, requested)| {
+            properties.map_or(requested.is_none(), |properties| {
+                properties
+                    .native_formats()
+                    .is_some_and(|(_, current)| current == *requested)
+            })
+        });
+        if exact && driver.ready() {
+            break;
+        }
+        if let Some(cause) = driver.process_failure() {
+            tracing::error!(device_id = %id, ?cause,
+                "PipeWire device processing failed before admission");
+            return Err(DriverError::Backend(format!(
+                "native device processing failed before admission: {cause:?}"
+            )));
+        }
+        if driver.failed() {
+            return Err(DriverError::Backend(
+                "native device disconnected before admission".into(),
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(DriverError::Backend(
+                "native device tuple readback timed out".into(),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    Ok(())
 }
 
 fn formats(properties: Option<&StreamProperties>) -> Result<NativeStreamFormats, DriverError> {

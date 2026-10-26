@@ -31,6 +31,7 @@ mod watchdog;
 #[cfg(not(debug_assertions))]
 mod benchmark;
 mod control;
+mod control_trace;
 mod ffi;
 mod native;
 #[cfg(test)]
@@ -175,7 +176,7 @@ pub struct TapStats {
     /// Format fields belong to one admitted generation. Retry a false snapshot;
     /// it does not mean the capture owner has permanently stopped.
     pub format_ready: bool,
-    /// Successfully prepared format generations.
+    /// PCM generations after format preparation or a reusable capture restart.
     pub format_generation: u64,
     /// Observed native timestamp discontinuities.
     pub clock_discontinuities: u64,
@@ -213,6 +214,9 @@ struct Resources {
     proc: *mut std::ffi::c_void,
     listeners: ListenerReceipts,
     resume: bool,
+    /// A repeated native start needs a new PCM generation, including a failed
+    /// start that already called its `IOProc` before returning an error.
+    start_attempted: bool,
     /// A failed native teardown must not downgrade a requested tap replacement
     /// into a format-only `IOProc` restart on the next control pass.
     rebuild: RebuildIntent,
@@ -247,6 +251,9 @@ pub struct TapSession {
     peaks: TapPeaks,
     clock: CallbackClock,
     running: AtomicBool,
+    /// PCM admission opens before native Start so its synchronous first callback
+    /// is accepted. Stop and failed Start close it independently of native ownership.
+    delivery: AtomicBool,
     sample_rate: AtomicU64,
     generation: AtomicU64,
     callbacks: AtomicU64,
@@ -265,6 +272,10 @@ impl TapSession {
     fn allowed(&self) -> bool {
         // SAFETY: immutable session borrow retains the initialized atomic gate.
         self.lifecycle.delivery_allowed()
+    }
+
+    fn delivering(&self) -> bool {
+        self.delivery.load(Ordering::Acquire) && self.allowed()
     }
 
     fn ring(&self) -> *mut AudioRing {
@@ -318,6 +329,7 @@ impl TapSession {
         if !stats.format_ready {
             stats.clock_valid = false;
         }
+        stats.clock_valid &= self.delivery.load(Ordering::Acquire);
         stats
     }
 }

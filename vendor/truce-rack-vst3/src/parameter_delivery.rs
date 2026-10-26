@@ -12,7 +12,8 @@ use std::{
 use truce_rack_core::error::{Error, Result};
 use vst3::Steinberg::Vst::{
     IAudioProcessor, IAudioProcessorTrait, IEditController, IEditControllerTrait, IParamValueQueue,
-    IParamValueQueueTrait, IParameterChanges, IParameterChangesTrait, ProcessData,
+    IParamValueQueueTrait, IParameterChanges, IParameterChangesTrait,
+    ParameterInfo as Vst3ParameterInfo, ProcessData,
 };
 use vst3::Steinberg::{kInvalidArgument, kResultOk};
 use vst3::{Class, ComPtr, ComWrapper};
@@ -249,7 +250,7 @@ pub(super) struct OutputParameters {
 }
 
 impl OutputParameters {
-    fn new(metadata: &[super::Vst3ParameterInfo], maximum_block: usize) -> Result<Self> {
+    fn new(metadata: &[Vst3ParameterInfo], maximum_block: usize) -> Result<Self> {
         if maximum_block == 0
             || i32::try_from(maximum_block).is_err()
             || metadata
@@ -374,7 +375,7 @@ impl OutputParameters {
 pub(super) struct InputParameters {
     changes: ComWrapper<Changes>,
     pointer: ComPtr<IParameterChanges>,
-    metadata: Vec<super::Vst3ParameterInfo>,
+    metadata: Vec<Vst3ParameterInfo>,
     output: OutputParameters,
 }
 
@@ -391,7 +392,7 @@ impl InputParameters {
         let mut slots: Vec<Slot> = Vec::with_capacity(count);
         let mut metadata = Vec::with_capacity(count);
         for index in 0..count {
-            let mut info = super::empty_parameter_info();
+            let mut info = crate::metadata::empty_parameter_info();
             let index = i32::try_from(index).expect("bounded parameter count");
             if unsafe { controller.getParameterInfo(index, &raw mut info) } != kResultOk {
                 return Err(Error::Other(
@@ -493,7 +494,7 @@ impl InputParameters {
         self.changes.count.load(Ordering::Acquire) != 0
     }
 
-    pub(super) fn metadata(&self, index: usize) -> Option<&super::Vst3ParameterInfo> {
+    pub(super) fn metadata(&self, index: usize) -> Option<&Vst3ParameterInfo> {
         self.metadata.get(index)
     }
 
@@ -538,7 +539,7 @@ impl InputParameters {
             ));
         }
         for (index, cached) in self.metadata.iter_mut().enumerate() {
-            let mut updated = super::empty_parameter_info();
+            let mut updated = crate::metadata::empty_parameter_info();
             let index = i32::try_from(index).expect("parameter capacity is bounded");
             if unsafe { controller.getParameterInfo(index, &raw mut updated) } != kResultOk {
                 return Err(Error::Other(
@@ -594,8 +595,8 @@ mod output_tests {
     use super::*;
     use vst3::ComRef;
 
-    fn metadata(id: u32) -> super::super::Vst3ParameterInfo {
-        let mut info = super::super::empty_parameter_info();
+    fn metadata(id: u32) -> Vst3ParameterInfo {
+        let mut info = crate::metadata::empty_parameter_info();
         info.id = id;
         info
     }
@@ -742,4 +743,4 @@ mod output_tests {
 mod tests;
 
 #[cfg(test)]
-pub(super) use tests::count_allocations;
+pub(super) use crate::test_support::count_allocations;

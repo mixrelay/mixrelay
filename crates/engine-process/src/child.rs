@@ -1,3 +1,4 @@
+//! Observes controller ownership and requests the existing engine drain.
 use std::{future::Future, io, io::Read, io::Write, thread};
 
 use tokio::sync::oneshot;

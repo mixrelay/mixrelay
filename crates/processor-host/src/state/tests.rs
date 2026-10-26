@@ -56,18 +56,19 @@ fn capture_interns_before_reuse_matching_and_keeps_json_small() {
 struct StateCaptureFixture {
     control: Option<std::sync::Arc<HostedProcessorControl>>,
     worker: std::sync::Arc<crate::shared_transport::WorkerControl>,
-    registration: Option<crate::ProcessorControlRegistration>,
+    registration: Option<crate::control::ProcessorControlRegistration>,
     _audio: crate::shared_transport::ParentAudio,
     registry: ProcessorControlRegistry,
     node: crate::NodeId,
-    config: crate::ProviderNodeConfig,
-    format: crate::RenderFormat,
+    config: mixrelay_audio_graph::ProviderNodeConfig,
+    format: mixrelay_audio_graph::RenderFormat,
     _directory: FixtureDir,
 }
 
 impl StateCaptureFixture {
     fn new(label: &str) -> Self {
-        use crate::{AudioLayout, NodeId, ProviderNodeConfig, RenderFormat};
+        use crate::{AudioLayout, NodeId};
+        use mixrelay_audio_graph::{ProviderNodeConfig, RenderFormat};
         use std::sync::{Arc, atomic::Ordering};
 
         let directory = FixtureDir::new(label).unwrap();
@@ -101,7 +102,7 @@ impl StateCaptureFixture {
             sample_rate: 48_000,
             block_frames: 128,
         };
-        let request = crate::HostedProcessorPrepareRequest {
+        let request = mixrelay_audio_engine::HostedProcessorPrepareRequest {
             node_id: &node,
             config: &config,
             format,
@@ -128,14 +129,14 @@ impl StateCaptureFixture {
         self.control.as_ref().unwrap().shared.header().instance_id
     }
 
-    fn candidate(&self, parameters: Value) -> crate::ProviderNodeConfig {
+    fn candidate(&self, parameters: Value) -> mixrelay_audio_graph::ProviderNodeConfig {
         let mut candidate = self.config.clone();
         candidate.parameters = parameters;
         candidate
     }
 
-    fn reuse_identity(&self, config: &crate::ProviderNodeConfig) -> Option<u64> {
-        let request = crate::HostedProcessorPrepareRequest {
+    fn reuse_identity(&self, config: &mixrelay_audio_graph::ProviderNodeConfig) -> Option<u64> {
+        let request = mixrelay_audio_engine::HostedProcessorPrepareRequest {
             node_id: &self.node,
             config,
             format: self.format,

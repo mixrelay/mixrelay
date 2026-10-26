@@ -25,15 +25,17 @@ typedef void (*MRPWProcess)(void *userdata, const MRPWCycle *cycle);
 /* Prepare on the unstarted parent connection. It must outlive this stream.
  * Control thread only. mode uses MRPWStreamMode.
  * target is a registry object.serial, not a recyclable object id.
- * manual_output selects DSP-cycle releases; independent publishers use false. */
+ * manual_output selects DSP-cycle releases; independent publishers use false.
+ * ring_frames is preallocated retention, independent of node latency/quantum. */
 MRPWStream *mr_pw_stream_open(const MRPWConnectionHandles *connection, const char *name, const char *description,
                              const char *target, uint32_t mode, uint32_t channels,
-                             uint32_t sample_rate, uint32_t block_frames, bool manual_output);
+                             uint32_t sample_rate, uint32_t block_frames, bool manual_output,
+                             uint32_t ring_frames);
 /* Exact PCM encoding (MR_PCM_FORMAT_*); zero retains advertised alternatives. */
 MRPWStream *mr_pw_stream_open_pcm(const MRPWConnectionHandles *connection, const char *name, const char *description,
                                  const char *target, uint32_t mode, uint32_t channels,
                                  uint32_t sample_rate, uint32_t block_frames, bool manual_output,
-                                 uint32_t sample_format);
+                                 uint32_t sample_format, uint32_t ring_frames);
 void mr_pw_stream_close(MRPWStream *stream);
 /* Control thread only; caller retains the stream throughout this call. Updates
  * metadata without reconnecting, changing format or restarting the PCM ring. */
@@ -44,6 +46,9 @@ uint32_t mr_pw_stream_node_id(MRPWStream *stream);
 /* Control only, after successful Rust-owned DSP monitor PortConfig preparation.
  * Native outputs are rejected. No RT path may invoke this activation boundary. */
 int mr_pw_stream_activate_capture(MRPWStream *stream);
+/* First native buffer-return failure, latched until this acquisition is retired.
+ * Atomic observation; zero means no such failure. */
+int mr_pw_stream_return_error(MRPWStream *stream);
 int mr_pw_stream_ready(MRPWStream *stream);
 /* Atomic control-side terminal state observation; PAUSED/CONNECTING are not failures. */
 int mr_pw_stream_failed(MRPWStream *stream);
@@ -66,9 +71,10 @@ uint64_t mr_pw_stream_quantum(MRPWStream *stream);
 void mr_pw_stream_discard_input(MRPWStream *stream);
 typedef struct { uint64_t overflows, starvations; } MRPWTransferCounters;
 MRPWTransferCounters mr_pw_stream_counters(MRPWStream *stream);
-/* Nonconsuming native capture admission failure generation. Capture-only;
- * malformed/corrupt ingress and ring rejection advance it, output failures do
- * not. Acquire observes the producer's release counter without reading IO data. */
+/* Nonconsuming source-local discontinuity generation. Capture-only; native
+ * ingress/ring failures, buffer-return failure and requested stream/clock
+ * restarts advance it. Output transfer failures do not. Acquire observes
+ * producer/control publications without reading borrowed IO data. */
 uint64_t mr_pw_stream_capture_failures(MRPWStream *stream);
 /* Independent diagnostic observations, not a transactional queue snapshot.
  * Each failure group has one serialized writer. Counts wrap unsigned and live

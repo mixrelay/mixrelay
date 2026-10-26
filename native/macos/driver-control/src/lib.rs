@@ -345,7 +345,7 @@ fn native_spec(config: &DriverDeviceConfig) -> Result<EndpointSpec, DriverError>
         id: identity(&config.spec.id)?,
         display_name: config.spec.display_name.clone(),
         sample_rate: config.spec.default_sample_rate,
-        capacity_frames: 16_384,
+        capacity_frames: mixrelay_audio_io::retention::RING_FRAMES,
         render_channels: config
             .spec
             .render

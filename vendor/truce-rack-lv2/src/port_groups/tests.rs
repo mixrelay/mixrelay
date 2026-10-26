@@ -1,58 +1,9 @@
 use super::*;
 use crate::Lv2Scanner;
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
 use truce_rack_core::buffer::{AudioBuffer, BusRange};
 use truce_rack_core::events::EventList;
 use truce_rack_core::plugin::{Plugin, PluginCore, ProcessContext};
 use truce_rack_core::scanner::PluginScanner;
-
-thread_local! {
-    static MEASURE: Cell<bool> = const { Cell::new(false) };
-    static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
-}
-
-struct CountingAllocator;
-
-// SAFETY: every operation delegates to `System`; the thread-local counter only observes calls.
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if MEASURE.try_with(Cell::get).unwrap_or(false) {
-            ALLOCATIONS.with(|count| count.set(count.get() + 1));
-        }
-        // SAFETY: this is the allocator operation's original layout.
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        // SAFETY: `pointer` and `layout` are exactly those passed by the allocator caller.
-        unsafe { System.dealloc(pointer, layout) };
-    }
-    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        if MEASURE.try_with(Cell::get).unwrap_or(false) {
-            ALLOCATIONS.with(|count| count.set(count.get() + 1));
-        }
-        // SAFETY: this is the allocator operation's original pointer and layout.
-        unsafe { System.realloc(pointer, layout, size) }
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: CountingAllocator = CountingAllocator;
-
-fn count_allocations(operation: impl FnOnce()) -> usize {
-    struct Reset;
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            MEASURE.with(|flag| flag.set(false));
-        }
-    }
-    ALLOCATIONS.with(|count| count.set(0));
-    MEASURE.with(|flag| flag.set(true));
-    let reset = Reset;
-    operation();
-    drop(reset);
-    ALLOCATIONS.with(Cell::get)
-}
 
 fn fixture() -> (Lv2Scanner, truce_rack_core::info::PluginInfo) {
     let scanner = Lv2Scanner::new();
@@ -267,6 +218,7 @@ fn native_group_permutation_and_fresh_state_restore() {
     assert_eq!(layout.outputs[1].kind, BusKind::Auxiliary);
     assert_eq!(
         plugin
+            .bindings
             .ports
             .iter()
             .filter_map(|p| p.audio_plane)
@@ -378,6 +330,7 @@ fn assert_other_bundle_layouts(scanner: &Lv2Scanner) {
     let indexed = scanner.load(&indexed_info).unwrap();
     assert_eq!(
         indexed
+            .bindings
             .ports
             .iter()
             .filter_map(|port| port.audio_plane)
@@ -425,7 +378,7 @@ fn native_process_pointer_allocation_count() {
     for _ in 0..16 {
         run_block(&mut plugin, &input, &mut output, &events, &mut sink);
     }
-    let allocations = count_allocations(|| {
+    let allocations = crate::test_allocations::measure(|| {
         for _ in 0..100 {
             run_block(&mut plugin, &input, &mut output, &events, &mut sink);
         }
@@ -452,7 +405,7 @@ fn native_pending_controls_process_without_allocations() {
     let events = EventList::new();
     let mut sink = EventList::new();
     let mut run = |gain: f32| {
-        plugin.controller.pending.publish(2, gain);
+        plugin.ui.controller.pending.publish(2, gain);
         let input_refs = [input.as_slice()];
         let mut output_refs = [output.as_mut_slice()];
         let ranges = [BusRange::new(0, 1)];
@@ -473,7 +426,7 @@ fn native_pending_controls_process_without_allocations() {
     for _ in 0..16 {
         run(0.5);
     }
-    let allocations = count_allocations(|| {
+    let allocations = crate::test_allocations::measure(|| {
         for block in 0..100 {
             run(if block % 2 == 0 { 0.25 } else { 0.75 });
         }

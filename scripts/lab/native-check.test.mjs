@@ -96,6 +96,51 @@ test("command failure stops the plan and cannot be reported as a pass", () => {
   assert.equal(result.status, "failed");
   assert.equal(calls, 2);
 });
+
+test("Linux native callback fixture failures fail the full source gate", () => {
+  const fixture = "native/linux/pipewire/tests/run-stream-buffer-metadata.sh";
+  const calls = [];
+  const result = runChecks("linux", "test", (command, args) => {
+    calls.push([command, ...args]);
+    return { status: args.includes(fixture) ? 17 : 0 };
+  });
+  assert.equal(result.status, "failed");
+  assert.deepEqual(calls.at(-1), ["bash", fixture]);
+  assert.equal(result.steps.at(-1).exitCode, 17);
+  assert.equal(buildPlan("darwin", "test").some(step => step.includes(fixture)), false);
+});
+
+for (const [os, format] of [["darwin", "au"], ["linux", "lv2"]]) {
+  test(`${format} excluded adapter unit failures fail the source gate`, t => {
+    const fixture = nativeFixture(t);
+    const manifest = `vendor/truce-rack-${format}/Cargo.toml`;
+    const calls = [];
+    const result = runChecks(os, "test", nativeRunner(fixture, (command, args) => {
+      calls.push([command, ...args]);
+      return { status: (os === "darwin" ? args[0] === "test" && args.includes(manifest)
+        : args.includes("scripts/check-lv2-boundary.sh")) ? 19 : 0 };
+    }));
+    assert.equal(result.status, "failed");
+    assert.equal(result.steps.at(-1).exitCode, 19);
+    const command = calls.at(-1);
+    if (os === "darwin") {
+      assert.equal(command[0], "cargo");
+      assert.equal(command[1], "test");
+      assert.ok(command.includes("--locked"));
+      assert.ok(command.includes("--lib"));
+      assert.ok(command.includes(manifest));
+      assert.ok(command.includes("--target-dir"));
+      assert.ok(command.includes("target"));
+    } else {
+      assert.deepEqual(command, ["bash", "scripts/check-lv2-boundary.sh"]);
+    }
+    const plan = buildPlan(os, "test");
+    assert.ok(plan.some(step => step[1] === "clippy" && step.includes(manifest)
+      && step.includes("--all-targets") && step.includes("warnings")));
+    assert.ok(plan.some(step => step[1] === "fmt" && step.includes(manifest)
+      && step.includes("--check")));
+  });
+}
 test("missing executables and terminated children are failures", () => {
   for (const result of [{ status: null, error: new Error("ENOENT") }, { status: null, signal: "SIGTERM" }]) {
     assert.equal(runChecks("linux", "build", () => result).status, "failed");

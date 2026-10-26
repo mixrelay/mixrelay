@@ -1,16 +1,18 @@
 //! RF64 container sizes are 64-bit here. Hound still owns format headers
 //! and sample encoding; its `WavWriter`'s 32-bit byte counter is never used for PCM.
 use hound::{Sample, SampleFormat, WavSpec, WavWriter};
-use std::io::{self, Cursor, Seek, SeekFrom, Write};
+use std::io::{self, Cursor, SeekFrom};
 
-pub(super) struct WaveWriter<W: Write + Seek> {
+use super::stream::RecordingStream;
+
+pub(super) struct WaveWriter<W: RecordingStream> {
     stream: W,
     spec: WavSpec,
     header: Vec<u8>,
     data_bytes: u64,
 }
 
-impl<W: Write + Seek> WaveWriter<W> {
+impl<W: RecordingStream> WaveWriter<W> {
     pub(super) fn new(stream: W, spec: WavSpec) -> Result<Self, hound::Error> {
         // Reuse Hound's validated fmt chunk, including WAVE_FORMAT_EXTENSIBLE
         // for multichannel and 24-bit PCM. Only the container size fields change.
@@ -79,13 +81,22 @@ impl<W: Write + Seek> WaveWriter<W> {
     }
 
     pub(super) fn finalize(mut self) -> io::Result<()> {
+        let frame_bytes = u64::from(self.spec.channels) * u64::from(self.spec.bits_per_sample / 8);
+        let incomplete_frame = !self.data_bytes.is_multiple_of(frame_bytes);
+        self.data_bytes -= self.data_bytes % frame_bytes;
+        let end = (self.header.len() as u64)
+            .checked_add(self.data_bytes)
+            .ok_or_else(|| io::Error::other("WAV size exhausted"))?;
+        // A failed write can leave either a partial sample or some channels of
+        // the final frame. Only whole frames belong to the recoverable prefix.
+        self.stream.truncate(end)?;
+        self.stream.seek(SeekFrom::Start(end))?;
         if !self.data_bytes.is_multiple_of(2) {
             self.stream.write_all(&[0])?;
         }
         self.update_header()?;
         self.stream.flush()?;
-        let frame_bytes = u64::from(self.spec.channels) * u64::from(self.spec.bits_per_sample / 8);
-        if !self.data_bytes.is_multiple_of(frame_bytes) {
+        if incomplete_frame {
             return Err(io::Error::other("unfinished channel frame"));
         }
         Ok(())

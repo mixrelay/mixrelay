@@ -17,6 +17,74 @@ fn mixer(render: u32, capture: u32) -> ClientMix {
 }
 
 #[test]
+fn retention_admission_includes_frame_tags_and_rejects_invalid_geometry() {
+    // At maximum retention capacity, the 1 GiB budget admits three 64-channel
+    // writers or 63 stereo writers. Per-frame tags and headers consume the rest.
+    assert_eq!(client_limit(1_048_576, 64), 3);
+    assert_eq!(client_limit(1_048_576, 2), 63);
+    assert_eq!(client_limit(16_384, 2), MAX_CLIENTS);
+    assert_eq!(client_limit(1_048_576, 0), MAX_CLIENTS);
+    for (capacity, channels) in [
+        (0, 2),
+        (3, 2),
+        (1 << 21, 2),
+        (u32::MAX, 2),
+        (128, 65),
+        (128, u32::MAX),
+    ] {
+        assert_eq!(client_limit(capacity, channels), 0);
+    }
+}
+
+#[test]
+fn rejected_registration_preserves_existing_pcm_and_membership() {
+    let mut mixer = mixer(2, 2);
+    assert!(mixer.render(42, 0, &[0.375; 16], 8).accepted);
+    // Fill metadata slots without allocating another client PCM mapping.
+    for id in 100..100 + u32::try_from(MAX_CLIENTS - mixer.clients.len()).unwrap() {
+        mixer.clients.push(Client {
+            id,
+            rendered: AtomicBool::new(false),
+            queue: None,
+        });
+    }
+    let revision = mixer.revision();
+    assert!(!mixer.register(999));
+    assert_eq!(mixer.revision(), revision);
+    let mut output = [9.0; 16];
+    assert_eq!(mixer.capture(0, &mut output, 8).available, 8);
+    assert_eq!(output.map(f32::to_bits), [0.375_f32.to_bits(); 16]);
+}
+
+#[test]
+fn failed_native_start_cannot_publish_a_running_client_clock() {
+    let mut mixer = mixer(2, 2);
+    let mut clock = Clock::new(48_000, 1, 1).unwrap();
+    assert!(mixer.publish_clock(&clock, true));
+    let mut snapshot = ClientPcmSnapshot::new().unwrap();
+    assert!(mixer.append_snapshot(&mut snapshot));
+    // SAFETY: the test retains the complete snapshot and every immutable grant header.
+    let readers = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
+    assert!(
+        readers
+            .iter()
+            .all(|reader| !reader.clock().unwrap().running)
+    );
+    assert!(clock.start(100));
+    assert!(!mixer.publish_clock_after(&clock, true, || {
+        assert!(readers.iter().all(|reader| reader.clock().is_none()));
+        false
+    }));
+    assert!(
+        readers
+            .iter()
+            .all(|reader| reader.clock().is_none_or(|clock| !clock.running))
+    );
+    assert!(mixer.publish_clock(&clock, true));
+    assert!(readers.iter().all(|reader| reader.clock().unwrap().running));
+}
+
+#[test]
 fn private_queue_epoch_exhaustion_replaces_grants_without_reusing_old_pcm() {
     let mut mixer = mixer(2, 2);
     let mut clock = crate::clock::Clock::new(48_000, 1, 1).unwrap();

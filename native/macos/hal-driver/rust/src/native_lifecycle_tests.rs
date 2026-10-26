@@ -237,6 +237,56 @@ fn native_multi_client_activity_and_restart_discard_previous_capture() {
 }
 
 #[test]
+fn rejected_native_start_keeps_shared_clients_stopped_until_mapping_replacement() {
+    use mixrelay_macos_transport::{
+        client_pcm::ClientPcmSnapshot,
+        shared_audio_buffer::{
+            mr_shared_audio_buffer_requires_replacement, mr_shared_audio_buffer_try_begin_epoch,
+        },
+    };
+
+    let fixture = native_fixture();
+    let transport = Transport::new(10, 2, 2);
+    let id = transport.add(&fixture, "Exhausted native start", 48_000);
+    assert_eq!(fixture.registry.client(id, 42, true), OK);
+    let (_, snapshot) = crate::native::client_snapshot(&fixture.registry, None).unwrap();
+    // SAFETY: this test owns the complete snapshot and its retained immutable grants.
+    let readers = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
+    // SAFETY: the fixture owns this mapping and no IO producer has started.
+    let render = unsafe { super::mr_endpoint_transport_render_buffer(transport.pointer) };
+    for _ in 0..=u16::MAX {
+        // SAFETY: the test is the sole producer-lifecycle owner of this idle ring.
+        if unsafe { mr_shared_audio_buffer_try_begin_epoch(render) } == 0 {
+            break;
+        }
+    }
+    // SAFETY: the live test mapping retains this exhausted ring.
+    assert!(unsafe { mr_shared_audio_buffer_requires_replacement(render) });
+    assert_eq!(
+        fixture.registry.start(id, 42, 100),
+        crate::abi::NATIVE_ERROR
+    );
+    assert!(!fixture.registry.snapshot(id).unwrap().running);
+    assert!(
+        readers
+            .iter()
+            .all(|reader| reader.clock().is_none_or(|clock| !clock.running))
+    );
+    assert!(
+        !fixture
+            .registry
+            .timestamp(id, 100, &mut Timestamp::default())
+    );
+    assert_eq!(fixture.registry.replacement_endpoint(), Some([10; 16]));
+    let replacement = Transport::new(10, 2, 2);
+    assert_eq!(replacement.add(&fixture, "Replacement", 48_000), id);
+    assert_eq!(fixture.perform(), OK);
+    assert_eq!(fixture.registry.start(id, 42, 200), OK);
+    pcm(&fixture, id, true, 0, 0.375);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.375_f32.to_bits(); 64]);
+}
+
+#[test]
 fn every_native_rate_commit_rearms_capture_before_callbacks_resume() {
     let fixture = native_fixture();
     let transport = Transport::new(10, 2, 2);

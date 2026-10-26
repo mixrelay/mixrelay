@@ -1,17 +1,19 @@
 use hound::{Sample, WavSpec};
 use std::{
     fs::{File, OpenOptions},
-    io::{self, BufWriter, Seek, Write},
+    io::{self, BufWriter},
     path::{Path, PathBuf},
 };
 
 mod container;
+pub(super) mod stream;
 use container::WaveWriter;
+use stream::RecordingStream;
 
 /// The narrow file-creation boundary permits deterministic I/O faults in tests.
 /// Production always creates one new file, never overwriting existing recordings.
 pub(super) trait FileFactory {
-    type Stream: Write + Seek;
+    type Stream: RecordingStream;
     fn create(&mut self, path: &Path) -> io::Result<Self::Stream>;
 }
 

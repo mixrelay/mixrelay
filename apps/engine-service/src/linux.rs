@@ -1,12 +1,10 @@
-use mixrelay_audio_engine::{
-    BlockProcessor, ExternalBinding, ExternalIo, PeakMeterBank, ProcessorExchange, RenderPlan,
-};
+//! Linux runtime assembly and atomic publication of native resources.
+use mixrelay_audio_engine::{BlockProcessor, PeakMeterBank, ProcessorExchange, RenderPlan};
 use mixrelay_audio_graph::{
-    ApplicationCaptureRequest, CompileContext, CompileLimits, FROM_OS_PORT_ID, GraphCompiler,
-    GraphDocument, RenderFormat, TO_OS_PORT_ID,
+    ApplicationCaptureRequest, CompileContext, CompileLimits, GraphCompiler, GraphDocument,
+    RenderFormat,
 };
-use mixrelay_audio_io::process::{CycleBlocks, ProcessCycle, ProcessReport, TransferOutcome};
-use mixrelay_audio_io::session::{AudioBackendKind, CURRENT_TIMER_FORMAT, ClockAuthority};
+use mixrelay_audio_io::session::{AudioBackendKind, CURRENT_TIMER_FORMAT};
 use mixrelay_audio_io::{
     HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities, VirtualEndpointSpec,
 };
@@ -32,25 +30,33 @@ mod applications;
 mod clock;
 #[path = "linux_devices.rs"]
 mod devices;
+#[path = "linux_driver_monitor.rs"]
+mod driver_monitor;
 #[path = "linux_endpoints.rs"]
 mod endpoints;
 #[path = "linux_format.rs"]
 mod format;
 use mixrelay_pipewire as native;
+#[path = "linux_processing.rs"]
+mod processing;
+#[path = "linux_recovery.rs"]
+mod recovery;
 #[cfg(test)]
 #[cfg(feature = "native-lab")]
 #[path = "linux_resource_tests.rs"]
 mod resource_tests;
 #[path = "linux_source_mute.rs"]
 mod source_mute;
-use crate::processing_failure::{Failure, FailureMailbox};
+use crate::processing_failure::Failure;
 use applications::{CaptureSet as PipeWireCaptureSet, CaptureWatch};
 use devices::{DeviceStreams, DeviceWatch};
 use endpoints::{EndpointControls, EndpointEdit, EndpointSet, EndpointSpecs};
-use mixrelay_audio_io::recovery::{RecoveryConsumer, RecoveryMailbox};
+use mixrelay_audio_io::recovery::RecoveryMailbox;
 use mixrelay_engine_service::resource_requirements::{DeviceRequirements, ResourceRequirements};
-use mixrelay_pipewire::{DriverCycle, DriverFormat, DriverProcess, GraphDriver};
 use native::NativeStream;
+#[cfg(all(test, feature = "native-lab"))]
+use processing::LinuxProcessState;
+use processing::run_audio_worker;
 const ENGINE_BLOCK_FRAMES: u32 = CURRENT_TIMER_FORMAT.block_frames;
 fn adapter_profile() -> mixrelay_engine_service::session::AdapterProfile {
     mixrelay_engine_service::session::AdapterProfile {
@@ -153,12 +159,14 @@ fn run_bound(
     );
 
     let reclaimer = spawn_reclaimers(&exchange, &endpoint_backend)?;
-    let recovery = spawn_device_recovery(&endpoint_backend, &exchange)?;
+    let recovery = recovery::start(&endpoint_backend, &exchange)?;
     let worker_status = runtime_status.clone();
+    let (worker_result, mut completion) = crate::worker_completion::channel();
     let audio_thread = thread::Builder::new()
         .name("mixrelay-pipewire-audio".to_owned())
         .spawn(move || {
-            run_audio_worker(processor, exchange, &endpoint_backend, &worker_status);
+            let result = run_audio_worker(processor, exchange, &endpoint_backend, &worker_status);
+            let _ = worker_result.send(result);
         })
         .map_err(|error| format!("could not start PipeWire audio worker: {error}"))?;
     let worker =
@@ -169,21 +177,32 @@ fn run_bound(
     let result = runtime
         .block_on(service.serve(
             controller,
-            mixrelay_engine_process::shutdown(owner, signals.requested()),
+            completion.shutdown(mixrelay_engine_process::shutdown(
+                owner,
+                signals.requested(),
+            )),
             || {
                 format_monitor.stop_observing();
                 maintenance.stop_observing();
             },
         ))
         .map_err(|error| error.to_string());
-    // Every owner has finished before the run counts as a clean exit.
-    result
-        .and(format_monitor.finish())
-        .and(maintenance.finish())
-        .and(worker.finish())
-        .and(recovery.finish())
-        .and(reclaimer.finish())
-        .and(latency.finish())
+    // Evaluate every retirement in ownership order, retaining all failures.
+    crate::shutdown::collect([
+        ("Control service", result),
+        ("Format monitor", format_monitor.finish()),
+        ("Control maintenance", maintenance.finish()),
+        ("Audio worker join", worker.finish()),
+        (
+            "Audio processing",
+            runtime
+                .block_on(completion.finish())
+                .map_err(|error| error.to_string()),
+        ),
+        ("Resource recovery", recovery.finish()),
+        ("Resource retirement", reclaimer.finish()),
+        ("Latency observer", latency.finish()),
+    ])
 }
 
 fn create_initial_processor(
@@ -235,562 +254,6 @@ fn spawn_reclaimers(
         },
     )
     .map_err(|error| format!("could not start Linux resource reclaimer: {error}"))
-}
-
-struct DeviceRecoveryWorker {
-    stopping: Arc<AtomicBool>,
-    worker: Option<thread::JoinHandle<()>>,
-}
-impl DeviceRecoveryWorker {
-    /// Stops and joins the worker; a panic means the service did not stop cleanly.
-    fn finish(mut self) -> Result<(), String> {
-        self.stop_and_join()
-    }
-
-    fn stop_and_join(&mut self) -> Result<(), String> {
-        self.stopping.store(true, Ordering::Release);
-        self.worker.take().map_or(Ok(()), |worker| {
-            worker
-                .join()
-                .map_err(|_| "MixRelay device recovery worker panicked".to_owned())
-        })
-    }
-}
-impl Drop for DeviceRecoveryWorker {
-    fn drop(&mut self) {
-        if let Err(error) = self.stop_and_join() {
-            tracing::error!(%error);
-        }
-    }
-}
-
-fn spawn_device_recovery(
-    backend: &Arc<LinuxVirtualEndpointBackend>,
-    exchange: &Arc<ProcessorExchange>,
-) -> Result<DeviceRecoveryWorker, String> {
-    let weak = Arc::downgrade(backend);
-    let weak_exchange = Arc::downgrade(exchange);
-    let stopping = Arc::new(AtomicBool::new(false));
-    let stop = stopping.clone();
-    let worker = thread::Builder::new()
-        .name("mixrelay-device-recovery".into())
-        .spawn(move || {
-            while !stop.load(Ordering::Acquire) {
-                let Some(backend) = weak.upgrade() else {
-                    break;
-                };
-                backend.device_recovery.reclaim();
-                backend.recover_applications(&stop);
-                if let Some(exchange) = weak_exchange.upgrade() {
-                    backend.poll_source_mute(&exchange);
-                }
-                if backend.device_recovery.idle() {
-                    // Do not hold the configuration mutex across discovery/open.
-                    let watch = backend
-                        .device_watch
-                        .lock()
-                        .ok()
-                        .and_then(|watch| watch.clone());
-                    if let Some(watch) = watch
-                        && watch.needs_observation()
-                        && let Ok(mut prepared) = DeviceStreams::recover(&watch, &stop)
-                        && !prepared.is_empty()
-                        && !stop.load(Ordering::Acquire)
-                        && backend.bind_device_inputs(&mut prepared).is_ok()
-                    {
-                        // A concurrent edit may have replaced/deleted these nodes.
-                        // The audio epoch and per-stream lease checks reject stale results.
-                        let _ = backend.device_recovery.publish(watch.generation, prepared);
-                    }
-                }
-                drop(backend);
-                thread::sleep(Duration::from_millis(500));
-            }
-        })
-        .map_err(|error| format!("could not start device recovery: {error}"))?;
-    Ok(DeviceRecoveryWorker {
-        stopping,
-        worker: Some(worker),
-    })
-}
-
-struct LinuxProcessState<'a> {
-    processor: Box<BlockProcessor>,
-    exchange: Arc<ProcessorExchange>,
-    endpoint_backend: &'a LinuxVirtualEndpointBackend,
-    application_recovery: RecoveryConsumer<'a, PipeWireCaptureSet>,
-    device_recovery: RecoveryConsumer<'a, DeviceStreams>,
-    endpoints: Box<EndpointSet>,
-    captures: Box<PipeWireCaptureSet>,
-    devices: Box<DeviceStreams>,
-    status: Arc<AdapterRuntimeStatus>,
-    timeline: clock::GraphTimeline,
-    clock_diagnostics: Arc<clock::DiscontinuityMailbox>,
-    failure: Arc<FailureMailbox>,
-    resource_failures: Arc<FailureMailbox>,
-}
-
-fn run_audio_worker(
-    processor: Box<BlockProcessor>,
-    exchange: Arc<ProcessorExchange>,
-    endpoint_backend: &LinuxVirtualEndpointBackend,
-    status: &Arc<AdapterRuntimeStatus>,
-) {
-    let Ok(_lease) = status.begin_processing() else {
-        return;
-    };
-    let Some(application_recovery) = endpoint_backend.application_recovery.try_consumer() else {
-        tracing::error!("application recovery already has an audio consumer");
-        return;
-    };
-    let Some(device_recovery) = endpoint_backend.device_recovery.try_consumer() else {
-        tracing::error!("device recovery already has an audio consumer");
-        return;
-    };
-    let initial_format = processor.plan().format();
-    let driver_format =
-        match DriverFormat::new(initial_format.sample_rate, initial_format.block_frames) {
-            Ok(format) => format,
-            Err(error) => {
-                tracing::error!(%error, "could not prepare PipeWire graph driver format");
-                return;
-            }
-        };
-    let timeline = match clock::GraphTimeline::new(initial_format.sample_rate) {
-        Ok(timeline) => timeline,
-        Err(error) => {
-            tracing::error!(%error, "could not prepare PipeWire graph timeline");
-            return;
-        }
-    };
-    let clock_diagnostics = Arc::new(clock::DiscontinuityMailbox::default());
-    let failure = Arc::new(FailureMailbox::default());
-    let resource_failures = Arc::new(FailureMailbox::default());
-    let context = LinuxProcessState {
-        processor,
-        exchange,
-        endpoint_backend,
-        application_recovery,
-        device_recovery,
-        endpoints: Box::default(),
-        captures: Box::default(),
-        devices: Box::default(),
-        status: status.clone(),
-        timeline,
-        clock_diagnostics: Arc::clone(&clock_diagnostics),
-        failure: Arc::clone(&failure),
-        resource_failures: Arc::clone(&resource_failures),
-    };
-    let driver = match GraphDriver::open(context, driver_format) {
-        Ok(driver) => driver,
-        Err(error) => {
-            tracing::error!(%error, "could not start PipeWire graph driver");
-            return;
-        }
-    };
-    monitor_audio_driver(
-        driver,
-        status,
-        &clock_diagnostics,
-        &failure,
-        &resource_failures,
-    );
-}
-
-fn monitor_audio_driver(
-    driver: GraphDriver<LinuxProcessState<'_>>,
-    status: &AdapterRuntimeStatus,
-    clock_diagnostics: &clock::DiscontinuityMailbox,
-    failure: &FailureMailbox,
-    resource_failures: &FailureMailbox,
-) {
-    let started = Instant::now();
-    let mut last_clock_event = 0;
-    let mut startup_failed = false;
-    while !driver.ready()
-        && !status.stop_requested()
-        && failure.read().is_none()
-        && driver.process_failure().is_none()
-    {
-        if started.elapsed() > Duration::from_secs(5) || driver.failed() {
-            tracing::error!("PipeWire graph driver did not become ready");
-            startup_failed = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    while !status.stop_requested()
-        && !startup_failed
-        && !driver.failed()
-        && failure.read().is_none()
-        && driver.process_failure().is_none()
-    {
-        // Control-plane health/shutdown wait, NOT an audio scheduling clock.
-        report_clock_discontinuity(clock_diagnostics, &mut last_clock_event);
-        report_resource_failure(resource_failures);
-        thread::sleep(Duration::from_millis(20));
-    }
-    let disconnected = driver.failed();
-    let native_failure = driver.finish(); // Drain before reading final RT diagnostics.
-    report_resource_failure(resource_failures);
-    report_clock_discontinuity(clock_diagnostics, &mut last_clock_event);
-    if let Some(cause) = failure.read() {
-        tracing::error!(?cause, "PipeWire realtime processing failed");
-    }
-    if let Some(cause) = native_failure {
-        tracing::error!(?cause, "PipeWire native processing failed");
-    }
-    if disconnected && !status.stop_requested() {
-        tracing::error!("PipeWire graph driver disconnected");
-    }
-}
-
-fn report_resource_failure(mailbox: &FailureMailbox) {
-    if let Some((cause, native_code)) = mailbox.take() {
-        tracing::warn!(
-            ?cause,
-            native_code,
-            "PipeWire realtime resource operation rejected; retaining active graph"
-        );
-    }
-}
-
-fn report_clock_discontinuity(mailbox: &clock::DiscontinuityMailbox, last_event: &mut u64) {
-    let Some(read) = mailbox.read_since(*last_event) else {
-        return;
-    };
-    *last_event = read.event_number;
-    let previous = read.event.previous;
-    let current = read.event.current;
-    tracing::warn!(
-        event_number = read.event_number,
-        overwritten = read.overwritten,
-        previous_clock_id = previous.clock_id,
-        previous_rate = previous.rate,
-        previous_position = previous.position,
-        previous_frames = previous.frames,
-        previous_monotonic_ns = previous.monotonic_ns,
-        current_clock_id = current.clock_id,
-        current_rate = current.rate,
-        current_position = current.position,
-        current_frames = current.frames,
-        current_monotonic_ns = current.monotonic_ns,
-        mapped_epoch = read.event.mapped_epoch,
-        render_position = read.event.render_position,
-        "PipeWire native timeline discontinuity"
-    );
-}
-
-#[cfg(test)]
-mod clock_diagnostic_tests {
-    use super::*;
-
-    #[test]
-    fn control_poll_reports_each_mailbox_event_once() {
-        let mailbox = clock::DiscontinuityMailbox::default();
-        let previous = DriverCycle {
-            position: 0,
-            monotonic_ns: 1,
-            clock_id: 2,
-            rate: 48_000,
-            frames: 128,
-        };
-        let event = clock::NativeDiscontinuity {
-            previous,
-            current: DriverCycle {
-                position: 256,
-                monotonic_ns: 2,
-                ..previous
-            },
-            mapped_epoch: 2,
-            render_position: 128,
-        };
-        let mut last_event = 0;
-        report_clock_discontinuity(&mailbox, &mut last_event);
-        assert_eq!(last_event, 0);
-        mailbox.publish(event);
-        report_clock_discontinuity(&mailbox, &mut last_event);
-        assert_eq!(last_event, 1);
-        report_clock_discontinuity(&mailbox, &mut last_event);
-        assert_eq!(last_event, 1);
-    }
-}
-
-impl DriverProcess for LinuxProcessState<'_> {
-    fn prepare_inputs(
-        &mut self,
-        inputs: &mixrelay_pipewire::GraphInputs,
-    ) -> Result<(), mixrelay_pipewire::DriverError> {
-        self.endpoints
-            .bind_inputs(inputs)
-            .map_err(mixrelay_pipewire::DriverError::Input)?;
-        self.captures
-            .bind_inputs(inputs)
-            .map_err(mixrelay_pipewire::DriverError::Input)?;
-        self.devices
-            .bind_inputs(inputs)
-            .map_err(mixrelay_pipewire::DriverError::Input)?;
-        self.endpoint_backend.register_inputs(inputs)
-    }
-    fn process(&mut self, native: &DriverCycle) {
-        if self.status.stop_requested() || self.failure.read().is_some() || self.status.checkpoint()
-        {
-            return;
-        }
-        if let Err(cause) = self.process_cycle(native) {
-            self.failure.publish(cause);
-        }
-    }
-}
-
-impl LinuxProcessState<'_> {
-    fn process_cycle(&mut self, native: &DriverCycle) -> Result<(), Failure> {
-        let previous_format = self.processor.plan().format();
-        let activated =
-            match self
-                .exchange
-                .activate_pending_configured(&mut self.processor, |revision| {
-                    self.endpoint_backend.activate_pending(
-                        revision,
-                        &mut self.endpoints,
-                        &mut self.captures,
-                        &mut self.devices,
-                    )
-                }) {
-                Ok(activated) => activated,
-                // Control reclamation is bounded backpressure, not a failed audio cycle.
-                Err(Failure::RetirementPending) => false,
-                Err(cause) => {
-                    self.resource_failures.publish(cause);
-                    false
-                }
-            };
-        let format = self.processor.plan().format();
-        if activated && previous_format != format {
-            self.timeline = clock::GraphTimeline::new(format.sample_rate).map_err(Failure::from)?;
-            self.status.activate_format(format);
-        }
-        format::observe_endpoints(&self.endpoints);
-        let cycle = self.timeline.map(native)?;
-        if let Some(event) = self.timeline.take_discontinuity() {
-            self.clock_diagnostics.publish(event);
-        }
-        self.status
-            .observe_clock(ClockAuthority::AudioServer, false);
-        if cycle.frames == 0 {
-            // A valid native iteration still owes the manual output dependency,
-            // even when duration mapping has not accumulated one PCM frame yet.
-            process_blocks_and_release(self, None, Self::process_block, Self::trigger_outputs)?;
-            return Ok(());
-        }
-        let blocks = CycleBlocks::new(
-            cycle,
-            mixrelay_audio_io::session::SessionFormat {
-                sample_rate: format.sample_rate,
-                block_frames: format.block_frames,
-            },
-        )
-        .map_err(Failure::from)?;
-        if cycle.discontinuity && cycle.clock.epoch > 1 {
-            self.status.record_process(ProcessReport {
-                discontinuities: 1,
-                ..ProcessReport::default()
-            });
-        }
-        process_blocks_and_release(
-            self,
-            Some(blocks),
-            Self::process_block,
-            Self::trigger_outputs,
-        )?;
-        // A node.group preference is not proof of a shared driver. Report only
-        // actual native callback IDs after every currently active owner agrees.
-        let synchronized = self.endpoints.shares_clock(native.clock_id, native.rate)
-            && self.captures.shares_clock(native.clock_id, native.rate)
-            && self.devices.shares_clock(native.clock_id, native.rate);
-        self.status
-            .observe_clock(ClockAuthority::AudioServer, synchronized);
-        Ok(())
-    }
-
-    fn trigger_outputs(&mut self) {
-        self.endpoints.trigger_outputs(&self.resource_failures);
-        self.devices.trigger_outputs(&self.resource_failures);
-    }
-
-    fn process_block(&mut self, cycle: ProcessCycle) -> Result<(), Failure> {
-        self.devices
-            .observe_controls(self.processor.plan().controls());
-        self.application_recovery
-            .activate(self.captures.generation, |next| {
-                self.captures.replace(next);
-            });
-        self.device_recovery
-            .activate(self.devices.generation, |next| {
-                self.devices.replace_disconnected(next);
-            });
-        let report = self
-            .processor
-            .process_external_cycle(
-                cycle,
-                &mut LinuxExternalIo {
-                    endpoints: &mut self.endpoints,
-                    application_captures: &mut self.captures,
-                    devices: &mut self.devices,
-                },
-            )
-            .map_err(Failure::from)?;
-        self.status
-            .record_process(self.endpoints.finish_block(cycle.frames)?);
-        self.captures.finish_block(cycle.frames);
-        self.devices.finish_input_block();
-        let Some(report) = report else {
-            return Ok(());
-        };
-        self.status.record_process(report);
-        self.status.record_process(self.devices.take_report());
-        self.status.record_process(self.endpoints.take_report());
-        self.status.record_process(self.captures.take_report());
-        self.status.observe_application_state(self.captures.state());
-        Ok(())
-    }
-}
-
-// Static callbacks keep the native-cycle sequencing testable without allocating
-// or introducing a second dispatch/ownership path in the real-time process.
-fn process_blocks_and_release<Owner>(
-    owner: &mut Owner,
-    blocks: Option<CycleBlocks>,
-    mut process_block: impl FnMut(&mut Owner, ProcessCycle) -> Result<(), Failure>,
-    release_outputs: impl FnOnce(&mut Owner),
-) -> Result<(), Failure> {
-    for block in blocks.into_iter().flatten() {
-        process_block(owner, block)?;
-    }
-    release_outputs(owner);
-    Ok(())
-}
-
-#[cfg(test)]
-mod native_output_release_tests {
-    use super::*;
-
-    fn blocks() -> CycleBlocks {
-        CycleBlocks::new(
-            ProcessCycle {
-                clock: mixrelay_audio_io::process::ClockDomain {
-                    authority: ClockAuthority::AudioServer,
-                    id: 26,
-                    epoch: 1,
-                },
-                sample_rate: 48_000,
-                frames: 512,
-                first_frame: 0,
-                monotonic_ns: Some(0),
-                discontinuity: false,
-            },
-            mixrelay_audio_io::session::SessionFormat {
-                sample_rate: 48_000,
-                block_frames: 128,
-            },
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn output_release_follows_all_four_slices_once() {
-        let mut counts = (0, 0);
-        process_blocks_and_release(
-            &mut counts,
-            Some(blocks()),
-            |counts, block| {
-                assert_eq!(block.frames, 128);
-                counts.0 += 1;
-                assert_eq!(counts.1, 0);
-                Ok(())
-            },
-            |counts| {
-                assert_eq!(counts.0, 4);
-                counts.1 += 1;
-            },
-        )
-        .unwrap();
-        assert_eq!(counts, (4, 1));
-        counts = (0, 0);
-        process_blocks_and_release(
-            &mut counts,
-            None,
-            |_, _| panic!("zero render budget has no DSP slice"),
-            |counts| counts.1 += 1,
-        )
-        .unwrap();
-        assert_eq!(counts, (0, 1));
-    }
-
-    #[test]
-    fn failed_slice_does_not_release_partial_cycle() {
-        let mut counts = (0, 0);
-        let result = process_blocks_and_release(
-            &mut counts,
-            Some(blocks()),
-            |counts, _| {
-                counts.0 += 1;
-                if counts.0 == 2 {
-                    Err(Failure::InvalidTransfer)
-                } else {
-                    Ok(())
-                }
-            },
-            |counts| counts.1 += 1,
-        );
-        assert_eq!(result, Err(Failure::InvalidTransfer));
-        assert_eq!(counts, (2, 0));
-    }
-}
-
-struct LinuxExternalIo<'a> {
-    endpoints: &'a mut EndpointSet,
-    application_captures: &'a mut PipeWireCaptureSet,
-    devices: &'a mut DeviceStreams,
-}
-
-impl ExternalIo for LinuxExternalIo<'_> {
-    fn read_source(
-        &mut self,
-        binding: &ExternalBinding,
-        destination: &mut [f32],
-        _cycle: &ProcessCycle,
-    ) -> TransferOutcome {
-        if binding.port_id().as_str() == FROM_OS_PORT_ID {
-            return self.endpoints.read(binding.node_id().as_str(), destination);
-        } else if binding.port_id().as_str() == mixrelay_audio_graph::AUDIO_PORT_ID {
-            if !self
-                .application_captures
-                .contains(binding.node_id().as_str())
-            {
-                return self.devices.read(binding.node_id().as_str(), destination);
-            }
-            return self
-                .application_captures
-                .read(binding.node_id().as_str(), destination);
-        }
-        TransferOutcome::complete(0)
-    }
-
-    fn write_sink(
-        &mut self,
-        binding: &ExternalBinding,
-        source: &[f32],
-        _cycle: &ProcessCycle,
-    ) -> TransferOutcome {
-        if binding.port_id().as_str() == TO_OS_PORT_ID {
-            return self.endpoints.write(binding.node_id().as_str(), source);
-        }
-        if binding.port_id().as_str() == mixrelay_audio_graph::AUDIO_PORT_ID {
-            return self.devices.write(binding.node_id().as_str(), source);
-        }
-        TransferOutcome::complete(0)
-    }
 }
 
 struct LinuxVirtualEndpointBackend {

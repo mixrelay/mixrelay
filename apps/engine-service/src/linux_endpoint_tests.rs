@@ -4,8 +4,8 @@ use super::super::*;
 use super::*;
 #[cfg(feature = "native-lab")]
 use mixrelay_audio_graph::{
-    AudioDeviceInputConfig, AudioEndpoint, ChannelMapping, EdgeSpec, NodeConfig, NodeSpec,
-    VirtualEndpointConfig, VirtualEndpointReference,
+    AudioDeviceInputConfig, AudioEndpoint, ChannelMapping, EdgeSpec, FROM_OS_PORT_ID, NodeConfig,
+    NodeSpec, TO_OS_PORT_ID, VirtualEndpointConfig, VirtualEndpointReference,
 };
 use mixrelay_audio_graph::{ChannelLayout, StreamSpec};
 #[cfg(feature = "native-lab")]
@@ -180,7 +180,8 @@ impl Session {
         let worker_exchange = exchange.clone();
         let worker_backend = backend.clone();
         let thread = thread::spawn(move || {
-            run_audio_worker(processor, worker_exchange, &worker_backend, &worker_status);
+            run_audio_worker(processor, worker_exchange, &worker_backend, &worker_status)
+                .expect("native PipeWire worker failed");
         });
         Self {
             _worker: mixrelay_engine_service::session::AudioWorker::new(status, thread),

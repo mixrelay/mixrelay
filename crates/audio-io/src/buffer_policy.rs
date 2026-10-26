@@ -12,6 +12,8 @@ pub struct QueueBounds {
     pub minimum_frames: u32,
     /// Physical storage, not a latency target. Half remains overflow headroom.
     pub capacity_frames: usize,
+    /// Explicit target ceiling, independent of additional retention storage.
+    pub maximum_target_frames: usize,
 }
 
 /// Invalid off-realtime queue policy configuration.
@@ -51,7 +53,7 @@ impl QueueTargetPolicy {
     /// use mixrelay_audio_io::{buffer_policy::{QueueBounds, QueueTargetPolicy},
     ///     clock_bridge::ClockRelation};
     /// let queue = QueueTargetPolicy::new(48_000, 44_100, ClockRelation::Independent,
-    ///     QueueBounds { minimum_frames: 32, capacity_frames: 16_384 })?;
+    ///     QueueBounds { minimum_frames: 32, capacity_frames: 16_384, maximum_target_frames: 8192 })?;
     /// // The peer's 128 frames round up to 140 here; reserve two full bursts.
     /// assert_eq!(queue.target_frames(32, 128, 1), 280);
     /// # Ok::<(), mixrelay_audio_io::buffer_policy::QueuePolicyError>(())
@@ -65,7 +67,9 @@ impl QueueTargetPolicy {
         if queue_rate == 0 || peer_rate == 0 {
             return Err(QueuePolicyError::ZeroRate);
         }
-        if bounds.minimum_frames == 0 || bounds.minimum_frames as usize > bounds.capacity_frames / 2
+        if bounds.minimum_frames == 0
+            || bounds.minimum_frames as usize > bounds.maximum_target_frames
+            || bounds.maximum_target_frames > bounds.capacity_frames / 2
         {
             return Err(QueuePolicyError::InvalidBounds);
         }
@@ -73,7 +77,7 @@ impl QueueTargetPolicy {
             queue_rate,
             peer_rate,
             minimum_frames: bounds.minimum_frames,
-            maximum_frames: bounds.capacity_frames / 2,
+            maximum_frames: bounds.maximum_target_frames,
             bursts: match relation {
                 ClockRelation::Independent => 2,
                 ClockRelation::ProvenSameClock => 1,

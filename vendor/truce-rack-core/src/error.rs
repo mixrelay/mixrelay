@@ -10,9 +10,46 @@ use std::path::PathBuf;
 /// Result alias for rack operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Bounded failures reported by native processing without allocating a message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ProcessFault {
+    /// Input events exceed storage prepared during activation.
+    #[error("input event capacity exhausted")]
+    InputEventCapacity,
+    /// Input event data is outside the format's valid range or block extent.
+    #[error("invalid input event")]
+    InvalidInputEvent,
+    /// Native output exceeds the host's prepared event storage.
+    #[error("output event capacity exhausted")]
+    OutputEventCapacity,
+    /// Native output has an invalid header, length, type or timestamp.
+    #[error("invalid output event")]
+    InvalidOutputEvent,
+    /// The active audio layout cannot address the supplied channel.
+    #[error("audio mapping unavailable")]
+    InvalidAudioMapping,
+    /// The requested block exceeds the activated frame extent.
+    #[error("invalid process block size")]
+    InvalidBlockSize,
+    /// The native instance omitted a required processing callback.
+    #[error("required process callback missing")]
+    MissingCallback,
+    /// Native processing returned a failure status.
+    #[error("native processing failed (code {0})")]
+    NativeStatus(i64),
+}
+
 /// Top-level error type for the host framework.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// A realtime processing failure with no allocated diagnostic payload.
+    #[error("[{format}] {fault}")]
+    Process {
+        /// Short identifier for the format wrapper.
+        format: &'static str,
+        /// Failure observed at the processing boundary.
+        fault: ProcessFault,
+    },
     /// Plugin not found at the supplied path / id.
     #[error("plugin not found: {0}")]
     PluginNotFound(String),

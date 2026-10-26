@@ -6,7 +6,7 @@ use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList},
     capture_ring::{mr_audio_ring_create, mr_audio_ring_read_interleaved},
 };
-use std::{ptr, time::Instant};
+use std::{ptr, sync::atomic::Ordering, time::Instant};
 
 #[repr(C)]
 struct Buffers {
@@ -60,6 +60,10 @@ fn run(channels: u32, frames: u32, planar: bool) {
         .ring
         .set(RingOwner(ring))
         .expect("unpublished benchmark ring");
+    session.delivery.store(true, Ordering::Release);
+    session
+        .sample_rate
+        .store(48_000_f64.to_bits(), Ordering::Release);
     let mut samples = vec![0.25; channels as usize * frames as usize];
     let mut output = vec![0.0; samples.len()];
     let input = input(&mut samples, channels, frames, planar);

@@ -2,17 +2,13 @@
 //!
 //! The worker renders graph blocks in the time-constraint class and steps out of it for
 //! control work (activation, checkpoints, format gating, direct-mode hand-off). While a
-//! device clock paces it, the worker sleeps until that device's callback publishes credit
-//! instead of polling. Every ten seconds a reporting thread logs which paths ran and how
-//! quickly the worker woke; the worker itself never writes logs.
-use std::{
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
-    thread::JoinHandle,
-    time::{Duration, Instant},
-};
+//! device clock paces it, the worker sleeps until that device's callback publishes credit.
+//! A reporting thread logs paths and wake latency every ten seconds and drains the
+//! last partial window during shutdown.
+use std::time::{Duration, Instant};
+
+mod reporting;
+use reporting::Reporter;
 
 use mixrelay_realtime::{
     LatencyHistogram, LatencySummary, Notifier, RealtimeThread, Timebase, Transition, Wake,
@@ -68,55 +64,6 @@ pub(super) struct WorkerRuntime {
     reporter: Option<Reporter>,
 }
 
-/// Logs windows off the audio thread. The worker only `try_lock`s the slot (never
-/// waits, never wakes anyone); the reporter polls it on its own clock.
-struct Reporter {
-    slot: Arc<Mutex<Option<Window>>>,
-    stop: Arc<AtomicBool>,
-    thread: JoinHandle<()>,
-}
-
-fn log(window: &Window) {
-    let Window {
-        counts,
-        latency,
-        realtime,
-    } = window;
-    tracing::info!(
-        direct = counts.direct,
-        hardware_blocks = counts.hardware,
-        shared_source_blocks = counts.shared_source,
-        timer_blocks = counts.timer,
-        idle_waits = counts.idle_waits,
-        wait_timeouts = counts.timeouts,
-        wake_p50_us = latency.map(|summary| summary.p50_us),
-        wake_p99_us = latency.map(|summary| summary.p99_us),
-        wake_max_us = latency.map(|summary| summary.maximum_us),
-        realtime,
-        "graph worker paths"
-    );
-}
-
-fn start_reporter() -> Option<Reporter> {
-    let slot = Arc::new(Mutex::new(None::<Window>));
-    let stop = Arc::new(AtomicBool::new(false));
-    let (shared, stopping) = (Arc::clone(&slot), Arc::clone(&stop));
-    std::thread::Builder::new()
-        .name("mixrelay-worker-report".into())
-        .spawn(move || {
-            while !stopping.load(Ordering::Acquire) {
-                std::thread::park_timeout(Duration::from_secs(1));
-                let window = shared.lock().ok().and_then(|mut slot| slot.take());
-                if let Some(window) = &window {
-                    log(window);
-                }
-            }
-        })
-        .inspect_err(|error| tracing::warn!(%error, "graph worker paths are not reported"))
-        .ok()
-        .map(|thread| Reporter { slot, stop, thread })
-}
-
 /// The process's device-credit wakeup: device callbacks signal it once registered.
 /// `None` when the kernel refused the semaphore; the worker then keeps polling.
 fn device_wakeup() -> Option<&'static Notifier> {
@@ -150,7 +97,9 @@ impl WorkerRuntime {
             latency: LatencyHistogram::default(),
             counts: Counts::default(),
             reported: Instant::now(),
-            reporter: start_reporter(),
+            reporter: Reporter::start(reporting::log)
+                .inspect_err(|error| tracing::warn!(%error, "graph worker paths are not reported"))
+                .ok(),
         }
     }
 
@@ -196,15 +145,14 @@ impl WorkerRuntime {
 
     /// Leaves the realtime class for good (worker shutdown) and stops the reporter.
     pub(super) fn finish(&mut self) {
+        let window = self.take_window();
         if self.realtime.take().is_some()
             && let Err(error) = mixrelay_realtime::demote_current_thread()
         {
             tracing::warn!(%error, "graph worker stops in the realtime class");
         }
         if let Some(reporter) = self.reporter.take() {
-            reporter.stop.store(true, Ordering::Release);
-            reporter.thread.thread().unpark();
-            let _ = reporter.thread.join();
+            reporter.finish(window);
         }
     }
 
@@ -252,18 +200,27 @@ impl WorkerRuntime {
             return;
         }
         self.reported = Instant::now();
-        let window = Window {
+        let window = self.take_window();
+        // A busy slot (the reporter is reading it) drops this window rather than wait.
+        if let Some(reporter) = &self.reporter {
+            reporter.publish(window);
+        }
+    }
+
+    fn take_window(&mut self) -> Window {
+        Window {
             counts: std::mem::take(&mut self.counts),
             latency: self.latency.take(),
             realtime: self.realtime.is_some(),
-        };
-        // A busy slot (the reporter is reading it) drops this window rather than wait.
-        if let Some(Ok(mut slot)) = self
-            .reporter
-            .as_ref()
-            .map(|reporter| reporter.slot.try_lock())
-        {
-            *slot = Some(window);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+impl Drop for WorkerRuntime {
+    fn drop(&mut self) {
+        self.finish();
     }
 }

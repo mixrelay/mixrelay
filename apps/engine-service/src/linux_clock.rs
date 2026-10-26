@@ -44,7 +44,9 @@ impl GraphTimeline {
     /// Maps one native callback; invalid rate, quantum, or arithmetic leaves state unchanged.
     pub(super) fn map(&mut self, native: &DriverCycle) -> Result<ProcessCycle, CycleError> {
         // Bound callback work, reject malformed clocks before touching state.
-        if !(8_000..=384_000).contains(&native.rate) || native.frames == 0 || native.frames > 32_768
+        if !(8_000..=384_000).contains(&native.rate)
+            || native.frames == 0
+            || native.frames > DriverCycle::MAX_FRAMES
         {
             return Err(CycleError::InvalidFormat);
         }

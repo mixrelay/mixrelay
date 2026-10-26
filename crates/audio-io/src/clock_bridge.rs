@@ -504,7 +504,7 @@ fn validate_config(c: BridgeConfig) -> Result<(), BridgeError> {
         || c.max_input_frames > 65_536
         || c.max_output_frames > 65_536
         || c.capacity_frames < CHUNK.max(c.max_input_frames)
-        || c.capacity_frames > 262_144
+        || c.capacity_frames > crate::retention::RING_FRAMES as usize
         || c.priming_frames > c.capacity_frames
         || !c.max_correction_ppm.is_finite()
         || !(1.0..=2_000.0).contains(&c.max_correction_ppm)

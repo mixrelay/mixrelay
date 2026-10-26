@@ -8,7 +8,9 @@ pub(crate) use packets::Packet;
 use packets::PacketRing;
 
 pub(crate) const PACKET_FRAMES: usize = 256;
-pub(crate) const PACKETS: usize = 128;
+// Packet-rate tags allow a take to change input rate without reallocating its queue.
+pub(crate) const PACKETS: usize =
+    (mixrelay_audio_io::retention::FRAMES as usize).div_ceil(PACKET_FRAMES);
 // Least common multiple of all product sample rates: input duration stays exact
 // across rate changes without floating-point drift or a realtime clock query.
 pub(crate) const DURATION_TICKS_PER_SECOND: u64 = 28_224_000;

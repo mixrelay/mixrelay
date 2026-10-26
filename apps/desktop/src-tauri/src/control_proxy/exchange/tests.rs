@@ -20,12 +20,7 @@ fn server_with_engines(
     replies: Vec<(u16, Option<&'static str>, &'static str)>,
     engines: Vec<Option<&'static str>>,
 ) -> (String, ControlProxyClient, JoinHandle<Vec<String>>) {
-    static FIXTURES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let fixture = mixrelay_test_support::FixtureDir::new(&format!(
-        "exchange-{}",
-        FIXTURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ))
-    .expect("fixture");
+    let fixture = mixrelay_test_support::FixtureDir::ipc("exc").expect("socket fixture");
     let path = fixture.join("engine.sock");
     let listener = UnixListener::bind(&path).expect("bind fixture");
     let mut client = ControlProxyClient::with_socket(Some(path.clone()));

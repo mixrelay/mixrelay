@@ -1,7 +1,7 @@
 //! Resolve LV2 port-group metadata into one immutable native audio layout.
 //! Lilv queries and allocations occur only during load, never in `process`.
 
-use super::{MAX_LV2_AUDIO_CHANNELS, PortInfo, PortKind};
+use crate::ports::{MAX_LV2_AUDIO_CHANNELS, PortInfo, PortKind};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};

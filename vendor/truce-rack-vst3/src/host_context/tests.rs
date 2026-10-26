@@ -663,12 +663,12 @@ fn combined_component_load_uses_its_existing_controller_without_reinitializing()
         has_editor: false,
         accepts_midi: false,
     };
-    let context = crate::LoadContext {
+    let context = crate::loading::LoadContext {
         info: &info,
         factory: &factory,
         host_services: &services,
     };
-    let parts = crate::load_controller(&context, &component).unwrap();
+    let parts = crate::loading::load_controller(&context, &component).unwrap();
     assert!(!parts.separate);
     assert!(parts.lifecycle.is_none());
     assert_eq!(*events.lock().unwrap(), ["initialize"]);
@@ -930,7 +930,7 @@ fn latency_snapshot_revision_stays_unknown_after_a_new_callback_during_refresh()
 }
 
 #[test]
-fn lifecycle_guard_terminates_partial_owner_and_disarm_transfers_responsibility() {
+fn lifecycle_guard_terminates_partial_owner_and_moves_into_complete_owner() {
     let contexts = Arc::new(Mutex::new(Vec::new()));
     let terminations = Arc::new(AtomicUsize::new(0));
     let plugin = ComWrapper::new(ProbeBase {
@@ -945,10 +945,9 @@ fn lifecycle_guard_terminates_partial_owner_and_disarm_transfers_responsibility(
     }
     assert_eq!(terminations.load(Ordering::Relaxed), 1);
     {
-        let mut guard =
-            crate::lifecycle::InitializedPlugin::initialize(&pointer, std::ptr::null_mut())
-                .expect("initialized");
-        guard.disarm();
+        let guard = crate::lifecycle::InitializedPlugin::initialize(&pointer, std::ptr::null_mut())
+            .expect("initialized");
+        let _owner = crate::lifecycle::PluginLifetimes::new(guard, None);
     }
-    assert_eq!(terminations.load(Ordering::Relaxed), 1);
+    assert_eq!(terminations.load(Ordering::Relaxed), 2);
 }

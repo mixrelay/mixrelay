@@ -8,6 +8,7 @@ fn policy(queue_rate: u32, peer_rate: u32, relation: ClockRelation) -> QueueTarg
         QueueBounds {
             minimum_frames: 32,
             capacity_frames: 16_384,
+            maximum_target_frames: 8192,
         },
     )
     .unwrap()
@@ -51,7 +52,13 @@ fn same_nominal_rate_never_implies_one_clock() {
 #[test]
 fn capacity_is_only_a_limit_not_a_target_or_channel_scaled_latency() {
     let target = policy(48_000, 96_000, ClockRelation::Independent);
-    for capacity_frames in [1024, 4096, 16_384, 65_536] {
+    for capacity_frames in [
+        1024,
+        4096,
+        16_384,
+        65_536,
+        crate::retention::RING_FRAMES as usize,
+    ] {
         let resized = QueueTargetPolicy::new(
             48_000,
             96_000,
@@ -59,6 +66,7 @@ fn capacity_is_only_a_limit_not_a_target_or_channel_scaled_latency() {
             QueueBounds {
                 minimum_frames: 32,
                 capacity_frames,
+                maximum_target_frames: 8192.min(capacity_frames / 2),
             },
         )
         .unwrap();
@@ -85,6 +93,7 @@ fn invalid_configuration_is_rejected_before_callback_use() {
     let bounds = QueueBounds {
         minimum_frames: 32,
         capacity_frames: 64,
+        maximum_target_frames: 32,
     };
     for (queue, peer) in [(0, 0), (48_000, 0), (0, 48_000)] {
         assert_eq!(
@@ -96,14 +105,17 @@ fn invalid_configuration_is_rejected_before_callback_use() {
         QueueBounds {
             minimum_frames: 0,
             capacity_frames: 64,
+            maximum_target_frames: 32,
         },
         QueueBounds {
             minimum_frames: 32,
             capacity_frames: 63,
+            maximum_target_frames: 32,
         },
         QueueBounds {
             minimum_frames: 1,
             capacity_frames: 0,
+            maximum_target_frames: 1,
         },
     ] {
         assert_eq!(

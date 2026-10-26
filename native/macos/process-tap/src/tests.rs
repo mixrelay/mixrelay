@@ -3,6 +3,7 @@ use super::*;
 mod format_snapshot;
 mod retirement;
 mod service_restart;
+mod start_stop;
 mod watchdog;
 use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList},
@@ -37,6 +38,7 @@ fn fixture() -> TapSession {
             ..ListenerReceipts::default()
         },
         resume: false,
+        start_attempted: true,
         rebuild: RebuildIntent::Unchanged,
     });
     session.format.set(format()).expect("unpublished format");
@@ -48,6 +50,7 @@ fn fixture() -> TapSession {
         .store(48_000_f64.to_bits(), Ordering::Release);
     session.generation.store(1, Ordering::Release);
     session.running.store(true, Ordering::Release);
+    session.delivery.store(true, Ordering::Release);
     session
 }
 
@@ -151,6 +154,7 @@ struct Fake<'a> {
     diagnostic_retires: Cell<u32>,
     diagnostic_preparation: Cell<std::time::Duration>,
     resume_during_diagnostic: Cell<Option<&'a TapSession>>,
+    callback_during_start: Cell<Option<&'a TapSession>>,
 }
 
 impl Default for Fake<'_> {
@@ -177,6 +181,7 @@ impl Default for Fake<'_> {
             diagnostic_retires: Cell::new(0),
             diagnostic_preparation: Cell::new(std::time::Duration::ZERO),
             resume_during_diagnostic: Cell::new(None),
+            callback_during_start: Cell::new(None),
         }
     }
 }
@@ -238,6 +243,9 @@ impl Native for Fake<'_> {
         Ok(self.format.get())
     }
     fn start(&self, _: u32, _: *mut c_void) -> Result<(), TapError> {
+        if let Some(session) = self.callback_during_start.take() {
+            callback(session, &mut [0.75; 64], None);
+        }
         self.result(Failure::Start)
     }
     fn stop(&self, _: u32, _: *mut c_void) -> Result<(), TapError> {

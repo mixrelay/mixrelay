@@ -32,10 +32,14 @@ fn source_token(id: &str) -> u64 {
 }
 
 fn client_grants() -> (ClientPcmWriter, Vec<ClientPcmReader>) {
+    client_grants_with_capacity(16_384)
+}
+
+fn client_grants_with_capacity(capacity: u32) -> (ClientPcmWriter, Vec<ClientPcmReader>) {
     let mut writer = ClientPcmWriter::new(
         EndpointTransportConfig {
             endpoint_id: [1; 16],
-            capacity_frames: 16_384,
+            capacity_frames: capacity,
             render_channels: 2,
             capture_channels: 2,
         },

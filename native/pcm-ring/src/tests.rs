@@ -367,7 +367,7 @@ fn empty_and_failed_initialization_are_clearable_without_allocations() {
     unsafe {
         mr_pcm_ring_clear(storage.as_mut_ptr());
     }
-    for (channels, capacity) in [(0, 4), (65, 4), (1, 3), (1, 65537)] {
+    for (channels, capacity) in [(0, 4), (65, 4), (1, 3), (1, (1 << 20) + 1)] {
         // SAFETY: sized/aligned exclusive cleared storage, no live callbacks.
         unsafe {
             assert!(!mr_pcm_ring_init(storage.as_mut_ptr(), channels, capacity));

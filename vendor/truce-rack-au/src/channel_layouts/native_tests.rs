@@ -1,4 +1,5 @@
-use crate::{AuPlugin, AuScanner, discover_bus_layout};
+use crate::bus_topology::discover_bus_layout;
+use crate::{AuPlugin, AuScanner};
 use objc2_audio_toolbox::{
     AudioUnitSetProperty, kAudioUnitProperty_BypassEffect, kAudioUnitScope_Global,
 };
@@ -93,7 +94,7 @@ fn apple_limiter_alternative_widths_restore_topology_and_render_native_pcm() {
         assert_bypass_pcm(&mut plugin, usize::try_from(channels).unwrap());
         plugin.deactivate();
         assert!(!plugin.is_active());
-        assert!(plugin.render_ctx.is_none());
+        assert_eq!(plugin.render.render_ctx.as_deref().unwrap().frames, 0);
         assert_eq!(plugin.supported_layouts(), catalog);
     }
     let fresh = load_limiter();
@@ -143,7 +144,7 @@ fn selected_reload_keeps_formats_untouched_until_activation() {
         worker.activate(selected.clone(), 48_000.0, 128).unwrap();
         assert_bypass_pcm(&mut worker, usize::try_from(channels).unwrap());
         worker.deactivate();
-        assert!(worker.render_ctx.is_none());
+        assert_eq!(worker.render.render_ctx.as_deref().unwrap().frames, 0);
     }
 }
 
@@ -166,7 +167,7 @@ fn initialized_readback_rejects_geometry_changes_and_restores_reusable_instance(
     let layout = plugin.supported_layouts()[0].clone();
     // SAFETY: the test exclusively owns an inactive AU on its creator thread.
     let previous = unsafe {
-        crate::capture_native_formats(
+        crate::stream_format::capture_native_formats(
             plugin.instance,
             &plugin.input_bus_channels,
             &plugin.output_bus_channels,
@@ -177,7 +178,7 @@ fn initialized_readback_rejects_geometry_changes_and_restores_reusable_instance(
         // Match the negotiated rate first so a geometry rejection cannot be masked by
         // the factory default sample rate.
         unsafe {
-            crate::apply_and_verify_native_formats(
+            crate::stream_format::apply_and_verify_native_formats(
                 plugin.instance,
                 &plugin.input_bus_channels,
                 &plugin.output_bus_channels,
@@ -208,12 +209,18 @@ fn initialized_readback_rejects_geometry_changes_and_restores_reusable_instance(
         );
         assert!(!plugin.initialized);
         assert!(!plugin.is_active());
-        assert!(plugin.render_ctx.is_none());
-        assert!(plugin.host_transport.is_none());
+        assert!(plugin.render.render_ctx.is_none());
+        assert!(plugin.render.host_transport.is_none());
         for format in &previous {
             assert_eq!(
-                unsafe { crate::read_stream_format(plugin.instance, format.scope, format.element) }
-                    .unwrap(),
+                unsafe {
+                    crate::bus_topology::read_stream_format(
+                        plugin.instance,
+                        format.scope,
+                        format.element,
+                    )
+                }
+                .unwrap(),
                 format.format
             );
         }
@@ -246,8 +253,8 @@ fn incomplete_uninitialization_blocks_stateful_reactivation_before_native_mutati
         .unwrap_err()
         .to_string();
     assert!(error.contains("requires an inactive instance"), "{error}");
-    assert!(plugin.render_ctx.is_some());
-    assert!(plugin.host_transport.is_some());
+    assert!(plugin.render.render_ctx.is_some());
+    assert!(plugin.render.host_transport.is_some());
     assert!(plugin.activate(layout.clone(), 48_000.0, 128).is_err());
     plugin.deactivate();
     assert!(!plugin.initialized);
@@ -312,4 +319,89 @@ fn selected_reload_measurement() {
         full[10].as_micros(),
         selected_only[10].as_micros()
     );
+}
+
+#[test]
+fn render_geometry_failures_keep_typed_causes_without_allocating() {
+    use truce_rack_core::error::{Error, ProcessFault};
+
+    let mut plugin = load_limiter();
+    let layout = plugin.supported_layouts()[0].clone();
+    let channels = usize::try_from(layout.total_output_channels()).unwrap();
+    plugin.activate(layout, 48_000.0, 128).unwrap();
+    let input = vec![vec![0.25_f32; 129]; channels];
+    let mut output = vec![vec![0.0_f32; 129]; channels];
+    let inputs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
+    let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(Vec::as_mut_slice).collect();
+    let ranges = [BusRange::new(0, channels)];
+    let mut oversized = AudioBuffer::new(&inputs, &mut outputs, 129, &ranges, &ranges);
+    let events = EventList::new();
+    let mut output_events = EventList::new();
+    let mut context = ProcessContext {
+        sample_rate: 48_000.0,
+        max_block_size: 128,
+        transport: None,
+        output_events: &mut output_events,
+    };
+    let allocations = allocation_counter::measure(|| {
+        assert!(matches!(
+            plugin.process(&mut oversized, &events, &mut context),
+            Err(Error::Process {
+                format: "au",
+                fault: ProcessFault::InvalidBlockSize
+            })
+        ));
+    });
+    assert_eq!(allocations.count_total, 0);
+    let mut no_outputs = [];
+    let mut missing = AudioBuffer::new(&inputs, &mut no_outputs, 64, &ranges, &[]);
+    let allocations = allocation_counter::measure(|| {
+        assert!(matches!(
+            plugin.process(&mut missing, &events, &mut context),
+            Err(Error::Process {
+                format: "au",
+                fault: ProcessFault::InvalidAudioMapping
+            })
+        ));
+    });
+    assert_eq!(allocations.count_total, 0);
+    plugin.deactivate();
+}
+
+#[test]
+fn native_render_status_keeps_its_code_without_allocating() {
+    use objc2_audio_toolbox::{AudioUnitUninitialize, kAudioUnitErr_Uninitialized};
+    use truce_rack_core::error::{Error, ProcessFault};
+
+    let mut plugin = load_limiter();
+    let layout = plugin.supported_layouts()[0].clone();
+    let channels = usize::try_from(layout.total_output_channels()).unwrap();
+    plugin.activate(layout, 48_000.0, 128).unwrap();
+    // SAFETY: the test exclusively owns a native instance with no hardware or concurrent render.
+    assert_eq!(unsafe { AudioUnitUninitialize(plugin.instance) }, 0);
+    // Keep the adapter's active state to exercise an AU that rejects rendering after setup.
+    let input = vec![vec![0.25_f32; 64]; channels];
+    let mut output = vec![vec![0.0_f32; 64]; channels];
+    let inputs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
+    let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(Vec::as_mut_slice).collect();
+    let ranges = [BusRange::new(0, channels)];
+    let mut buffer = AudioBuffer::new(&inputs, &mut outputs, 64, &ranges, &ranges);
+    let events = EventList::new();
+    let mut output_events = EventList::new();
+    let mut context = ProcessContext {
+        sample_rate: 48_000.0,
+        max_block_size: 128,
+        transport: None,
+        output_events: &mut output_events,
+    };
+    let allocations = allocation_counter::measure(|| {
+        assert!(matches!(plugin.process(&mut buffer, &events, &mut context),
+            Err(Error::Process { format: "au", fault: ProcessFault::NativeStatus(code) })
+                if code == i64::from(kAudioUnitErr_Uninitialized)));
+    });
+    assert_eq!(allocations.count_total, 0);
+    let ctx = plugin.render.render_ctx.as_deref().unwrap();
+    assert_eq!(ctx.frames, 0);
+    assert!(ctx.input_planes.iter().all(|plane| plane.is_null()));
+    plugin.deactivate();
 }

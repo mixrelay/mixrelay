@@ -2,9 +2,10 @@ use super::{
     RebuildIntent, TapError, TapSession,
     native::{Native, ProcessIdentity},
 };
+use crate::control_trace::{self, Procedure};
 use crate::process_tap_input::TapFormat;
 use mixrelay_macos_transport::capture_ring::mr_audio_ring_read_interleaved;
-use std::sync::atomic::Ordering;
+use std::{ptr, sync::atomic::Ordering};
 
 struct Discovery {
     candidate: Vec<ProcessIdentity>,
@@ -44,12 +45,27 @@ impl TapSession {
         if self.running.load(Ordering::Acquire) {
             return Err(TapError::code(7));
         }
-        let resources = self.resources.get();
-        if resources.proc.is_null() || !self.allowed() {
+        let mut resources = self.resources.get();
+        if resources.proc.is_null()
+            || !self.allowed()
+            || self.active_callbacks.load(Ordering::Acquire) != 0
+        {
             return Err(TapError::code(9));
         }
         self.watchdog.borrow_mut().clear(native);
-        native.start(resources.aggregate, resources.proc)?;
+        if resources.start_attempted {
+            self.discard_pcm();
+            self.generation.fetch_add(1, Ordering::Release);
+        }
+        resources.start_attempted = true;
+        self.resources.set(resources);
+        // A successful Start may call the IOProc before returning. A failed
+        // Start retains its owner but must not expose any partially accepted PCM.
+        self.delivery.store(true, Ordering::Release);
+        if let Err(error) = native.start(resources.aggregate, resources.proc) {
+            self.delivery.store(false, Ordering::Release);
+            return Err(error);
+        }
         self.running.store(true, Ordering::Release);
         Ok(())
     }
@@ -60,6 +76,9 @@ impl TapSession {
             return Err(TapError::code(8));
         }
         let mut resources = self.resources.get();
+        // Closing admission precedes native Stop. An already entered callback
+        // remains owned; restart cannot discard its ring until its guard drains.
+        self.delivery.store(false, Ordering::Release);
         native.stop(resources.aggregate, resources.proc)?;
         self.running.store(false, Ordering::Release);
         resources.resume = false;
@@ -68,6 +87,7 @@ impl TapSession {
     }
 
     fn unregister(&self, native: &impl Native) -> bool {
+        self.delivery.store(false, Ordering::Release);
         let mut resources = self.resources.get();
         if self.running.load(Ordering::Acquire)
             && removed(native.stop(resources.aggregate, resources.proc))
@@ -359,7 +379,9 @@ impl TapSession {
             return Err(TapError::code(9));
         }
         native.rebuild(self, selection)?;
-        let format = native.format(self.resources.get().tap)?;
+        let format = control_trace::run(Procedure::ReadTapFormat, || {
+            native.format(self.resources.get().tap)
+        })?;
         if !self.compatible(&format) {
             return Err(TapError::code(5));
         }
@@ -395,16 +417,33 @@ impl TapSession {
         self.sample_rate
             .store(format.sample_rate.to_bits(), Ordering::Release);
         self.generation.fetch_add(1, Ordering::Release);
+        let mut resources = self.resources.get();
+        resources.start_attempted = false;
+        self.resources.set(resources);
         Ok(())
     }
 
     fn discard_pcm(&self) {
         let mut discarded = [0.0; 64 * 64];
-        // SAFETY: callback unregistration and active count have drained the only
+        // SAFETY: native stop/unregistration and the active count have drained the
         // producer; control owns the sole consumer and scratch covers 64 channels.
         while unsafe { mr_audio_ring_read_interleaved(self.ring(), discarded.as_mut_ptr(), 64) }
             != 0
         {}
         self.peaks.clear();
+        // SAFETY: the callback writer has drained before this sole control owner
+        // invalidates its publication and starts a new native continuity interval.
+        unsafe {
+            mixrelay_macos_transport::callback_clock::mr_callback_clock_record_values(
+                ptr::from_ref(&self.clock).cast_mut(),
+                0.0,
+                0,
+                false,
+                0,
+            );
+            mixrelay_macos_transport::callback_clock::mr_callback_clock_reset(
+                ptr::from_ref(&self.clock).cast_mut(),
+            );
+        }
     }
 }

@@ -1,5 +1,37 @@
 # 설치본의 네이티브 경계 실패 분석
 
+## 2026-10-27 누적 credit과 보존 용량
+
+`a88eada` 집중 실행 `40329569555`의 macOS 26 Intel 새 설치는 뒤 순서의 소스 output에
+1,108프레임 구멍이 있으나, 종료 녹음은 유음 144,000프레임 중 896프레임만 식별된다.
+이 take는 `stopped`, `error: null`이며 packet queue overrun으로 실패한 이전 `f27da5c`와
+구별한다. 앞 순서와 업그레이드 양 순서의 유음은 완전했다. 15 Intel은 새 설치 통과,
+업그레이드에서 source output과 종료 녹음의 누락이 각각 4,032·1,600프레임으로 일치했다.
+15 ARM은 새 설치·업그레이드 양 순서와 모든 필수 시나리오가 통과했다.
+
+지연된 그래프에 native credit 4,096프레임을 한 번에 주는 합성 회귀가 유음 32,768프레임 중
+1,280프레임만 전달하며 실패했다. 실제 공유 VM·ClientPcmMixer·Converter·SourceRegistry·
+CaptureAlignment를 통과하는 경로다. 생산자가 남긴 PCM은 보존돼 있는데 획득 어댑터가
+이번 128프레임만 반영한 tail 부근에서 읽기 시작하고 누적 credit 전체를 진행하고 있었다.
+
+남은 전체 credit을 전달한 뒤에도 producer reserve를 그대로 더하면 용량 끝에서 실패했다.
+16,384프레임 burst의 유음은 수정 전 14,336프레임, 수정 후 32,768프레임이다.
+`source_time_for_credit`은 실제 읽기 quantum과 남은 credit을 분리하고 보존 용량을 넘지 않는다.
+실제 ApplicationPacer·MacTimeline·BlockProcessor·MacEngineExternalIo를 연결한 별도 회귀도
+전달 경계를 검증한다. pending extent 전달을 제거하면 20,480프레임 중 15,616프레임만 남고,
+현재 소스는 전부 보존한다. 이 조작은 원래 설치본 손실 수치의 재현과 구분한다.
+
+대기 절차는 다음 native 절대 경계를 계산한다. 이전 250µs 대기는 2,048프레임 동안 171회
+깨어났으며 현재 회귀는 native 128프레임의 16주기와 늦은 wake의 위상 보존을 확인한다.
+보존된 PCM은 순서대로 따라잡고 놓친 시간만큼 가짜 credit을 만들지 않는다.
+
+입력 링은 최대 지원 192kHz의 4초를 power-of-two로 올린 1,048,576프레임,
+녹음 큐는 768,000프레임으로 준비한다. 용량 초과의 기존 실패·불연속 계수와 수락 기준은 유지한다.
+4초와 링 끝까지 지연된 공유 입력, 각 지원 rate의 4초 녹음 전달에 대해 유음·무음 순서와
+실시간 할당 0을 확인했다. 이는 아직 새 설치본의 성공을 뜻하지 않는다.
+
+## 최초 분석 대상
+
 대상은 `71f49210ba262771d4e37815b2496f07be7129a0`의 설치본이며,
 전체 실행은 [40207863718](https://github.com/mixrelay/mixrelay/actions/runs/40207863718)이다.
 네 설치 파일을 고정한 candidate digest는

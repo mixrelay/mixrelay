@@ -14,3 +14,9 @@ pub(super) fn frame(elapsed_nanos: u64, rate: u32) -> Option<u64> {
     // processing work. The mixer's cursor still drains every retained frame.
     Some(frame / u64::from(FRAMES) * u64::from(FRAMES))
 }
+
+pub(super) fn next(elapsed_nanos: u64, rate: u32) -> Option<std::time::Duration> {
+    let next_frame = frame(elapsed_nanos, rate)?.checked_add(u64::from(FRAMES))?;
+    let nanos = (u128::from(next_frame) * 1_000_000_000).div_ceil(u128::from(rate));
+    Some(std::time::Duration::from_nanos(u64::try_from(nanos).ok()?))
+}

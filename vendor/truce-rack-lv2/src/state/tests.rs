@@ -267,9 +267,7 @@ fn tampered_asset_bytes_are_rejected_before_restore() {
         sha256: format!("{:x}", Sha256::digest(original)),
         data: STANDARD.encode(b"tampered asset"),
     };
-    let failure = assets::materialize(&[tampered])
-        .err()
-        .expect("a changed asset must be rejected");
+    let failure = assets::materialize(&[tampered]).expect_err("a changed asset must be rejected");
     assert!(failure.to_string().contains("SHA-256 mismatch"));
 }
 
@@ -518,7 +516,7 @@ fn native_state_fixture_restores_opaque_bytes_and_ports_and_propagates_vendor_fa
         .activate(plugin.layouts[0].clone(), 48_000.0, 128)
         .unwrap();
     let original = plugin.save_state().unwrap();
-    assert!(plugin.controller.pending.publish(2, 0.625));
+    assert!(plugin.ui.controller.pending.publish(2, 0.625));
     let pending: Snapshot = serde_json::from_slice(&plugin.save_state().unwrap()).unwrap();
     assert_eq!(pending.ports["gain"].to_bits(), 0.625_f32.to_bits());
     assert_eq!(
@@ -526,7 +524,7 @@ fn native_state_fixture_restores_opaque_bytes_and_ports_and_propagates_vendor_fa
         0.625_f64.to_bits()
     );
     plugin.load_state(&original).unwrap();
-    assert_eq!(plugin.controller.pending.peek(0), None);
+    assert_eq!(plugin.ui.controller.pending.peek(0), None);
     assert_eq!(
         plugin.parameter_value(0).unwrap().to_bits(),
         1.0_f64.to_bits()
@@ -565,7 +563,7 @@ fn native_state_fixture_restores_opaque_bytes_and_ports_and_propagates_vendor_fa
     }
     // The fixture rejects a leading 254 on restore, and a leading 253 on subsequent save.
     fixture_opaque_property_mut(&mut snapshot).value = PropertyValue::Bytes(vec![254, 0, 0, 0, 0]);
-    assert!(plugin.controller.pending.publish(2, 0.375));
+    assert!(plugin.ui.controller.pending.publish(2, 0.375));
     assert!(
         plugin
             .load_state(&serde_json::to_vec(&snapshot).unwrap())

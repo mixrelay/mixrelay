@@ -1,10 +1,19 @@
 use objc2_audio_toolbox::{AUChannelInfo, kAudioUnitProperty_SupportedNumChannels};
 
-use super::{
-    AudioComponentInstance, AudioUnitGetProperty, AudioUnitGetPropertyInfo, BusLayout,
-    ChannelConfig, Error, Result, apply_and_verify_native_formats, capture_native_formats,
-    discover_bus_layout, kAudioUnitScope_Global, ptr, restore_native_formats,
+use crate::bus_topology::{discover_bus_layout, validate_bus_channels};
+use crate::stream_format::{
+    apply_and_verify_native_formats, capture_native_formats, restore_native_formats,
 };
+use objc2_audio_toolbox::{
+    AudioComponentInstance, AudioUnitGetProperty, AudioUnitGetPropertyInfo, kAudioUnitScope_Global,
+};
+use std::ptr;
+use truce_rack_core::{
+    bus::{BusLayout, ChannelConfig},
+    error::{Error, Result},
+};
+
+type CatalogTopology = (Vec<BusLayout>, Vec<u32>, Vec<u32>);
 
 const MAX_CHANNELS: u32 = 64;
 const MAX_CAPABILITIES: usize = 4096;
@@ -34,7 +43,7 @@ fn candidate_pairs(capabilities: &[AUChannelInfo], has_input: bool) -> Vec<(u32,
         for output in 1..=MAX_CHANNELS {
             if capabilities
                 .iter()
-                .any(|entry| matches_pair(entry, (input, output)))
+                .any(|entry| matches_pair(*entry, (input, output)))
             {
                 pairs.push((input, output));
             }
@@ -43,7 +52,7 @@ fn candidate_pairs(capabilities: &[AUChannelInfo], has_input: bool) -> Vec<(u32,
     pairs
 }
 
-fn matches_pair(entry: &AUChannelInfo, pair: (u32, u32)) -> bool {
+fn matches_pair(entry: AUChannelInfo, pair: (u32, u32)) -> bool {
     matches_count(entry.inChannels, pair.0)
         && matches_count(entry.outChannels, pair.1)
         && (entry.inChannels != -1 || entry.outChannels != -1 || pair.0 == pair.1)
@@ -73,7 +82,7 @@ fn same_bus_roles(left: &BusLayout, right: &BusLayout) -> bool {
 pub(super) unsafe fn select(
     unit: AudioComponentInstance,
     selected: &BusLayout,
-) -> Result<(Vec<BusLayout>, Vec<u32>, Vec<u32>)> {
+) -> Result<CatalogTopology> {
     let inputs: Vec<_> = selected
         .inputs
         .iter()
@@ -84,7 +93,7 @@ pub(super) unsafe fn select(
         .iter()
         .map(|bus| bus.channels.count())
         .collect();
-    super::validate_bus_channels(&inputs, &outputs)?;
+    validate_bus_channels(&inputs, &outputs)?;
     // SAFETY: serialized reads of the exclusively owned, inactive instance.
     let (original, _, _) = unsafe { discover_bus_layout(unit)? };
     if !same_bus_roles(&original, selected) {
@@ -98,7 +107,8 @@ pub(super) unsafe fn select(
             selected.total_input_channels(),
             selected.total_output_channels(),
         );
-        if !declarations.is_empty() && !declarations.iter().any(|entry| matches_pair(entry, pair)) {
+        if !declarations.is_empty() && !declarations.iter().any(|entry| matches_pair(*entry, pair))
+        {
             return Err(Error::Other(
                 "selected AU channel counts are not declared supported".into(),
             ));
@@ -124,7 +134,7 @@ unsafe fn capabilities(unit: AudioComponentInstance) -> Result<Vec<AUChannelInfo
             ptr::null_mut(),
         )
     };
-    if status == super::kAudioUnitErr_InvalidProperty {
+    if status == objc2_audio_toolbox::kAudioUnitErr_InvalidProperty {
         return Ok(Vec::new());
     }
     let bytes = usize::try_from(size).unwrap_or(usize::MAX);
@@ -206,9 +216,7 @@ unsafe fn probe_pair(
 /// # Safety
 /// The instance is newly created and exclusively owned by `AuPlugin::load_from`, which disposes
 /// it if discovery or restoration fails. No render callback or listener is installed yet.
-pub(super) unsafe fn discover(
-    unit: AudioComponentInstance,
-) -> Result<(Vec<BusLayout>, Vec<u32>, Vec<u32>)> {
+pub(super) unsafe fn discover(unit: AudioComponentInstance) -> Result<CatalogTopology> {
     // SAFETY: the owning load path supplies a live, uninitialized instance exclusively.
     let (original, inputs, outputs) = unsafe { discover_bus_layout(unit)? };
     let mut layouts = vec![original.clone()];

@@ -117,3 +117,15 @@ pub(super) fn restart(
 
 #[cfg(test)]
 mod tests;
+
+/// Attempt shutdown of an active layout before initialized interfaces terminate.
+pub(super) fn deactivate_before_terminate(
+    component: &ComPtr<IComponent>,
+    processor: &ComPtr<IAudioProcessor>,
+    layout: Option<&NativeLayout>,
+    processing: &mut bool,
+) {
+    if let Some(layout) = layout {
+        let _ = deactivate(component, processor, layout, processing);
+    }
+}

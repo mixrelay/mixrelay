@@ -180,9 +180,9 @@ impl HostContext {
         self.gui_closed.load(Ordering::Acquire)
     }
 
-    pub(crate) fn main_thread_scope(&self) -> crate::Result<MainThreadScope> {
+    pub(crate) fn main_thread_scope(&self) -> truce_rack_core::error::Result<MainThreadScope> {
         if thread::current().id() != self.main_thread || !self.is_main_thread() {
-            return Err(crate::Error::Other(
+            return Err(truce_rack_core::error::Error::Other(
                 "CLAP main-thread operation called from a different OS thread".into(),
             ));
         }
@@ -277,12 +277,12 @@ impl HostContext {
     pub(crate) unsafe fn service_callback(
         &self,
         plugin: *const clap_plugin,
-    ) -> crate::Result<bool> {
+    ) -> truce_rack_core::error::Result<bool> {
         if !self.take_callback_request() {
             return Ok(false);
         }
         let Some(callback) = (unsafe { (*plugin).on_main_thread }) else {
-            return Err(crate::Error::Other(
+            return Err(truce_rack_core::error::Error::Other(
                 "CLAP host callback requested but plugin has no on_main_thread".into(),
             ));
         };

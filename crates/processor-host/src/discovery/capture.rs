@@ -25,7 +25,7 @@ pub(super) fn capture_json_child<T: serde::de::DeserializeOwned>(
     let stdout_handle = stdout.stdio()?;
     let stderr_handle = stderr.stdio()?;
     command
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(stdout_handle)
         .stderr(stderr_handle);
     let spawned = command.spawn();
@@ -111,8 +111,8 @@ impl Drop for CapturePath {
 
 impl CaptureFile {
     fn new() -> Result<Self, String> {
-        let (path, _) =
-            crate::worker_paths().map_err(|error| format!("capture directory failed: {error}"))?;
+        let (path, _) = crate::worker_paths::worker_paths()
+            .map_err(|error| format!("capture directory failed: {error}"))?;
         let path = path.with_extension("capture");
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);

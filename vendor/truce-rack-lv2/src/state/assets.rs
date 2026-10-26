@@ -7,7 +7,7 @@ use std::{
     collections::BTreeSet,
     ffi::{CStr, CString, c_char, c_void},
     fs::{self, File, OpenOptions},
-    io::Read,
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -232,7 +232,6 @@ pub(super) fn materialize(assets: &[Asset]) -> Result<tempfile::TempDir> {
             return Err(error("LV2 asset SHA-256 mismatch"));
         }
         let path = root.path().join(&asset.path);
-        use std::io::Write as _;
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -245,7 +244,7 @@ pub(super) fn materialize(assets: &[Asset]) -> Result<tempfile::TempDir> {
 }
 
 pub(super) fn decoded_size(encoded: &str) -> Result<usize> {
-    if encoded.len() % 4 != 0 {
+    if !encoded.len().is_multiple_of(4) {
         return Err(error("invalid LV2 asset data length"));
     }
     let padding = encoded

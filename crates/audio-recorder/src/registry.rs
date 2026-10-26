@@ -13,7 +13,7 @@ use std::{
 const MAX_SESSIONS: usize = 16;
 
 /// Control-side owner of at most sixteen recorder workers and their fixed packet
-/// pools (at most 1 MiB of PCM per 8-channel recorder). Clones share sessions.
+/// pools (four seconds at the maximum supported rate). Clones share sessions.
 /// The final registry Drop stops/drains and joins all workers; do not drop the
 /// registry or call its methods on an audio thread.
 #[derive(Clone, Default)]

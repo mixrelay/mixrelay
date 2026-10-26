@@ -17,6 +17,7 @@ pub mod pcm_fifo;
 pub mod process;
 pub mod recovery;
 pub mod residence;
+pub mod retention;
 pub use device::{DeviceDirection, DeviceSelector};
 pub use native_format::{
     NativeDeviceFormats, NativeSampleFormat, NativeStreamFormat, NativeStreamFormats,

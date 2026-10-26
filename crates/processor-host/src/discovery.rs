@@ -12,7 +12,9 @@ use std::{
 use mixrelay_control_protocol::{ExternalProcessorDiagnostic, ProcessorDiscoveryStage};
 
 use crate::{
-    CatalogEntry, ProcessorCatalog, RackCatalogTarget, RackFormat, RackLocator, rack_formats,
+    ProcessorCatalog, RackFormat, RackLocator,
+    catalog::{CatalogEntry, RackCatalogTarget},
+    rack_formats,
 };
 
 mod capture;

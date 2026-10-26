@@ -23,6 +23,11 @@ fn native_callback_and_hal_contracts() {
 #[cfg(target_os = "linux")]
 mod linux;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod shutdown;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod worker_completion;
+
 mod latency_maintenance;
 #[cfg(any(test, target_os = "linux"))]
 mod processing_failure;

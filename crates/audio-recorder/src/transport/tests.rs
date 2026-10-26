@@ -2,6 +2,8 @@ use super::{CLOSED, Flight, PACKETS, Packet, Producer, RecorderTap, Transport};
 use std::sync::{Arc, atomic::Ordering};
 use std::time::{Duration, Instant};
 
+mod retention;
+
 #[test]
 fn cutoff_waits_for_admitted_packet_and_observes_its_late_failure() {
     for late_failure in [false, true] {

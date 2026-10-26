@@ -495,6 +495,28 @@ Driver 실행부·엔진·가상 장치 종료, 명시적 재연결 전 중지 �
 녹음 마무리·종료 경쟁·실패 처리는 기존 파일·종료 경로 자동 검사로 검증했다.
 검증 범위는 [검증 현황](validation/current.md)에 둔다.
 
+### 엔진 강화 실행 매트릭스
+
+절차 근거와 관찰 한계는 [엔진 비교 연구](research/loopback-engine-comparison.md)에 기록한다.
+분석·구현·소스 검증·설치본 수락을 따로 판정하며, 마지막 수락 전까지 전체 완료로 표시하지 않는다.
+
+| ID | 책임·소유자 | procedure 대조와 구현 | TODO 상태 | 완료 조건 |
+| --- | --- | --- | --- | --- |
+| E1 | PCM·버퍼·주기 / native transport·macOS worker | 누적 credit 전체를 획득 frontier로 전달, 절대 native 주기 대기, 최대 192kHz에서도 최소 4초 저장량 준비 | 구현·개별 회귀 완료, 통합 검사 중 | 무음·유음, 부분 게시·지연·ring 끝·초과의 실제 PCM 보존과 RT 할당 0 |
+| E2 | 그래프 / audio-engine | GKAudioGraph update/perform/stop/remove와 plan publication·retirement 대조. 미사용 병렬 엔진 제거, meter·processor exchange·render ownership 분리 | 185개 소스 회귀 완료 | 실제 publication·rollback·Off/Mute·off-RT 회수 계약 유지 |
+| E3 | macOS 앱 입력 / process-tap | Stop 실패 때 delivery 차단, callback 배출 후 재시작, 이전 PCM·clock 철회, 제어 절차별 OSStatus 관찰 | 65개 native 회귀·Desktop 오류 표시 회귀 완료 | 실패한 Start/Stop·late callback이 다른 세션이나 새 PCM으로 전파되지 않음 |
+| E4 | macOS HAL / HAL registry·client mix | 실제 stream 시작 성공 후 running 게시, tags/header 포함 용량 admission, client 수명·configuration 거래 분리 | 133개 소스 회귀 완료 | 시작·예약 실패 때 기존 client·revision·PCM 보존 |
+| E5 | 녹음 / recorder transport·RecordingStream | 4초 packet 저장량, 부분 byte 쓰기 뒤 완전한 frame prefix 확정, flush→truncate→header finalize 책임 분리 | 47개 파일 회귀·저장량 회귀 완료 | 원래 쓰기 오류와 후속 정리 오류 보존, Failed 유지 |
+| E6 | Linux / PipeWire stream·graph driver | 입력 저장과 출력 quantum 분리. queue 반환·clock 교체·frame budget 실패를 개별 owner에 고정하고 제어측 회수 | 구현·정적 확인 완료, Linux 실행 대기 | Rust·실제 C callback fixture·ASan/UBSan·서비스 recovery 검증 |
+| E7 | 플러그인 격리 / processor-host | scan/probe와 인스턴스별 child 수명, READY 이후 native hang 감독, 부모 EOF 감시, 실패한 candidate의 control owner 보존 | 192개 회귀 완료 | crash·abort·hang·late reply 때 독립 peer PCM 유지, 정확한 dry fallback·재시도·child 회수 |
+| E8 | 엔진 조립 / engine-service·session | native 계약·DSP 준비·그래프 게시·제어·저장 거래와 session format/status/telemetry 소유자 분리. Linux pause 위임 보강 | session 45개 회귀 완료 | 기존 거래 순서·rollback·의존 방향 유지, 중복 실행 소유자 제거 |
+| E9 | 종료 / engine-process·worker completion | child 시작 전 reaper 준비, 마지막 실행 계측 발행, typed worker 결과로 control admission 종료, 모든 독립 owner 정리 오류 보존 | reaper 15개·공통/macOS 회귀 완료 | 정상 drain과 실패 종료 모두 정확한 child·오디오 owner 회수 |
+| E10 | AU / render·transport·activation | 현재 입력 block extent만 callback에 노출, 정지 후 refcon 수명 유지, native OSStatus·geometry typed 오류 전달 | 35개 회귀·strict clippy 완료 | 정상·오류 경로 RT 할당 0, 렌더 뒤 PCM borrow 철회 |
+| E11 | VST3 / module·instance·event exchange | 필수 module hook 검증, COM 이벤트·포인터 저장소 준비, checked bus 범위와 typed 오류 전달 | 111개 회귀·strict clippy 완료 | 잘못된 native 이벤트·geometry의 무할당 거절, 출력 이벤트 전달 |
+| E12 | CLAP / processing·events·state | 4,096개+pending 입력 저장소 준비, header 검증, 입력 초과·start 거절의 typed 오류 전달 | 69개 회귀·strict clippy 완료 | 초과 입력 전에 native 호출 차단, 출력 prefix 보존, RT 할당 0 |
+| E13 | LV2 / atoms·ports·instance | 정렬된 포트별 Atom 저장소·전체 용량·payload 범위 검증, 초과 입력의 명시 오류 | pure 12개·전체 타입/strict 검사 완료, Linux native 실행 대기 | 격리된 Lilv fixture 5개도 필수 실행, 실제 PCM·state·다중 bus 검증 |
+| E14 | 최종 수락 / 통합 담당 | 모든 변경을 한 HEAD로 통합해 회귀·성능·서명·설치 검증 | macOS 통합 회귀 완료, Linux·설치본 수락 미완료 | 동일 최종 네 설치 파일로 13개 대상·필수 skip 0·정리 성공 |
+
 | 영역 | 남은 확인·구현 |
 | --- | --- |
 | Driver 안정성 | 엔진 재시작·앱 재실행 시 일시정지·그래프·가상 장치 설정 보존, 비정상 종료 복구 재시도·종료 우선, 지연 lease 만료·이전 엔진 보고 차단을 소스 시험으로 확인. Linux 실시간 실패 원인·출력 release 오류 코드는 원자 mailbox로 비실시간 기록(공통 mailbox 시험 완료, Linux 빌드 확인은 남음). 가상 장치 I/O 버퍼의 오디오 설정 추종과 재시작·비정상 종료 복구의 설치본 확인은 남음(설치·업데이트 후 첫 연결은 2026-10-13 설치본에서 해결 확인) |
@@ -507,7 +529,7 @@ Driver 실행부·엔진·가상 장치 종료, 명시적 재연결 전 중지 �
 | 녹음·계측 | 무료 시간·채널·녹음기 경계와 인증 변경, RF64 세 형식·1–8채널·4GiB 경계·종료 파일은 외부 도구 없는 소스 자동 검사 완료. 설치본 장시간 녹음·외부 리더 호환 확인, 실제 클립 이벤트 계측·프리셋 청취/튜닝은 남음 |
 | UI 품질·접근성·번역 | 채널 연결 키보드 대체(Shift+F10 메뉴·ChannelConnectionDialog, 소스 구현·자동 검사 완료)·포커스 복귀·스크린리더·전체 번역의 실제 설치본 확인; 소스 UI 게이트와 네 coverage 항목은 100% 통과 |
 | 인증 | Driver 시작·앱 최초 연결의 자동 확인 병합·24시간 시도 제한, 온라인 성공부터 30일 권한, 회수/일시 실패 분류·이미 해제된 활성화의 로컬 정리·불확실한 활성화 중복 방지를 소스와 가짜 시계·HTTP·인증 저장소로 검증. 진행 중 오디오·녹음 유지와 새 유료 작업 제한은 기존 엔진·Driver 테스트로 확인. 실제 구매·기기 이전·무료 전환은 남음 |
-| 설치·공개 파일 | 지원 계약·GitHub-hosted multi-arch CI·Linux 전체 VM·파일 해시 기반 설치본 gate·업데이트 게시 검사를 연결함. 최신 전체 설치본 실행 `40315961318`은 `f27da5c`의 같은 후보로 13개 중 10개 통과, macOS 15 ARM·15 Intel·26 Intel 실패이며 정리는 전부 통과하고 필수 skip은 0이다. Ubuntu ARM과 macOS 26·27 ARM의 새 설치·업그레이드가 통과했다. 잔여 콜백 좌표 누락·녹음기 과부하를 분석했고, 후속 소스는 완료된 native 128프레임 주기에 작업을 풀어 과도한 엔진 실행을 줄인다. 실패 종료 녹음의 PCM 분석과 원래 오류를 함께 보존한다. 관련 Rust·네이티브 1,028개·스크립트 626개 검사가 통과했으며 새 후보 수락은 남음. [native 경계 분석](validation/2026-10-26-native-boundary-analysis.md)과 [검증 현황](validation/current.md)을 따른다. 수락은 같은 설치 파일의 13개 필수 대상·시나리오·정리 모두 성공과 skip 0으로 판정한다. 공개 배포·고지·다운로드 확인은 별도 출시 조건이다. |
+| 설치·공개 파일 | 최신 전체 설치본 실행 `40315961318`은 `f27da5c`의 같은 네 후보로 13개 중 10개 통과·정리 13개 통과·필수 skip 0이다. Ubuntu ARM을 포함한 Linux 7개와 macOS 14·26·27 ARM이 통과했다. 후속 `a88eada`의 집중 실행 `40329569555`은 macOS 15 ARM 통과·15 Intel·26 Intel 실패다. 소스 CI 13개·VM 준비 7개·UI 검사는 통과했다. 보존된 PCM을 누적 native credit만큼 읽지 못한 획득 좌표 결함과 250µs 폴링을 후속 소스에서 수정했다. 공유·native 입력·앱 캡처와 녹음 큐는 최대 지원 rate에서 최소 4초를 보존하도록 늘렸다. 소스 회귀와 새 설치본 검증을 진행 중이며, 같은 최종 설치본으로 13개 전체의 skip 없는 수락은 미완료다. |
 | 판매·운영 | 상점·상품·정산·실결제/환불·지원 수신, 개인정보/판매 고지와 최종 11언어 계약 |
 
 검사는 변경 경계에 맞춰 수행한다. 소스 유닛 테스트·정적 검사와 개발 설치본 확인은 구분하며

@@ -7,13 +7,15 @@
 //! assets referenced through `atom:Path` are packaged with the snapshot; nested URID containers
 //! and paths outside host-owned state directories remain unsupported.
 
-use super::{Error, LV2Feature, Lv2Plugin, PortKind, Result, UridMap};
+use crate::{Lv2Plugin, features::UridMap, ports::PortKind};
 use assets::{FreePath, MakePath, MapPath};
+use lv2_raw::core::LV2Feature;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::{CStr, c_void},
 };
+use truce_rack_core::error::{Error, Result};
 
 mod assets;
 
@@ -94,11 +96,7 @@ fn byte_order() -> &'static str {
 }
 
 fn uri(map: &UridMap, id: u32) -> Option<String> {
-    map.entries.lock().ok()?.iter().find_map(|(uri, value)| {
-        (*value == id)
-            .then(|| uri.to_str().ok().map(str::to_owned))
-            .flatten()
-    })
+    map.uri(id)
 }
 
 fn map_uri(map: &UridMap, value: &str) -> Result<u32> {
@@ -232,7 +230,7 @@ unsafe extern "C" fn store(
 
 fn input_ports(plugin: &Lv2Plugin) -> Result<BTreeMap<String, usize>> {
     let mut result = BTreeMap::new();
-    for (index, port) in plugin.ports.iter().enumerate() {
+    for (index, port) in plugin.bindings.ports.iter().enumerate() {
         if !port.is_input || !matches!(port.kind, PortKind::Control { .. }) {
             continue;
         }
@@ -255,8 +253,9 @@ fn input_ports(plugin: &Lv2Plugin) -> Result<BTreeMap<String, usize>> {
                 .map_err(|_| error("LV2 control symbol is not UTF-8"))?
                 .to_owned()
         };
-        let offset = plugin.control_value_offset[index];
-        if offset >= plugin.control_values.len() || result.insert(symbol, offset).is_some() {
+        let offset = plugin.bindings.control_value_offset[index];
+        if offset >= plugin.bindings.control_values.len() || result.insert(symbol, offset).is_some()
+        {
             return Err(error("LV2 control port layout is invalid"));
         }
     }
@@ -575,7 +574,7 @@ pub(super) fn restore(plugin: &mut Lv2Plugin, bytes: &[u8]) -> Result<()> {
     }
     plugin.restored_assets = restored_assets;
     for (symbol, offset) in ports {
-        plugin.control_values[offset] = snapshot.ports[&symbol];
+        plugin.bindings.control_values[offset] = snapshot.ports[&symbol];
     }
     Ok(())
 }

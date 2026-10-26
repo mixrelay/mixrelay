@@ -1,7 +1,8 @@
+//! Weak native observations and pinned metadata transactions for one acquisition.
 use super::{
     NativeAllocation, decode_native_format, mr_pw_stream_failed, mr_pw_stream_native_format,
-    mr_pw_stream_node_id, mr_pw_stream_ready, mr_pw_stream_set_description,
-    mr_pw_stream_supported_formats,
+    mr_pw_stream_node_id, mr_pw_stream_ready, mr_pw_stream_return_error,
+    mr_pw_stream_set_description, mr_pw_stream_supported_formats,
 };
 use std::{
     ffi::{CStr, CString},
@@ -26,6 +27,15 @@ impl StreamProperties {
         };
         // SAFETY: the strong allocation pins teardown during the atomic state read.
         unsafe { mr_pw_stream_failed(allocation.pointer.as_ptr()) != 0 }
+    }
+
+    /// Observes the first native buffer-return errno without resetting the acquisition.
+    #[must_use]
+    pub fn buffer_return_error(&self) -> Option<i32> {
+        let allocation = self.0.upgrade()?;
+        // SAFETY: the strong allocation pins the atomic native fault observation.
+        let error = unsafe { mr_pw_stream_return_error(allocation.pointer.as_ptr()) };
+        (error < 0).then_some(error)
     }
 
     /// Returns the registry ID of this exact, still-owned native stream.
@@ -127,6 +137,7 @@ mod tests {
         assert_eq!(properties.node_id(), None);
         assert_eq!(properties.native_formats(), None);
         assert!(!properties.failed());
+        assert_eq!(properties.buffer_return_error(), None);
         for (before, after, error) in [
             ("before", "after", "retired"),
             ("before\0", "after", "previous"),

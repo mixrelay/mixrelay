@@ -583,6 +583,12 @@ impl SourceRegistry {
     /// Observes the current producer lease and acknowledged native clock.
     #[must_use]
     pub fn clock(&self, token: u64) -> Option<SourceClock> {
+        self.clock_with_capacity(token).map(|(clock, _)| clock)
+    }
+
+    /// Observes a source clock and its retained graph-frame extent under one pin.
+    #[must_use]
+    pub fn clock_with_capacity(&self, token: u64) -> Option<(SourceClock, u32)> {
         let read = self.read(token);
         let source = read.source()?;
         let clock = source.mapping.clock();
@@ -608,14 +614,19 @@ impl SourceRegistry {
         {
             return None;
         }
-        Some(SourceClock {
-            epoch: (lease << 16) | epoch,
-            native_frames: frames,
-            native_rate: rate,
-            graph_rate: u32::try_from(format & u64::from(u32::MAX)).ok()?,
-            running,
-            synchronized: u32::from(running != 0 && consumer_running && consumer >> 48 == epoch),
-        })
+        Some((
+            SourceClock {
+                epoch: (lease << 16) | epoch,
+                native_frames: frames,
+                native_rate: rate,
+                graph_rate: u32::try_from(format & u64::from(u32::MAX)).ok()?,
+                running,
+                synchronized: u32::from(
+                    running != 0 && consumer_running && consumer >> 48 == epoch,
+                ),
+            },
+            source.capacity,
+        ))
     }
     /// Reads one complete graph block under the source's single-consumer claim.
     pub fn read_audio(&self, token: u64, samples: &mut [f32], frames: u32, rate: u32) -> u32 {

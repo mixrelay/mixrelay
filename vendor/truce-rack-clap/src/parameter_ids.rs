@@ -74,7 +74,6 @@ impl ParameterIds {
         !self.active_indices.is_empty()
     }
 
-    #[cfg(test)]
     pub(crate) fn pending_count(&self) -> usize {
         self.active_indices.len()
     }

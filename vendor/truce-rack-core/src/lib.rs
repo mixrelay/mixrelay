@@ -50,7 +50,7 @@ pub mod wrapper;
 pub use buffer::AudioBuffer;
 pub use bus::{BusKind, BusLayout, ChannelConfig};
 pub use editor::{PluginEditor, WindowHandle};
-pub use error::{Error, Result};
+pub use error::{Error, ProcessFault, Result};
 pub use events::{Event, EventBody, EventList, MidiData};
 pub use info::{ParameterInfo, PluginCategory, PluginInfo, PresetInfo};
 pub use plugin::{Plugin, PluginCore, ProcessContext, ProcessStatus};

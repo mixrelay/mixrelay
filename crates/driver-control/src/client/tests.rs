@@ -90,7 +90,7 @@ fn service_rejections_keep_status_and_error_message() {
 
 #[tokio::test]
 async fn lifecycle_client_stops_real_http_inventory_and_reactivates_retained_settings() {
-    let fixture = mixrelay_test_support::FixtureDir::new("drv-life").unwrap();
+    let fixture = mixrelay_test_support::FixtureDir::ipc("drv").unwrap();
     let (backend, observed) = crate::test_backend::FakeBackend::ready();
     let manager = crate::DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
     let expected = observed.lock().settings.devices.clone();
@@ -106,7 +106,7 @@ async fn lifecycle_client_stops_real_http_inventory_and_reactivates_retained_set
 
 #[tokio::test]
 async fn absent_native_driver_can_quit_without_attempting_a_stop() {
-    let fixture = mixrelay_test_support::FixtureDir::new("drv-quit").unwrap();
+    let fixture = mixrelay_test_support::FixtureDir::ipc("drv").unwrap();
     let (backend, observed) = crate::test_backend::FakeBackend::ready();
     observed.lock().state = crate::DriverState::NotInstalled;
     let manager = crate::DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
@@ -128,7 +128,7 @@ async fn serve(
     app: axum::Router,
 ) -> (DriverClient, tokio::task::JoinHandle<()>) {
     let uid = mixrelay_local_socket::current_uid();
-    let (listener, socket) = mixrelay_local_socket::bind(&fixture.join("ipc"), DRIVER_SOCKET, uid)
+    let (listener, socket) = mixrelay_local_socket::bind(fixture.path(), DRIVER_SOCKET, uid)
         .await
         .unwrap();
     let client = DriverClient::with_socket_path(socket.path()).unwrap();
@@ -141,7 +141,7 @@ async fn serve(
 
 #[tokio::test]
 async fn blocking_and_async_clients_share_socket_inventory_and_revision_errors() {
-    let fixture = mixrelay_test_support::FixtureDir::new("drv-block").unwrap();
+    let fixture = mixrelay_test_support::FixtureDir::ipc("drv").unwrap();
     let (backend, observed) = crate::test_backend::FakeBackend::ready();
     let manager = crate::DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
     let (client, service) = serve(&fixture, crate::router(manager)).await;
@@ -189,7 +189,7 @@ async fn blocking_and_async_clients_share_socket_inventory_and_revision_errors()
 
 #[tokio::test]
 async fn explicit_missing_socket_fails_without_falling_back_to_session_service() {
-    let fixture = mixrelay_test_support::FixtureDir::new("drv-miss").unwrap();
+    let fixture = mixrelay_test_support::FixtureDir::ipc("drv").unwrap();
     let client = DriverClient::with_socket_path(fixture.join(DRIVER_SOCKET)).unwrap();
     assert!(matches!(client.snapshot().await, Err(DriverError::Http(_))));
     assert!(matches!(
@@ -230,7 +230,7 @@ async fn socket_clients_keep_response_limits_json_errors_and_no_redirects() {
         (StatusCode::BAD_GATEWAY, b"service unavailable".to_vec()),
         (StatusCode::TEMPORARY_REDIRECT, b"redirect refused".to_vec()),
     ] {
-        let fixture = mixrelay_test_support::FixtureDir::new("drv-resp").unwrap();
+        let fixture = mixrelay_test_support::FixtureDir::ipc("drv").unwrap();
         let app = Router::new().route(
             SNAPSHOT_ROUTE,
             get(move || {
@@ -293,7 +293,7 @@ fn runtime_latency_replies_decode_and_rejections_stay_errors() {
 
 #[tokio::test]
 async fn claiming_clients_reach_the_policy_with_their_verified_peer() {
-    let fixture = mixrelay_test_support::FixtureDir::new("drv-claim").unwrap();
+    let fixture = mixrelay_test_support::FixtureDir::ipc("drv").unwrap();
     let (backend, _) = crate::test_backend::FakeBackend::ready();
     let manager = crate::DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
     let seen = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
@@ -306,7 +306,7 @@ async fn claiming_clients_reach_the_policy_with_their_verified_peer() {
         }),
     );
     let uid = mixrelay_local_socket::current_uid();
-    let (listener, socket) = mixrelay_local_socket::bind(&fixture.join("ipc"), DRIVER_SOCKET, uid)
+    let (listener, socket) = mixrelay_local_socket::bind(fixture.path(), DRIVER_SOCKET, uid)
         .await
         .unwrap();
     let plain = DriverClient::with_socket_path(socket.path()).unwrap();

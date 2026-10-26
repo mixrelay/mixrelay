@@ -1,8 +1,9 @@
-use super::{ClapScanner, PluginInfo, scan_optional_default_dir_into};
+use crate::{ClapScanner, scanner::scan_optional_default_dir_into};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use truce_rack_core::error::Error;
+use truce_rack_core::info::PluginInfo;
 use truce_rack_core::scanner::PluginScanner;
 
 static NEXT_FIXTURE_ID: AtomicUsize = AtomicUsize::new(0);

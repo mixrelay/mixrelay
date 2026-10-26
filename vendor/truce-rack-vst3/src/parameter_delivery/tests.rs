@@ -1,53 +1,11 @@
 use super::*;
-use std::{
-    alloc::{GlobalAlloc, Layout, System},
-    cell::{Cell, RefCell},
-};
+use std::cell::{Cell, RefCell};
 use vst3::Steinberg::Vst::{
     AudioBusBuffers, AudioBusBuffers__type0, IComponentHandler, ParameterInfo, ProcessSetup,
 };
 use vst3::Steinberg::{FUnknown, IBStream, IPlugView, IPluginBaseTrait};
 
-thread_local! {
-    static MEASURE: Cell<bool> = const { Cell::new(false) };
-    static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
-}
-
-struct CountingAllocator;
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if MEASURE.try_with(Cell::get).unwrap_or(false) {
-            ALLOCATIONS.with(|count| count.set(count.get() + 1));
-        }
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(pointer, layout) };
-    }
-    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        if MEASURE.try_with(Cell::get).unwrap_or(false) {
-            ALLOCATIONS.with(|count| count.set(count.get() + 1));
-        }
-        unsafe { System.realloc(pointer, layout, size) }
-    }
-}
-#[global_allocator]
-static ALLOCATOR: CountingAllocator = CountingAllocator;
-
-pub(crate) fn count_allocations(operation: impl FnOnce()) -> usize {
-    struct Reset;
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            MEASURE.with(|value| value.set(false));
-        }
-    }
-    ALLOCATIONS.with(|count| count.set(0));
-    MEASURE.with(|value| value.set(true));
-    let reset = Reset;
-    operation();
-    drop(reset);
-    ALLOCATIONS.with(Cell::get)
-}
+use crate::test_support::count_allocations;
 
 struct Controller {
     values: RefCell<[f64; 2]>,
@@ -363,16 +321,15 @@ fn parameter_delivery_has_zero_allocations_for_ten_thousand_blocks() {
     let processor = ComWrapper::new(Processor::new());
     let processor_pointer = processor.to_com_ptr::<IAudioProcessor>().unwrap();
     let mut parameters = InputParameters::from_controller(&pointer, 2).unwrap();
-    ALLOCATIONS.with(|count| count.set(0));
-    MEASURE.with(|measure| measure.set(true));
-    for _ in 0..10_000 {
-        parameters.set(&pointer, 0, 0.2).unwrap();
-        parameters.set(&pointer, 0, 0.7).unwrap();
-        parameters.set(&pointer, 1, 0.4).unwrap();
-        assert_eq!(run(&mut parameters, &processor_pointer).0, kResultOk);
-    }
-    MEASURE.with(|measure| measure.set(false));
-    assert_eq!(ALLOCATIONS.with(Cell::get), 0);
+    let allocations = count_allocations(|| {
+        for _ in 0..10_000 {
+            parameters.set(&pointer, 0, 0.2).unwrap();
+            parameters.set(&pointer, 0, 0.7).unwrap();
+            parameters.set(&pointer, 1, 0.4).unwrap();
+            assert_eq!(run(&mut parameters, &processor_pointer).0, kResultOk);
+        }
+    });
+    assert_eq!(allocations, 0);
 }
 
 #[test]

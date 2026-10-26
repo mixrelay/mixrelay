@@ -343,8 +343,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_live_slow_read_reports_pending_before_the_editor_liveness_deadline() {
-        let fixture = mixrelay_test_support::FixtureDir::new("ipc-read").unwrap();
-        let directory = fixture.join("control");
+        let fixture = mixrelay_test_support::FixtureDir::ipc("ctl").unwrap();
+        let directory = fixture.path().to_owned();
         let uid = std::fs::metadata(fixture.path()).unwrap().uid();
         let control = Arc::new(HeldControl::default());
         let service = LocalSocket::start_with_dispatch(&directory, uid, Arc::clone(&control))
@@ -388,8 +388,8 @@ mod tests {
         for method in ["GET", "PUT", "applications"] {
             let must_complete =
                 method == "PUT" || (method == "applications" && cfg!(target_os = "linux"));
-            let fixture = mixrelay_test_support::FixtureDir::new("ipc-quit").unwrap();
-            let directory = fixture.join("control");
+            let fixture = mixrelay_test_support::FixtureDir::ipc("ctl").unwrap();
+            let directory = fixture.path().to_owned();
             let uid = std::fs::metadata(fixture.path()).unwrap().uid();
             let control = Arc::new(HeldControl::default());
             let service = LocalSocket::start_with_dispatch(&directory, uid, Arc::clone(&control))
@@ -435,8 +435,8 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_cancels_idle_readers_and_removes_only_owned_socket() {
-        let fixture = mixrelay_test_support::FixtureDir::new("ipc-stop").expect("fixture");
-        let directory = fixture.join("control");
+        let fixture = mixrelay_test_support::FixtureDir::ipc("ctl").expect("fixture");
+        let directory = fixture.path().to_owned();
         let uid = std::fs::metadata(fixture.path()).expect("metadata").uid();
         let control = LocalControl::new(
             crate::control_proxy::ControlProxyClient::with_socket(Some(
@@ -517,8 +517,8 @@ mod tests {
 
     #[tokio::test]
     async fn one_connection_runs_commands_reads_and_a_subscription_together() {
-        let fixture = mixrelay_test_support::FixtureDir::new("ipc-mux").expect("fixture");
-        let directory = fixture.join("control");
+        let fixture = mixrelay_test_support::FixtureDir::ipc("ctl").expect("fixture");
+        let directory = fixture.path().to_owned();
         let uid = std::fs::metadata(fixture.path()).expect("metadata").uid();
         let control = LocalControl::new(
             crate::control_proxy::ControlProxyClient::with_socket(Some(
@@ -570,8 +570,8 @@ mod tests {
 
     #[tokio::test]
     async fn one_connection_carries_sequential_requests_until_the_peer_closes() {
-        let fixture = mixrelay_test_support::FixtureDir::new("ipc-reuse").expect("fixture");
-        let directory = fixture.join("control");
+        let fixture = mixrelay_test_support::FixtureDir::ipc("ctl").expect("fixture");
+        let directory = fixture.path().to_owned();
         let uid = std::fs::metadata(fixture.path()).expect("metadata").uid();
         let control = LocalControl::new(
             crate::control_proxy::ControlProxyClient::with_socket(Some(

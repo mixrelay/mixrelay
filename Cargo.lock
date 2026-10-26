@@ -81,15 +81,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "arc-swap"
-version = "1.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2669,7 +2660,6 @@ dependencies = [
 name = "mixrelay-audio-engine"
 version = "0.1.0"
 dependencies = [
- "arc-swap",
  "mixrelay-audio-graph",
  "mixrelay-audio-io",
  "mixrelay-audio-recorder",
@@ -2917,6 +2907,7 @@ dependencies = [
  "mixrelay-pcm-ring",
  "mixrelay-pipewire",
  "sha2",
+ "tracing",
 ]
 
 [[package]]
@@ -3039,6 +3030,7 @@ dependencies = [
  "mixrelay-macos-transport",
  "mixrelay-realtime",
  "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]
@@ -3054,6 +3046,7 @@ dependencies = [
  "memmap2",
  "mixrelay-audio-engine",
  "mixrelay-audio-graph",
+ "mixrelay-audio-io",
  "mixrelay-control-protocol",
  "mixrelay-processor-state",
  "mixrelay-realtime",
@@ -5709,6 +5702,7 @@ dependencies = [
 name = "truce-rack-core"
 version = "1.1.5"
 dependencies = [
+ "allocation-counter",
  "bitflags 2.13.1",
  "smallvec",
  "thiserror 2.0.20",

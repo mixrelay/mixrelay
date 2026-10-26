@@ -94,3 +94,6 @@ features = [
 [lints.clippy.pedantic]
 level = "warn"
 priority = -1
+
+[dev-dependencies.allocation-counter]
+version = "0.8.1"

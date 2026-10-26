@@ -20,6 +20,7 @@ pub(super) struct ApplicationClockSnapshot {
     pub graph_rate: u32,
     pub running: u32,
     pub synchronized: u32,
+    pub capacity_frames: u32,
 }
 
 #[derive(Default)]
@@ -68,6 +69,8 @@ pub(super) enum Pace {
     Block {
         first_frame: u64,
         frames: u32,
+        /// Remaining graph-frame credit, including this block.
+        available_frames: u32,
         epoch: u64,
         discontinuity: bool,
         overrun: bool,
@@ -221,6 +224,7 @@ impl NativePacer {
         Pace::Block {
             first_frame,
             frames,
+            available_frames: u32::try_from(available).unwrap_or(u32::MAX),
             epoch: clock.epoch,
             discontinuity: restarted || lost_window,
             overrun: lost_window,
@@ -279,8 +283,10 @@ mod tests {
                         Pace::Block {
                             first_frame,
                             frames,
+                            available_frames,
                             ..
                         } => {
+                            assert_eq!(u64::from(available_frames), through - processed);
                             assert_eq!(first_frame, processed);
                             assert!(frames <= 128);
                             processed += u64::from(frames);
@@ -306,6 +312,7 @@ mod tests {
             Pace::Block {
                 first_frame: 9872,
                 frames: 128,
+                available_frames: 128,
                 epoch: 1,
                 discontinuity: true,
                 overrun: false,
@@ -320,6 +327,7 @@ mod tests {
             Pace::Block {
                 first_frame: 0,
                 frames: 64,
+                available_frames: 64,
                 epoch: 2,
                 discontinuity: true,
                 overrun: false,
@@ -334,6 +342,7 @@ mod tests {
             Pace::Block {
                 first_frame: 9872,
                 frames: 128,
+                available_frames: 128,
                 epoch: 2,
                 discontinuity: true,
                 overrun: true,
@@ -428,6 +437,7 @@ mod tests {
             graph_rate: 48_000,
             running: 1,
             synchronized: 1,
+            capacity_frames: 4096,
         };
         assert_eq!(pacer.next((11, clock), format), Pace::Wait);
         clock.native_frames += 441;

@@ -140,19 +140,14 @@ pub enum MidiData {
     },
 }
 
-/// Reasonable inline capacity for the per-block event list.
-/// Few hosts produce more than ~16 events per audio block; sizing
-/// the inline buffer this way keeps the audio thread out of the
-/// allocator for the vast majority of blocks.
+/// Inline storage; larger realtime bursts require preparation before processing.
 const EVENT_LIST_INLINE: usize = 32;
 
 /// Sample-ordered event buffer used for one `process` block.
 ///
-/// Backed by `SmallVec<[Event; 32]>`: 32 inline entries cover
-/// almost every block without heap allocation; bursts spill to
-/// the heap rather than getting dropped. Cleared between blocks
-/// by [`EventList::clear`] (keeps the heap allocation when one
-/// was forced).
+/// Prepare larger storage with [`Self::try_with_capacity`] before audio starts.
+/// Realtime producers use [`Self::try_push`] to reject an exhausted destination
+/// without allocating. [`Self::clear`] retains all prepared storage.
 #[derive(Debug, Default, Clone)]
 pub struct EventList {
     events: SmallVec<[Event; EVENT_LIST_INLINE]>,
@@ -166,6 +161,16 @@ impl EventList {
         Self::default()
     }
 
+    /// Prepare event storage outside the audio callback.
+    ///
+    /// # Errors
+    /// Returns an allocation or capacity error without publishing a partial list.
+    pub fn try_with_capacity(capacity: usize) -> Result<Self, smallvec::CollectionAllocErr> {
+        let mut events = SmallVec::new();
+        events.try_reserve_exact(capacity)?;
+        Ok(Self { events })
+    }
+
     /// Build from an existing slice.
     #[must_use]
     pub fn from_slice(events: &[Event]) -> Self {
@@ -174,10 +179,21 @@ impl EventList {
         }
     }
 
-    /// Append an event. Caller is responsible for keeping the
-    /// list sample-offset-sorted.
+    /// Append an event, growing storage if necessary. Prepare outside realtime
+    /// or use [`Self::try_push`]. The caller maintains sample-offset order.
     pub fn push(&mut self, event: Event) {
         self.events.push(event);
+    }
+
+    /// Append within prepared capacity. A full list remains unchanged.
+    /// The caller maintains sample-offset order and handles a rejected event.
+    #[must_use]
+    pub fn try_push(&mut self, event: Event) -> bool {
+        if self.events.len() == self.events.capacity() {
+            return false;
+        }
+        self.events.push(event);
+        true
     }
 
     /// Reset to empty without dropping any heap allocation.
@@ -216,3 +232,6 @@ impl<'a> IntoIterator for &'a EventList {
         self.events.iter()
     }
 }
+
+#[cfg(test)]
+mod tests;

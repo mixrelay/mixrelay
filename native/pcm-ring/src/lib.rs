@@ -151,7 +151,7 @@ impl PcmRing {
     /// owner releases its mapping and requires all ring users to have drained.
     #[must_use]
     pub fn new(channels: u32, capacity: u32) -> Option<Self> {
-        if !(1..=64).contains(&channels) || !(4..=65536).contains(&capacity) {
+        if !(1..=64).contains(&channels) || !(4..=1 << 20).contains(&capacity) {
             return None;
         }
         Some(Self {

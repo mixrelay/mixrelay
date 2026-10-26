@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{
     collections::BTreeSet,
     ffi::{CStr, CString, c_char, c_void},
-    fmt,
     ptr::NonNull,
     sync::{Arc, Mutex},
     thread::JoinHandle,
@@ -20,6 +19,10 @@ use mixrelay_macos_transport::endpoint_identity::{endpoint_uid, parse_endpoint_i
 use tauri::State;
 // Keep the crate exporting the native capture entry points linked into the desktop.
 use mixrelay_process_tap::{self as _, TapStats as NativeStats};
+
+#[path = "macos_audio/capture_error.rs"]
+mod capture_error;
+use capture_error::{CaptureOperation, CaptureProbeError, NativeError};
 
 #[path = "macos_audio/capture_reader.rs"]
 mod capture_reader;
@@ -48,7 +51,7 @@ pub(crate) fn list_device_app_activity(
 #[path = "macos_audio/live_clock_tests.rs"]
 mod live_clock_tests;
 
-const CAPTURE_RING_CAPACITY_FRAMES: usize = 16_384;
+const CAPTURE_RING_CAPACITY_FRAMES: usize = mixrelay_audio_io::retention::RING_FRAMES as usize;
 const ENGINE_BLOCK_FRAMES: usize = 128;
 const MAXIMUM_METER_CHANNELS: usize = 64;
 const PUMP_IDLE_INTERVAL: Duration = Duration::from_micros(250);
@@ -66,13 +69,6 @@ struct NativeApplicationSourceTransport {
 const NATIVE_OK: i32 = 0;
 const NATIVE_INVALID_ARGUMENT: i32 = 1;
 const NATIVE_RESOURCE_BUSY: i32 = 9;
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-struct NativeError {
-    code: i32,
-    os_status: i32,
-}
 
 #[repr(C)]
 struct NativeConfig {
@@ -223,20 +219,6 @@ impl From<NativeStats> for CaptureProbeStats {
     }
 }
 
-#[derive(Debug)]
-struct CaptureProbeError(NativeError);
-
-impl fmt::Display for CaptureProbeError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "application capture failed: {} (OSStatus {})",
-            native_error_name(self.0.code),
-            self.0.os_status
-        )
-    }
-}
-
 struct CaptureProbeSession {
     native: NonNull<NativeProcessTapSession>,
     reader_claim: AtomicBool,
@@ -288,7 +270,12 @@ impl CaptureProbeSession {
         selector: &ApplicationSelector,
         target_device_uid: Option<&str>,
     ) -> Result<Self, CaptureProbeError> {
-        let invalid = || CaptureProbeError(NativeError::new(NATIVE_INVALID_ARGUMENT));
+        let invalid = || {
+            CaptureProbeError::new(
+                CaptureOperation::Validate,
+                NativeError::new(NATIVE_INVALID_ARGUMENT),
+            )
+        };
         let source_id =
             mixrelay_macos_transport::capture_selection::source_id(selector).ok_or_else(invalid)?;
         let (bundle, excluded) = match selector {
@@ -313,7 +300,12 @@ impl CaptureProbeSession {
         let target_device_uid = target_device_uid
             .map(CString::new)
             .transpose()
-            .map_err(|_| CaptureProbeError(NativeError::new(NATIVE_INVALID_ARGUMENT)))?;
+            .map_err(|_| {
+                CaptureProbeError::new(
+                    CaptureOperation::Validate,
+                    NativeError::new(NATIVE_INVALID_ARGUMENT),
+                )
+            })?;
         let config = NativeConfig {
             bundle_id: bundle.as_ref().map_or(std::ptr::null(), |id| id.as_ptr()),
             mute_while_captured: target_device_uid.is_some(),
@@ -328,12 +320,16 @@ impl CaptureProbeSession {
         let mut error = NativeError::new(NATIVE_OK);
         // SAFETY: `config` and its C string remain alive for the synchronous creation call.
         let native = unsafe { mr_process_tap_create(&raw const config, &raw mut error) };
-        let native = NonNull::new(native).ok_or(CaptureProbeError(error))?;
+        let native =
+            NonNull::new(native).ok_or(CaptureProbeError::new(CaptureOperation::Prepare, error))?;
         let stats: CaptureProbeStats = unsafe { mr_process_tap_stats(native.as_ptr()) }.into();
         let Ok(channels) = u16::try_from(stats.channels) else {
             // SAFETY: no Arc/session escaped; destroy consumes the native owner.
             unsafe { mr_process_tap_destroy(native.as_ptr()) };
-            return Err(CaptureProbeError(NativeError::new(NATIVE_INVALID_ARGUMENT)));
+            return Err(CaptureProbeError::new(
+                CaptureOperation::Prepare,
+                NativeError::new(NATIVE_INVALID_ARGUMENT),
+            ));
         };
         let channel_layout = match channels {
             1 => ChannelLayout::Mono,
@@ -361,7 +357,7 @@ impl CaptureProbeSession {
         if error.code == NATIVE_OK {
             Ok(())
         } else {
-            Err(CaptureProbeError(error))
+            Err(CaptureProbeError::new(CaptureOperation::Start, error))
         }
     }
 
@@ -707,7 +703,7 @@ impl ScopedPlayback {
         if error.code == NATIVE_OK {
             Ok(())
         } else {
-            Err(CaptureProbeError(error).to_string())
+            Err(CaptureProbeError::new(CaptureOperation::Stop, error).to_string())
         }
     }
 
@@ -725,7 +721,7 @@ impl ScopedPlayback {
             // Destroy transfers this exact tap to native retirement; retaining
             // the empty owner prevents later ACK retries from restoring its lease.
             drop(owner.take());
-            Err(CaptureProbeError(error).to_string())
+            Err(CaptureProbeError::new(CaptureOperation::Refresh, error).to_string())
         }
     }
 }
@@ -807,28 +803,6 @@ fn run_audio_pump(
 ) {
     if let Err(error) = clock_pump::run_with_handoff(capture, transport, channels, control) {
         tracing::error!(%error, "application source clock bridge stopped");
-    }
-}
-
-impl NativeError {
-    const fn new(code: i32) -> Self {
-        Self { code, os_status: 0 }
-    }
-}
-
-fn native_error_name(code: i32) -> &'static str {
-    match code {
-        0 => "ok",
-        1 => "invalid_argument",
-        2 => "unsupported_system",
-        3 => "application_not_found",
-        4 => "core_audio_failure",
-        5 => "unsupported_format",
-        6 => "out_of_memory",
-        7 => "already_running",
-        8 => "not_running",
-        9 => "resource_busy",
-        _ => "unknown_native_error",
     }
 }
 
@@ -1202,7 +1176,7 @@ pub(crate) fn list_capturable_applications() -> Result<Vec<CapturableApplication
         mr_process_tap_visit_applications(Some(collect_application), (&raw mut applications).cast())
     };
     if error.code != NATIVE_OK {
-        return Err(CaptureProbeError(error).to_string());
+        return Err(CaptureProbeError::new(CaptureOperation::Enumerate, error).to_string());
     }
     applications.sort_unstable_by(|left, right| {
         left.bundle_id

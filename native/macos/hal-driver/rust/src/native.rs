@@ -209,8 +209,11 @@ unsafe extern "C" fn start(runtime: *mut c_void, now: u64) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     let mut clock = runtime.clock.clone();
     if !clock.start(now)
-        || !runtime.clients.publish_clock(&clock, true)
-        || !unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) }
+        || !runtime.clients.publish_clock_after(&clock, true, || {
+            // SAFETY: registry control owns this runtime and drained every IO pin.
+            // Keep the shared client clock hidden until native preparation succeeds.
+            unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) }
+        })
     {
         return false;
     }

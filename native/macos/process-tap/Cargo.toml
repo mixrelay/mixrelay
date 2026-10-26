@@ -14,6 +14,8 @@ workspace = true
 [dependencies]
 # Typed capture failures retain their native status at the C boundary.
 thiserror.workspace = true
+# Native control procedures use the desktop's existing structured log subscriber.
+tracing = "0.1.41"
 # Share transport/clock primitives without making HAL/engine depend on AppKit.
 mixrelay-realtime = { path = "../../../crates/realtime" }
 mixrelay-macos-transport = { path = "../common" }

@@ -1,5 +1,4 @@
 use std::{
-    hint::black_box,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -15,13 +14,25 @@ use truce_rack_core::{
     info::{ParameterFlags, ParameterInfo, PresetInfo},
 };
 
+use super::super::{RackFormat, describe_loaded_plugin, select_effect_layout};
 use super::*;
+
+#[path = "channel_tests/pcm.rs"]
+mod pcm;
+use std::path::PathBuf;
+use truce_rack_core::{
+    bus::BusLayout,
+    info::{PluginCategory, PluginInfo},
+};
 
 #[derive(Clone, Copy)]
 enum FixtureProcessAction {
     ReportUnknownLatency,
     StatusErrorThenUnknown,
     CallErrorThenUnknown,
+    NonFinite(f32),
+    PartialFailure,
+    OutputEvents(usize),
 }
 
 #[derive(Clone, Copy)]
@@ -266,7 +277,7 @@ impl Plugin<f32> for ChannelFixture {
         &mut self,
         buffer: &mut AudioBuffer<'_, f32>,
         _events: &EventList,
-        _context: &mut ProcessContext<'_>,
+        context: &mut ProcessContext<'_>,
     ) -> PluginResult<ProcessStatus> {
         match self.next_process_action.take() {
             Some(FixtureProcessAction::ReportUnknownLatency) => self.latency_frames = None,
@@ -277,6 +288,25 @@ impl Plugin<f32> for ChannelFixture {
             Some(FixtureProcessAction::CallErrorThenUnknown) => {
                 self.next_process_action = Some(FixtureProcessAction::ReportUnknownLatency);
                 return Err(Error::Other("fixture process failure".to_owned()));
+            }
+            Some(FixtureProcessAction::NonFinite(value)) => {
+                buffer.main_outputs()[0][0] = value;
+                return Ok(ProcessStatus::Continue);
+            }
+            Some(FixtureProcessAction::PartialFailure) => {
+                buffer.main_outputs()[0][0] = 9.0;
+                return Err(Error::NotActivated);
+            }
+            Some(FixtureProcessAction::OutputEvents(count)) => {
+                use truce_rack_core::events::{Event, EventBody, TransportFlag};
+                for _ in 0..count {
+                    if !context.output_events.try_push(Event {
+                        sample_offset: 0,
+                        body: EventBody::TransportFlag(TransportFlag::PlayStart),
+                    }) {
+                        return Ok(ProcessStatus::Error);
+                    }
+                }
             }
             None => self.latency_frames = self.latency_after_process,
         }
@@ -639,7 +669,7 @@ fn failed_main_thread_service_stops_worker_and_clears_latency() {
         crate::latency::publish_intrinsic_frames(control.header(), Some(64));
         request.store(request_value, Ordering::Release);
 
-        assert!(crate::service_plugin_control(&control, &worker).is_err());
+        assert!(crate::worker::broker::service_plugin_control(&control, &worker).is_err());
         assert_eq!(control.header().shutdown.load(Ordering::Acquire), 1);
         assert_eq!(
             control.header().worker_status.load(Ordering::Acquire),
@@ -674,10 +704,10 @@ fn busy_dsp_defers_main_thread_request_without_consuming_it() {
     let worker = Mutex::new(activate(plugin, 0, 1).unwrap());
     let dsp = worker.lock().unwrap();
     request.store(1, Ordering::Release);
-    crate::service_plugin_control(&control, &worker).unwrap();
+    crate::worker::broker::service_plugin_control(&control, &worker).unwrap();
     assert_eq!(request.load(Ordering::Acquire), 1);
     drop(dsp);
-    crate::service_plugin_control(&control, &worker).unwrap();
+    crate::worker::broker::service_plugin_control(&control, &worker).unwrap();
     assert_eq!(request.load(Ordering::Acquire), 0);
     worker.lock().unwrap().set_parameter(8, 0.75).unwrap();
 }
@@ -708,17 +738,17 @@ fn headless_main_thread_applies_parameter_mailbox_after_catalog_refresh() {
     request.store(1, Ordering::Release);
 
     let dsp = worker.lock().unwrap();
-    crate::service_plugin_control(&control, &worker).unwrap();
+    crate::worker::broker::service_plugin_control(&control, &worker).unwrap();
     assert!(header.parameters_pending.load(Ordering::Acquire));
     assert_eq!(writes.load(Ordering::Relaxed), 0);
     drop(dsp);
-    crate::service_plugin_control(&control, &worker).unwrap();
+    crate::worker::broker::service_plugin_control(&control, &worker).unwrap();
 
     assert!(!header.parameters_pending.load(Ordering::Acquire));
     assert!(!header.parameters[0].pending.load(Ordering::Acquire));
     assert_eq!(writes.load(Ordering::Relaxed), 1);
-    assert_eq!(header.process_failures.load(Ordering::Acquire), 0);
-    crate::service_plugin_control(&control, &worker).unwrap();
+    assert_eq!(header.process_faults.total(), 0);
+    crate::worker::broker::service_plugin_control(&control, &worker).unwrap();
     assert_eq!(writes.load(Ordering::Relaxed), 1);
 }
 
@@ -757,7 +787,7 @@ fn native_state_request_waits_for_real_parameter_delivery_and_acknowledges_cance
             thread::yield_now();
         }
 
-        crate::apply_pending_state_request(&control, &worker);
+        crate::worker::broker::apply_pending_state_request(&control, &worker);
         assert!(control.pending_request().is_some());
         assert_eq!(captures.load(Ordering::Relaxed), 0);
         assert!(pending.load(Ordering::Acquire));
@@ -766,10 +796,10 @@ fn native_state_request_waits_for_real_parameter_delivery_and_acknowledges_cance
                 reader.join().unwrap(),
                 Err(crate::ProcessorStateError::Timeout)
             );
-            crate::apply_pending_state_request(&control, &worker);
+            crate::worker::broker::apply_pending_state_request(&control, &worker);
         } else {
             worker.lock().unwrap().process(1).unwrap();
-            crate::apply_pending_state_request(&control, &worker);
+            crate::worker::broker::apply_pending_state_request(&control, &worker);
             assert_eq!(reader.join().unwrap(), Ok(Vec::new()));
         }
 
@@ -868,112 +898,6 @@ fn worker_rejects_over_limit_inputs_outputs_and_bus_sum_overflow() {
             let activations = Arc::clone(&plugin.activations);
             assert!(activate(plugin, 0, 32).is_err());
             assert_eq!(activations.load(Ordering::Relaxed), 0);
-        }
-    }
-}
-
-#[test]
-fn failed_worker_bypass_never_routes_sidechain_into_auxiliary_outputs() {
-    use truce_rack_core::bus::{Bus, BusKind, ChannelConfig};
-    for action in [
-        FixtureProcessAction::StatusErrorThenUnknown,
-        FixtureProcessAction::CallErrorThenUnknown,
-    ] {
-        let mut layout = BusLayout::stereo_with_sidechain("Key");
-        layout.outputs.push(Bus {
-            name: "Auxiliary".into(),
-            kind: BusKind::Auxiliary,
-            channels: ChannelConfig::Stereo,
-        });
-        let mut plugin = fixture(vec![layout]);
-        plugin.next_process_action = Some(action);
-        let mut worker = activate(plugin, 0, 32).unwrap();
-        for (index, channel) in worker.input_storage.iter_mut().enumerate() {
-            channel.fill(f32::from(u16::try_from(index + 1).unwrap()));
-        }
-        assert!(worker.process(7).is_err());
-        for output in &mut worker.output_storage {
-            output.fill(99.0);
-        }
-        let allocation = allocation_counter::measure(|| worker.bypass(7));
-        assert_eq!(allocation.count_total, 0);
-        assert_eq!(allocation.count_current, 0);
-        for (index, output) in worker.output_storage.iter().enumerate() {
-            let expected = if index < 2 {
-                f32::from(u16::try_from(index + 1).unwrap())
-            } else {
-                0.0
-            };
-            assert!(
-                output[..7]
-                    .iter()
-                    .all(|sample| sample.to_bits() == expected.to_bits())
-            );
-            assert!(
-                output[7..]
-                    .iter()
-                    .all(|sample| sample.to_bits() == 99.0_f32.to_bits())
-            );
-        }
-    }
-}
-
-#[test]
-fn process_preserves_every_channel_at_supported_boundaries() {
-    for channels in [1, 2, 8, 64] {
-        let mut worker = worker(channels, 256);
-        for frames in [1, 32, 256] {
-            worker.clear_outputs();
-            worker.process(frames).unwrap();
-            for (input, output) in worker.input_storage.iter().zip(&worker.output_storage) {
-                assert_eq!(&input[..frames], &output[..frames]);
-                assert!(output[frames..].iter().all(|sample| *sample == 0.0));
-            }
-        }
-    }
-}
-
-#[test]
-fn process_channel_references_allocate_nothing() {
-    for channels in [1, 2, 8, 64] {
-        let mut worker = worker(channels, 256);
-        let allocation = allocation_counter::measure(|| {
-            for frames in [1, 32, 256] {
-                worker.process(frames).unwrap();
-            }
-        });
-        assert_eq!(allocation.count_total, 0);
-    }
-}
-
-#[test]
-fn process_channel_reference_measurement() {
-    const ITERATIONS: u32 = 20_000;
-    if std::env::var_os("MIXRELAY_MEASURE_RACK_CHANNELS").is_none() {
-        return;
-    }
-    for channels in [2, 8, 64] {
-        for frames in [32, 256] {
-            let mut worker = worker(channels, frames);
-            for _ in 0..ITERATIONS {
-                black_box(&mut worker).process(black_box(frames)).unwrap();
-            }
-            let mut elapsed = [0.0; 7];
-            for ns in &mut elapsed {
-                let start = Instant::now();
-                for _ in 0..ITERATIONS {
-                    black_box(&mut worker).process(black_box(frames)).unwrap();
-                }
-                *ns = start.elapsed().as_secs_f64() * 1_000_000_000.0 / f64::from(ITERATIONS);
-            }
-            elapsed.sort_by(f64::total_cmp);
-            for (input, output) in worker.input_storage.iter().zip(&worker.output_storage) {
-                assert_eq!(input, output);
-            }
-            println!(
-                "rack-process channels={channels} frames={frames} median_ns={:.3}",
-                elapsed[3]
-            );
         }
     }
 }

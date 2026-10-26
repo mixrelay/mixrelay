@@ -5,7 +5,7 @@ use std::ffi::CStr;
 use truce_rack_core::error::{Error, Result};
 use truce_rack_core::info::{ParameterFlags, ParameterInfo};
 
-use super::{PortInfo, PortKind};
+use crate::ports::{PortInfo, PortKind};
 
 const TOGGLED: &[u8] = b"http://lv2plug.in/ns/lv2core#toggled\0";
 const INTEGER: &[u8] = b"http://lv2plug.in/ns/lv2core#integer\0";
@@ -436,8 +436,9 @@ unsafe fn node_number(node: *const lilv_sys::LilvNode) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Lv2Scanner, PluginScanner};
+    use crate::Lv2Scanner;
     use truce_rack_core::plugin::PluginCore;
+    use truce_rack_core::scanner::PluginScanner;
 
     fn parameter(min: f64, max: f64, writable: bool) -> Parameters {
         Parameters {

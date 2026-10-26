@@ -128,6 +128,22 @@ mixer의 forward cursor로 보존된 PCM을 순서대로 배출한다. 외부 HA
 시간 credit은 게시된 PCM과 native playhead 범위로 제한한다. 타임스탬프는 worker가 깨어난
 시각이 아니라 native anchor와 프레임 좌표에서 구한다. 같은 클록의 master만 SRC를 우회한다.
 
+`cadence::next`는 native anchor에서 다음 절대 128프레임 경계를 계산한다.
+`Scheduling`은 그 deadline까지 기다리며 제어·종료 확인을 위해 대기를 5ms 이내로 제한한다.
+누적 credit은 `Pace::Block.available_frames` → `MacTimeline` → `MacEngineExternalIo`로 전달한다.
+획득 frontier는 이번 읽기 quantum과 아직 처리하지 않은 전체 credit을 구분한다.
+보존 용량 안의 가장 오래된 PCM부터 읽고, 같은 epoch에서 이미 읽은 시각으로 되돌아가지 않는다.
+
+`audio-io::retention`은 최대 지원 샘플레이트에서도 최소 4초의 backlog 저장량을 정한다.
+macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭제곱인 1,048,576프레임으로 올림한다.
+녹음 전달 큐는 256프레임 × 3,000개이며 192kHz에서 4초다. 모두 제어 경로에서 준비하고,
+실시간 중에는 확장하지 않는다. 이 저장 용량은 재생 priming·지연 목표와 별개다.
+지연 목표는 관찰한 callback burst와 클록 관계에서 정한다. `QueueBounds.maximum_target_frames`는
+저장량과 별도로 지정하며 macOS bridge의 기존 상한은 8,192프레임이다. Linux 출력 링은
+최대 RAW 전송 32,768프레임을 수용하도록 65,536프레임으로 준비한다. 가득 찬 private FIFO는 실패한 쓰기를
+거부하며 기존 PCM을 보존한다. 시각 공유 링은 오래된 구간을 덮어쓰므로 독자가 누락·불연속을
+확인한다. 녹음 큐가 한계를 넘으면 받아 둔 prefix를 마무리하고 `Failed`로 보고한다.
+
 공유 source의 `SourceClockRead`는 준비된 snapshot·소비자 갱신 중의 보류·생산자 grant 만료를
 구분한다. 보류는 cursor와 생산자를 유지한다. `begin_epoch`는 소비자 snapshot 재조회 없이
 게시한 생산자 epoch를 반환한다. clock 관찰·epoch 승인·native 메타데이터는
@@ -184,6 +200,19 @@ Linux 어댑터는 Secret Service의 잠긴 항목을 해제하거나 프롬프�
 인덱스는 인스턴스 목록에서 생성하며 외부에 가변 목록을 전달하지 않는다.
 활성화는 준비된 인스턴스 전체를 옮기고, 폐기는 기존 retired 소유자의 회수 경로에서 수행한다.
 단일 bus 처리와 multibus gather·scatter 및 dry fallback도 이 소유자의 처리 계약에 속한다.
+
+`engine-service`의 조립은 native 계약·DSP 준비·그래프 게시·제어·저장을 각 소유 모듈에 위임한다.
+`session::NativeFormat`은 native 형식 callback과 설정을, `ProcessTelemetry`는 실패 계수를 소유한다.
+macOS `worker`와 Linux `processing`은 오디오 실행을 소유하고 typed 결과를 공통
+`worker_completion::Completion`에 전달한다. 작업자가 먼저 실패하면 제어 admission을 닫고,
+shutdown은 worker join·복구·회수·기록을 모두 마친 뒤 각 경계의 오류를 모은다.
+
+`processor-host`의 `WorkerProcess`는 인스턴스별 child·부모 수명 pipe·감독·회수를 소유한다.
+creator와 DSP의 native 호출 진행은 서로 다른 고정 lane에 게시한다. 같은 진행 토큰의 호출이
+기존 5초 예산을 넘으면 해당 child만 실패 처리하고 회수한다. 정상 GUI mouse tracking은
+부모의 명시 응답 요청이 없으면 이 timeout 대상이 아니다. native 오류·불량 PCM과 늦은 wet 응답은
+블록 좌표가 맞는 dry 경로로 대체하며 다른 인스턴스의 실행을 중지하지 않는다.
+형식 어댑터는 native instance·processing·editor를 각각 소유하고 RT 이벤트 저장소는 준비 때 확보한다.
 
 ## 크레이트를 만들 때
 - 플랫폼 중립 크레이트는 `crates/`, OS 어댑터는 `native/<os>/`, 실행 파일은 `apps/`에 둔다. 이름은 `mixrelay-<역할>`이다. 기존 C 라이브러리 바인딩만 담는 새 크레이트는 `-sys`로 끝낸다(M-FFI-NAMING).

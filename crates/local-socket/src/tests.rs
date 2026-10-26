@@ -8,8 +8,8 @@ fn uid_of(path: &Path) -> u32 {
 
 #[tokio::test]
 async fn owned_socket_refuses_live_replacement_and_cleans_up() {
-    let fixture = mixrelay_test_support::FixtureDir::new("ipc").expect("fixture");
-    let directory = fixture.join("nested/control");
+    let fixture = mixrelay_test_support::FixtureDir::ipc("s").expect("fixture");
+    let directory = fixture.join("n/c");
     let uid = uid_of(fixture.path());
     let (listener, owner) = bind(&directory, ENGINE_SOCKET, uid).await.expect("bind");
     assert_eq!(
@@ -42,7 +42,7 @@ async fn owned_socket_refuses_live_replacement_and_cleans_up() {
 
 #[tokio::test]
 async fn unsafe_directories_and_non_socket_targets_are_not_overwritten() {
-    let fixture = mixrelay_test_support::FixtureDir::new("ipc-path").expect("fixture");
+    let fixture = mixrelay_test_support::FixtureDir::ipc("s").expect("fixture");
     // Exercise the unsafe mode explicitly; a private lab's inherited umask
     // otherwise creates an already-safe 0700 fixture directory.
     std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o755))
@@ -55,7 +55,7 @@ async fn unsafe_directories_and_non_socket_targets_are_not_overwritten() {
             .kind(),
         io::ErrorKind::PermissionDenied
     );
-    let directory = fixture.join("control");
+    let directory = fixture.join("c");
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(&directory)
@@ -68,7 +68,7 @@ async fn unsafe_directories_and_non_socket_targets_are_not_overwritten() {
     std::os::unix::fs::symlink(&directory, &link).expect("symlink");
     assert!(bind(&link, ENGINE_SOCKET, uid).await.is_err());
     // Without its lock beside the socket, a service does not start.
-    let locked = fixture.join("locked");
+    let locked = fixture.join("l");
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(&locked)
@@ -79,19 +79,15 @@ async fn unsafe_directories_and_non_socket_targets_are_not_overwritten() {
     let long = fixture.join("x".repeat(120));
     assert!(bind(&long, ENGINE_SOCKET, uid).await.is_err());
     // A directory cannot be created where a file stands.
-    let blocked = fixture.join("file");
+    let blocked = fixture.join("f");
     std::fs::write(&blocked, b"").expect("file");
-    assert!(
-        bind(&blocked.join("inner"), ENGINE_SOCKET, uid)
-            .await
-            .is_err()
-    );
+    assert!(bind(&blocked.join("i"), ENGINE_SOCKET, uid).await.is_err());
 }
 
 #[tokio::test]
 async fn connections_from_other_users_never_reach_the_service() {
-    let fixture = mixrelay_test_support::FixtureDir::new("ipc-peer").expect("fixture");
-    let directory = fixture.join("control");
+    let fixture = mixrelay_test_support::FixtureDir::ipc("s").expect("fixture");
+    let directory = fixture.join("c");
     let uid = uid_of(fixture.path());
     let (listener, socket) = bind(&directory, DRIVER_SOCKET, uid).await.expect("bind");
     let path = socket.path().to_path_buf();
@@ -169,12 +165,12 @@ fn socket_directories_follow_the_override_then_the_platform_location() {
 #[tokio::test]
 async fn ancestors_writable_by_others_are_refused_unless_root_sticky() {
     use std::os::unix::fs::PermissionsExt as _;
-    let fixture = mixrelay_test_support::FixtureDir::new("ipc-ancestor").expect("fixture");
+    let fixture = mixrelay_test_support::FixtureDir::ipc("s").expect("fixture");
     let uid = uid_of(fixture.path());
-    let open = fixture.join("open");
+    let open = fixture.join("o");
     std::fs::create_dir(&open).expect("directory");
     std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).expect("chmod");
-    let error = bind(&open.join("control"), ENGINE_SOCKET, uid)
+    let error = bind(&open.join("c"), ENGINE_SOCKET, uid)
         .await
         .expect_err("writable ancestor");
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
@@ -189,8 +185,8 @@ async fn ancestors_writable_by_others_are_refused_unless_root_sticky() {
 
 #[tokio::test]
 async fn starters_racing_on_one_thread_both_see_a_live_socket() {
-    let fixture = mixrelay_test_support::FixtureDir::new("ipc-live-race").expect("fixture");
-    let directory = fixture.join("control");
+    let fixture = mixrelay_test_support::FixtureDir::ipc("s").expect("fixture");
+    let directory = fixture.join("c");
     let uid = uid_of(fixture.path());
     let _live = bind(&directory, ENGINE_SOCKET, uid).await.expect("bind");
     // A current-thread runtime: a starter waiting for the lock must not block the holder.
@@ -205,8 +201,8 @@ async fn starters_racing_on_one_thread_both_see_a_live_socket() {
 
 #[tokio::test]
 async fn concurrent_starters_never_replace_each_others_live_socket() {
-    let fixture = mixrelay_test_support::FixtureDir::new("ipc-race").expect("fixture");
-    let directory = fixture.join("control");
+    let fixture = mixrelay_test_support::FixtureDir::ipc("s").expect("fixture");
+    let directory = fixture.join("c");
     let uid = uid_of(fixture.path());
     // A stale socket: its listener is gone but the path remains.
     let (listener, socket) = bind(&directory, ENGINE_SOCKET, uid).await.expect("bind");
@@ -227,9 +223,9 @@ async fn concurrent_starters_never_replace_each_others_live_socket() {
 
 #[tokio::test]
 async fn handlers_see_the_peer_of_their_connection() {
-    let fixture = mixrelay_test_support::FixtureDir::new("ipc-connect-info").expect("fixture");
+    let fixture = mixrelay_test_support::FixtureDir::ipc("s").expect("fixture");
     let uid = uid_of(fixture.path());
-    let (listener, socket) = bind(&fixture.join("control"), DRIVER_SOCKET, uid)
+    let (listener, socket) = bind(&fixture.join("c"), DRIVER_SOCKET, uid)
         .await
         .expect("bind");
     let path = socket.path().to_path_buf();

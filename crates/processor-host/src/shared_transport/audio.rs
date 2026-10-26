@@ -3,7 +3,8 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
-use crate::{AudioLayout, SharedHeader};
+use super::SharedHeader;
+use crate::AudioLayout;
 
 use super::{Mapping, input_offset};
 
@@ -20,10 +21,16 @@ impl ParentAudio {
     pub(super) fn open(file: &File) -> Result<Self, String> {
         let mapping = Mapping::open(file, None)?;
         let output_samples = mapping.output_samples();
-        let output_tags = vec![None; mapping.layout.block_frames];
+        let mut output_tags = mixrelay_audio_io::pcm_buffer::reserve(mapping.layout.block_frames)
+            .map_err(|error| {
+            format!("cannot allocate processor output coordinates: {error}")
+        })?;
+        output_tags.resize(mapping.layout.block_frames, None);
+        let output_cache = mixrelay_audio_io::pcm_buffer::zeroed(output_samples)
+            .map_err(|error| format!("cannot allocate processor output cache: {error}"))?;
         Ok(Self {
             mapping,
-            output_cache: vec![0.0; output_samples],
+            output_cache,
             output_tags,
             source_frame: 0,
             history_start: 0,

@@ -1,7 +1,17 @@
 use super::*;
 use crate::shared_transport::WorkerControl;
+use crate::worker::broker::publish_editor_failure;
+use crate::worker::broker::publish_observed_editor_snapshot;
 use crate::*;
+use mixrelay_audio_engine::HostedProcessorPrepareRequest;
+use mixrelay_audio_graph::{ProviderNodeConfig, RenderFormat};
+use mixrelay_control_protocol::ProcessorEditorState;
 use mixrelay_test_support::FixtureDir;
+use std::{
+    sync::{Arc, atomic::Ordering},
+    thread,
+    time::Instant,
+};
 
 struct Fixture {
     control: Arc<HostedProcessorControl>,
@@ -287,14 +297,14 @@ fn close_reopen_close_during_export_does_not_checkpoint_old_reuse_identity() {
         assert_eq!(kind, crate::editor_surface::NATIVE_STATE);
 
         // The original close token is now stale before its state response completes.
-        crate::publish_observed_editor_snapshot(
+        publish_observed_editor_snapshot(
             worker_control.header(),
             rack_formats::EditorSnapshot {
                 open: true,
                 ..rack_formats::EditorSnapshot::default()
             },
         );
-        crate::publish_observed_editor_snapshot(
+        publish_observed_editor_snapshot(
             worker_control.header(),
             rack_formats::EditorSnapshot::default(),
         );

@@ -79,7 +79,8 @@ fn native_pipewire_live_session_format_transaction() {
     let worker_exchange = exchange.clone();
     let worker_backend = backend.clone();
     let worker = thread::spawn(move || {
-        run_audio_worker(processor, worker_exchange, &worker_backend, &worker_status);
+        run_audio_worker(processor, worker_exchange, &worker_backend, &worker_status)
+            .expect("native PipeWire worker failed");
     });
     let guard = mixrelay_engine_service::session::AudioWorker::new(status.clone(), worker);
     thread::sleep(Duration::from_millis(100));

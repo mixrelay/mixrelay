@@ -9,6 +9,103 @@ use mixrelay_realtime::Timebase;
 
 mod startup;
 
+#[test]
+fn native_credit_bursts_reach_the_capture_frontier_before_graph_slicing() {
+    let status = Arc::new(AdapterRuntimeStatus::new(adapter_profile()));
+    let resources = MacDevices::new(status.clone(), 48_000, 128);
+    let devices = publish(&resources, &[]);
+    let nanos = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let registry = mixrelay_macos_transport::source_registry::SourceRegistry::with_clock(Box::new(
+        SchedulingClock {
+            origin: Instant::now(),
+            nanos: nanos.clone(),
+        },
+    ));
+    let mut application = ApplicationInput::new(&registry);
+    let mut processor = application_processor();
+    let mut timeline = MacTimeline::new();
+    let mut pacer = ApplicationPacer::default();
+    let route = RouteClock {
+        maximum_frames: 128,
+        synchronized: true,
+        independent_idle: false,
+    };
+    let mut block = 8;
+    application.publish(block);
+    let format = (48_000, 128, 16_384);
+    assert_eq!(
+        pacer.next(
+            (source_token("app"), application_progress(&registry)),
+            format
+        ),
+        Pace::Wait
+    );
+    let mut capture = Capture {
+        io: timeline.take_external_io(&devices),
+        pcm: Vec::with_capacity(40_960),
+    };
+    let measured = allocation_counter::measure(|| {
+        for blocks in [16, 128, 16] {
+            for _ in 0..blocks {
+                block += 1;
+                application.publish(block);
+            }
+            nanos.store(
+                u64::from(block) * 128 * 1_000_000_000 / 48_000,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            while let pace @ Pace::Block { .. } = pacer.next(
+                (source_token("app"), application_progress(&registry)),
+                format,
+            ) {
+                let (frames, discontinuity) = timeline.accept((pace, 3), &route, &status).unwrap();
+                assert!(timeline.available_frames >= frames);
+                capture.io = timeline.take_external_io(&devices);
+                capture.io.sources = Some(&registry);
+                process_native_cycle(
+                    &mut processor,
+                    &mut capture,
+                    WorkerCycle {
+                        timeline: &timeline,
+                        frames,
+                        discontinuity,
+                    },
+                )
+                .unwrap();
+                timeline.capture_alignment = std::mem::take(&mut capture.io.alignment);
+            }
+        }
+    });
+    assert_eq!(measured.count_total, 0);
+    assert_eq!(capture.pcm.len(), 40_960);
+    let complete = capture
+        .pcm
+        .chunks_exact(2)
+        .filter(|frame| {
+            frame[0].to_bits() == 0.0_f32.to_bits() && frame[1].to_bits() == 0.25_f32.to_bits()
+        })
+        .count();
+    assert_eq!(
+        complete, 20_480,
+        "retained source PCM was replaced by silence during native-credit catch-up"
+    );
+}
+
+fn application_progress(
+    registry: &mixrelay_macos_transport::source_registry::SourceRegistry,
+) -> ApplicationClockSnapshot {
+    let (clock, capacity_frames) = registry.clock_with_capacity(source_token("app")).unwrap();
+    ApplicationClockSnapshot {
+        epoch: clock.epoch,
+        native_frames: clock.native_frames,
+        native_rate: clock.native_rate,
+        graph_rate: clock.graph_rate,
+        running: clock.running,
+        synchronized: clock.synchronized,
+        capacity_frames,
+    }
+}
+
 struct Capture<'a> {
     io: MacEngineExternalIo<'a>,
     pcm: Vec<f32>,

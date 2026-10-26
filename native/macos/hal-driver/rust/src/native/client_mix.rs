@@ -18,6 +18,16 @@ use std::sync::{
 const COPY_FRAMES: usize = 32;
 const MAX_CHANNELS: usize = 64;
 
+fn client_limit(capacity: u32, channels: u32) -> usize {
+    if channels == 0 {
+        return MAX_CLIENTS;
+    }
+    let bytes = buffer::mr_shared_audio_buffer_required_bytes(capacity, channels);
+    MAX_PCM_BYTES
+        .checked_div(bytes)
+        .map_or(0, |limit| limit.min(MAX_CLIENTS))
+}
+
 struct Client {
     id: u32,
     rendered: AtomicBool,
@@ -56,21 +66,8 @@ impl ClientMix {
 
     pub(super) fn register(&mut self, id: u32) -> bool {
         if self.revision == u64::MAX
-            || self.clients.len() == MAX_CLIENTS
+            || self.clients.len() >= client_limit(self.capacity, self.geometry.render_channels)
             || self.clients.iter().any(|client| client.id == id)
-        {
-            return false;
-        }
-        let bytes = buffer::mr_shared_audio_buffer_required_bytes(
-            self.capacity,
-            self.geometry.render_channels,
-        );
-        if self
-            .clients
-            .len()
-            .checked_add(1)
-            .and_then(|count| count.checked_mul(bytes))
-            .is_none_or(|bytes| bytes > MAX_PCM_BYTES)
         {
             return false;
         }
@@ -112,6 +109,16 @@ impl ClientMix {
     }
 
     pub(super) fn publish_clock(&mut self, clock: &Clock, rearm: bool) -> bool {
+        self.publish_clock_after(clock, rearm, || true)
+    }
+
+    /// Keeps remote readers fenced until client queues and native stream preparation succeed.
+    pub(super) fn publish_clock_after(
+        &mut self,
+        clock: &Clock,
+        rearm: bool,
+        prepare: impl FnOnce() -> bool,
+    ) -> bool {
         let config = self.configuration();
         let (epoch, anchor) = clock.transport_epoch();
         let Some(publication) = self.clock.begin(ClientPcmTimeline {
@@ -144,6 +151,9 @@ impl ClientMix {
             if rearm {
                 client.rendered.store(false, Ordering::Relaxed);
             }
+        }
+        if !prepare() {
+            return false;
         }
         publication.commit();
         true

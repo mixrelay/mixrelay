@@ -11,6 +11,8 @@ pub(super) struct MacEngineExternalIo<'a> {
     pub(super) alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment,
     capture_time: Option<u64>,
     pub(super) align_inputs: bool,
+    /// Acquisition covers all pending clock credit; each transfer still uses cycle.frames.
+    pub(super) capture_frames: u32,
     devices: &'a crate::macos_devices::DeviceSet,
     /// The admitted cycle's one host label for all of its device transfers.
     host: u64,
@@ -25,6 +27,7 @@ impl<'a> MacEngineExternalIo<'a> {
             alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment::default(),
             capture_time: None,
             align_inputs: false,
+            capture_frames: 0,
         }
     }
 
@@ -74,6 +77,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
                 *enabled && binding.is_routed_source() && self.source_active(binding)
             })
             .count();
+        let capture_frames = self.capture_frames.max(cycle.frames);
         self.devices
             .reserve_capture_alignment(cycle.sample_rate, cycle.frames, count > 0);
         for (binding, _) in controls
@@ -83,9 +87,15 @@ impl ExternalIo for MacEngineExternalIo<'_> {
             let id = binding.node_id().as_str();
             let token = binding_token(binding);
             let sources = binding_sources(binding, self.sources);
-            let time = self.devices.capture_time(id, cycle.frames).or_else(|| {
-                sources
-                    .and_then(|sources| sources.source_time(token, cycle.sample_rate, cycle.frames))
+            let time = self.devices.capture_time(id, capture_frames).or_else(|| {
+                sources.and_then(|sources| {
+                    sources.source_time_for_credit(
+                        token,
+                        cycle.sample_rate,
+                        cycle.frames,
+                        capture_frames,
+                    )
+                })
             });
             if self.source_active(binding) {
                 active += 1;

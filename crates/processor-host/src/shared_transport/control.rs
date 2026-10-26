@@ -7,10 +7,10 @@ use std::{
 
 use crate::{
     PROCESSOR_STATE_TIMEOUT, ProcessorStateError, STATE_CAPACITY, STATE_FAILED, STATE_OK,
-    STATE_TOO_LARGE, STATE_UNSUPPORTED, SharedHeader, WORKER_READY,
+    STATE_TOO_LARGE, STATE_UNSUPPORTED, WORKER_READY,
 };
 
-use super::{CHUNK_CAPACITY, Mapping};
+use super::{CHUNK_CAPACITY, Mapping, SharedHeader};
 
 /// Control-only mapping; neither state mutex is reachable from an audio endpoint.
 pub(crate) struct ControlMailbox {
@@ -43,6 +43,12 @@ impl ControlMailbox {
 
     pub(crate) fn last_request_kind(&self) -> u32 {
         self.header().state_kind.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn has_pending_request(&self) -> bool {
+        let header = self.header();
+        header.state_request.load(Ordering::Acquire)
+            != header.state_response.load(Ordering::Acquire)
     }
 
     pub(crate) fn lock(&self) -> ControlGuard<'_> {

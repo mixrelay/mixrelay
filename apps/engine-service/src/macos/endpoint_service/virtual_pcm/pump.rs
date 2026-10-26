@@ -1,16 +1,17 @@
 //! One bounded virtual-input reader owns mixing, conversion and publication.
-use super::{Error, cadence, converter::Converter, scheduling::Scheduling};
+use super::{
+    Error, cadence,
+    converter::Converter,
+    scheduling::{self, Scheduling},
+};
 use mixrelay_macos_transport::{
     application_source_transport::{SourceClockRead, SourceTransport},
     client_pcm::{ClientPcmMixer, ClientPcmReader, MixError, MixWindow},
 };
 use mixrelay_realtime::{Timebase, host_time};
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 pub(super) struct Pump {
@@ -70,7 +71,7 @@ impl Pump {
                 let clock = match self.transport.observe_clock() {
                     SourceClockRead::Ready(clock) => clock,
                     SourceClockRead::Deferred => {
-                        std::thread::sleep(Duration::from_micros(250));
+                        scheduling::wait_for_period(None, timebase);
                         continue;
                     }
                     SourceClockRead::Revoked => return Err(Error::Stale),
@@ -82,7 +83,8 @@ impl Pump {
                         clock.rate,
                     )
                 }) else {
-                    if let Some(native) = self.queues.iter().find_map(ClientPcmReader::clock) {
+                    let native = self.queues.iter().find_map(ClientPcmReader::clock);
+                    if let Some(native) = native {
                         if !native.running {
                             self.transport.stop_native();
                         } else if self.mixer.is_current(native)
@@ -93,17 +95,17 @@ impl Pump {
                             let _ = converter.flush(&mut self.transport)?;
                         }
                     }
-                    std::thread::sleep(Duration::from_micros(250));
+                    scheduling::wait_for_period(native, timebase);
                     continue;
                 };
                 if clock.format_word == 0 {
-                    std::thread::sleep(Duration::from_micros(250));
+                    scheduling::wait_for_period(None, timebase);
                     continue;
                 }
                 if !self.configure(window, clock, &scheduling)?
                     || !self.transfer(window, clock, timebase)?
                 {
-                    std::thread::sleep(Duration::from_micros(250));
+                    scheduling::wait_for_period(None, timebase);
                 }
             }
             Ok(())

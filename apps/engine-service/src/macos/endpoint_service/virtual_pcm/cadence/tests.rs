@@ -6,6 +6,24 @@ use mixrelay_macos_transport::{
 };
 
 #[test]
+fn waiting_follows_absolute_native_periods_without_accumulating_wake_lateness() {
+    let mut elapsed = 0;
+    let mut releases = 0;
+    while elapsed < 42_666_667 && releases < 1_024 {
+        let deadline = next(elapsed, 48_000).unwrap();
+        let nanos = u64::try_from(deadline.as_nanos()).unwrap();
+        assert!(nanos > elapsed);
+        elapsed = nanos;
+        releases += 1;
+    }
+    assert_eq!(releases, 16, "waiting must not poll between native periods");
+    assert_eq!(elapsed, 42_666_667);
+    assert_eq!(next(3_000_000, 48_000).unwrap().as_nanos(), 5_333_334);
+    assert_eq!(next(8_000_000, 48_000).unwrap().as_nanos(), 10_666_667);
+    assert!(next(1, 0).is_none());
+}
+
+#[test]
 fn native_period_bounds_work_and_delayed_wakes_preserve_all_retained_pcm() {
     let mut writer = ClientPcmWriter::new(
         EndpointTransportConfig {

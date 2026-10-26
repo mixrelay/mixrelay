@@ -30,8 +30,8 @@ OS adapter, physical device, daemon scheduling deadline, or global capability.
 - Short quantum starvation retains sinc history. Actual dropped packets,
   restart, format/timeline changes require explicit reset plus external FIFO
   flush. New rate/channel configurations require off-thread reconstruction.
-- Memory is bounded, not universally small: maximum permitted 262144 source
-  frames at 64 channels consumes 64 MiB for the input FIFO alone. The numerical
+- Memory is bounded: the retention policy permits 1048576 source
+  frames at 64 channels, consuming 256 MiB for the input FIFO alone. The numerical
   fixture uses 8192 source frames (2 MiB at 64 channels), not the maximum.
 
 ## Reproduction

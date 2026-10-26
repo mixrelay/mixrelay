@@ -1,11 +1,11 @@
 use super::{EditorHostEvents, EditorHostFailure};
 use crate::shared_transport::WorkerControl;
 use crate::{
-    BASE64, ProcessorStateError,
+    ProcessorStateError,
     editor_surface::{EDITOR_FRAME, PointerEvent},
     rack_formats::{EditorSnapshot, RackWorkerPlugin},
 };
-use base64::Engine as _;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use block2::RcBlock;
 use dispatch2::MainThreadBound;
 use mixrelay_control_protocol::{EditorPointerKind, ProcessorEditorFrame};

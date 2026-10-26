@@ -4,6 +4,7 @@ use super::{
     RingOwner, TapConfig, TapError, TapSession, TapStats,
     native::{self, CoreAudio, Native, Timestamp},
 };
+use crate::control_trace::{self, Procedure};
 use crate::process_tap_input::{ingest, input_frames};
 use mixrelay_macos_transport::{
     audio_buffer::AudioBufferList,
@@ -46,7 +47,7 @@ pub(super) unsafe extern "C" fn io_proc(
     let session = unsafe { &*context.cast::<TapSession>() };
     let _active = Active::enter(&session.active_callbacks);
     session.callbacks.fetch_add(1, Ordering::Relaxed);
-    if session.allowed()
+    if session.delivering()
         && let Some(format) = session.format.get()
     {
         // SAFETY: ring/format are installed before IOProc registration and remain
@@ -134,7 +135,9 @@ fn initialize_selected(
     let description = native::Description::create(&selection)?;
     let _previous = session.selection.replace(Some(selection));
     description.tap(session)?;
-    let format = CoreAudio.format(session.resources.get().tap)?;
+    let format = control_trace::run(Procedure::ReadTapFormat, || {
+        CoreAudio.format(session.resources.get().tap)
+    })?;
     if !format.supported() {
         return Err(TapError::code(5));
     }
@@ -369,7 +372,7 @@ pub unsafe extern "C" fn mr_process_tap_read(
     let Some(session) = (unsafe { session.as_ref() }) else {
         return 0;
     };
-    if !session.allowed() {
+    if !session.delivering() {
         return 0;
     }
     // SAFETY: pump owns exclusive output and the sole consumer cursor.
@@ -392,7 +395,7 @@ pub unsafe extern "C" fn mr_process_tap_read_timed(
         return 0;
     };
     let current = || {
-        session.allowed()
+        session.delivering()
             && session.generation.load(Ordering::Acquire) == expected.format
             && unsafe {
                 mixrelay_macos_transport::callback_clock::mr_callback_clock_discontinuities(

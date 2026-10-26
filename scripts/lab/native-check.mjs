@@ -94,13 +94,27 @@ export function buildPlan(os, mode) {
   ];
   commands.push(["cargo", "build", "--locked", "--workspace"]);
   if (mode === "test") {
+    const platformManifest = `vendor/truce-rack-${os === "darwin" ? "au" : "lv2"}/Cargo.toml`;
+    // These platform crates are excluded workspace dependencies. Their own locks
+    // and manifest commands include unit tests omitted by workspace selection.
+    const platformOptions = ["--locked", "--manifest-path", platformManifest,
+      "--target-dir", "target", "--config",
+      `patch.crates-io.truce-rack-core.path=${JSON.stringify(resolve(root, "vendor/truce-rack-core"))}`];
     // Style and lints gate before tests, so CI enforces what the Rust rules document claims.
     commands.push(["cargo", "fmt", "--all", "--check"]);
+    commands.push(["cargo", "fmt", "--manifest-path", platformManifest, "--check"]);
     commands.push(["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]);
+    commands.push(["cargo", "clippy", ...platformOptions, "--all-targets", "--", "-D", "warnings"]);
     commands.push(["cargo", "test", "--locked", "-p", "truce-rack-vst3", "-p", "truce-rack-clap", "--lib"]);
+    commands.push(os === "darwin"
+      ? ["cargo", "test", ...platformOptions, "--lib"]
+      : ["bash", "scripts/check-lv2-boundary.sh"]);
     // Platform adapters live in the engine binary, not its portable library.
     // Omitting --bins silently skips platform adapter tests.
     commands.push(["cargo", "test", "--locked", "--workspace", "--lib", "--bins"]);
+    if (os === "linux") {
+      commands.push(["bash", "native/linux/pipewire/tests/run-stream-buffer-metadata.sh"]);
+    }
     commands.push(["pnpm", "--filter", "@mixrelay/control-ui", "exec", "vitest", "run"]);
     if (os === "darwin") {
       commands.push(["pnpm", "check:native"]);

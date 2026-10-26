@@ -46,7 +46,6 @@ repository = "https://github.com/mixrelay/mixrelay"
 [workspace.dependencies]
 rubato = { version = "5.0.0", default-features = false }
 audioadapter-buffers = "5.2.0"
-arc-swap = "1.8.0"
 axum = "0.8.9"
 parking_lot = "0.12.5"
 reqwest = { version = "0.13.4", default-features = false, features = ["json"] }

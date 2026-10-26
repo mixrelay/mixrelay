@@ -149,7 +149,7 @@ fn callback_owns_processor_and_main_state_observations_do_not_borrow_it() {
     let mut callbacks = Callbacks {
         state: AtomicI32::new(0),
         published: AtomicBool::new(false),
-        failure: AtomicI32::new(0),
+        failure: FailurePublication::default(),
         process: UnsafeCell::new(counter()),
         input_port: std::ptr::null_mut(),
     };
@@ -174,6 +174,10 @@ fn callback_owns_processor_and_main_state_observations_do_not_borrow_it() {
     // SAFETY: complete but invalid native clock; must not invoke the processor.
     unsafe { process::<Counter>(data, &raw mut native) };
     assert_eq!(calls.load(Ordering::Relaxed), 10_000);
+    assert_eq!(
+        callbacks.failure.read(),
+        Some(DriverProcessFailure::MissingPosition)
+    );
     // SAFETY: main callback touches only its atomic state, not processor storage.
     callbacks.input_port = std::ptr::dangling_mut::<u8>().cast();
     unsafe { state_changed::<Counter>(data, 0, 3, std::ptr::null()) };
@@ -245,4 +249,89 @@ fn native_graph_driver_drains_before_processor_drop_and_releases_resources() {
         before,
         "FD/thread leak after native filter retirement"
     );
+}
+
+#[test]
+fn callback_geometry_rejects_zero_or_unbounded_native_work() {
+    let mut native = position();
+    native.clock.duration = 32_768;
+    assert_eq!(DriverCycle::from_position(&native).unwrap().frames, 32_768);
+    for duration in [0, 32_769, u64::MAX] {
+        native.clock.duration = duration;
+        assert_eq!(DriverCycle::from_position(&native), None);
+    }
+    native.clock.duration = 128;
+    for rate in [0, 7_999, 384_001] {
+        native.clock.rate.denom = rate;
+        assert_eq!(DriverCycle::from_position(&native), None);
+    }
+}
+
+struct FaultedProcessor {
+    calls: usize,
+    failure: Option<DriverProcessFailure>,
+}
+
+impl DriverProcess for FaultedProcessor {
+    fn process(&mut self, cycle: &DriverCycle) {
+        self.calls += 1;
+        self.failure = Some(DriverProcessFailure::FrameBudget {
+            native_frames: cycle.frames,
+            native_rate: cycle.rate,
+            stream_rate: 192_000,
+            capacity_frames: 32_768,
+        });
+    }
+    fn failure(&self) -> Option<DriverProcessFailure> {
+        self.failure
+    }
+}
+
+#[test]
+fn first_source_fault_is_control_readable_without_another_native_callback() {
+    let mut callbacks = Callbacks {
+        state: AtomicI32::new(0),
+        published: AtomicBool::new(true),
+        failure: FailurePublication::default(),
+        process: UnsafeCell::new(FaultedProcessor {
+            calls: 0,
+            failure: None,
+        }),
+        input_port: std::ptr::null_mut(),
+    };
+    let data = (&raw const callbacks).cast_mut().cast();
+    let mut native = position();
+    let allocation = allocation_counter::measure(|| {
+        // SAFETY: this fixture retains the complete callback and native position.
+        unsafe { process::<FaultedProcessor>(data, &raw mut native) };
+    });
+    assert_eq!(allocation.count_total, 0);
+    let expected = Some(DriverProcessFailure::FrameBudget {
+        native_frames: 128,
+        native_rate: 48_000,
+        stream_rate: 192_000,
+        capacity_frames: 32_768,
+    });
+    assert_eq!(callbacks.failure.read(), expected);
+    callbacks
+        .failure
+        .publish(DriverProcessFailure::DependencyQueue(-22));
+    assert_eq!(callbacks.failure.read(), expected);
+    // SAFETY: the same pinned fixture is called again; the terminal gate must stop it.
+    unsafe { process::<FaultedProcessor>(data, &raw mut native) };
+    assert_eq!(callbacks.process.get_mut().calls, 1);
+    assert_eq!(callbacks.failure.read(), expected);
+
+    let mut peer = Callbacks {
+        state: AtomicI32::new(0),
+        published: AtomicBool::new(true),
+        failure: FailurePublication::default(),
+        process: UnsafeCell::new(counter()),
+        input_port: std::ptr::null_mut(),
+    };
+    let peer_data = (&raw const peer).cast_mut().cast();
+    // SAFETY: a separate complete callback owner borrows the same valid native value serially.
+    unsafe { process::<Counter>(peer_data, &raw mut native) };
+    assert_eq!(peer.process.get_mut().calls.load(Ordering::Relaxed), 1);
+    assert_eq!(peer.failure.read(), None);
 }

@@ -13,6 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod failure;
+use failure::FailurePublication;
+
 #[cfg(test)]
 mod tests;
 
@@ -33,17 +36,23 @@ pub struct DriverCycle {
 }
 
 impl DriverCycle {
+    /// Upper bound on native callback work; independent of the requested DSP block.
+    pub const MAX_FRAMES: u32 = 32_768;
+
     fn from_position(position: &spa::sys::spa_io_position) -> Option<Self> {
         let clock = &position.clock;
-        if clock.rate.num != 1 {
+        if clock.rate.num != 1 || !(8_000..=384_000).contains(&clock.rate.denom) {
             return None;
         }
+        let frames = u32::try_from(clock.duration)
+            .ok()
+            .filter(|frames| (1..=Self::MAX_FRAMES).contains(frames))?;
         Some(Self {
             position: clock.position,
             monotonic_ns: clock.nsec,
             clock_id: clock.id,
             rate: clock.rate.denom,
-            frames: u32::try_from(clock.duration).ok()?,
+            frames,
         })
     }
 }
@@ -63,6 +72,12 @@ pub trait DriverProcess: Send {
     }
     /// Processes the server's current clock position; the borrowed cycle cannot escape.
     fn process(&mut self, cycle: &DriverCycle);
+
+    /// Observes this processor's first terminal fault on its serialized callback.
+    /// The driver publishes it atomically for control and blocks further callbacks.
+    fn failure(&self) -> Option<DriverProcessFailure> {
+        None
+    }
 }
 
 /// Initial scheduling preference of this processing owner, not server policy.
@@ -126,6 +141,12 @@ pub enum DriverProcessFailure {
     MissingPosition,
     InvalidPosition,
     DependencyQueue(i32),
+    FrameBudget {
+        native_frames: u32,
+        native_rate: u32,
+        stream_rate: u32,
+        capacity_frames: u32,
+    },
 }
 
 struct InputLink {
@@ -290,8 +311,7 @@ struct Callbacks<P> {
     state: AtomicI32,
     // One-way control-to-RT ownership publication, not per-cycle readiness.
     published: AtomicBool,
-    // First terminal callback cause; the atomic is the complete payload.
-    failure: AtomicI32,
+    failure: FailurePublication,
     // Main-loop events touch only state. Control prepares this cell before
     // publication; afterwards only RT_PROCESS borrows it.
     process: UnsafeCell<P>,
@@ -364,7 +384,7 @@ impl<P: DriverProcess> GraphDriver<P> {
             callbacks: Box::new(Callbacks {
                 state: AtomicI32::new(sys::pw_filter_state_PW_FILTER_STATE_UNCONNECTED),
                 published: AtomicBool::new(false),
-                failure: AtomicI32::new(0),
+                failure: FailurePublication::default(),
                 process: UnsafeCell::new(process),
                 input_port: std::ptr::null_mut(),
             }),
@@ -453,32 +473,29 @@ impl<P: DriverProcess> GraphDriver<P> {
         Ok(())
     }
 
-    /// True only while the native filter reports streaming; atomic-only observation.
+    /// True only while native streaming and the processor's terminal gate are healthy.
     #[must_use]
     pub fn ready(&self) -> bool {
-        self.callbacks.state.load(Ordering::Acquire)
-            == sys::pw_filter_state_PW_FILTER_STATE_STREAMING
+        !self.callbacks.failure.is_set()
+            && self.callbacks.state.load(Ordering::Acquire)
+                == sys::pw_filter_state_PW_FILTER_STATE_STREAMING
     }
 
-    /// Reports terminal native disconnection/error, excluding pause and negotiation.
+    /// Reports terminal native or processor failure, excluding pause and negotiation.
     #[must_use]
     pub fn failed(&self) -> bool {
-        matches!(
-            self.callbacks.state.load(Ordering::Acquire),
-            sys::pw_filter_state_PW_FILTER_STATE_UNCONNECTED
-                | sys::pw_filter_state_PW_FILTER_STATE_ERROR
-        )
+        self.callbacks.failure.is_set()
+            || matches!(
+                self.callbacks.state.load(Ordering::Acquire),
+                sys::pw_filter_state_PW_FILTER_STATE_UNCONNECTED
+                    | sys::pw_filter_state_PW_FILTER_STATE_ERROR
+            )
     }
 
     /// Reads the first callback failure without clearing its terminal gate.
     #[must_use]
     pub fn process_failure(&self) -> Option<DriverProcessFailure> {
-        match self.callbacks.failure.load(Ordering::Relaxed) {
-            0 => None,
-            1 => Some(DriverProcessFailure::MissingPosition),
-            2 => Some(DriverProcessFailure::InvalidPosition),
-            errno => Some(DriverProcessFailure::DependencyQueue(errno)),
-        }
+        self.callbacks.failure.read()
     }
 
     /// Drains native callbacks before reading their final failure cause on control.
@@ -556,7 +573,7 @@ unsafe extern "C" fn process<P: DriverProcess>(
     // SAFETY: GraphDriver pins this storage through callback drain.
     let callbacks = unsafe { &*data.cast::<Callbacks<P>>() };
     // Only serialized RT callbacks write this complete atomic payload.
-    if callbacks.failure.load(Ordering::Relaxed) != 0 {
+    if callbacks.failure.is_set() {
         return;
     }
     if !callbacks.input_port.is_null() {
@@ -567,7 +584,9 @@ unsafe extern "C" fn process<P: DriverProcess>(
             if !buffer.is_null() {
                 let result = sys::pw_filter_queue_buffer(callbacks.input_port, buffer);
                 if result < 0 {
-                    callbacks.failure.store(result, Ordering::Relaxed);
+                    callbacks
+                        .failure
+                        .publish(DriverProcessFailure::DependencyQueue(result));
                     return;
                 }
             }
@@ -578,14 +597,22 @@ unsafe extern "C" fn process<P: DriverProcess>(
     }
     // SAFETY: PipeWire supplies null or an IO position live for this invocation.
     let Some(position) = (unsafe { position.as_ref() }) else {
-        callbacks.failure.store(1, Ordering::Relaxed);
+        callbacks
+            .failure
+            .publish(DriverProcessFailure::MissingPosition);
         return;
     };
     let Some(cycle) = DriverCycle::from_position(position) else {
-        callbacks.failure.store(2, Ordering::Relaxed);
+        callbacks
+            .failure
+            .publish(DriverProcessFailure::InvalidPosition);
         return;
     };
     // SAFETY: publication transfers the prepared processor exclusively to RT;
     // control never accesses it again until native teardown has drained callbacks.
-    unsafe { &mut *callbacks.process.get() }.process(&cycle);
+    let process = unsafe { &mut *callbacks.process.get() };
+    process.process(&cycle);
+    if let Some(failure) = process.failure() {
+        callbacks.failure.publish(failure);
+    }
 }

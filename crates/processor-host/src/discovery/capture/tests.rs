@@ -39,6 +39,16 @@ fn timeout_kills_and_reaps_direct_child_without_waiting_for_stdout_eof() {
     );
 }
 
+#[test]
+fn discovery_parent_keeps_the_child_lifetime_pipe_open_until_completion() {
+    let command = fixture("if read unused; then printf '[]'; else exit 19; fi");
+    let error = capture_json_child::<Vec<String>>(command, Duration::from_millis(50)).unwrap_err();
+    assert!(
+        error.contains("timed out"),
+        "the live parent must not send EOF: {error}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn invalid_utf8_inside_json_is_rejected_instead_of_repaired() {

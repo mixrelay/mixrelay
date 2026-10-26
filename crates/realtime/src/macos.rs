@@ -762,7 +762,8 @@ fn futex_wake(result: i32, errno: i32) -> FutexWake {
     }
 }
 
-#[cfg(all(test, not(debug_assertions)))]
+#[cfg(test)]
+#[cfg(not(debug_assertions))]
 mod benchmark;
 #[cfg(test)]
 mod tests;

@@ -1,12 +1,19 @@
+//! Native device loopback with bounded RAW frame budgets and source-local faults.
 use mixrelay_audio_io::{
     frame_budget::FrameBudgetMapper,
     process::{ClockDomain, ProcessCycle},
     session::ClockAuthority,
 };
-use mixrelay_pipewire::{DriverCycle, DriverError, DriverProcess, GraphInputs, NativeStream};
+use mixrelay_pipewire::{
+    DriverCycle, DriverError, DriverProcess, DriverProcessFailure, GraphInputs, NativeStream,
+};
 
-// Equal to the existing native ring's maximum whole-block acceptance, not a new queue.
-pub(super) const MAX_FRAMES: usize = 32_768;
+mod budget;
+#[cfg(test)]
+mod tests;
+
+// Largest RAW transfer prepared off RT; retained input storage is a separate bound.
+pub(super) const MAX_FRAMES: usize = mixrelay_pipewire::StreamFormat::MAX_TRANSFER_FRAMES as usize;
 
 pub(super) struct Loopback {
     pub(super) render: Option<NativeStream>,
@@ -16,6 +23,8 @@ pub(super) struct Loopback {
     pub(super) render_channels: usize,
     pub(super) capture_channels: usize,
     pub(super) mapper: FrameBudgetMapper,
+    pub(super) sample_rate: u32,
+    pub(super) failure: Option<DriverProcessFailure>,
 }
 
 #[cfg(test)]
@@ -87,6 +96,13 @@ impl DriverProcess for Loopback {
     }
 
     fn process(&mut self, cycle: &DriverCycle) {
+        if self.failure.is_some() {
+            return;
+        }
+        if let Err(failure) = budget::validate(cycle, self.sample_rate) {
+            self.failure = Some(failure);
+            return;
+        }
         let Ok(mapped) = self.mapper.map(ProcessCycle {
             clock: ClockDomain {
                 authority: ClockAuthority::AudioServer,
@@ -99,13 +115,22 @@ impl DriverProcess for Loopback {
             monotonic_ns: Some(cycle.monotonic_ns),
             discontinuity: false,
         }) else {
+            self.failure = Some(DriverProcessFailure::InvalidPosition);
             return;
         };
         // Only complete native-clock frame budgets enter the same existing RAW FIFO.
         let Ok(frames) = usize::try_from(mapped.frames) else {
+            self.failure = Some(budget::failure(cycle, self.sample_rate));
             return;
         };
-        if frames == 0 || frames > MAX_FRAMES {
+        if frames == 0 {
+            if let Some(capture) = &mut self.capture {
+                capture.trigger_output();
+            }
+            return;
+        }
+        if frames > MAX_FRAMES {
+            self.failure = Some(budget::failure(cycle, self.sample_rate));
             return;
         }
         let input = &mut self.input[..frames * self.render_channels];
@@ -123,5 +148,8 @@ impl DriverProcess for Loopback {
             capture.write(output);
             capture.trigger_output();
         }
+    }
+    fn failure(&self) -> Option<DriverProcessFailure> {
+        self.failure
     }
 }

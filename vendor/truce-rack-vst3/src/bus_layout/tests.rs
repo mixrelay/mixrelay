@@ -1,5 +1,6 @@
 use super::*;
 use std::cell::{Cell, RefCell};
+use truce_rack_core::buffer::AudioBuffer;
 use truce_rack_core::buffer::BusRange;
 use vst3::{
     Class, ComWrapper,
@@ -851,12 +852,18 @@ fn mismatched_process_geometry_is_rejected_before_the_native_callback() {
     let mut outputs: [&mut [f32]; 1] = [&mut output];
     let ranges = [BusRange::new(0, 1)];
     let mut buffer = AudioBuffer::new(&input, &mut outputs, 2, &ranges, &ranges);
-    assert!(
-        with_buffers(&mut buffer, &layout, |_, _| panic!(
-            "must not call native processor"
-        ))
-        .is_err()
-    );
+    let heap = crate::test_support::count_heap_operations(|| {
+        assert!(matches!(
+            with_buffers(&mut buffer, &layout, |_, _| panic!(
+                "must not call native processor"
+            )),
+            Err(Error::Process {
+                fault: truce_rack_core::error::ProcessFault::InvalidAudioMapping,
+                ..
+            })
+        ));
+    });
+    assert_eq!(heap, (0, 0));
 }
 
 #[test]
@@ -896,4 +903,38 @@ fn stack_bus_binding_removes_twenty_thousand_allocations_over_ten_thousand_stere
     });
     assert_eq!(before, 20_000);
     assert_eq!(after, 0);
+}
+
+#[test]
+fn invalid_bus_spans_fail_before_native_call_without_heap_use() {
+    let native = ComWrapper::new(Native::new(&[SpeakerArr::kStereo], &[SpeakerArr::kStereo]));
+    let component = native.to_com_ptr::<IComponent>().unwrap();
+    let processor = native.to_com_ptr::<IAudioProcessor>().unwrap();
+    let layout = discover(&component, &processor).unwrap().remove(0);
+    let input: [&[f32]; 2] = [&[0.25; 2], &[-0.5; 2]];
+    let good = BusRange::new(0, 2);
+    for invalid in [BusRange::new(usize::MAX, 2), BusRange::new(1, 2)] {
+        for (input_range, output_range) in [(invalid, good), (good, invalid)] {
+            let mut left = [0.75_f32; 2];
+            let mut right = [0.75_f32; 2];
+            let mut output: [&mut [f32]; 2] = [&mut left, &mut right];
+            let inputs = [input_range];
+            let outputs = [output_range];
+            let mut buffer = AudioBuffer::new(&input, &mut output, 2, &inputs, &outputs);
+            let heap = crate::test_support::count_heap_operations(|| {
+                assert!(matches!(
+                    with_buffers(&mut buffer, &layout, |_, _| panic!(
+                        "invalid span reached native DSP"
+                    )),
+                    Err(Error::Process {
+                        fault: truce_rack_core::error::ProcessFault::InvalidAudioMapping,
+                        ..
+                    })
+                ));
+            });
+            assert_eq!(heap, (0, 0));
+            assert_eq!(left.map(f32::to_bits), [0.75_f32.to_bits(); 2]);
+            assert_eq!(right.map(f32::to_bits), [0.75_f32.to_bits(); 2]);
+        }
+    }
 }

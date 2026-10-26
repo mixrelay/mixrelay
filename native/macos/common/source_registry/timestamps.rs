@@ -7,8 +7,25 @@ impl SourceRegistry {
     /// Latest safe start coordinate for an active source at the requested graph rate.
     #[must_use]
     pub fn source_time(&self, token: u64, rate: u32, frames: u32) -> Option<u64> {
+        self.source_time_for_credit(token, rate, frames, frames)
+    }
+
+    /// Start coordinate covering the clock's remaining graph-frame credit.
+    /// Read quantum and outstanding credit are distinct; the coordinate must
+    /// remain inside retained PCM even after a delayed consumer drains a burst.
+    #[must_use]
+    pub fn source_time_for_credit(
+        &self,
+        token: u64,
+        rate: u32,
+        frames: u32,
+        available_frames: u32,
+    ) -> Option<u64> {
         let read = self.read(token);
         let source = read.source()?;
+        if frames > source.capacity || available_frames > source.capacity {
+            return None;
+        }
         let clock = source.mapping.clock();
         // SAFETY: the graph consumer owns the requested rate; this publishes
         // only atomics so a waiting pump can acknowledge the initial format.
@@ -35,7 +52,9 @@ impl SourceRegistry {
                     .consumer_burst_frames
                     .load(Ordering::Acquire)
                     .max(frames),
-            );
+            )
+            .max(available_frames)
+            .min(source.capacity);
         let frame = stats
             .published_through_frame
             .checked_sub(u64::from(reserve))?;

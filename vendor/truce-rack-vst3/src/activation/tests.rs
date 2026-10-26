@@ -324,7 +324,7 @@ fn drop_cleanup_retries_deactivation_and_disables_buses_before_terminate() {
     assert!(deactivate(&component, &processor, &layout, &mut processing).is_err());
     assert!(processing, "failed native stop must remain retryable");
 
-    crate::deactivate_before_terminate(&component, &processor, Some(&layout), &mut processing);
+    super::deactivate_before_terminate(&component, &processor, Some(&layout), &mut processing);
     assert!(!processing);
     assert_eq!(unsafe { component.terminate() }, vst3::Steinberg::kResultOk);
 

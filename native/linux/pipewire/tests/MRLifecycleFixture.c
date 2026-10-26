@@ -394,7 +394,7 @@ static void native_lifecycle(enum spa_audio_format format) {
     MRPWConnectionHandles source_handles = mr_pw_connection_handles(source_connection);
     MRPWConnectionHandles observer_handles = mr_pw_connection_handles(observer_connection);
     f.source = mr_pw_stream_open(&source_handles, "io.mixrelay.fixture.lifecycle", "Owned lifecycle fixture",
-                                NULL, 1, 2, 48000, 128, true);
+                                NULL, 1, 2, 48000, 128, true, 32768);
     assert(f.source);
     assert(mr_pw_stream_supported_formats(f.source) == 15);
     select_native_format(f.source, format);
@@ -407,7 +407,7 @@ static void native_lifecycle(enum spa_audio_format format) {
     char serial[32];
     source_serial(f.source, serial);
     f.observer = mr_pw_stream_open(&observer_handles, "io.mixrelay.fixture.lifecycle.observer", "Owned observer",
-                                  serial, 3, 2, 48000, 128, false);
+                                  serial, 3, 2, 48000, 128, false, 32768);
     assert(f.observer);
     assert(mr_pw_stream_supported_formats(f.observer) == 1);
     assert(mr_pw_connection_start(observer_connection) == 0);

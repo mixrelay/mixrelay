@@ -14,6 +14,28 @@ fn partial_native_credit_preserves_every_audible_frame_through_acquisition_align
     input.verify();
 }
 
+#[test]
+fn deferred_graph_consumption_keeps_all_pcm_already_covered_by_native_credit() {
+    for batch in [4_096, 16_384] {
+        let mut input = AlignedInput::new();
+        let measured = allocation_counter::measure(|| input.run_batched(batch));
+        assert_eq!(measured.count_total, 0);
+        input.verify();
+    }
+}
+
+#[test]
+fn preallocated_retention_recovers_four_seconds_and_a_full_ring_of_quiet_and_signal() {
+    let capacity = mixrelay_audio_io::retention::RING_FRAMES;
+    for batch in [192_000, u64::from(capacity)] {
+        let mut input = AlignedInput::with_capacity(capacity);
+        input.repeat_signal = true;
+        let measured = allocation_counter::measure(|| input.run_batched(batch));
+        assert_eq!(measured.count_total, 0);
+        input.verify();
+    }
+}
+
 struct AlignedInput {
     registry: SourceRegistry,
     transport: SourceTransport,
@@ -27,6 +49,7 @@ struct AlignedInput {
     consumed: u64,
     published: u64,
     playhead: u64,
+    repeat_signal: bool,
     scratch: [f32; 256],
     input: [f32; 256],
     times: [u64; 128],
@@ -35,13 +58,17 @@ struct AlignedInput {
 }
 impl AlignedInput {
     fn new() -> Self {
+        Self::with_capacity(16_384)
+    }
+
+    fn with_capacity(capacity: u32) -> Self {
         let nanos = Arc::new(AtomicU64::new(0));
         let registry = SourceRegistry::with_clock(Box::new(Clock {
             origin: Instant::now(),
             nanos: nanos.clone(),
         }));
         let mut request = SourceRequest {
-            capacity_frames: 16_384,
+            capacity_frames: capacity,
             channels: 2,
             transport_version: VERSION,
             ..SourceRequest::default()
@@ -55,10 +82,10 @@ impl AlignedInput {
         registry.read_audio(token, &mut output, 128, 48_000);
         assert!(registry.set_clock_master(token, true));
         let clock = transport.clock().unwrap();
-        let converter = Converter::new(&mut transport, clock, (48_000, 2, 16_384))
+        let converter = Converter::new(&mut transport, clock, (48_000, 2, capacity))
             .unwrap()
             .unwrap();
-        let (writer, queues) = client_grants();
+        let (writer, queues) = client_grants_with_capacity(capacity);
         Self {
             registry,
             transport,
@@ -72,11 +99,12 @@ impl AlignedInput {
             consumed: 0,
             published: 0,
             playhead: 0,
+            repeat_signal: false,
             scratch: [0.0; 256],
             input: [0.0; 256],
             times: [0; 128],
             output,
-            captured: Vec::with_capacity(50_000 * 2),
+            captured: Vec::with_capacity((capacity as usize + 50_000) * 2),
         }
     }
 
@@ -109,8 +137,8 @@ impl AlignedInput {
         while self.published < self.playhead {
             let pcm: [f32; 1024] = std::array::from_fn(|index| {
                 let frame = self.published + index as u64 / 2;
-                let value = if audible(frame) {
-                    f32::from(u16::try_from(frame).unwrap()) / 65_536.0
+                let value = if self.audible(frame) {
+                    codeword(frame)
                 } else {
                     0.0
                 };
@@ -118,6 +146,52 @@ impl AlignedInput {
             });
             assert!(self.writer.write(self.published, &pcm, 512));
             self.published += 512;
+        }
+    }
+
+    fn run_batched(&mut self, batch: u64) {
+        for (step, batch) in std::iter::once(2_048)
+            .chain(std::iter::repeat_n(
+                batch,
+                usize::try_from(38_912_u64.div_ceil(batch)).unwrap(),
+            ))
+            .enumerate()
+        {
+            self.playhead += batch;
+            self.publish_callbacks();
+            self.nanos
+                .store(self.playhead * 1_000_000_000 / 48_000, Ordering::Relaxed);
+            while let Some(window) = self.mixer.window(&self.queues, |_| Some(self.playhead)) {
+                self.transfer(window);
+            }
+            let clock = self.registry.clock(self.token).unwrap();
+            if step == 0 {
+                // The pacing consumer attaches during quiet priming. Later publications
+                // remain retained while the independently scheduled graph is delayed.
+                assert_eq!(clock.native_frames, 2_048);
+                self.consumed = clock.native_frames;
+                continue;
+            }
+            assert_eq!(clock.native_frames - self.consumed, batch);
+            while self.consumed < clock.native_frames {
+                let first_frame = self.consumed - 2_048;
+                self.capture_cycle(
+                    ProcessCycle {
+                        clock: ClockDomain {
+                            authority: ClockAuthority::Device,
+                            id: 3,
+                            epoch: clock.epoch,
+                        },
+                        sample_rate: 48_000,
+                        frames: 128,
+                        first_frame,
+                        monotonic_ns: None,
+                        discontinuity: first_frame == 0,
+                    },
+                    u32::try_from(clock.native_frames - self.consumed).unwrap(),
+                );
+                self.consumed += 128;
+            }
         }
     }
 
@@ -168,22 +242,27 @@ impl AlignedInput {
                 monotonic_ns: None,
                 discontinuity: self.consumed == 0,
             };
-            let frontier = self
-                .registry
-                .source_time(self.token, 48_000, frames)
-                .map(|time| CaptureFrontier::new(self.token, time));
-            let period = self
-                .registry
-                .source_period(self.token)
-                .unwrap_or(1e9 / 48_000.0);
-            let output = &mut self.output[..frames as usize * 2];
-            output.fill(0.0);
-            if let Some(time) = self.alignment.begin(cycle, frontier, period) {
-                self.registry.read_at(self.token, output, 48_000, time);
-            }
-            self.captured.extend_from_slice(output);
+            self.capture_cycle(cycle, frames);
             self.consumed += u64::from(frames);
         }
+    }
+
+    fn capture_cycle(&mut self, cycle: ProcessCycle, available_frames: u32) {
+        let frames = cycle.frames;
+        let frontier = self
+            .registry
+            .source_time_for_credit(self.token, 48_000, frames, available_frames)
+            .map(|time| CaptureFrontier::new(self.token, time));
+        let period = self
+            .registry
+            .source_period(self.token)
+            .unwrap_or(1e9 / 48_000.0);
+        let output = &mut self.output[..frames as usize * 2];
+        output.fill(0.0);
+        if let Some(time) = self.alignment.begin(cycle, frontier, period) {
+            self.registry.read_at(self.token, output, 48_000, time);
+        }
+        self.captured.extend_from_slice(output);
     }
 
     #[expect(
@@ -201,8 +280,8 @@ impl AlignedInput {
             })
             .collect();
         let expected: Vec<_> = (0..self.playhead)
-            .filter(|&frame| audible(frame))
-            .map(|frame| f32::from(u16::try_from(frame).unwrap()) / 65_536.0)
+            .filter(|&frame| self.audible(frame))
+            .map(codeword)
             .collect();
         assert_eq!(
             actual.len(),
@@ -216,7 +295,7 @@ impl AlignedInput {
             );
         }
         for adjacent in actual.windows(2) {
-            if adjacent[1].1 - adjacent[0].1 == 1.0 / 65_536.0 {
+            if adjacent[1].1 - adjacent[0].1 == f32::EPSILON / 2.0 {
                 assert_eq!(
                     adjacent[1].0,
                     adjacent[0].0 + 1,
@@ -225,8 +304,17 @@ impl AlignedInput {
             }
         }
     }
+
+    fn audible(&self, frame: u64) -> bool {
+        let frame = if self.repeat_signal {
+            frame % 40_960
+        } else {
+            frame
+        };
+        (4_096..20_480).contains(&frame) || (24_576..40_960).contains(&frame)
+    }
 }
 
-fn audible(frame: u64) -> bool {
-    (4_096..20_480).contains(&frame) || (24_576..40_960).contains(&frame)
+fn codeword(frame: u64) -> f32 {
+    f32::from_bits(0x3f00_0000 + u32::try_from(frame).unwrap())
 }

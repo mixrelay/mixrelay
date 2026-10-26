@@ -10,7 +10,6 @@
 #include <unistd.h>
 
 enum {
-    MR_RING_FRAMES = 32768,
     MR_NATIVE_CAPTURE_WRITE = 0,
     MR_NATIVE_OUTPUT_READ = 1,
     MR_ENGINE_CAPTURE_READ = 2,
@@ -39,6 +38,7 @@ struct MRPWStream {
     bool native_output, manual_output;
     _Atomic int state;
     _Atomic bool format_valid;
+    _Atomic int buffer_return_error;
     _Atomic(struct spa_io_position *) position;
     _Atomic uint64_t clock_snapshot;
     _Atomic uint64_t format_snapshot;
@@ -78,6 +78,7 @@ static uint32_t stream_stride(MRPWStream *s) {
 }
 
 static void initialize_transfer_observations(MRPWStream *s) {
+    atomic_init(&s->buffer_return_error, 0);
     atomic_init(&s->position_snapshot, 0);
     atomic_init(&s->engine_read_frames, 0);
     atomic_init(&s->consumer_discard_calls, 0);
@@ -145,6 +146,8 @@ static int set_stream_position(struct spa_loop *loop, bool async, uint32_t seq,
     MRPWStream *s = user_data;
     struct spa_io_position *position = NULL;
     if (size == sizeof(position)) memcpy(&position, data, sizeof(position));
+    if (!s->native_output && atomic_load_explicit(&s->position, memory_order_acquire) != position)
+        restart_stream_ring(s);
     atomic_store_explicit(&s->position, position, memory_order_release);
     atomic_store_explicit(&s->clock_snapshot, 0, memory_order_release);
     atomic_store_explicit(&s->position_snapshot, 0, memory_order_release);
@@ -244,12 +247,18 @@ static void capture_buffer(MRPWStream *s, struct spa_data *pcm, uint32_t graph_f
 }
 
 static void stream_process_buffer(MRPWStream *s) {
+    if (atomic_load_explicit(&s->buffer_return_error, memory_order_acquire) < 0) return;
     /* Only the synchronized data loop dereferences borrowed IO memory. Rust
      * receives an atomic value copy, never a native pointer. */
     struct spa_io_position *position = atomic_load_explicit(&s->position, memory_order_acquire);
     uint64_t snapshot = 0;
     if (position && position->clock.rate.num == 1)
         snapshot = ((uint64_t)position->clock.id << 32) | position->clock.rate.denom;
+    /* Native inputs cannot carry PCM across clock-domain replacement. A
+     * quantum-only change or scheduling delay keeps the retained backlog. */
+    if (!s->native_output &&
+        atomic_load_explicit(&s->clock_snapshot, memory_order_acquire) != snapshot)
+        restart_stream_ring(s);
     atomic_store_explicit(&s->position_snapshot,
                           snapshot ? position->clock.position : 0, memory_order_release);
     atomic_store_explicit(&s->clock_snapshot, snapshot, memory_order_release);
@@ -279,7 +288,12 @@ static void stream_process_buffer(MRPWStream *s) {
     if (s->native_output) playback_buffer(s, b, d, graph_frames);
     else capture_buffer(s, d, graph_frames);
 done:
-    pw_stream_queue_buffer(s->stream, b);
+    const int returned = pw_stream_queue_buffer(s->stream, b);
+    if (returned < 0) {
+        /* The data-loop callback is the sole writer. This acquisition stays
+         * faulted until control retires it; a replacement owns further PCM. */
+        atomic_store_explicit(&s->buffer_return_error, returned, memory_order_release);
+    }
 }
 
 #ifdef MIXRELAY_LAB_PROCESS_OBSERVER
@@ -330,15 +344,16 @@ static uint32_t build_stream_formats(MRPWStream *s, struct spa_pod_builder *buil
 
 MRPWStream *mr_pw_stream_open(const MRPWConnectionHandles *connection, const char *name, const char *description,
                              const char *target, uint32_t mode, uint32_t channels,
-                             uint32_t sample_rate, uint32_t block_frames, bool manual_output) {
+                             uint32_t sample_rate, uint32_t block_frames, bool manual_output,
+                             uint32_t ring_frames) {
     return mr_pw_stream_open_pcm(connection, name, description, target, mode, channels,
-                                 sample_rate, block_frames, manual_output, 0);
+                                 sample_rate, block_frames, manual_output, 0, ring_frames);
 }
 
 MRPWStream *mr_pw_stream_open_pcm(const MRPWConnectionHandles *connection, const char *name, const char *description,
                                  const char *target, uint32_t mode, uint32_t channels,
                                  uint32_t sample_rate, uint32_t block_frames, bool manual_output,
-                                 uint32_t sample_format) {
+                                 uint32_t sample_format, uint32_t ring_frames) {
     if (!connection || !connection->core || !connection->thread_loop) return NULL;
     if (!name || !description || mode > MR_PW_GRAPH_CONTRIBUTION ||
         (mode >= MR_PW_APPLICATION_CAPTURE && (!target || !target[0]))) return NULL;
@@ -358,7 +373,7 @@ MRPWStream *mr_pw_stream_open_pcm(const MRPWConnectionHandles *connection, const
     s->manual_output = s->native_output && manual_output;
     s->channels = channels; s->sample_rate = sample_rate;
     s->loop = connection->thread_loop;
-    if (!mr_pcm_ring_init(&s->ring, channels, MR_RING_FRAMES)) goto fail;
+    if (!mr_pcm_ring_init(&s->ring, channels, ring_frames)) goto fail;
     struct pw_properties *p = pw_properties_new(
         PW_KEY_NODE_NAME, name, PW_KEY_NODE_DESCRIPTION, description,
         PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, s->native_output ? "Playback" : "Capture",
@@ -456,23 +471,31 @@ int mr_pw_stream_activate_capture(MRPWStream *s) {
     pw_thread_loop_unlock(s->loop);
     return result;
 }
+int mr_pw_stream_return_error(MRPWStream *s) {
+    return atomic_load_explicit(&s->buffer_return_error, memory_order_acquire);
+}
 int mr_pw_stream_ready(MRPWStream *s) {
+    if (mr_pw_stream_return_error(s) < 0) return 0;
     int state = atomic_load_explicit(&s->state, memory_order_acquire);
     return state == PW_STREAM_STATE_PAUSED || state == PW_STREAM_STATE_STREAMING;
 }
 int mr_pw_stream_failed(MRPWStream *s) {
+    if (mr_pw_stream_return_error(s) < 0) return 1;
     int state = atomic_load_explicit(&s->state, memory_order_acquire);
     return state == PW_STREAM_STATE_UNCONNECTED || state == PW_STREAM_STATE_ERROR;
 }
 int mr_pw_stream_connected(MRPWStream *s) {
-    return atomic_load_explicit(&s->state, memory_order_acquire) == PW_STREAM_STATE_STREAMING;
+    return mr_pw_stream_return_error(s) == 0 &&
+        atomic_load_explicit(&s->state, memory_order_acquire) == PW_STREAM_STATE_STREAMING;
 }
 int mr_pw_stream_input_activity(MRPWStream *s) {
+    if (mr_pw_stream_return_error(s) < 0) return 0;
     int state = atomic_load_explicit(&s->state, memory_order_acquire);
     return state == PW_STREAM_STATE_STREAMING ? 2 : state == PW_STREAM_STATE_PAUSED ? 1 : 0;
 }
 uint64_t mr_pw_stream_clock(MRPWStream *s) {
-    if (!atomic_load_explicit(&s->format_valid, memory_order_acquire) ||
+    if (mr_pw_stream_return_error(s) < 0 ||
+        !atomic_load_explicit(&s->format_valid, memory_order_acquire) ||
         atomic_load_explicit(&s->state, memory_order_acquire) != PW_STREAM_STATE_STREAMING) return 0;
     return atomic_load_explicit(&s->clock_snapshot, memory_order_acquire);
 }
@@ -482,14 +505,16 @@ uint64_t mr_pw_stream_format(MRPWStream *s) {
 }
 uint64_t mr_pw_stream_native_format(MRPWStream *s) {
     /* A single atomic tuple also publishes zero on invalid/unavailable Format. */
-    if (!atomic_load_explicit(&s->format_valid, memory_order_acquire)) return 0;
+    if (mr_pw_stream_return_error(s) < 0 ||
+        !atomic_load_explicit(&s->format_valid, memory_order_acquire)) return 0;
     return atomic_load_explicit(&s->format_snapshot, memory_order_acquire);
 }
 uint32_t mr_pw_stream_supported_formats(MRPWStream *s) {
     return s->supported_formats;
 }
 uint64_t mr_pw_stream_quantum(MRPWStream *s) {
-    if (!atomic_load_explicit(&s->format_valid, memory_order_acquire) ||
+    if (mr_pw_stream_return_error(s) < 0 ||
+        !atomic_load_explicit(&s->format_valid, memory_order_acquire) ||
         atomic_load_explicit(&s->state, memory_order_acquire) != PW_STREAM_STATE_STREAMING) return 0;
     return atomic_load_explicit(&s->quantum_snapshot, memory_order_acquire);
 }
@@ -513,9 +538,16 @@ MRPWTransferCounters mr_pw_stream_counters(MRPWStream *s) {
 uint64_t mr_pw_stream_capture_failures(MRPWStream *s) {
     if (s->native_output) return 0;
     return atomic_load_explicit(&s->failures[MR_NATIVE_CAPTURE_WRITE].rejected_calls,
-                                memory_order_acquire);
+                                memory_order_acquire) +
+        atomic_load_explicit(&s->native_restart_calls, memory_order_acquire) +
+        (mr_pw_stream_return_error(s) < 0);
 }
 uint32_t mr_pw_stream_read(MRPWStream *s, float *samples, uint32_t frames) {
+    if (mr_pw_stream_return_error(s) < 0) {
+        if (samples && frames)
+            memset(samples, 0, (size_t)frames * s->channels * sizeof(float));
+        return 0;
+    }
     uint32_t transferred = mr_pcm_ring_read(&s->ring, samples, frames);
     if (transferred)
         atomic_fetch_add_explicit(&s->engine_read_frames, transferred, memory_order_relaxed);
@@ -523,11 +555,14 @@ uint32_t mr_pw_stream_read(MRPWStream *s, float *samples, uint32_t frames) {
     return transferred;
 }
 uint32_t mr_pw_stream_write(MRPWStream *s, const float *samples, uint32_t frames) {
+    if (mr_pw_stream_return_error(s) < 0) return 0;
     uint32_t transferred = mr_pcm_ring_write(&s->ring, samples, frames);
     record_rejected(s, MR_ENGINE_OUTPUT_WRITE, frames, transferred);
     return transferred;
 }
 int mr_pw_stream_trigger_output(MRPWStream *s) {
+    const int error = mr_pw_stream_return_error(s);
+    if (error < 0) return error;
     int result;
     if (!s->manual_output) result = -EINVAL;
     else if (atomic_load_explicit(&s->state, memory_order_acquire) != PW_STREAM_STATE_STREAMING)
