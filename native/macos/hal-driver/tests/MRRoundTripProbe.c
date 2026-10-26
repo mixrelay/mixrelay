@@ -234,17 +234,20 @@ static void mr_play(MRProbe *probe, AudioBufferList *out, const AudioTimeStamp *
         atomic_fetch_add(&probe->out.inconsistent_buffers, 1U);
         return;
     }
-    mr_note(&probe->out, time, frames, first);
+    if (first < probe->run_frames) mr_note(&probe->out, time, frames, first);
 }
 
 static void mr_record(MRProbe *probe, const AudioBufferList *in, const AudioTimeStamp *time) {
     if (isnan(atomic_load(&probe->origin))) return;
+    const uint64_t first = atomic_load(&probe->recorded_frames);
+    // The audio owner closes the capture horizon independently of control-side
+    // AudioDeviceStop scheduling. Keep the whole final callback in the headroom.
+    if (probe->run_frames != 0U && first >= probe->run_frames) return;
     const uint32_t frames = mr_frames(in);
     if (frames == 0U) {
         atomic_fetch_add(&probe->in.inconsistent_buffers, 1U);
         return;
     }
-    const uint64_t first = atomic_load(&probe->recorded_frames);
     if (first + frames > probe->capacity) {
         atomic_store(&probe->overflow, 1U);
         return;
@@ -1149,6 +1152,11 @@ static void mr_report_json(const MRProbe *probe, const MRAnalysis *a, const MRRe
            a->max_error, (unsigned long long)a->locks, (unsigned long long)a->slips,
            (long long)a->slip_frames, (unsigned long long)a->map_changes,
            mr_identity(probe, a) ? "true" : "false", (unsigned long long)a->timed);
+    printf("\"captureIntegrity\":{\"recordingOverflow\":%u,\"outputDroppedChunks\":%u,"
+           "\"inputDroppedChunks\":%u,\"outputInconsistentBuffers\":%u,\"inputInconsistentBuffers\":%u},",
+           atomic_load(&probe->overflow), atomic_load(&probe->out.dropped_chunks),
+           atomic_load(&probe->in.dropped_chunks), atomic_load(&probe->out.inconsistent_buffers),
+           atomic_load(&probe->in.inconsistent_buffers));
     if (a->timed > 0U) {
         printf("\"latencyMs\":{\"min\":%.3f,\"max\":%.3f,\"mean\":%.3f},", a->ms_min, a->ms_max,
                a->ms_sum / (double)a->timed);
@@ -1593,6 +1601,35 @@ static bool mr_self_test_impulses(void) {
     return ok;
 }
 
+static bool mr_self_test_capture_horizon(void) {
+    float captured[24] = {0};
+    const float pcm[8] = {0.25F, -0.25F, 0.5F, -0.5F, 0.75F, -0.75F, 1.0F, -1.0F};
+    MRChunk chunks[4] = {0};
+    MRProbe probe = {.channels = 2U, .capacity = 12U, .run_frames = 6U,
+                     .recorded = captured};
+    probe.in.chunks = chunks;
+    probe.in.capacity = 4U;
+    atomic_store(&probe.origin, 0.0);
+    const AudioBufferList input = {.mNumberBuffers = 1U,
+        .mBuffers = {{.mNumberChannels = 2U, .mDataByteSize = sizeof(pcm), .mData = (void *)pcm}}};
+    const AudioTimeStamp time = {.mFlags = kAudioTimeStampSampleTimeValid};
+    // Control-side scheduling can delay Stop after the requested capture horizon.
+    // Retain the complete final callback, then stop recording on the audio owner.
+    for (unsigned callback = 0U; callback < 20U; ++callback) mr_record(&probe, &input, &time);
+    bool ok = mr_expect(atomic_load(&probe.recorded_frames) == 8U &&
+        atomic_load(&probe.in.count) == 2U && mr_incomplete(&probe) == 0U,
+        "late control stop cannot overflow an already complete capture");
+    ok &= mr_expect(memcmp(captured, pcm, sizeof(pcm)) == 0 &&
+        memcmp(captured + 8U, pcm, sizeof(pcm)) == 0,
+        "the complete final callback remains in the capture");
+    probe.run_frames = 32U;
+    mr_record(&probe, &input, &time);
+    mr_record(&probe, &input, &time);
+    ok &= mr_expect(atomic_load(&probe.overflow) != 0U,
+        "overflow before the requested horizon still invalidates the measurement");
+    return ok;
+}
+
 static int mr_self_test(void) {
     const bool impulses = mr_self_test_impulses();
     const bool jitter = mr_self_test_impulse_jitter();
@@ -1615,7 +1652,8 @@ static int mr_self_test(void) {
         capture = fclose(file) == 0 && capture;
     }
     capture = mr_expect(capture, "raw capture preserves all frames and damaged silence");
-    const bool passed = impulses && jitter && damage && channels && anchor && repeats && early && signal && capture;
+    const bool horizon = mr_self_test_capture_horizon();
+    const bool passed = impulses && jitter && damage && channels && anchor && repeats && early && signal && capture && horizon;
     printf("self test %s\n", passed ? "passed" : "FAILED");
     return passed ? 0 : 1;
 }

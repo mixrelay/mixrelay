@@ -19,14 +19,24 @@ fn producer_jitter_does_not_move_the_shared_cursor_and_restart_reacquires() {
     let base = 1_000_000_000_u64;
     for index in 0..1000_u32 {
         let frontier = Some(base + u64::from(index / 8) * 8 * 64 * 1_000_000_000 / 48_000);
-        let actual = alignment.begin(cycle, frontier, 1e9 / 48_000.0).unwrap();
+        let actual = alignment
+            .begin(
+                cycle,
+                frontier.map(|time| CaptureFrontier::new(1, time)),
+                1e9 / 48_000.0,
+            )
+            .unwrap();
         let expected = base + u64::from(index) * 64 * 1_000_000_000 / 48_000;
         assert!(actual.abs_diff(expected) <= 1);
         cycle.first_frame += 64;
     }
     cycle.clock.epoch += 1;
     assert_eq!(
-        alignment.begin(cycle, Some(base * 3), 1e9 / 48_000.0),
+        alignment.begin(
+            cycle,
+            Some(CaptureFrontier::new(1, base * 3)),
+            1e9 / 48_000.0
+        ),
         Some(base * 3)
     );
 }

@@ -3,6 +3,7 @@
 mod tests;
 use super::endpoint_service;
 use mixrelay_audio_engine::{ExternalBinding, ExternalIo};
+use mixrelay_audio_io::capture_alignment::CaptureFrontier;
 use mixrelay_audio_io::process::{ProcessCycle, TransferOutcome};
 
 pub(super) struct MacEngineExternalIo<'a> {
@@ -65,7 +66,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
                 .set_binding_active(binding.node_id().as_str(), false, enabled);
         }
         let mut active = 0;
-        let mut latest = None;
+        let mut latest = None::<CaptureFrontier>;
         let mut source_period = None;
         let count = controls
             .sources()
@@ -75,11 +76,10 @@ impl ExternalIo for MacEngineExternalIo<'_> {
             .count();
         self.devices
             .reserve_capture_alignment(cycle.sample_rate, cycle.frames, count > 0);
-        for (binding, enabled) in controls
+        for (binding, _) in controls
             .sources()
             .filter(|(binding, enabled)| *enabled && binding.is_routed_source())
         {
-            let _ = enabled;
             let id = binding.node_id().as_str();
             let token = binding_token(binding);
             let sources = binding_sources(binding, self.sources);
@@ -90,8 +90,13 @@ impl ExternalIo for MacEngineExternalIo<'_> {
             if self.source_active(binding) {
                 active += 1;
             }
-            if let Some(time) = time {
-                latest = Some(latest.map_or(time, |old: u64| old.min(time)));
+            if let Some(time) = time
+                && latest.is_none_or(|old| time < old.nanos())
+            {
+                let epoch = self.source_epoch(binding).unwrap_or(0);
+                let identity =
+                    hash_source(token.to_ne_bytes().into_iter().chain(epoch.to_ne_bytes()));
+                latest = Some(CaptureFrontier::new(identity, time));
             }
             source_period =
                 source_period.or_else(|| sources.and_then(|sources| sources.source_period(token)));

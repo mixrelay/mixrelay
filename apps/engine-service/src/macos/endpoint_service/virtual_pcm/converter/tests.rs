@@ -1,3 +1,4 @@
+mod alignment;
 mod handoff;
 use super::*;
 use mixrelay_macos_transport::{

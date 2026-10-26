@@ -143,6 +143,12 @@ HAL 번들에 선언하며 엔진은 audio-server UID의 grant 게시와 console
 정지한 virtual source의 남은 PCM은 읽지 않으며, 연결 전 포맷 요청은 허용한다. 장치·client의
 제거는 grant 무효화와 worker 종료·join을 거친 뒤 VM·변환 버퍼를 회수한다.
 
+`CaptureFrontier`는 최소 안전 좌표를 제공한 입력의 신원·epoch와 획득 시각을 묶는다.
+`CaptureAlignment`는 graph frame credit에 따라 연속 획득 좌표를 유지한다. 같은 입력의
+스케줄링 burst·reserve 증가로 frontier가 과거로 움직여도 이미 읽는 좌표를 되돌리지 않는다.
+다른 입력이 현재 좌표보다 오래된 frontier로 합류하거나 clock·rate·graph 연속성이 바뀌면
+공통 좌표를 다시 획득한다. 개별 source reader의 cursor는 앞으로만 진행한다.
+
 `HalIoContext`는 기존 공유 매핑의 클럭·epoch·producer activity를 게시한다.
 공유 PCM 링은 현재 매핑 형식의 수명 메타데이터를 보존하며 클라이언트 PCM의 저장소로 사용하지 않는다.
 이 소유자는 PCM의 복사·합산이나 채널 변환 scratch를 관리하지 않는다.
