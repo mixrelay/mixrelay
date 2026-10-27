@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/v17.3.0/schemas/config.json",
+  "bootstrap-sha": "c198dd16b4f6750f74a48d5d4e8a414f7534899f",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "include-component-in-tag": false,
+      "skip-changelog": true,
+      "draft": true,
+      "force-tag-creation": true,
+      "pull-request-header": "Merging this PR tags the merge commit and creates a draft release. Build and qualify the installers from that tag; publish the release only after `Qualify exact release artifacts` succeeds and its files are attached."
+    }
+  }
+}
