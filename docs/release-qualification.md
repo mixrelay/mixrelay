@@ -294,12 +294,19 @@ Collection preserves the PCM failure and never repeats the signal.
 
 macOS PCM acceptance starts at the product's native boundary. `AUDIO-01` compares
 the actual HAL writes with every observed HAL read. Received source frames must
-retain their exact sample bits; unpublished positions must return zero. Admission
-rejection, changed samples, incorrect availability, incomplete trace retention and
+retain their exact sample bits; unpublished positions must return zero. Rejection
+of a valid request, changed samples, incorrect availability, incomplete trace retention and
 ambiguous concurrent publication prevent acceptance. Each compared source segment
 must contain at least 24,000 distinct published and read frames. Native timestamps
 establish publication before a read; a callback that the OS never delivers does
 not create expected input for the product.
+
+HAL trace v5 distinguishes null host storage and requests beyond the prepared
+1,048,576-frame retention from product transfer failures. Typed counts must cover
+every extent rejection, and the last rejected size, pointer presence and direction
+remain in the report. Safe rejection of invalid host storage creates no expected
+PCM; rejecting a valid coalesced request still fails. Incomplete classification
+cannot qualify the case. Older trace versions retain their unclassified failures.
 
 `native-probe.stdout.json`, callback timing and raw capture preserve the original
 OS roundtrip counters. `native-signal.json` reports them under `hostRoundtrip`,

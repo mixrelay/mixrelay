@@ -6,6 +6,24 @@ import { mergePcmRanges } from './pcm-ranges.mjs';
 const overlaps = (a, b) => a[2] < b[2] + b[3] && b[2] < a[2] + a[3];
 const supplied = row => row[4] === 1 && row[5] === row[3];
 
+function inspectAdmission(admission, version, violations, rejectedHostRequests, evidenceIssues) {
+  if (!admission) return;
+  const countsComplete = version < 5 || admission.nullBuffer + admission.oversizedFrames === admission.extent;
+  if (!countsComplete) evidenceIssues.push({ reason: 'incomplete_extent_classification', admission });
+  if (admission.extent && countsComplete) {
+    const extent = admission.lastRejectedExtent;
+    const classified = version >= 5 && admission.nullBuffer + admission.oversizedFrames === admission.extent
+      && (!extent.bufferPresent ? admission.nullBuffer > 0
+        : extent.frames > 1048576 && admission.oversizedFrames > 0);
+    if (classified) rejectedHostRequests.push({ reason: 'invalid_buffer_extent', count: admission.extent,
+      nullBuffer: admission.nullBuffer, oversizedFrames: admission.oversizedFrames, lastRejectedExtent: extent });
+    else violations.push({ boundary: 'hal_admission', reason: 'extent', count: admission.extent,
+      lastRejectedExtent: extent ?? null });
+  }
+  for (const stage of ['timestamp', 'stream', 'frozen', 'inactive', 'native'])
+    if (admission[stage]) violations.push({ boundary: 'hal_admission', reason: stage, count: admission[stage] });
+}
+
 function referenceBits(source, origin, channels) {
   return (deviceFrame, channel) => {
     const frame = deviceFrame - origin;
@@ -54,7 +72,7 @@ export function analyseHalPcmContract(trace, { source, origin, channels, sourceQ
   assert.ok(Number.isSafeInteger(channels) && channels > 0 && channels <= 64);
   assert.equal(source.length % (channels * 4), 0);
   assert.ok(Number.isSafeInteger(origin) && origin >= 0);
-  assert.ok([3, 4].includes(trace.version), 'Product PCM verification requires native call timing');
+  assert.ok([3, 4, 5].includes(trace.version), 'Product PCM verification requires native call timing');
   const summary = analyseHalIo(trace), { retention, admission } = summary;
   const writes = trace.rows.filter(row => row[1] === 1), reads = trace.rows.filter(row => row[1] === 0);
   // The installed finite probes fit inside the product's prepared 1,048,576-frame retention.
@@ -64,13 +82,12 @@ export function analyseHalPcmContract(trace, { source, origin, channels, sourceQ
   const clients = [...new Set(writes.map(row => row[8]))];
   const candidates = clients.filter(client => writes.filter(row => row[8] === client).every(row => row[3] === sourceQuantum));
   const sourceClient = candidates.length === 1 ? candidates[0] : null;
-  const evidenceIssues = [], violations = [];
+  const evidenceIssues = [], violations = [], rejectedHostRequests = [];
   if (sourceClient === null) evidenceIssues.push({ reason: 'unresolved_source_client', candidates });
   if (!writes.length || !reads.length) evidenceIssues.push({ reason: 'missing_native_io' });
   if (!retention.issued || retention.writerDropped || retention.notRetainedRecentRows || retention.observationsBeyondCapacity)
     evidenceIssues.push({ reason: 'incomplete_native_trace', retention });
-  if (admission) for (const stage of ['timestamp', 'extent', 'stream', 'frozen', 'inactive', 'native'])
-    if (admission[stage]) violations.push({ boundary: 'hal_admission', reason: stage, count: admission[stage] });
+  inspectAdmission(admission, trace.version, violations, rejectedHostRequests, evidenceIssues);
   const bits = referenceBits(source, origin, channels);
   if (sourceClient !== null) inspectWrites(writes, sourceClient, channels, bits, violations);
   let comparedFrames = 0, unpublishedFrames = 0;
@@ -94,7 +111,7 @@ export function analyseHalPcmContract(trace, { source, origin, channels, sourceQ
   return { boundary: 'hal_pcm', sourceClient, sourceRanges, comparedFrames, unpublishedFrames,
     comparedSourceRanges: mergePcmRanges(comparedSource.flatMap(range => range.end <= origin ? []
       : [{ start: Math.max(0, range.start - origin), end: range.end - origin }])),
-    evidenceComplete: evidenceIssues.length === 0, evidenceIssues, violations,
+    evidenceComplete: evidenceIssues.length === 0, evidenceIssues, violations, rejectedHostRequests,
     passed: evidenceIssues.length === 0 && violations.length === 0 && comparedFrames > 0,
     limitations: ['Only complete, nonconcurrent native observations establish this finite single-source contract.',
       'OS callback cadence and downstream OS delivery remain separate diagnostics; this result does not establish their cause.'] };

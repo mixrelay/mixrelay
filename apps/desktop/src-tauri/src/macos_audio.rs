@@ -30,6 +30,9 @@ mod capture_reader;
 mod capture_transaction;
 #[path = "macos_audio/clock_pump.rs"]
 mod clock_pump;
+#[cfg(test)]
+#[path = "macos_audio/committed_credit_tests.rs"]
+mod committed_credit_tests;
 #[path = "macos_audio/device_activity.rs"]
 mod device_activity;
 pub(crate) use device_activity::DeviceActivityCache;
@@ -147,7 +150,7 @@ unsafe extern "C" {
         channels: u32,
         error: *mut NativeTransportError,
     ) -> *mut NativeApplicationSourceTransport;
-    fn mr_application_source_transport_write_timed(
+    fn mr_application_source_transport_write_clocked(
         transport: *mut NativeApplicationSourceTransport,
         samples: *const f32,
         times: *const u64,
@@ -174,10 +177,8 @@ unsafe extern "C" {
         converter: u32,
         drought: u32,
     );
-    fn mr_application_source_transport_publish_native(
+    fn mr_application_source_transport_stop_native(
         transport: *mut NativeApplicationSourceTransport,
-        native_frames: u64,
-        running: bool,
     );
 }
 
@@ -575,6 +576,12 @@ struct ApplicationSourceTransport {
 unsafe impl Send for ApplicationSourceTransport {}
 
 impl ApplicationSourceTransport {
+    fn observe_capture(&mut self, health: &CaptureProbeStats) {
+        if !health.running {
+            self.stop_native();
+        }
+    }
+
     fn publish_measurements(&mut self, producer: u32, converter: u32, drought: u32) {
         // SAFETY: this pump exclusively owns the live transport.
         unsafe {
@@ -587,10 +594,10 @@ impl ApplicationSourceTransport {
         }
     }
 
-    fn publish_native(&mut self, frames: u64, running: bool) {
+    fn stop_native(&mut self) {
         // SAFETY: sole pump owner; bounded atomic publication into validated trailer.
         unsafe {
-            mr_application_source_transport_publish_native(self.native.as_ptr(), frames, running);
+            mr_application_source_transport_stop_native(self.native.as_ptr());
         };
     }
     fn clock(&mut self) -> Option<NativeClockSnapshot> {
@@ -645,7 +652,7 @@ impl ApplicationSourceTransport {
         };
         // SAFETY: this pump exclusively owns the transport and samples cover the frame count.
         unsafe {
-            mr_application_source_transport_write_timed(
+            mr_application_source_transport_write_clocked(
                 self.native.as_ptr(),
                 samples.as_ptr(),
                 times.as_ptr(),

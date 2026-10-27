@@ -509,7 +509,7 @@ impl Pump {
                 self.last_refresh = Instant::now();
             }
             if self.format_pending {
-                self.transport.publish_native(0, false);
+                self.transport.stop_native();
                 if self.state.is_some() {
                     off_realtime(realtime, || {
                         if let Some(previous) = self.state.take() {
@@ -563,16 +563,13 @@ impl Pump {
         if !health.format_ready {
             // Native invalidation is recoverable. Do not certify mixed counters
             // as clock credit or mistake a refresh's temporary stop for retirement.
-            self.transport.publish_native(0, false);
+            self.transport.stop_native();
             self.waker.briefly(&self.capture);
             return Ok(());
         }
-        // Ring acceptance is not the native clock: overflowed callback frames
-        // still elapsed. A drop also forces the epoch reset below.
-        self.transport.publish_native(
-            health.captured_frames.saturating_add(health.dropped_frames),
-            health.running,
-        );
+        // Raw capture activity can stop credit. Only converted PCM committed to
+        // the shared transport can advance it; drops reset the epoch below.
+        self.transport.observe_capture(&health);
         let rate = checked_rate(health.sample_rate)?;
         if !health.running {
             return Err(PumpError::TapStopped);

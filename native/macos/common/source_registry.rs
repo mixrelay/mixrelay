@@ -49,7 +49,7 @@ mod timestamps;
 use latency::{Latency, Observation, transition};
 const MAX_LEASE: u64 = (1 << 48) - 1;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct SourceClock {
     /// Opaque lease/stream identity, not a raw shared-buffer epoch.
@@ -59,6 +59,14 @@ pub struct SourceClock {
     pub graph_rate: u32,
     pub running: u32,
     pub synchronized: u32,
+}
+
+/// PCM availability and clock metadata observed under one retained source pin.
+#[derive(Clone, Copy, Debug)]
+pub struct SourcePcmProgress {
+    pub clock: SourceClock,
+    pub published_frames: u64,
+    pub capacity_frames: u32,
 }
 #[derive(Clone, Copy)]
 struct ReadWindow {
@@ -583,19 +591,21 @@ impl SourceRegistry {
     /// Observes the current producer lease and acknowledged native clock.
     #[must_use]
     pub fn clock(&self, token: u64) -> Option<SourceClock> {
-        self.clock_with_capacity(token).map(|(clock, _)| clock)
+        self.pcm_progress(token).map(|progress| progress.clock)
     }
 
     /// Observes a source clock and its retained graph-frame extent under one pin.
     #[must_use]
-    pub fn clock_with_capacity(&self, token: u64) -> Option<(SourceClock, u32)> {
+    pub fn pcm_progress(&self, token: u64) -> Option<SourcePcmProgress> {
         let read = self.read(token);
         let source = read.source()?;
         let clock = source.mapping.clock();
         let format = clock.format_word.load(Ordering::Acquire);
         let acknowledged = clock.acknowledged_format.load(Ordering::Acquire);
         let lease = clock.producer_lease.load(Ordering::Acquire);
-        let epoch = unsafe { mr_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) }.epoch;
+        // SAFETY: the read pin retains the validated buffer through this snapshot.
+        let pcm = unsafe { mr_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) };
+        let epoch = pcm.epoch;
         let frames = clock.native_frames.load(Ordering::Acquire);
         let rate = clock.native_sample_rate.load(Ordering::Acquire);
         let running = clock.native_running.load(Ordering::Acquire);
@@ -614,8 +624,8 @@ impl SourceRegistry {
         {
             return None;
         }
-        Some((
-            SourceClock {
+        Some(SourcePcmProgress {
+            clock: SourceClock {
                 epoch: (lease << 16) | epoch,
                 native_frames: frames,
                 native_rate: rate,
@@ -625,8 +635,9 @@ impl SourceRegistry {
                     running != 0 && consumer_running && consumer >> 48 == epoch,
                 ),
             },
-            source.capacity,
-        ))
+            published_frames: pcm.published_through_frame,
+            capacity_frames: source.capacity,
+        })
     }
     /// Reads one complete graph block under the source's single-consumer claim.
     pub fn read_audio(&self, token: u64, samples: &mut [f32], frames: u32, rate: u32) -> u32 {

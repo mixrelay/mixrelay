@@ -73,3 +73,28 @@ test('a native inactive rejection remains a product failure despite matching ret
     frozen: 0, inactive: 1, native: 0, lastRejectedTimestampBits: '0000000000000000' };
   assert.equal(analyse(data).passed, false);
 });
+
+test('v5 distinguishes rejected invalid host storage from rejection of a valid coalesced IO span', () => {
+  const data = fixture(); data.trace.version = 5;
+  data.trace.admission = { read: 2, write: 2, timestamp: 0, extent: 1, stream: 0,
+    frozen: 0, inactive: 0, native: 0, nullBuffer: 1, oversizedFrames: 0,
+    lastRejectedTimestampBits: '0000000000000000',
+    lastRejectedExtent: { frames: 8192, bufferPresent: false, render: false } };
+  let measured = analyse(data);
+  assert.equal(measured.passed, true);
+  assert.equal(measured.rejectedHostRequests.length, 1);
+  data.trace.admission.lastRejectedExtent.bufferPresent = true;
+  assert.equal(analyse(data).passed, false, 'An 8,192-frame request with valid storage must be accepted');
+  data.trace.admission.lastRejectedExtent.frames = 1048577;
+  data.trace.admission.nullBuffer = 0;
+  data.trace.admission.oversizedFrames = 1;
+  assert.equal(analyse(data).passed, true, 'A request beyond prepared retention must be rejected safely');
+  data.trace.admission.extent = 2;
+  assert.equal(analyse(data).passed, false, 'Every rejection must have a matching typed classification');
+  data.trace.admission.oversizedFrames = 2;
+  assert.equal(analyse(data).passed, true);
+  data.trace.admission.extent = 0;
+  assert.equal(analyse(data).passed, false, 'An in-flight classification cannot certify complete admission evidence');
+  delete data.trace.admission.lastRejectedExtent;
+  assert.throws(() => analyse(data), /rejected extent/);
+});

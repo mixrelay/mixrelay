@@ -49,7 +49,7 @@ export async function macosSignal(device, directory, { execute, snapshot, schedu
       try { execute(command.program, command.args, { timeout: command.timeout }); }
       catch (error) { processFailure = error; }
       measured = readMeasurement(stdout, processFailure);
-      const evidence = readProbePcmEvidence(directory, measured);
+      const evidence = readProbePcmEvidence(directory, measured, { expectedTraceVersion: 5 });
       product = evidence.product;
       writeFileSync(join(directory, 'native-product-pcm.json'), JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx' });
       try { hostRoundtrip = verifyMeasurement(measured, product); }

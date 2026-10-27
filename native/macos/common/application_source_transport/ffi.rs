@@ -1,4 +1,4 @@
-use super::{SourceClockSnapshot, SourceTransport};
+use super::{Publication, SourceClockSnapshot, SourceTransport};
 use crate::{
     application_source_mapping::Mapping,
     control_inventory::{Message, Xpc},
@@ -257,6 +257,19 @@ pub unsafe extern "C" fn mr_application_source_transport_publish_native(
     }
 }
 
+/// Ends native activity while preserving the last committed PCM credit.
+/// # Safety
+/// Handle is null or retained by its sole pump without concurrent destruction.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_application_source_transport_stop_native(
+    transport: *mut SourceTransport,
+) {
+    // SAFETY: caller retains this sole producer; publication uses its bounded claim.
+    if let Some(transport) = unsafe { transport.as_ref() } {
+        transport.stop_native();
+    }
+}
+
 /// Queues source normalization evidence for this exact producer epoch. Busy
 /// claims retain the count locally until a later publication, write or reset.
 /// Returns false for a stale lease/epoch without publishing into its replacement.
@@ -309,18 +322,48 @@ pub unsafe extern "C" fn mr_application_source_transport_write_timed(
     times: *const u64,
     frames: u32,
 ) -> bool {
-    // SAFETY: caller owns the retained transport and both complete immutable inputs.
+    // SAFETY: caller retains the producer and both complete immutable input spans.
+    unsafe { write_timed(transport, input, times, frames, Publication::PcmOnly) }
+}
+
+/// Publishes timed PCM and its native frame credit under the same producer claim.
+/// # Safety
+/// The sole retained producer owns this call. `input` and `times` cover `frames`
+/// interleaved PCM frames and timestamps, disjoint from the shared mapping.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_application_source_transport_write_clocked(
+    transport: *mut SourceTransport,
+    input: *const f32,
+    times: *const u64,
+    frames: u32,
+) -> bool {
+    // SAFETY: caller retains the producer and both complete immutable input spans.
+    unsafe { write_timed(transport, input, times, frames, Publication::NativeCredit) }
+}
+
+// SAFETY: caller exclusively owns the retained producer and both readable input
+// spans, each covering frames PCM frames/timestamps in the immutable channel layout.
+unsafe fn write_timed(
+    transport: *mut SourceTransport,
+    input: *const f32,
+    times: *const u64,
+    frames: u32,
+    publication: Publication,
+) -> bool {
+    // SAFETY: caller exclusively retains the producer for the synchronous call.
     let Some(transport) = (unsafe { transport.as_mut() }) else {
         return false;
     };
     if input.is_null() || times.is_null() || frames > transport.mapping.capacity() {
         return false;
     }
-    // SAFETY: validated geometry and caller's declared extents.
+    // SAFETY: immutable mapping geometry and the caller's declared input spans.
     let channels = unsafe { mr_shared_audio_buffer_channels(transport.mapping.buffer.as_ptr()) };
+    // SAFETY: caller retains the declared complete interleaved PCM span.
     let samples = unsafe { slice::from_raw_parts(input, frames as usize * channels as usize) };
+    // SAFETY: caller retains exactly the declared timestamp span for this call.
     let times = unsafe { slice::from_raw_parts(times, frames as usize) };
-    transport.write_pcm(samples, frames, Some(times))
+    transport.write_prepared(samples, frames, Some(times), publication)
 }
 
 /// Stops native publication and releases the mapping, descriptor and local owner.

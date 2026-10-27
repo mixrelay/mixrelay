@@ -11,11 +11,10 @@ pub(super) struct NativeClockSnapshot {
     pub running: u32,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ApplicationClockSnapshot {
     pub epoch: u64,
-    pub native_frames: u64,
+    pub published_frames: u64,
     pub native_rate: u32,
     pub graph_rate: u32,
     pub running: u32,
@@ -62,12 +61,11 @@ impl ApplicationPacer {
             if awaited || continuing {
                 // A new producer epoch starts at zero. Retain the input published
                 // while this active consumer was waiting for its first observation.
-                self.hardware
-                    .begin((self.generation, 0, clock.native_rate), rate);
+                self.hardware.begin((self.generation, 0, rate), rate);
             }
         }
         self.hardware.next(
-            (self.generation, clock.native_frames, clock.native_rate),
+            (self.generation, clock.published_frames, rate),
             rate,
             maximum,
             capacity,
@@ -451,7 +449,7 @@ mod tests {
         let format = (48_000, 128, 16_384);
         let mut clock = ApplicationClockSnapshot {
             epoch: 7,
-            native_frames: 0,
+            published_frames: 0,
             native_rate: 48_000,
             graph_rate: 48_000,
             running: 0,
@@ -459,7 +457,7 @@ mod tests {
             capacity_frames: 16_384,
         };
         assert_eq!(pacer.next((11, clock), format), Pace::Idle);
-        clock.native_frames = 8_192;
+        clock.published_frames = 8_192;
         clock.running = 1;
         clock.native_rate = 0;
         assert_eq!(pacer.next((11, clock), format), Pace::Unknown);
@@ -484,7 +482,7 @@ mod tests {
         let format = (48_000, 128, 16_384);
         let mut clock = ApplicationClockSnapshot {
             epoch: 7,
-            native_frames: 8_192,
+            published_frames: 8_192,
             native_rate: 48_000,
             graph_rate: 48_000,
             running: 1,
@@ -494,7 +492,7 @@ mod tests {
         // Attaching to an already running source still excludes its pre-admission history.
         assert_eq!(pacer.next((11, clock), format), Pace::Wait);
         clock.epoch = 8;
-        clock.native_frames = 384;
+        clock.published_frames = 384;
         for first in [0, 128, 256] {
             assert!(matches!(pacer.next((11, clock), format), Pace::Block {
                 first_frame, frames: 128, overrun: false, ..
@@ -509,7 +507,7 @@ mod tests {
         let format = (48_000, 128, 4096);
         let mut clock = ApplicationClockSnapshot {
             epoch: 1,
-            native_frames: 100,
+            published_frames: 100,
             native_rate: 44_100,
             graph_rate: 48_000,
             running: 1,
@@ -517,7 +515,7 @@ mod tests {
             capacity_frames: 4096,
         };
         assert_eq!(pacer.next((11, clock), format), Pace::Wait);
-        clock.native_frames += 441;
+        clock.published_frames += 480;
         let mut processed = 0;
         while let Pace::Block { frames, .. } = pacer.next((11, clock), format) {
             processed += frames;
@@ -525,7 +523,7 @@ mod tests {
         assert_eq!(processed, 480);
         assert_eq!(pacer.next((12, clock), format), Pace::Wait);
         clock.epoch += 1;
-        clock.native_frames = 0;
+        clock.published_frames = 0;
         assert_eq!(pacer.next((12, clock), format), Pace::Wait);
         clock.graph_rate = 44_100;
         assert_eq!(pacer.next((12, clock), format), Pace::Unknown);

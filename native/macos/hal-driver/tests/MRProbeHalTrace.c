@@ -37,13 +37,19 @@ static MRProbeHalTraceResult mr_trace_read(AudioDeviceID device, CFDataRef *data
 static bool mr_trace_write(FILE *file, const uint64_t *words) {
     fprintf(file, "{\"version\":%llu,\"issued\":%llu,\"dropped\":%llu,\"capacity\":8192,",
             (unsigned long long)words[0], (unsigned long long)words[3], (unsigned long long)words[4]);
-    const UInt32 header = words[0] == 4U ? 14U : 5U;
-    if (words[0] == 4U) {
+    const UInt32 header = words[0] == 5U ? 17U : words[0] == 4U ? 14U : 5U;
+    if (words[0] >= 4U) {
         const char *names[] = {"read", "write", "timestamp", "extent", "stream", "frozen", "inactive", "native"};
         fprintf(file, "\"admission\":{");
         for (UInt32 index = 0U; index < 8U; ++index)
             fprintf(file, "%s\"%s\":%llu", index == 0U ? "" : ",", names[index], (unsigned long long)words[5U + index]);
-        fprintf(file, ",\"lastRejectedTimestampBits\":\"%016llx\"},", (unsigned long long)words[13]);
+        fprintf(file, ",\"lastRejectedTimestampBits\":\"%016llx\"", (unsigned long long)words[13]);
+        if (words[0] == 5U)
+            fprintf(file, ",\"lastRejectedExtent\":{\"frames\":%u,\"bufferPresent\":%s,\"render\":%s},\"nullBuffer\":%llu,\"oversizedFrames\":%llu",
+                (unsigned)(words[14] & UINT32_MAX), (words[14] & (UINT64_C(1) << 32U)) ? "true" : "false",
+                (words[14] & (UINT64_C(1) << 33U)) ? "true" : "false",
+                (unsigned long long)words[15], (unsigned long long)words[16]);
+        fprintf(file, "},");
     }
     fprintf(file, "\"rows\":[");
     bool comma = false;
@@ -65,14 +71,13 @@ static bool mr_trace_write(FILE *file, const uint64_t *words) {
 MRProbeHalTraceResult mr_probe_hal_trace_save(AudioDeviceID device, const char *path) {
     CFDataRef data = NULL;
     MRProbeHalTraceResult result = mr_trace_read(device, &data);
-    /* CFData has no UInt64 alignment contract. Decode the fixed prefix first;
-     * the baseline v3 and admission-aware v4 retain the same eleven-word rows. */
+    /* CFData has no UInt64 alignment contract. All supported versions retain eleven-word rows. */
     uint64_t prefix[5] = {0};
     if (result.stage == NULL && CFDataGetLength(data) >= (CFIndex)sizeof(prefix))
         memcpy(prefix, CFDataGetBytePtr(data), sizeof(prefix));
-    if (result.stage == NULL && ((prefix[0] != 3U && prefix[0] != 4U) || prefix[1] != 10U || prefix[2] != 8192U))
+    if (result.stage == NULL && ((prefix[0] < 3U || prefix[0] > 5U) || prefix[1] != 10U || prefix[2] != 8192U))
         result = mr_trace_result("hal_trace_payload_version", noErr, EINVAL);
-    const size_t expected = ((prefix[0] == 4U ? 14U : 5U) + 8192U * 11U) * sizeof(uint64_t);
+    const size_t expected = ((prefix[0] == 5U ? 17U : prefix[0] == 4U ? 14U : 5U) + 8192U * 11U) * sizeof(uint64_t);
     uint64_t *words = NULL;
     if (result.stage == NULL && CFDataGetLength(data) != (CFIndex)expected)
         result = mr_trace_result("hal_trace_payload_size", noErr, EINVAL);

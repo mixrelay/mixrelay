@@ -13,10 +13,9 @@ impl Registry {
             device: id,
             stream,
             render,
-            client,
-            frame,
             samples,
             frames,
+            ..
         } = operation;
         let Some(device) = self.pin(id).filter(|device| device.id == id) else {
             return false;
@@ -24,8 +23,12 @@ impl Registry {
         device
             .io_trace
             .note(if render { Stage::Write } else { Stage::Read });
-        if samples.is_null() || frames as usize > crate::formats::MAX_BUFFER_FRAMES {
-            device.io_trace.note(Stage::Extent);
+        // The host can coalesce IO beyond its nominal device quantum. Bound one
+        // request by the prepared retention, then process it in scratch-sized tiles.
+        if samples.is_null() || frames > mixrelay_audio_io::retention::RING_FRAMES {
+            device
+                .io_trace
+                .reject_extent(frames, !samples.is_null(), render);
             return false;
         }
         let expected = device.id + if render { 2 } else { 1 };
@@ -42,23 +45,65 @@ impl Registry {
             device.io_trace.note(Stage::Inactive);
             return true;
         }
-        let accepted = unsafe {
-            device.process_io(crate::io_outcome::Transfer {
-                direction: if render {
-                    crate::io_outcome::Direction::ClientOutput(client)
-                } else {
-                    crate::io_outcome::Direction::Capture
-                },
-                frame,
-                samples,
-                frames,
-            })
-        };
+        let accepted = unsafe { process_tiles(&device, operation) };
         if !accepted {
             device.io_trace.note(Stage::Native);
         }
         accepted
     }
+}
+
+// SAFETY: caller retains one IO pin and the complete exclusive host span in the
+// committed directional format. Every tile remains within that same allocation.
+unsafe fn process_tiles(device: &Device, operation: IoOperation) -> bool {
+    let mut transfer = crate::io_outcome::Transfer {
+        direction: if operation.render {
+            crate::io_outcome::Direction::ClientOutput(operation.client)
+        } else {
+            crate::io_outcome::Direction::Capture
+        },
+        frame: operation.frame,
+        samples: operation.samples,
+        frames: operation.frames,
+    };
+    if operation.frames as usize <= crate::formats::MAX_BUFFER_FRAMES {
+        // SAFETY: the common callback path already fits all prepared processing storage.
+        return unsafe { device.process_io(transfer) };
+    }
+    let channels = if operation.render {
+        device.render_channels.load(Ordering::Acquire)
+    } else {
+        device.capture_channels.load(Ordering::Acquire)
+    } as usize;
+    let sample_bytes = if operation.render {
+        4
+    } else {
+        device.capture_format.format().bytes_per_sample()
+    };
+    let maximum = crate::formats::BUFFER_SIZES[crate::formats::BUFFER_SIZES.len() - 1];
+    let mut offset = 0;
+    while offset < operation.frames {
+        let frames = (operation.frames - offset).min(maximum);
+        let Some(frame) = operation.frame.checked_add(u64::from(offset)) else {
+            return false;
+        };
+        // SAFETY: validated total frame extent and the IO pin fix this tile's byte range.
+        transfer.samples = unsafe {
+            operation
+                .samples
+                .cast::<u8>()
+                .add(offset as usize * channels * sample_bytes)
+                .cast()
+        };
+        transfer.frame = frame;
+        transfer.frames = frames;
+        // SAFETY: tile geometry fits the prepared converter scratch and native mixer.
+        if !unsafe { device.process_io(transfer) } {
+            return false;
+        }
+        offset += frames;
+    }
+    true
 }
 
 // SAFETY: the caller holds an IO pin and validated the operation extent. The SDK

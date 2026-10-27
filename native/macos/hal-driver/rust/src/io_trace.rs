@@ -7,6 +7,7 @@ use crate::io_outcome::IoOutcome;
 // Keep its early signal window as well; longer sessions report overwrites explicitly.
 const CAPACITY: usize = 8192;
 const FIELDS: usize = 10;
+pub(crate) const HEADER_WORDS: usize = 5 + crate::io_admission::COUNTERS + 4;
 
 pub(crate) struct IoTrace {
     pub(crate) admission: crate::io_admission::Admission,
@@ -103,6 +104,12 @@ impl IoTrace {
         }
     }
 
+    pub(crate) fn reject_extent(&self, frames: u32, buffer_present: bool, render: bool) {
+        if self.enabled() {
+            self.admission.extent(frames, buffer_present, render);
+        }
+    }
+
     pub(crate) fn reject_timestamp(&self, sample_time: f64, render: bool) {
         if self.enabled() {
             self.admission.note(if render {
@@ -176,7 +183,7 @@ impl IoTrace {
     }
 
     /// Fixed-size, native-endian `UInt64` payload: version, fields, capacity, issued,
-    /// dropped, admission counters/raw rejected timestamp, then (sequence, render, frame, frames, accepted, available, zeros,
+    /// dropped, admission counters/rejected arguments, then (sequence, render, frame, frames, accepted, available, zeros,
     /// hash, client, `host_start`, `host_end`). Host counters bracket processing, excluding tracing.
     pub(crate) fn snapshot(&self) -> Vec<u8> {
         // Acquire drops first: each dropped reservation precedes the issued bound.
@@ -186,7 +193,8 @@ impl IoTrace {
     }
 
     fn snapshot_at(&self, issued: u64, dropped: u64) -> Vec<u8> {
-        let mut words = vec![4, FIELDS as u64, CAPACITY as u64, issued, dropped];
+        let mut words = Vec::with_capacity(HEADER_WORDS + CAPACITY * (FIELDS + 1));
+        words.extend([5, FIELDS as u64, CAPACITY as u64, issued, dropped]);
         words.extend(self.admission.snapshot());
         for row in &self.rows {
             let before = row.sequence.load(Ordering::SeqCst);
@@ -246,7 +254,7 @@ mod tests {
             .chunks_exact(8)
             .map(|word| u64::from_ne_bytes(word.try_into().unwrap()))
             .collect();
-        let sequences: Vec<_> = words[14..]
+        let sequences: Vec<_> = words[HEADER_WORDS..]
             .chunks_exact(FIELDS + 1)
             .filter_map(|row| (row[0] != 0).then_some(row[0]))
             .collect();
@@ -277,8 +285,11 @@ mod tests {
             let actual = words(&trace);
             assert_eq!(actual[3], u64::from(enabled));
             if enabled {
-                assert_eq!(&actual[14..21], &[1, 0, 64, 2, 1, 1, 1]);
-                assert_eq!(&actual[23..25], &[1234, 1234]);
+                assert_eq!(
+                    &actual[HEADER_WORDS..HEADER_WORDS + 7],
+                    &[1, 0, 64, 2, 1, 1, 1]
+                );
+                assert_eq!(&actual[HEADER_WORDS + 9..HEADER_WORDS + 11], &[1234, 1234]);
             }
         }
     }
@@ -303,7 +314,7 @@ mod tests {
         let actual = words(&trace);
         assert_eq!(actual[3], CAPACITY as u64 + 3);
         assert_eq!(actual[4], 0);
-        let mut sequences: Vec<_> = actual[14..]
+        let mut sequences: Vec<_> = actual[HEADER_WORDS..]
             .chunks_exact(FIELDS + 1)
             .map(|row| row[0])
             .collect();

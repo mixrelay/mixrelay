@@ -18,6 +18,8 @@ use super::{Fixture, changed, request};
 use crate::abi::{HostOps, OK};
 use crate::registry::IoOperation;
 
+#[path = "native_host_io_tests.rs"]
+mod host_io;
 #[path = "native_lifecycle_tests.rs"]
 mod lifecycle;
 
@@ -100,9 +102,13 @@ pub(super) struct Transport {
 }
 impl Transport {
     pub(super) fn new(endpoint: u8, render: u32, capture: u32) -> Self {
+        Self::with_capacity(endpoint, render, capture, 256)
+    }
+
+    pub(super) fn with_capacity(endpoint: u8, render: u32, capture: u32, capacity: u32) -> Self {
         let config = EndpointTransportConfig {
             endpoint_id: [endpoint; 16],
-            capacity_frames: 256,
+            capacity_frames: capacity,
             render_channels: render,
             capture_channels: capture,
         };

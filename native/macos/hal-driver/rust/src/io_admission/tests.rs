@@ -43,8 +43,10 @@ fn rejected_sdk_coordinates_and_registry_admission_remain_visible_without_native
         .chunks_exact(8)
         .map(|word| u64::from_ne_bytes(word.try_into().unwrap()))
         .collect();
-    assert_eq!((words[0], words[3]), (4, 0));
-    assert_eq!(&words[5..14], &counters);
+    assert_eq!((words[0], words[3]), (5, 0));
+    assert_eq!(&words[5..crate::io_trace::HEADER_WORDS], &counters);
+    assert_eq!(counters[9], u64::from(u32::MAX) | (1 << 32));
+    assert_eq!(&counters[10..], &[1, 1]);
     assert!(invoke(id + 1, 10.0, pointer, 1));
     assert_eq!(pcm.map(f32::to_bits), [0; 2]);
     assert_eq!(pin.io_trace.admission.snapshot()[0], 7);
@@ -61,5 +63,5 @@ fn disabled_admission_does_not_retain_previous_measurement_counts() {
     pin.io_trace.set_enabled(false);
     pin.io_trace.reject_timestamp(11.5, false);
     pin.io_trace.note(Stage::Frozen);
-    assert_eq!(pin.io_trace.admission.snapshot(), [0; COUNTERS + 1]);
+    assert_eq!(pin.io_trace.admission.snapshot(), [0; COUNTERS + 4]);
 }

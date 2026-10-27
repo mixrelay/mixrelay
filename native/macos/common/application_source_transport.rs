@@ -10,7 +10,8 @@ pub use ffi::{
     mr_application_source_transport_destroy, mr_application_source_transport_publish_measurements,
     mr_application_source_transport_publish_native,
     mr_application_source_transport_record_source_faults, mr_application_source_transport_reset,
-    mr_application_source_transport_write, mr_application_source_transport_write_timed,
+    mr_application_source_transport_stop_native, mr_application_source_transport_write,
+    mr_application_source_transport_write_clocked, mr_application_source_transport_write_timed,
 };
 
 use crate::{

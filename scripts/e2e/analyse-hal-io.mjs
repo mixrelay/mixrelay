@@ -8,20 +8,28 @@ import { analyseProbeReference } from './probe-pcm-reference.mjs';
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 
 export function analyseHalIo(trace, signalWindow = null) {
-  assert.ok([1, 2, 3, 4].includes(trace.version), 'Unsupported HAL trace version');
-  assert.equal(trace.capacity, { 1: 2048, 2: 4096, 3: 8192, 4: 8192 }[trace.version], 'Unexpected HAL trace capacity');
-  const admission = trace.version === 4 ? trace.admission : null;
+  assert.ok([1, 2, 3, 4, 5].includes(trace.version), 'Unsupported HAL trace version');
+  assert.equal(trace.capacity, { 1: 2048, 2: 4096, 3: 8192, 4: 8192, 5: 8192 }[trace.version], 'Unexpected HAL trace capacity');
+  const admission = trace.version >= 4 ? trace.admission : null;
   if (admission) {
     for (const field of ['read', 'write', 'timestamp', 'extent', 'stream', 'frozen', 'inactive', 'native'])
       assert.ok(integer(admission[field]), `Invalid HAL admission counter ${field}`);
     assert.match(admission.lastRejectedTimestampBits, /^[0-9a-f]{16}$/);
+    if (trace.version >= 5) {
+      for (const field of ['nullBuffer', 'oversizedFrames'])
+        assert.ok(integer(admission[field]), `Missing native rejected extent classification ${field}`);
+      const extent = admission.lastRejectedExtent;
+      assert.ok(extent && integer(extent.frames) && extent.frames <= 0xffffffff, 'Missing native rejected extent');
+      assert.equal(typeof extent.bufferPresent, 'boolean');
+      assert.equal(typeof extent.render, 'boolean');
+    }
   } else assert.ok(trace.version < 4, 'Missing HAL admission counters');
   assert.ok(integer(trace.issued) && integer(trace.dropped) && trace.dropped <= trace.issued);
   assert.ok(Array.isArray(trace.rows) && trace.rows.length <= trace.capacity);
   if (signalWindow) assert.ok(integer(signalWindow.start) && integer(signalWindow.end) && signalWindow.end > signalWindow.start);
   const sequences = new Set();
   const rows = trace.rows.map(row => {
-    assert.ok(Array.isArray(row) && row.length === ({ 1: 8, 2: 9, 3: 11, 4: 11 }[trace.version]) && row.slice(0, 7).every(integer));
+    assert.ok(Array.isArray(row) && row.length === ({ 1: 8, 2: 9, 3: 11, 4: 11, 5: 11 }[trace.version]) && row.slice(0, 7).every(integer));
     const [sequence, render, frame, frames, accepted, available, zeroFrames, hash] = row;
     assert.ok(sequence > 0 && sequence <= trace.issued && !sequences.has(sequence), 'Invalid or repeated observation sequence');
     assert.ok(render <= 1 && accepted <= 1 && frames <= 0xffffffff && available <= frames && zeroFrames <= frames);

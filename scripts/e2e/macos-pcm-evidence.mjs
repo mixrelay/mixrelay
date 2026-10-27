@@ -41,9 +41,11 @@ export function probePcmReference(measured, timing) {
   return { origin, source, plan };
 }
 
-export function readProbePcmEvidence(directory, measured) {
+export function readProbePcmEvidence(directory, measured, { expectedTraceVersion = null } = {}) {
   const { origin, source, plan } = probePcmReference(measured, readFileSync(join(directory, 'native-probe.stderr.log'), 'utf8'));
   const trace = JSON.parse(readFileSync(join(directory, 'native-hal-io.json'), 'utf8'));
+  if (expectedTraceVersion !== null)
+    assert.equal(trace.version, expectedTraceVersion, 'Loaded HAL does not match the candidate trace schema');
   assert.equal(readFileSync(join(directory, 'native-signal.f32')).length, measured.recordedFrames * 8, 'Incomplete native raw capture');
   const product = requireObservedSegments(analyseHalPcmContract(trace, { source, origin, channels: 2 }),
     plan.segments.filter(segment => segment.kind === 'audible'));

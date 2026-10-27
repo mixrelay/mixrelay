@@ -16,7 +16,7 @@ function coverage(rows, start, end) {
 
 // Available is a count, not a valid prefix. Only a fully supplied read covers its entire range.
 export function analyseSourceNative(trace, plan, source, origin) {
-  assert.ok([3, 4].includes(trace.version));
+  assert.ok([3, 4, 5].includes(trace.version));
   const summary = analyseHalIo(trace), writes = trace.rows.filter(row => row[1] === 1), reads = trace.rows.filter(row => row[1] === 0);
   assert.equal(source.length, plan.frames * 8);
   assert.ok(Number.isSafeInteger(origin) && origin >= 0);

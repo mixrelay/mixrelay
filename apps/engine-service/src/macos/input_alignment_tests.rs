@@ -95,15 +95,16 @@ fn native_credit_bursts_reach_the_capture_frontier_before_graph_slicing() {
 fn application_progress(
     registry: &mixrelay_macos_transport::source_registry::SourceRegistry,
 ) -> ApplicationClockSnapshot {
-    let (clock, capacity_frames) = registry.clock_with_capacity(source_token("app")).unwrap();
+    let progress = registry.pcm_progress(source_token("app")).unwrap();
+    let clock = progress.clock;
     ApplicationClockSnapshot {
         epoch: clock.epoch,
-        native_frames: clock.native_frames,
+        published_frames: progress.published_frames,
         native_rate: clock.native_rate,
         graph_rate: clock.graph_rate,
         running: clock.running,
         synchronized: clock.synchronized,
-        capacity_frames,
+        capacity_frames: progress.capacity_frames,
     }
 }
 
@@ -156,6 +157,13 @@ impl mixrelay_macos_transport::source_registry::SchedulingClock for SchedulingCl
 }
 impl ApplicationInput {
     fn new(registry: &mixrelay_macos_transport::source_registry::SourceRegistry) -> Self {
+        Self::at_rate(registry, 48_000)
+    }
+
+    fn at_rate(
+        registry: &mixrelay_macos_transport::source_registry::SourceRegistry,
+        native_rate: u32,
+    ) -> Self {
         use mixrelay_macos_transport::{application_source_transport::*, source_control::*};
         use std::os::fd::IntoRawFd;
         let mut request = SourceRequest {
@@ -193,7 +201,7 @@ impl ApplicationInput {
             assert!(mr_application_source_transport_reset(
                 owner,
                 clock.format_word,
-                48_000
+                native_rate
             ));
             mr_application_source_transport_publish_native(owner, 0, true);
         }

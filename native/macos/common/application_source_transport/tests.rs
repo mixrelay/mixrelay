@@ -470,9 +470,25 @@ fn clocked_writes_publish_only_committed_pcm_credit_and_stop_preserves_position(
     assert!(producer.begin_epoch(format, 24_000).is_some());
     assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 0);
     let measured = allocation_counter::measure(|| {
-        assert!(producer.write_clocked_pcm(&[0.25; 48], 24, &[100; 24]));
+        // SAFETY: this fixture owns the producer and complete stereo PCM/timestamp spans.
+        assert!(unsafe {
+            mr_application_source_transport_write_clocked(
+                &raw mut producer,
+                [0.25; 48].as_ptr(),
+                [100; 24].as_ptr(),
+                24,
+            )
+        });
         assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 12);
-        assert!(producer.write_clocked_pcm(&[0.0; 32], 16, &[200; 16]));
+        // SAFETY: the sole producer and both immutable input spans remain live for this call.
+        assert!(unsafe {
+            mr_application_source_transport_write_clocked(
+                &raw mut producer,
+                [0.0; 32].as_ptr(),
+                [200; 16].as_ptr(),
+                16,
+            )
+        });
         assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 20);
         let claim = ProducerClaim::acquire(mapping.clock()).unwrap();
         assert!(!producer.write_clocked_pcm(&[0.5; 16], 8, &[300; 8]));

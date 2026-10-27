@@ -129,7 +129,11 @@ test('both fixed source orders run once with the same executable and retain a fa
           zero, hash, render ? 3 : 0, (render ? 10 : 12) + first, (render ? 11 : 13) + first]);
       }
     }
-    writeFileSync(args.at(-1), JSON.stringify({ version: 3, capacity: 8192, issued: rows.length, dropped: 0, rows }));
+    writeFileSync(args.at(-1), JSON.stringify({ version: 5, capacity: 8192, issued: rows.length, dropped: 0, rows,
+      admission: { read: rows.filter(row => row[1] === 0).length, write: rows.filter(row => row[1] === 1).length,
+        timestamp: 0, extent: 0, stream: 0, frozen: 0, inactive: 0, native: 0,
+        lastRejectedTimestampBits: '0000000000000000', lastRejectedExtent: { frames: 0, bufferPresent: false, render: false },
+        nullBuffer: 0, oversizedFrames: 0 } }));
   };
   await assert.rejects(compareMacosSources({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.test'] }, join(directory, 'evidence'), {
     execute, prepare: () => bundle, measurementBoundary: async (measure, options) => { receipts.push(options.receiptDirectory); return measure(); },

@@ -4,7 +4,7 @@ import { pcmHash } from '../pcm-hash.mjs';
 import { probeSampleBits } from '../probe-signal.mjs';
 
 // A finite native observation for process/observer tests; no audio device opens.
-export function writeProbeEvidence(directory, measured, { corruptRead = true } = {}) {
+export function writeProbeEvidence(directory, measured, { corruptRead = true, traceVersion = 5 } = {}) {
   const frames = 30720, source = Buffer.alloc(frames * 8), rows = [], timing = ['timebase,1,1'];
   for (let frame = 4800; frame < frames; frame++) for (let channel = 0; channel < 2; channel++)
     source.writeUInt32LE(probeSampleBits(frame, channel), frame * 8 + channel * 4);
@@ -23,6 +23,10 @@ export function writeProbeEvidence(directory, measured, { corruptRead = true } =
   writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(metrics));
   writeFileSync(join(directory, 'native-probe.stderr.log'), timing.join('\n') + '\n');
   writeFileSync(join(directory, 'native-signal.f32'), source);
-  writeFileSync(join(directory, 'native-hal-io.json'), JSON.stringify({ version: 3, issued: rows.length, dropped: 0, capacity: 8192, rows }));
+  writeFileSync(join(directory, 'native-hal-io.json'), JSON.stringify({ version: traceVersion, issued: rows.length,
+    dropped: 0, capacity: 8192, rows, admission: { read: rows.length / 2, write: rows.length / 2,
+      timestamp: 0, extent: 0, stream: 0, frozen: 0, inactive: 0, native: 0,
+      lastRejectedTimestampBits: '0000000000000000', lastRejectedExtent: { frames: 0, bufferPresent: false, render: false },
+      nullBuffer: 0, oversizedFrames: 0 } }));
   return metrics;
 }

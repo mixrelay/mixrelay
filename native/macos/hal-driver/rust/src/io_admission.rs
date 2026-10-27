@@ -21,6 +21,9 @@ pub(crate) enum Stage {
 pub(crate) struct Admission {
     counts: [AtomicU64; COUNTERS],
     rejected_timestamp: AtomicU64,
+    rejected_extent: AtomicU64,
+    null_buffers: AtomicU64,
+    oversized_frames: AtomicU64,
 }
 
 impl Admission {
@@ -28,6 +31,9 @@ impl Admission {
         Self {
             counts: std::array::from_fn(|_| AtomicU64::new(0)),
             rejected_timestamp: AtomicU64::new(0),
+            rejected_extent: AtomicU64::new(0),
+            null_buffers: AtomicU64::new(0),
+            oversized_frames: AtomicU64::new(0),
         }
     }
 
@@ -36,6 +42,9 @@ impl Admission {
             count.store(0, Ordering::Relaxed);
         }
         self.rejected_timestamp.store(0, Ordering::Relaxed);
+        self.rejected_extent.store(0, Ordering::Relaxed);
+        self.null_buffers.store(0, Ordering::Relaxed);
+        self.oversized_frames.store(0, Ordering::Relaxed);
     }
 
     pub(crate) fn note(&self, stage: Stage) {
@@ -50,12 +59,29 @@ impl Admission {
         self.note(Stage::Timestamp);
     }
 
-    pub(crate) fn snapshot(&self) -> [u64; COUNTERS + 1] {
-        let mut words = [0; COUNTERS + 1];
+    pub(crate) fn extent(&self, frames: u32, buffer_present: bool, render: bool) {
+        let category = if buffer_present {
+            &self.oversized_frames
+        } else {
+            &self.null_buffers
+        };
+        category.fetch_add(1, Ordering::Relaxed);
+        // One atomic word retains a consistent size/pointer/direction diagnostic.
+        let value =
+            u64::from(frames) | (u64::from(buffer_present) << 32) | (u64::from(render) << 33);
+        self.rejected_extent.store(value, Ordering::Relaxed);
+        self.note(Stage::Extent);
+    }
+
+    pub(crate) fn snapshot(&self) -> [u64; COUNTERS + 4] {
+        let mut words = [0; COUNTERS + 4];
         for (word, count) in words.iter_mut().zip(&self.counts) {
             *word = count.load(Ordering::Relaxed);
         }
         words[COUNTERS] = self.rejected_timestamp.load(Ordering::Relaxed);
+        words[COUNTERS + 1] = self.rejected_extent.load(Ordering::Relaxed);
+        words[COUNTERS + 2] = self.null_buffers.load(Ordering::Relaxed);
+        words[COUNTERS + 3] = self.oversized_frames.load(Ordering::Relaxed);
         words
     }
 }

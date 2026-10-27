@@ -48,9 +48,11 @@ Ownership:
   changes and unavoidable overwrite recovery anchor a cursor. Fixed atomic
   per-source counters are reported from the pump's off-realtime control step.
 - The pump acknowledges the requested format only after resetting its SRC and
-  shared timeline. It owns its write position, native rate/frame progress and
-  native running flag. Native frame progress includes captured **and dropped**
-  callback frames; amplitude is not a clock signal.
+  shared timeline. It owns its write position, native rate and running flag.
+  `write_clocked` commits timed PCM before publishing its frame credit in native
+  units under the same producer claim. Raw captured/dropped callback counts remain
+  capture diagnostics and never authorize unwritten shared PCM. Stopping activity
+  preserves committed credit; a producer epoch reset starts a new position.
 - An atomic nonblocking producer/control guard excludes reconnect from an
   in-flight retired-pump write/reset. The audio consumer never takes this guard.
   A monotonically increasing attachment lease is returned in the XPC reply along
@@ -58,7 +60,7 @@ Ownership:
   producers cannot write/reset after reconnect, including shared epoch wrap or
   two attachment replies arriving out of order.
 - The engine selects the clock-master flag. That source uses a fixed nominal SRC
-  ratio because the graph is paced by its native clock. Other sources use the
+  ratio because its published PCM paces the graph. Other sources use the
   independent-clock bridge with engine-consumed output FIFO feedback.
 
 Conversion storage/filter allocation happens on the owned desktop pump worker,
@@ -69,9 +71,11 @@ and filter reset. Rate-only tap changes refresh through native control code;
 unsupported layout changes are explicit errors requiring session recreation.
 
 The consumer rejects unacknowledged rates and stale epochs.
-`mr_engine_source_registry_clock` exposes actual native frame progression
-for the engine pacer; the caller must detect lack of progression/stalls rather
-than treating a stored running flag as proof of an advancing clock.
+`SourceRegistry::pcm_progress` observes the committed graph-frame watermark,
+retention capacity and native metadata under one source pin. Application pacing
+uses that watermark directly, preserving the last frame when rates differ.
+`mr_engine_source_registry_clock` retains the native metadata projection for its
+C callers. A stored running flag alone does not authorize graph advancement.
 
 Verification uses the Cargo-owned `native_callback_and_hal_contracts` engine
 test. It runs the current shared buffer, registry and producer reset/write helpers

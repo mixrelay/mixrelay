@@ -146,6 +146,13 @@ mixer의 forward cursor로 보존된 PCM을 순서대로 배출한다. 외부 HA
 이미 실행 중인 source에 처음 연결할 때와 물리 장치의 `HardwarePacer`는 현재 credit을
 시작 기준으로 사용한다. 다른 native pacing 소유자로 전환하면 대기 중인 application 상태를 회수한다.
 
+앱 펌프의 `write_clocked`는 공유 PCM·획득 시각을 먼저 쓰고 같은 생산자 claim에서
+native 단위 credit을 공개한다. 캡처 누적량·drop 통계는 입력 준비량으로 사용하지 않는다.
+정지 때는 마지막 게시 위치를 보존하고, 새 producer epoch에서만 0부터 시작한다.
+`SourceRegistry::pcm_progress`는 같은 source pin에서 게시된 그래프 프레임·보존량·클록 메타데이터를
+분리해 전달한다. `ApplicationPacer`는 게시 프레임을 직접 사용하므로 SRC 출력의 끝을
+native 단위로 재환산해 버리지 않는다. 물리 장치는 기존 하드웨어 credit으로 진행한다.
+
 `audio-io::retention`은 최대 지원 샘플레이트에서도 최소 4초의 backlog 저장량을 정한다.
 macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭제곱인 1,048,576프레임으로 올림한다.
 녹음 전달 큐는 256프레임 × 3,000개이며 192kHz에서 4초다. 모두 제어 경로에서 준비하고,
@@ -155,6 +162,12 @@ macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭�
 최대 RAW 전송 32,768프레임을 수용하도록 65,536프레임으로 준비한다. 가득 찬 private FIFO는 실패한 쓰기를
 거부하며 기존 PCM을 보존한다. 시각 공유 링은 오래된 구간을 덮어쓰므로 독자가 누락·불연속을
 확인한다. 녹음 큐가 한계를 넘으면 받아 둔 prefix를 마무리하고 `Failed`로 보고한다.
+
+HAL의 호스트 I/O 요청 크기와 설정 가능한 버퍼 크기는 별개다. 한 요청은 준비한
+1,048,576프레임 보존량으로 제한하며, 2,048프레임을 넘는 요청은 같은 I/O pin 안에서
+기존 scratch 크기로 나눠 처리한다. Float32·정수 변환·복수 클라이언트 믹스 모두 같은 경로다.
+정상 quantum은 추가 scratch 조회 없이 기존 처리로 보낸다. HAL trace v5는 null 버퍼와
+보존량 초과를 분리하고 마지막 거부의 크기·포인터 유무·방향을 기록한다.
 
 공유 source의 `SourceClockRead`는 준비된 snapshot·소비자 갱신 중의 보류·생산자 grant 만료를
 구분한다. 보류는 cursor와 생산자를 유지한다. `begin_epoch`는 소비자 snapshot 재조회 없이

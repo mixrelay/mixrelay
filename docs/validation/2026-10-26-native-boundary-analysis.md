@@ -1,5 +1,35 @@
 # 설치본의 네이티브 경계 실패 분석
 
+## 2026-10-27 유효 host span과 변환 완료 PCM의 경계
+
+제품 `b30fb23`·검사 `63b1dbe`의 `40464144389`는 12개 대상 통과,
+15 Intel 실패다. 새 설치의 native trace는 extent 거부 1건을 보였으며,
+실제 유음 게시 139,356프레임은 HAL 읽기와 녹음에 보존됐다.
+trace v4에는 거부한 크기·포인터가 없어 null과 과대 요청 중 어느 조건인지 알 수 없다.
+
+SDK의 `DoIOOperation`은 실제 frame 수가 nominal 버퍼와 다를 수 있다고 명시한다.
+우리 `Registry::io`는 최대 설정 quantum인 2,048을 초과하면 거부했다.
+실제 native runtime에 8,192프레임을 요청하는 회귀는 이 거부 때문에 실패했다.
+후속 경로는 준비된 보존량까지 허용하고 같은 I/O pin에서 기존 scratch 크기로 나눈다.
+Float32·packed Signed24, 큰 쓰기와 다중 client 믹스가 RT 할당 없이 동작한다.
+정상 quantum은 기존 처리로 바로 보낸다. trace v5는 모든 extent 거부의 null/보존량 초과
+분류와 마지막 요청 인자를 보존한다. 유효 span 거부·불완전한 분류는 계속 실패다.
+입력이 없는 잘못된 host 요청을 안전하게 거부한 사실은 PCM 손실로 세지 않는다.
+
+업그레이드의 전체 시스템 녹음은 중앙 1초의 두 tone이 모두 0이었다.
+`Pump::start_epoch`는 불연속 이전 private capture prefix를 버리지만,
+`Pump::pass`는 raw captured+dropped 누적량을 변환된 PCM보다 먼저 공개했다.
+새 epoch의 공유 버퍼가 비어도 246,272프레임을 공개하는 경로가 실제 transport 회귀에서 실패했다.
+후속 `write_clocked`는 timed PCM과 native 단위 credit을 한 claim에서 순서대로 공개한다.
+`stop_native`는 이미 게시한 위치를 되감지 않는다. raw capture 통계는 관측값으로만 남긴다.
+
+엔진의 처리량에는 native 단위 credit을 다시 환산하지 않는다.
+`SourcePcmProgress`는 같은 source pin에서 클록 메타데이터·게시된 그래프 프레임·보존량을 전달한다.
+`ApplicationPacer`는 그래프 게시량을 직접 사용한다. 실제 공유 PCM을 게시하는 44.1→48kHz
+회귀는 이전 환산 로직에서 1,025프레임 중 1,024개만 얻었고, 직접 게시량에서는 모두 얻었다.
+이 비교에는 source FIFO의 startup reserve를 충족하는 입력을 사용하며, 작은 미준비 FIFO를
+프레임 환산 결함으로 오인하지 않는다. 설치본의 정확한 대응과 전체 수락은 새 후보에서 확인한다.
+
 ## 2026-10-27 실제 게시한 PCM의 수락과 첫 source credit
 
 제품 수락의 기준 입력은 완전하게 보관된 native 쓰기 관찰이다. 소스의 계획 좌표 전체와

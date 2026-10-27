@@ -91,16 +91,17 @@ fn set_source_master((token, kind): (u64, SourceKind), master: bool) {
 }
 
 fn binding_clock(binding: &ExternalBinding) -> Option<ApplicationClockSnapshot> {
-    let (clock, capacity_frames) = binding_sources(binding, endpoint_service::source_registry())?
-        .clock_with_capacity(binding_token(binding))?;
+    let progress = binding_sources(binding, endpoint_service::source_registry())?
+        .pcm_progress(binding_token(binding))?;
+    let clock = progress.clock;
     Some(ApplicationClockSnapshot {
         epoch: clock.epoch,
-        native_frames: clock.native_frames,
+        published_frames: progress.published_frames,
         native_rate: clock.native_rate,
         graph_rate: clock.graph_rate,
         running: clock.running,
         synchronized: clock.synchronized,
-        capacity_frames,
+        capacity_frames: progress.capacity_frames,
     })
 }
 

@@ -148,11 +148,11 @@ static void custom_property_lists(AudioObjectID device) {
     CFRelease(enabled);
     assert(raw == 1);
     CFDataRef snapshot = custom_data(device, 'mrdo');
-    assert(CFDataGetLength(snapshot) == (14 + 8192 * 11) * (CFIndex)sizeof(uint64_t));
+    assert(CFDataGetLength(snapshot) == (17 + 8192 * 11) * (CFIndex)sizeof(uint64_t));
     uint64_t header[5] = {0};
     memcpy(header, CFDataGetBytePtr(snapshot), sizeof(header));
     CFRelease(snapshot);
-    assert(header[0] == 4 && header[1] == 10 && header[2] == 8192 && header[3] == 0 && header[4] == 0);
+    assert(header[0] == 5 && header[1] == 10 && header[2] == 8192 && header[3] == 0 && header[4] == 0);
     assert(set_custom_flag(device, 0) == noErr);
     enabled = custom_data(device, 'mrdi');
     memcpy(&raw, CFDataGetBytePtr(enabled), sizeof(raw));
@@ -167,7 +167,7 @@ static void custom_property_lists(AudioObjectID device) {
     char json[512] = {0};
     assert(file != NULL && fgets(json, sizeof(json), file) != NULL);
     assert(fclose(file) == 0 && unlink(path) == 0);
-    assert(strcmp(json, "{\"version\":4,\"issued\":0,\"dropped\":0,\"capacity\":8192,\"admission\":{\"read\":0,\"write\":0,\"timestamp\":0,\"extent\":0,\"stream\":0,\"frozen\":0,\"inactive\":0,\"native\":0,\"lastRejectedTimestampBits\":\"0000000000000000\"},\"rows\":[]}\n") == 0);
+    assert(strcmp(json, "{\"version\":5,\"issued\":0,\"dropped\":0,\"capacity\":8192,\"admission\":{\"read\":0,\"write\":0,\"timestamp\":0,\"extent\":0,\"stream\":0,\"frozen\":0,\"inactive\":0,\"native\":0,\"lastRejectedTimestampBits\":\"0000000000000000\",\"lastRejectedExtent\":{\"frames\":0,\"bufferPresent\":false,\"render\":false},\"nullBuffer\":0,\"oversizedFrames\":0},\"rows\":[]}\n") == 0);
     assert(mr_probe_hal_trace_enable(device, false).stage == NULL);
 }
 

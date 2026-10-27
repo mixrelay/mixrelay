@@ -54,6 +54,8 @@ bool mr_application_source_transport_reset(
     MRApplicationSourceTransport *transport, uint64_t format_word, uint32_t native_sample_rate);
 void mr_application_source_transport_publish_native(
     MRApplicationSourceTransport *transport, uint64_t native_frames, bool running);
+/* End activity without rewinding PCM already committed in this epoch. */
+void mr_application_source_transport_stop_native(MRApplicationSourceTransport *transport);
 bool mr_application_source_transport_record_source_faults(
     MRApplicationSourceTransport *transport, uint64_t epoch, uint64_t count);
 
@@ -75,6 +77,9 @@ bool mr_application_source_transport_write(
     MRApplicationSourceTransport *transport,
     const float *interleaved_samples,
     uint32_t frame_count);
+/* Commit timed PCM before publishing its corresponding native frame credit. */
+bool mr_application_source_transport_write_clocked(MRApplicationSourceTransport *transport,
+    const float *samples, const uint64_t *times, uint32_t frames);
 bool mr_application_source_transport_write_timed(MRApplicationSourceTransport *transport,
     const float *interleaved_samples, const uint64_t *timestamps, uint32_t frame_count);
 

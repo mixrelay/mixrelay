@@ -116,6 +116,24 @@ test('OS roundtrip counters remain diagnostic when observed HAL publications and
   assert.equal(report.hostRoundtrip.corruptFrames, 632);
 });
 
+test('a stale loaded HAL cannot qualify a candidate even when its retained PCM is correct', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-native-version-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  await assert.rejects(nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
+    snapshot() {}, diagnostics() {},
+    execute(program, args) {
+      if (program === 'zsh') return '/probe.app';
+      if (consentFixture(program, args, directory)) return;
+      if (program === 'open') writeProbeEvidence(directory, {
+        inputAuthorization: { initial: 3, final: 3, requested: false }, activityProtection: true,
+        complete: true, channelOrder: true, missingFrames: 0, repeatedFrames: 0,
+        corruptFrames: 0, nonfiniteSamples: 0, receivedFrames: 144000,
+      }, { corruptRead: false, traceVersion: 4 });
+    },
+  }), /Loaded HAL does not match the candidate trace schema/);
+  assert.equal(JSON.parse(readFileSync(join(directory, 'native-hal-io.json'))).version, 4);
+});
+
 test('observation and cleanup failures retain the original PCM boundary and every failure', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'mr-combined-pcm-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

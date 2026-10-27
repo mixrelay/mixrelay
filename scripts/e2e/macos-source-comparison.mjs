@@ -49,6 +49,7 @@ export async function compareMacosSources(device, directory, { measurementBounda
         assert.equal(metrics.error, undefined, 'Native source comparison failed before drain');
         const analysis = analyseSourceComparison(plan, source, metrics, readFileSync(join(output, 'timing.csv'), 'utf8'), readFileSync(join(output, 'capture.f32')));
         const rawTrace = JSON.parse(readFileSync(join(output, 'hal-io.json'), 'utf8'));
+        assert.equal(rawTrace.version, 5, 'Loaded HAL does not match the candidate trace schema');
         const trace = analyseHalIo(rawTrace), native = analyseSourceNative(rawTrace, plan, source, metrics.origin);
         const traceComplete = trace.retention.issued > 0 && trace.retention.writerDropped === 0
           && trace.retention.notRetainedRecentRows === 0 && trace.retention.observationsBeyondCapacity === 0;
