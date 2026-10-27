@@ -16,6 +16,7 @@ channel counts do not require separate installations. Virtual devices support
 - [Product and implementation status](docs/product.md): free driver, free/paid app policy, behavior, implementation boundaries and the single work checklist.
 - [Design system](docs/design-system.md): Core tokens and contracts, with Foundations, Components, Patterns, Pages and Review documentation in Storybook (`pnpm storybook`).
 - [Pause and resume manual](docs/manual/playback.md): shared playback controls and how paused intervals affect recordings, in the 11 supported languages.
+- [Manual publication policy](docs/manual/README.md): language support checks and translation scope for Rawsector manuals.
 - [Product website draft](apps/website/README.md): static product page and HTML guide; local preview only, with no checkout or downloads yet.
 
 ## Repository layout
