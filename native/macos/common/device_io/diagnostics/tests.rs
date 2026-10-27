@@ -134,11 +134,7 @@ fn pending_or_overwritten_slot_and_future_cursor_never_fabricate_a_record() {
 
 #[test]
 fn concurrent_publication_has_coherent_payloads_and_complete_loss_accounting() {
-    use std::{
-        sync::Arc,
-        thread,
-        time::{Duration, Instant},
-    };
+    use std::{sync::Arc, thread};
     const TOTAL: u64 = 10_000;
     let evidence = Arc::new(ClockEvidence::default());
     let writer = Arc::clone(&evidence);
@@ -151,19 +147,31 @@ fn concurrent_publication_has_coherent_payloads_and_complete_loss_accounting() {
         }
     });
     let (mut cursor, mut received, mut missed) = (0, 0, 0);
-    let started = Instant::now();
-    while cursor < TOTAL {
-        if let Some(record) = evidence.read(cursor) {
-            assert_event(record.event, cursor + record.missed_before + 1);
-            cursor = record.next_cursor;
-            received += 1;
-            missed += record.missed_before;
-        } else {
-            assert!(started.elapsed() < Duration::from_secs(10));
+    let mut read_next = || {
+        let Some(record) = evidence.read(cursor) else {
+            return false;
+        };
+        assert_event(record.event, cursor + record.missed_before + 1);
+        cursor = record.next_cursor;
+        received += 1;
+        missed += record.missed_before;
+        true
+    };
+    // Exercise concurrent reads for a finite workload; scheduling speed is not
+    // the journal's contract. Joining observes producer failure and completion.
+    for _ in 0..TOTAL {
+        if !read_next() {
             thread::yield_now();
         }
     }
     producer.join().unwrap();
+    // A completed writer can leave at most one ring of unread publications.
+    for _ in 0..CLOCK_BREAK_CAPACITY {
+        if !read_next() {
+            break;
+        }
+    }
+    assert_eq!(cursor, TOTAL);
     assert_eq!(received + missed, TOTAL);
     assert!(evidence.read(cursor).is_none());
 }
