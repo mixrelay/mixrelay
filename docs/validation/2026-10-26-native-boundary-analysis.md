@@ -1,5 +1,56 @@
 # 설치본의 네이티브 경계 실패 분석
 
+## 2026-10-27 Intel 콜백 대기와 System Trace
+
+제품 `559721e`·측정 `f6d1f67`의 전체 실행 `40438316558`은 11개 통과,
+macOS 15 Intel·26 Intel 실패다. Ubuntu ARM 부팅·설치본은 통과했다.
+15 Intel 새 설치의 source output과 source HAL 쓰기에는 같은 612프레임 구멍이 있다.
+공급한 전체 쓰기의 해시는 279행 모두 기준 신호와 일치한다. 업그레이드의 기본 왕복은 통과했다.
+무음→유음의 소스 출력과 종료 녹음 누락은 새 설치 996·업그레이드 876프레임으로 각각 일치한다.
+26 Intel의 기본 왕복·녹음·시스템 캡처·정리는 양 모드 모두 통과했지만, 추가 비교의 무음
+콜백 좌표가 새 설치 유음→무음에서 724·업그레이드 무음→유음에서 664프레임 빠졌다.
+관찰한 무음 payload는 모두 0이다. 콜백 coverage 실패는 그대로 유지한다.
+
+동일 네 설치 파일과 측정 소스 `74ece43`의 집중 진단 `40443993285`에서 15 Intel의
+새 설치 `AUDIO-01`은 missing 1,264·corrupt 632·repeated 0프레임으로 실패했다.
+System Trace의 시작 알림은 `notify_register_dispatch`로 등록한 전용 Darwin 알림으로
+확인한다. `xctrace`의 표준 출력 문구만으로 준비를 승인하지 않는다.
+TOC는 실제 측정 중 5.336276초를 기록했으며 CPU 상태 330,294행과 user PC 샘플이 저장됐다.
+스레드 상태 export는 60초 제한으로 끊겼다. 아래 대기 구간은 완성된 행에 있지만 전체 XML은
+불완전하므로 export 성공으로 기록하지 않는다.
+
+`MRRoundTripProbe` PID 10845의 IO thread `0x8140`과 원본 timing 431개의 진입·종료를
+대조했다. 콜백의 두 명령이 해당 스레드의 CPU 실행 구간 안에 있어야 한다는 조건으로 구한
+두 시계의 상수 차이는 `[731062505998, 731062512504]`ns다. 6,506ns 폭의 추론 범위이며
+직접 기록한 wall-clock anchor는 아니다. 해당 범위 전체에서 다음 순서는 유지된다.
+
+1. trace 1.947574419초부터 1.969690059초까지 소스 IO thread가 22.115640ms 대기한다.
+   CoreAudio IO thread `0x8142`가 깨운 뒤 968ns 후 CPU를 받는다. 이 구간은 실행 가능한
+   소스 thread가 낮은 우선순위 때문에 계속 밀린 상태와 구별된다.
+2. 뒤따른 출력 콜백 좌표는 `73892`에서 `74524`로 건너뛴다. 같은 소스의 HAL 쓰기도
+   정확히 그 632프레임을 게시하지 않았다. 입력 콜백의 별도 구멍은 `[72868, 73500)`이다.
+   모든 콜백 본문의 최대 실행 시간은 490.963µs다.
+3. HAL 읽기는 `[72868, 74012)`의 1,144프레임 중 1,024프레임을 공급하고 120프레임을
+   0으로 채운다. 다음 `[74012, 74524)`는 512프레임 전부 미공급이다. 게시되지 않은 구간과
+   실제 0 PCM이 일치하며 이전 PCM을 재생한 증거는 없다. source 쓰기 279행의 해시는 모두 맞다.
+
+CoreAudio가 소스를 깨우기 전 구간에는 인터럽트와 Apple framework 실행이 함께 있다.
+같은 PID의 binary images와 trace의 symbol archive를 UUID로 대조했다. CoreAudio의
+`HALS_IOContext_Legacy_Impl::IsAnyEngineMixing_Helper`·`PerformIO`·`HALB_Guard::WaitFor`와
+`HALS_IOEngine2::AudioIssueDetectorAnalyzeBuffer` → `rtaid::DetectorNode::AnalyzeABL` →
+libvDSP 경로가 샘플에 있다. CoreAudio UUID는 `98907A8F-43FC-3D69-AB7E-BE41950154D3`,
+검출기 UUID는 `31F6A9E2-A1BE-3E15-8867-2A32043F6E10`이다. archive의 image 상대 주소를
+Apple `symbols`로 조회한 결과이며 해당 OS framework를 디컴파일한 것은 아니다.
+이것만으로 내부 procedure의 비용, 인터럽트 원인, VM CPU 회수, MixRelay의 간접 부하 중
+하나를 원인으로 확정하지 않는다. System Trace 자체도 부하를 더한다.
+이 기록은 소스 호출 지연의 위치를 좁히며 추적하지 않은 전체 실행의 원인을 증명하지 않는다.
+버퍼에는 생성된 PCM만 보존할 수 있으므로 이 구멍을 저장량 증가로 복원할 수는 없다.
+
+집중 진단의 업그레이드 기본 왕복과 새 설치·업그레이드의 무음·유음 양 순서는 통과했다.
+정리도 통과했지만 진단 실행은 실패 상태이며 전체 13개 수락에 합산하지 않는다.
+원시 ZIP SHA-256은 `75cb0afc45f8def78a62ad001df043989a0429a9283f858c8468750949e5ee9b`로
+확인했고 원본 PCM·XML·로그를 목적이 명시된 Diagnostics에 보존했다. ZIP 사본은 남기지 않는다.
+
 ## 2026-10-27 출력 콜백과 Driver 조회 수명
 
 `abf09f6`의 전체 실행 `40375187739`에서 실패한 원본 PCM과 callback timing,
