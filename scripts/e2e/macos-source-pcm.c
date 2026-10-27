@@ -44,7 +44,8 @@ OSStatus mr_source_io(AudioDeviceID device, const AudioTimeStamp *now,
     const uint64_t recorded_start = pcm->recorded_frames;
     bool captured = false, rendered = false;
     uint64_t source_start = 0U;
-    if (in_valid && incoming > 0U) {
+    // Capture owns the finite horizon; a late control-side stop cannot extend it.
+    if (in_valid && incoming > 0U && recorded_start < pcm->source_frames) {
         if (recorded_start <= pcm->capacity && incoming <= pcm->capacity - recorded_start) {
             memcpy(pcm->recorded + recorded_start * 2U, input->mBuffers[0].mData,
                    (size_t)incoming * 2U * sizeof(float));
@@ -62,7 +63,7 @@ OSStatus mr_source_io(AudioDeviceID device, const AudioTimeStamp *now,
                 memcpy(output->mBuffers[0].mData, pcm->source + source_start * 2U,
                        (size_t)count * 2U * sizeof(float));
             }
-            rendered = true;
+            rendered = source_start < pcm->source_frames;
         } else pcm->invalid_timestamps++;
     }
     const uint64_t exited = pcm->clock();
@@ -72,6 +73,31 @@ OSStatus mr_source_io(AudioDeviceID device, const AudioTimeStamp *now,
 }
 
 static uint64_t fixed_clock(void) { return 123U; }
+
+static int finite_capture_self_test(void) {
+    float source[2048] = {0}, recorded[3072] = {0}, received[1024] = {0}, played[1024];
+    MRSourceChunk ins[16], outs[16];
+    MRSourcePcm pcm = {.source = source, .source_frames = 768U, .recorded = recorded,
+        .capacity = 1536U, .input = ins, .output = outs, .chunk_capacity = 16U,
+        .quantum = 512U, .clock = fixed_clock};
+    AudioBufferList input = {.mNumberBuffers = 1U, .mBuffers = {{2U, sizeof(received), received}}};
+    AudioBufferList output = {.mNumberBuffers = 1U, .mBuffers = {{2U, sizeof(played), played}}};
+    AudioTimeStamp time = {.mSampleTime = 10000.0, .mHostTime = 1U, .mFlags = 3U};
+    for (size_t i = 2048U; i < 3072U; i++) recorded[i] = 9.0F;
+    // The whole last 512-frame callback is retained, then control-side stop can be late.
+    for (unsigned phase = 0U; phase < 8U; phase++) {
+        mr_source_io(0U, NULL, &input, &time, &output, &time, &pcm);
+        time.mSampleTime += 512.0;
+    }
+    if (pcm.recorded_frames != 1024U || pcm.input_count != 2U || pcm.output_count != 2U ||
+        pcm.overflow != 0U || pcm.dropped_chunks != 0U) return 1;
+    for (size_t i = 2048U; i < 3072U; i++) if (recorded[i] != 9.0F) return 1;
+    for (size_t i = 0U; i < 1024U; i++) if (played[i] != 0.0F) return 1;
+    // An undersized capture still fails before the finite horizon is complete.
+    pcm.recorded_frames = 0U; pcm.capacity = 256U;
+    mr_source_io(0U, NULL, &input, &time, &output, &time, &pcm);
+    return pcm.overflow == 1U && pcm.recorded_frames == 0U ? 0 : 1;
+}
 
 int mr_source_pcm_self_test(void) {
     float source[2048] = {0}, recorded[2048] = {0}, received[1024] = {0}, played[1024];
@@ -97,5 +123,5 @@ int mr_source_pcm_self_test(void) {
     mr_source_io(0U, NULL, &input, &time, &output, &time, &pcm);
     if (pcm.invalid_timestamps != 1U || pcm.recorded_frames != 1024U) return 1;
     for (size_t i = 0U; i < 1024U; i++) if (played[i] != 0.0F) return 1;
-    return 0;
+    return finite_capture_self_test();
 }
