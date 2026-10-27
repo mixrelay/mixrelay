@@ -15,8 +15,8 @@ The checker rejects different deployment and dependency minima in Tauri and Pipe
 The `Release PR and draft release` workflow (`release-please.yml`) runs release-please
 on every push to `main`. It reads the Conventional Commits merged since the last release
 and keeps one release PR open: `fix` raises the patch version, `feat` the minor version,
-and a breaking change (`!` or a `BREAKING CHANGE:` footer) the major version, also from
-0.x to 1.0.0. Other commit types do not open a release PR. The manifest starts at 0.1.0
+and a breaking change (`!` or a `BREAKING CHANGE:` footer) the minor version in 0.x
+(`bump-minor-pre-major`) and the major version from 1.0.0. Other commit types do not open a release PR. The manifest starts at 0.1.0
 and `bootstrap-sha` is the `v0.1.0` source commit `c198dd16`, so the earlier history,
 which is mostly not in Conventional Commits form, never selects a version.
 [Development rules](development.md) describe the title convention and the optional
@@ -500,8 +500,8 @@ pnpm release:qualify --directory /absolute/candidate \
 A successful native workflow creates `publication/mix-relay.release.json` and
 `publication/mix-relay.qualification.json` inside its `qualification-evidence` Actions
 artifact. Attach both files, the candidate JSON and the unchanged installers to the
-draft `vMAJOR.MINOR.PATCH` GitHub release that release-please created, then publish it. Keep the Actions evidence for the publication
-window (currently 90 days). After expiration, rerun qualification before publication.
+draft `vMAJOR.MINOR.PATCH` GitHub release that release-please created, then publish it.
+Keep the Actions evidence for the publication window (currently 90 days). After expiration, rerun qualification before publication.
 
 `publish-updates.yml` checks the final tag's source commit, candidate hashes, manifest
 hash, successful source CI and the successful `main` qualification workflow run and
