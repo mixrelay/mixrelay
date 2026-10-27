@@ -10,6 +10,45 @@ Run `pnpm support:check` after changing build or packaging configuration. When c
 the contract, run `pnpm support:sync` to regenerate Compose and the environment table.
 The checker rejects different deployment and dependency minima in Tauri and PipeWire.
 
+## Starting a release
+
+The `Release PR and draft release` workflow (`release-please.yml`) runs release-please
+on every push to `main`. It reads the Conventional Commits merged since the last release
+and keeps one release PR open: `fix` raises the patch version, `feat` the minor version,
+and a breaking change (`!` or a `BREAKING CHANGE:` footer) the major version, also from
+0.x to 1.0.0. Other commit types do not open a release PR. The manifest starts at 0.1.0
+and `bootstrap-sha` is the `v0.1.0` source commit `c198dd16`, so the earlier history,
+which is mostly not in Conventional Commits form, never selects a version.
+[Development rules](development.md) describe the title convention and the optional
+`RELEASE_PLEASE_TOKEN`; without it, GitHub runs no checks on the release PR.
+
+release-please changes only `.release-please-manifest.json`. A second job in the same
+workflow checks out the release branch, runs `pnpm product:version set` with that version
+and commits the Cargo, npm, Tauri, HAL and `Cargo.lock` changes. It commits nothing when
+the branch already carries the version. `pnpm product:version check` must pass on the
+release PR, because `cargo build --locked` rejects stale workspace versions in
+`Cargo.lock`. Generated release notes go to the PR body and the draft release.
+release-please does not edit `CHANGELOG.md`; installers package that curated file from
+the tag commit, so merge its user-facing notes before the release PR.
+
+Merging the release PR makes release-please create the tag `vMAJOR.MINOR.PATCH` on the
+merge commit and a draft GitHub release with that tag. It never publishes the release.
+The tag commit is the candidate source:
+
+1. Wait for the `main` push run of `Native build and unit tests` for that commit to
+   succeed. Later pushes do not cancel `main` runs, because qualification requires the
+   run for this exact commit.
+2. Dispatch `Build Linux release candidates once per CPU` on the tag and build the macOS
+   PKG from a clean checkout of the tag, as described below.
+3. Create the candidate with the tag commit as `--source-revision` and the tag version as
+   `--version`. Attach the installers, `mix-relay.candidate.json` and
+   `source-revision.txt` to the draft.
+4. Optionally diagnose with `candidate-e2e.yml`, then dispatch
+   `Qualify exact release artifacts` from `main` with the draft tag as `candidate_tag`.
+5. Attach `mix-relay.release.json` and `mix-relay.qualification.json` from that run to the
+   same draft. A person then publishes it, and `publish-updates.yml` verifies that the tag
+   still points at the qualified source commit before requesting catalog publication.
+
 ## Build once, qualify the final files
 
 The `Native build and unit tests` workflow reads its matrices from the contract. Its
@@ -77,7 +116,8 @@ pnpm release:candidate --directory /absolute/candidate \
 This writes `mix-relay.candidate.json` with the source commit, contract SHA-256 and
 each file's size and SHA-256. Rebuilding, signing, stapling or repacking changes the
 candidate and requires another qualification run. Attach these files to a draft or
-prerelease GitHub release; creating a candidate does not publish the product.
+prerelease GitHub release; creating a candidate does not publish the product. For a
+release, use the draft that release-please created for the tag.
 
 ## GitHub-hosted execution
 
@@ -460,7 +500,7 @@ pnpm release:qualify --directory /absolute/candidate \
 A successful native workflow creates `publication/mix-relay.release.json` and
 `publication/mix-relay.qualification.json` inside its `qualification-evidence` Actions
 artifact. Attach both files, the candidate JSON and the unchanged installers to the
-final `vMAJOR.MINOR.PATCH` GitHub release. Keep the Actions evidence for the publication
+draft `vMAJOR.MINOR.PATCH` GitHub release that release-please created, then publish it. Keep the Actions evidence for the publication
 window (currently 90 days). After expiration, rerun qualification before publication.
 
 `publish-updates.yml` checks the final tag's source commit, candidate hashes, manifest
@@ -476,4 +516,5 @@ revalidating a download link. It does not request the server's older format filt
 
 The workflow guards catalog dispatch, not the GitHub release button. Use draft and
 prerelease assets until qualification passes. No workflow here automatically publishes
-a GitHub release or changes repository visibility.
+a GitHub release or changes repository visibility; release-please creates only the
+draft and its tag.
