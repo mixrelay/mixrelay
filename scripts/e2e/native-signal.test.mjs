@@ -180,8 +180,9 @@ test('system-wide tracing is ready before the original measurement and stops aft
   const before = process.env.GITHUB_ACTIONS;
   process.env.GITHUB_ACTIONS = 'true';
   t.after(() => { if (before === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = before; });
-  for (const [failed, ready] of [[false, 'Recording started.'], [true, 'Starting recording with the System Trace template. Targeting All Processes.\nCtrl-C to stop the recording\n']]) {
+  for (const failed of [false, true]) {
     const phases = [];
+    let notified = false;
     const child = new EventEmitter();
     child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
     child.kill = signal => { phases.push(signal); child.emit('close', 0, null); };
@@ -193,17 +194,52 @@ test('system-wide tracing is ready before the original measurement and stops aft
       start(program, args) {
         assert.equal(program, 'xcrun'); assert.ok(args.includes('--all-processes'));
         assert.equal(args.includes('--launch'), false);
-        queueMicrotask(() => { phases.push('ready'); child.stdout.emit('data', Buffer.from(ready)); });
+        assert.equal(args[args.indexOf('--notify-tracing-started') + 1], 'trace.fixture');
+        queueMicrotask(() => { phases.push('ready'); notified = true; });
         return child;
       },
+      notify: () => ({ name: 'trace.fixture', registered: () => true,
+        started: () => notified, log: () => 'registered\nstarted\n',
+        async stop() { phases.push('observer-stop'); } }),
       wait: async read => { await Promise.resolve(); assert.equal(read(), true); },
     });
     if (failed) await assert.rejects(work, /original measurement failed/);
     else assert.equal(await work, 42);
-    assert.deepEqual(phases, ['ready', 'measure', 'SIGINT']);
+    assert.deepEqual(phases, ['ready', 'measure', 'SIGINT', 'observer-stop']);
     // The diagnostic output name is reused only after this invocation has finished.
     rmSync(join(directory, 'scheduler.log'));
+    rmSync(join(directory, 'scheduler-notification.log'));
   }
+});
+
+test('trace stdout cannot start PCM before the Darwin notification, and both processes are reclaimed', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-trace-not-ready-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const before = process.env.GITHUB_ACTIONS;
+  process.env.GITHUB_ACTIONS = 'true';
+  t.after(() => { if (before === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = before; });
+  const phases = [];
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+  child.kill = signal => { phases.push(signal); child.emit('close', 0, null); };
+  await assert.rejects(withMacosSchedulerTrace(directory, () => phases.push('measure'), {
+    start: () => {
+      queueMicrotask(() => child.stdout.emit('data', Buffer.from('Ctrl-C to stop the recording\n')));
+      return child;
+    },
+    notify: () => ({ name: 'trace.fixture', registered: () => true, started: () => false,
+      log: () => 'registered\n', async stop() { phases.push('observer-stop'); } }),
+    wait: async (read, phase) => {
+      await Promise.resolve();
+      if (phase === 'System Trace readiness') {
+        assert.equal(read(), false);
+        throw new Error('No Darwin start notification');
+      }
+      assert.equal(read(), true);
+    },
+  }), /No Darwin start notification/);
+  assert.deepEqual(phases, ['SIGINT', 'observer-stop']);
+  assert.match(readFileSync(join(directory, 'scheduler.log'), 'utf8'), /Ctrl-C/);
 });
 
 function recording() {
