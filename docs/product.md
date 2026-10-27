@@ -502,7 +502,7 @@ Driver 실행부·엔진·가상 장치 종료, 명시적 재연결 전 중지 �
 
 | ID | 책임·소유자 | procedure 대조와 구현 | TODO 상태 | 완료 조건 |
 | --- | --- | --- | --- | --- |
-| E1 | PCM·버퍼·주기 / native transport·macOS worker | 게시한 그래프 PCM을 pacing frontier로 사용, SRC commit 후 credit 공개, host I/O span과 설정 quantum 분리, 최대 192kHz에서도 최소 4초 저장량 준비 | 초기 source·큰 host span·fractional SRC 끝 프레임 회귀 구현, 후속 설치본 수락 대기 | 무음·유음, 생산자 시작·부분 게시·지연·ring 끝·초과의 실제 PCM 보존과 RT 할당 0 |
+| E1 | PCM·버퍼·주기 / native transport·macOS worker | 게시한 그래프 PCM을 pacing frontier로 사용, SRC commit 후 credit 공개, host I/O span과 설정 quantum 분리, 최대 192kHz에서도 최소 4초 저장량 준비 | 초기 source·큰 host span·fractional SRC 끝 프레임 회귀와 `c198dd1` 설치본 13개 수락 완료 | 무음·유음, 생산자 시작·부분 게시·지연·ring 끝·초과의 실제 PCM 보존과 RT 할당 0 |
 | E2 | 그래프 / audio-engine | GKAudioGraph update/perform/stop/remove와 plan publication·retirement 대조. 미사용 병렬 엔진 제거, meter·processor exchange·render ownership 분리 | 185개 소스 회귀 완료 | 실제 publication·rollback·Off/Mute·off-RT 회수 계약 유지 |
 | E3 | macOS 앱 입력 / process-tap | Stop 실패 때 delivery 차단, callback 배출 후 재시작, 이전 PCM·clock 철회, 제어 절차별 OSStatus 관찰 | 65개 native 회귀·Desktop 오류 표시 회귀 완료 | 실패한 Start/Stop·late callback이 다른 세션이나 새 PCM으로 전파되지 않음 |
 | E4 | macOS HAL / HAL registry·client mix | 실제 stream 시작 성공 후 running 게시, tags/header 포함 용량 admission, client 수명·configuration 거래 분리 | 133개 소스 회귀 완료 | 시작·예약 실패 때 기존 client·revision·PCM 보존 |
@@ -515,7 +515,7 @@ Driver 실행부·엔진·가상 장치 종료, 명시적 재연결 전 중지 �
 | E11 | VST3 / module·instance·event exchange | 필수 module hook 검증, COM 이벤트·포인터 저장소 준비, checked bus 범위와 typed 오류 전달 | 111개 회귀·strict clippy 완료 | 잘못된 native 이벤트·geometry의 무할당 거절, 출력 이벤트 전달 |
 | E12 | CLAP / processing·events·state | 4,096개+pending 입력 저장소 준비, header 검증, 입력 초과·start 거절의 typed 오류 전달 | 69개 회귀·strict clippy 완료 | 초과 입력 전에 native 호출 차단, 출력 prefix 보존, RT 할당 0 |
 | E13 | LV2 / atoms·ports·instance | 정렬된 포트별 Atom 저장소·전체 용량·payload 범위 검증, 초과 입력의 명시 오류 | Linux 54개·strict clippy 완료 | 격리된 Lilv fixture 5개도 필수 실행, 실제 PCM·state·다중 bus 검증 |
-| E14 | 최종 수락 / 통합 담당 | 모든 변경을 한 HEAD로 통합해 회귀·성능·서명·설치 검증 | 직전 설치본 10개 통과·macOS 3개 PCM 실패, Driver 조회 부하 수정본 검증 중 | 동일 최종 네 설치 파일로 13개 대상·필수 skip 0·정리 성공 |
+| E14 | 최종 수락 / 통합 담당 | 모든 변경을 한 HEAD로 통합해 회귀·성능·서명·설치 검증 | `c198dd1`의 같은 네 설치 파일로 13개 통과·필수 결과 116개 통과·skip 0·정리 13개 통과 (`40480070783`) | 동일 최종 네 설치 파일로 13개 대상·필수 skip 0·정리 성공 |
 
 | 영역 | 남은 확인·구현 |
 | --- | --- |
@@ -529,7 +529,7 @@ Driver 실행부·엔진·가상 장치 종료, 명시적 재연결 전 중지 �
 | 녹음·계측 | 무료 시간·채널·녹음기 경계와 인증 변경, RF64 세 형식·1–8채널·4GiB 경계·종료 파일은 외부 도구 없는 소스 자동 검사 완료. 설치본 장시간 녹음·외부 리더 호환 확인, 실제 클립 이벤트 계측·프리셋 청취/튜닝은 남음 |
 | UI 품질·접근성·번역 | 채널 연결 키보드 대체(Shift+F10 메뉴·ChannelConnectionDialog, 소스 구현·자동 검사 완료)·포커스 복귀·스크린리더·전체 번역의 실제 설치본 확인; 소스 UI 게이트와 네 coverage 항목은 100% 통과 |
 | 인증 | Driver 시작·앱 최초 연결의 자동 확인 병합·24시간 시도 제한, 온라인 성공부터 30일 권한, 회수/일시 실패 분류·이미 해제된 활성화의 로컬 정리·불확실한 활성화 중복 방지를 소스와 가짜 시계·HTTP·인증 저장소로 검증. 진행 중 오디오·녹음 유지와 새 유료 작업 제한은 기존 엔진·Driver 테스트로 확인. 실제 구매·기기 이전·무료 전환은 남음 |
-| 설치·공개 파일 | 최신 전체 설치본 실행 `40315961318`은 `f27da5c`의 같은 네 후보로 13개 중 10개 통과·정리 13개 통과·필수 skip 0이다. Ubuntu ARM을 포함한 Linux 7개와 macOS 14·26·27 ARM이 통과했다. 후속 `a88eada`의 집중 실행 `40329569555`은 macOS 15 ARM 통과·15 Intel·26 Intel 실패다. 소스 CI 13개·VM 준비 7개·UI 검사는 통과했다. 보존된 PCM을 누적 native credit만큼 읽지 못한 획득 좌표 결함과 250µs 폴링을 후속 소스에서 수정했다. 공유·native 입력·앱 캡처와 녹음 큐는 최대 지원 rate에서 최소 4초를 보존하도록 늘렸다. 소스 회귀와 새 설치본 검증을 진행 중이며, 같은 최종 설치본으로 13개 전체의 skip 없는 수락은 미완료다. |
+| 설치·공개 파일 | [전체 설치본 실행 `40480070783`](https://github.com/mixrelay/mixrelay/actions/runs/40480070783)은 제품·검사 `c198dd1`의 같은 네 설치 파일로 13개 대상의 새 설치·업그레이드와 정리를 통과했다. 필수 시나리오 결과 116개 통과·skip 0이다. macOS 6개 대상 모두 실제 HAL 입력 보존·기본 녹음·무음→유음과 유음→무음·전체 시스템 캡처를 통과했다. 소스 CI 13개·VM 준비·UI 검사도 통과했다. 캡처 누적량으로 미기록 PCM을 소비하던 credit, SRC 끝 프레임의 재환산 손실, 설정 quantum으로 큰 host 요청을 거부하던 경로를 수정했다. 로컬 변경과 이전 실패 실행의 원시 증거는 보존했다. |
 | 판매·운영 | 상점·상품·정산·실결제/환불·지원 수신, 개인정보/판매 고지와 최종 11언어 계약 |
 
 검사는 변경 경계에 맞춰 수행한다. 소스 유닛 테스트·정적 검사와 개발 설치본 확인은 구분하며
