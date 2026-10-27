@@ -1,6 +1,7 @@
+//! Application capture sessions, graph handoffs, and desktop capture commands.
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{
-    collections::BTreeSet,
     ffi::{CStr, CString, c_char, c_void},
     ptr::NonNull,
     sync::{Arc, Mutex},
@@ -10,10 +11,9 @@ use std::{
 
 use mixrelay_audio_graph::{ApplicationCaptureRequest, ApplicationSelector, SourcePlaybackPolicy};
 use mixrelay_audio_io::{
-    ApplicationCaptureBackend, ApplicationCaptureCapabilities, ApplicationCaptureHealth,
-    ApplicationCaptureSession, ApplicationSelectorKind, AudioDeviceDescriptor,
-    CapturableApplication, ChannelLayout, HostAudioBackendError, ResolvedApplicationCapture,
-    StreamSpec,
+    ApplicationCaptureBackend, ApplicationCaptureHealth, ApplicationCaptureSession,
+    AudioDeviceDescriptor, CapturableApplication, ChannelLayout, HostAudioBackendError,
+    ResolvedApplicationCapture, StreamSpec,
 };
 use mixrelay_macos_transport::endpoint_identity::{endpoint_uid, parse_endpoint_id};
 use tauri::State;
@@ -24,15 +24,30 @@ use mixrelay_process_tap::{self as _, TapStats as NativeStats};
 mod capture_error;
 use capture_error::{CaptureOperation, CaptureProbeError, NativeError};
 
+#[path = "macos_audio/capture_backend.rs"]
+mod capture_backend;
+use capture_backend::MacApplicationCaptureBackend;
+#[path = "macos_audio/capture_ffi.rs"]
+mod capture_ffi;
+#[cfg(test)]
+#[path = "macos_audio/tests.rs"]
+mod tests;
+use capture_ffi::{
+    NativeConfig, NativeProcessTapSession, mr_process_tap_create, mr_process_tap_destroy,
+    mr_process_tap_read, mr_process_tap_read_timed, mr_process_tap_refresh_format,
+    mr_process_tap_start, mr_process_tap_stats, mr_process_tap_stop, mr_process_tap_take_peaks,
+    mr_process_tap_visit_applications, mr_process_tap_wakeup,
+};
+#[path = "macos_audio/source_transport.rs"]
+mod source_transport;
+use source_transport::{ApplicationSourceTransport, NativeClockSnapshot};
+
 #[path = "macos_audio/capture_reader.rs"]
 mod capture_reader;
 #[path = "macos_audio/capture_transaction.rs"]
 mod capture_transaction;
 #[path = "macos_audio/clock_pump.rs"]
 mod clock_pump;
-#[cfg(test)]
-#[path = "macos_audio/committed_credit_tests.rs"]
-mod committed_credit_tests;
 #[path = "macos_audio/device_activity.rs"]
 mod device_activity;
 pub(crate) use device_activity::DeviceActivityCache;
@@ -49,138 +64,15 @@ pub(crate) fn list_device_app_activity(
 ) -> Result<std::collections::BTreeMap<String, Vec<device_activity::DeviceAppActivity>>, String> {
     cache.activity().map_err(|error| error.to_string())
 }
-#[cfg(test)]
-#[cfg(mixrelay_application_clock_fixture)]
-#[path = "macos_audio/live_clock_tests.rs"]
-mod live_clock_tests;
 
 const CAPTURE_RING_CAPACITY_FRAMES: usize = mixrelay_audio_io::retention::RING_FRAMES as usize;
 const ENGINE_BLOCK_FRAMES: usize = 128;
 const MAXIMUM_METER_CHANNELS: usize = 64;
 const PUMP_IDLE_INTERVAL: Duration = Duration::from_micros(250);
 
-#[repr(C)]
-struct NativeProcessTapSession {
-    _private: [u8; 0],
-}
-
-#[repr(C)]
-struct NativeApplicationSourceTransport {
-    _private: [u8; 0],
-}
-
 const NATIVE_OK: i32 = 0;
 const NATIVE_INVALID_ARGUMENT: i32 = 1;
 const NATIVE_RESOURCE_BUSY: i32 = 9;
-
-#[repr(C)]
-struct NativeConfig {
-    bundle_id: *const c_char,
-    mute_while_captured: bool,
-    ring_capacity_frames: usize,
-    target_device_uid: *const c_char,
-    system_audio: bool,
-    excluded_bundle_ids: *const *const c_char,
-    excluded_bundle_count: usize,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-struct NativeTransportError {
-    code: i32,
-    system_error: i32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct NativeClockSnapshot {
-    format_word: u64,
-    epoch: u64,
-    produced_frames: u64,
-    consumed_frames: u64,
-    consumer_ticks: u64,
-    consumer_running: u32,
-    clock_master: u32,
-    target_backlog_frames: u32,
-    consumer_burst_frames: u32,
-    starvation_episodes: u64,
-    starvation_frames: u64,
-    rebuffer_frames: u64,
-    overwrite_skips: u64,
-    insufficient_headroom: u32,
-}
-
-unsafe extern "C" {
-    fn mr_process_tap_visit_applications(
-        visitor: Option<
-            unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, *const c_char, i32),
-        >,
-        context: *mut c_void,
-    ) -> NativeError;
-    fn mr_process_tap_create(
-        config: *const NativeConfig,
-        error: *mut NativeError,
-    ) -> *mut NativeProcessTapSession;
-    fn mr_process_tap_start(session: *mut NativeProcessTapSession) -> NativeError;
-    fn mr_process_tap_stop(session: *mut NativeProcessTapSession) -> NativeError;
-    fn mr_process_tap_refresh_format(session: *mut NativeProcessTapSession) -> NativeError;
-    fn mr_process_tap_wakeup(session: *const NativeProcessTapSession) -> *const c_void;
-    fn mr_process_tap_destroy(session: *mut NativeProcessTapSession);
-    fn mr_process_tap_read(
-        session: *mut NativeProcessTapSession,
-        destination: *mut f32,
-        maximum_frames: usize,
-    ) -> usize;
-    fn mr_process_tap_read_timed(
-        session: *mut NativeProcessTapSession,
-        destination: *mut f32,
-        times: *mut u64,
-        maximum_frames: usize,
-        generation: mixrelay_process_tap::TapReadGeneration,
-    ) -> usize;
-    fn mr_process_tap_stats(session: *const NativeProcessTapSession) -> NativeStats;
-    fn mr_process_tap_take_peaks(
-        session: *mut NativeProcessTapSession,
-        destination: *mut f32,
-        maximum_channels: usize,
-    ) -> usize;
-    fn mr_application_source_transport_connect(
-        source_id: *const c_char,
-        capacity_frames: u32,
-        channels: u32,
-        error: *mut NativeTransportError,
-    ) -> *mut NativeApplicationSourceTransport;
-    fn mr_application_source_transport_write_clocked(
-        transport: *mut NativeApplicationSourceTransport,
-        samples: *const f32,
-        times: *const u64,
-        frames: u32,
-    ) -> bool;
-    fn mr_application_source_transport_record_source_faults(
-        transport: *mut NativeApplicationSourceTransport,
-        epoch: u64,
-        count: u64,
-    ) -> bool;
-    fn mr_application_source_transport_destroy(transport: *mut NativeApplicationSourceTransport);
-    fn mr_application_source_transport_clock(
-        transport: *mut NativeApplicationSourceTransport,
-        snapshot: *mut NativeClockSnapshot,
-    ) -> bool;
-    fn mr_application_source_transport_reset(
-        transport: *mut NativeApplicationSourceTransport,
-        format_word: u64,
-        native_sample_rate: u32,
-    ) -> bool;
-    fn mr_application_source_transport_publish_measurements(
-        transport: *mut NativeApplicationSourceTransport,
-        producer: u32,
-        converter: u32,
-        drought: u32,
-    );
-    fn mr_application_source_transport_stop_native(
-        transport: *mut NativeApplicationSourceTransport,
-    );
-}
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -505,167 +397,6 @@ impl Drop for CaptureProbeSession {
     fn drop(&mut self) {
         // SAFETY: `CaptureProbeSession` has unique ownership and the C destructor is null-safe.
         unsafe { mr_process_tap_destroy(self.native.as_ptr()) };
-    }
-}
-
-struct MacApplicationCaptureBackend {
-    capabilities: ApplicationCaptureCapabilities,
-}
-
-impl Default for MacApplicationCaptureBackend {
-    fn default() -> Self {
-        Self {
-            capabilities: ApplicationCaptureCapabilities {
-                max_channels: 2,
-                supported_selectors: BTreeSet::from([
-                    ApplicationSelectorKind::BundleId,
-                    ApplicationSelectorKind::AllExcept,
-                ]),
-                supports_mute_while_captured: false,
-            },
-        }
-    }
-}
-
-impl ApplicationCaptureBackend for MacApplicationCaptureBackend {
-    type Session = CaptureProbeSession;
-
-    fn capabilities(&self) -> &ApplicationCaptureCapabilities {
-        &self.capabilities
-    }
-
-    fn open(
-        &self,
-        request: &ApplicationCaptureRequest,
-    ) -> Result<Self::Session, HostAudioBackendError> {
-        request.validate(&self.capabilities).map_err(|error| {
-            HostAudioBackendError::CapabilityUnavailable {
-                capability: error.to_string(),
-            }
-        })?;
-        let target_device_uid = match request.source_playback {
-            SourcePlaybackPolicy::Preserve => None,
-            SourcePlaybackPolicy::MuteWhileCaptured => {
-                let id = request
-                    .forwarding_endpoint
-                    .as_ref()
-                    .and_then(|endpoint| parse_endpoint_id(endpoint.as_str()))
-                    .ok_or_else(|| HostAudioBackendError::CapabilityUnavailable {
-                        capability: "forwarding requires an exact MixRelay endpoint identity"
-                            .to_owned(),
-                    })?;
-                Some(endpoint_uid(id))
-            }
-        };
-        CaptureProbeSession::prepare_selector(&request.selector, target_device_uid.as_deref())
-            .and_then(|session| {
-                session.start_native()?;
-                Ok(session)
-            })
-            .map_err(|error| HostAudioBackendError::BackendFailure {
-                message: error.to_string(),
-            })
-    }
-}
-
-struct ApplicationSourceTransport {
-    native: NonNull<NativeApplicationSourceTransport>,
-}
-
-// The mapped transport is exclusively owned by one pump thread and uses lock-free shared atoms.
-unsafe impl Send for ApplicationSourceTransport {}
-
-impl ApplicationSourceTransport {
-    fn observe_capture(&mut self, health: &CaptureProbeStats) {
-        if !health.running {
-            self.stop_native();
-        }
-    }
-
-    fn publish_measurements(&mut self, producer: u32, converter: u32, drought: u32) {
-        // SAFETY: this pump exclusively owns the live transport.
-        unsafe {
-            mr_application_source_transport_publish_measurements(
-                self.native.as_ptr(),
-                producer,
-                converter,
-                drought,
-            );
-        }
-    }
-
-    fn stop_native(&mut self) {
-        // SAFETY: sole pump owner; bounded atomic publication into validated trailer.
-        unsafe {
-            mr_application_source_transport_stop_native(self.native.as_ptr());
-        };
-    }
-    fn clock(&mut self) -> Option<NativeClockSnapshot> {
-        let mut snapshot = NativeClockSnapshot::default();
-        // SAFETY: sole worker owns the transport; Rust validates the versioned mapping.
-        unsafe { mr_application_source_transport_clock(self.native.as_ptr(), &raw mut snapshot) }
-            .then_some(snapshot)
-    }
-
-    fn reset(&mut self, format: u64, native_rate: u32) -> bool {
-        // SAFETY: only the producer worker can reset this transport's epoch.
-        unsafe { mr_application_source_transport_reset(self.native.as_ptr(), format, native_rate) }
-    }
-
-    fn record_source_faults(&mut self, epoch: u64, count: u64) -> bool {
-        // SAFETY: this pump owns the transport; native code validates its lease
-        // and exact epoch before publishing or retaining this fixed counter.
-        unsafe {
-            mr_application_source_transport_record_source_faults(self.native.as_ptr(), epoch, count)
-        }
-    }
-
-    fn connect(source_id: &str, channels: u16) -> Result<Self, String> {
-        let source_id = CString::new(source_id)
-            .map_err(|_| "application source ID contains a null byte".to_owned())?;
-        let mut error = NativeTransportError {
-            code: 0,
-            system_error: 0,
-        };
-        // SAFETY: the source ID remains valid for the synchronous XPC attachment request.
-        let native = unsafe {
-            mr_application_source_transport_connect(
-                source_id.as_ptr(),
-                u32::try_from(CAPTURE_RING_CAPACITY_FRAMES)
-                    .map_err(|_| "application source capacity is invalid".to_owned())?,
-                u32::from(channels),
-                &raw mut error,
-            )
-        };
-        let native = NonNull::new(native).ok_or_else(|| {
-            format!(
-                "application source transport failed: code={} system_error={}",
-                error.code, error.system_error
-            )
-        })?;
-        Ok(Self { native })
-    }
-
-    fn write(&mut self, samples: &[f32], times: &[u64], frames: usize) -> bool {
-        let Ok(frames) = u32::try_from(frames) else {
-            return false;
-        };
-        // SAFETY: this pump exclusively owns the transport and samples cover the frame count.
-        unsafe {
-            mr_application_source_transport_write_clocked(
-                self.native.as_ptr(),
-                samples.as_ptr(),
-                times.as_ptr(),
-                frames,
-            )
-        }
-    }
-}
-
-impl Drop for ApplicationSourceTransport {
-    fn drop(&mut self) {
-        // SAFETY: the pump has unique ownership of this mapped transport.
-        unsafe { mr_application_source_transport_destroy(self.native.as_ptr()) };
     }
 }
 
@@ -1039,60 +770,6 @@ fn same_capture_session(
         && current.stream == requested.stream
         && current.source_playback == requested.source_playback
         && current.forwarding_endpoint == requested.forwarding_endpoint
-}
-
-#[cfg(test)]
-mod restored_pid_tests {
-    use super::*;
-
-    #[test]
-    fn source_mute_without_owned_forwarding_is_rejected_before_native_capture() {
-        let request = serde_json::from_value(serde_json::json!({
-            "selector":{"match":"bundle_id","bundle_id":"io.mixrelay.unowned-fixture","include_descendants":false},
-            "stream":{"channels":2,"channelLayout":"stereo"},
-            "sourcePlayback":"mute_while_captured"
-        }))
-        .unwrap();
-        let backend = MacApplicationCaptureBackend::default();
-        assert!(!backend.capabilities().supports_mute_while_captured);
-        assert!(matches!(
-            backend.open(&request),
-            Err(HostAudioBackendError::CapabilityUnavailable { .. })
-        ));
-    }
-
-    #[test]
-    fn capture_session_reuse_changes_with_forwarding_endpoint() {
-        let preserve: ApplicationCaptureRequest = serde_json::from_value(serde_json::json!({
-            "selector":{"match":"bundle_id","bundle_id":"io.mixrelay.fixture","include_descendants":false},
-            "stream":{"channels":2,"channelLayout":"stereo"},
-            "sourcePlayback":"preserve"
-        }))
-        .expect("preserved source request");
-        let mut first = preserve.clone();
-        first.source_playback = SourcePlaybackPolicy::MuteWhileCaptured;
-        first.forwarding_endpoint = Some("17e59d73-42c1-4f11-a8b4-6c2d913357e0".into());
-        let mut second = first.clone();
-        second.forwarding_endpoint = Some("27e59d73-42c1-4f11-a8b4-6c2d913357e0".into());
-        assert!(same_capture_session(&first, &first));
-        assert!(!same_capture_session(&first, &second));
-        assert!(!same_capture_session(&preserve, &first));
-    }
-
-    #[test]
-    fn restored_pid_manifest_is_rejected_without_attempting_a_native_tap() {
-        let manifest = serde_json::from_value(serde_json::json!({
-            "protocolVersion":1, "revision":7, "sources":[{
-                "nodeId":"saved-pid", "request":{
-                    "selector":{"match":"process_id","process_id":4_294_967_295_u32,"include_descendants":true},
-                    "stream":{"channels":2,"channelLayout":"stereo"},"sourcePlayback":"preserve","requiresReselection":true
-                }
-            }]
-        })).unwrap();
-        let state = ApplicationCaptureState::default();
-        assert!(state.prepare(&manifest).is_err());
-        assert!(!state.has_pending().unwrap());
-    }
 }
 
 fn prepare_application_audio(

@@ -1,5 +1,6 @@
 //! Opt-in real process tap + actual desktop SRC pump + isolated v2 registry.
 //! Never attaches to the installed engine's graph or a physical/default output.
+use super::super::*;
 use super::*;
 use std::{
     io::{BufRead, BufReader, Write},
