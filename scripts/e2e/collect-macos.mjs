@@ -73,6 +73,18 @@ export function collectCoreaudioLog(outputPath, run = spawnSync) {
   return readFileSync(outputPath, 'utf8');
 }
 
+export function collectSchedulerTrace(capture, path, trace, exists = existsSync) {
+  if (!exists(trace)) return;
+  const tables = ['process-info', 'thread-info', 'cpu-state', 'thread-state', 'time-sample'];
+  const exports = [['toc', ['--toc']], ...tables.map(schema => [schema,
+    ['--xpath', `/trace-toc/run[@number="1"]/data/table[@schema="${schema}"]`]])];
+  for (const [name, options] of exports) {
+    const output = path(`scheduler-trace-${name}.xml`);
+    if (!exists(output)) capture(`scheduler-trace-${name}-export.log`, 'xcrun',
+      ['xctrace', 'export', '--input', trace, ...options, '--output', output], 60000);
+  }
+}
+
 export function collectMacos(destination, prefix = '') {
 assert.equal(process.platform, 'darwin');
 assert.equal(process.env.GITHUB_ACTIONS, 'true');
@@ -83,10 +95,7 @@ function capture(file, program, args, timeout = 30000) {
   writeFileSync(path(file), `${result.stdout ?? ''}\n${result.stderr ?? ''}\nexit=${result.status}; signal=${result.signal ?? ''}; error=${result.error?.message ?? ''}\n`);
   return result;
 }
-if (existsSync(join(output, 'scheduler.trace')) && !existsSync(join(output, 'scheduler-trace-toc.xml'))) {
-  capture('scheduler-trace-export.log', 'xcrun', ['xctrace', 'export', '--input', join(output, 'scheduler.trace'),
-    '--toc', '--output', join(output, 'scheduler-trace-toc.xml')]);
-}
+collectSchedulerTrace(capture, path, join(output, 'scheduler.trace'));
 const logs = join(homedir(), 'Library/Logs/MixRelay');
 if (existsSync(logs)) for (const file of readdirSync(logs).filter(name => /^[A-Za-z0-9_.-]+\.log$/.test(name))) {
   copyFileSync(join(logs, file), path(`app-log-${file}`));
