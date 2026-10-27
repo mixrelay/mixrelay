@@ -12,6 +12,7 @@ struct Shared {
     entered: AtomicBool,
     fail: AtomicBool,
     calls: AtomicUsize,
+    failed_calls: AtomicUsize,
 }
 
 struct AsyncNative(Arc<Shared>);
@@ -50,6 +51,8 @@ impl Native for AsyncNative {
             blocked = self.0.resume.wait(blocked).expect("test gate");
         }
         if self.0.fail.load(Ordering::Acquire) {
+            // Publish after selecting failure; the observer cannot change this call's outcome.
+            self.0.failed_calls.fetch_add(1, Ordering::Release);
             TapError::status(-1)
         } else {
             Ok(())
@@ -149,7 +152,7 @@ fn real_dispatch_queue_does_not_block_destroy_and_retries_before_admission_relea
     }
     *shared.blocked.lock().expect("test gate") = false;
     shared.resume.notify_one();
-    wait_for(|| shared.calls.load(Ordering::Relaxed) >= 2);
+    wait_for(|| shared.failed_calls.load(Ordering::Acquire) >= 2);
     assert!(finished.try_recv().is_err());
     shared.fail.store(false, Ordering::Release);
     finished
