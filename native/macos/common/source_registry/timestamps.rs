@@ -1,26 +1,91 @@
 //! Time-addressed reads use coordinates published with PCM, under the same lease/epoch.
-use super::{Source, SourceRegistry};
+use super::{Source, SourceRegistry, stream_epoch};
 use crate::shared_audio_buffer::{SharedAudioBufferStats, mr_shared_audio_buffer_stats};
 use std::sync::atomic::Ordering;
+
+/// The publication a pacing clock observed when it granted graph-frame credit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PublishedCredit {
+    /// The stream identity, as reported by `SourceClock::epoch`.
+    pub epoch: u64,
+    /// Published graph frames that the credit covers.
+    pub through: u64,
+}
+
+/// Graph-frame credit that a time-addressed acquisition must cover.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GraphCredit {
+    /// Frames of this graph read.
+    pub frames: u32,
+    /// Remaining graph-frame credit, including this read.
+    pub available_frames: u32,
+    /// The pacing publication that granted this credit. A source that does not
+    /// pace the graph has none; its newest publication bounds the coordinate.
+    pub published: Option<PublishedCredit>,
+}
+
+/// Why a read produced no PCM. No reason advances the source cursor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadMiss {
+    /// No current lease, acknowledged format or PCM epoch, or a busy consumer claim.
+    Unavailable,
+    /// Priming or rebuffering below the consumer's latency target.
+    NotReady,
+    /// The requested coordinates extend past the newest publication.
+    Ahead,
+    /// The requested coordinate precedes retained or unread PCM.
+    Behind,
+    /// Coordinates inside the retained window are missing or outside one frame period.
+    Mismatch,
+    /// A concurrent overwrite or lease change invalidated the copied PCM.
+    Incomplete,
+}
+impl std::fmt::Display for ReadMiss {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Unavailable => "source stream unavailable",
+            Self::NotReady => "source below its latency target",
+            Self::Ahead => "requested PCM is not yet published",
+            Self::Behind => "requested PCM is evicted or already consumed",
+            Self::Mismatch => "acquisition coordinates do not match the request",
+            Self::Incomplete => "source PCM changed during the copy",
+        })
+    }
+}
+impl std::error::Error for ReadMiss {}
 
 impl SourceRegistry {
     /// Latest safe start coordinate for an active source at the requested graph rate.
     #[must_use]
     pub fn source_time(&self, token: u64, rate: u32, frames: u32) -> Option<u64> {
-        self.source_time_for_credit(token, rate, frames, frames)
+        self.source_time_for_credit(
+            token,
+            rate,
+            GraphCredit {
+                frames,
+                available_frames: frames,
+                published: None,
+            },
+        )
     }
 
     /// Start coordinate covering the clock's remaining graph-frame credit.
     /// Read quantum and outstanding credit are distinct; the coordinate must
     /// remain inside retained PCM even after a delayed consumer drains a burst.
+    /// A credited publication bounds the coordinate: PCM committed after the
+    /// pacing snapshot is not yet credited and never advances it.
     #[must_use]
     pub fn source_time_for_credit(
         &self,
         token: u64,
         rate: u32,
-        frames: u32,
-        available_frames: u32,
+        credit: GraphCredit,
     ) -> Option<u64> {
+        let GraphCredit {
+            frames,
+            available_frames,
+            published,
+        } = credit;
         let read = self.read(token);
         let source = read.source()?;
         if frames > source.capacity || available_frames > source.capacity {
@@ -55,9 +120,19 @@ impl SourceRegistry {
             )
             .max(available_frames)
             .min(source.capacity);
-        let frame = stats
-            .published_through_frame
-            .checked_sub(u64::from(reserve))?;
+        let through = match published {
+            None => stats.published_through_frame,
+            Some(published)
+                if published.epoch
+                    == stream_epoch(clock.producer_lease.load(Ordering::Acquire), stats.epoch) =>
+            {
+                // Publication is monotonic within one stream; min only guards the bound.
+                published.through.min(stats.published_through_frame)
+            }
+            // The credit described a replaced stream; the pacer restarts on its next poll.
+            Some(_) => return None,
+        };
+        let frame = through.checked_sub(u64::from(reserve))?;
         // SAFETY: the mapping includes the epoch-tagged coordinate sidecar.
         unsafe { clock.time_at(source.capacity, stats.epoch, frame) }
     }
@@ -117,11 +192,13 @@ pub(super) fn locate(
     nanos: u64,
     rate: u32,
     extent: (u32, u64),
-) -> Option<u64> {
+) -> Result<u64, ReadMiss> {
     let (frames, minimum) = extent;
     if stats.epoch == 0 || rate == 0 || nanos == 0 {
-        return None;
+        return Err(ReadMiss::Unavailable);
     }
+    // One output-frame quantization bound; scheduling delay never relaxes this bound.
+    let tolerance = 1_000_000_000 / u64::from(rate) + 2;
     let clock = source.mapping.clock();
     let time = |frame| {
         // SAFETY: caller pins this mapping and validates the lease/epoch after copying PCM.
@@ -147,18 +224,28 @@ pub(super) fn locate(
     {
         nearest -= 1;
     }
-    if nearest.checked_add(u64::from(frames))? > end {
-        return None;
+    // Every readable coordinate is newer than the request: it was evicted, or
+    // this forward-only reader already consumed it.
+    let oldest = time(start).or_else(|| end.checked_sub(1).and_then(time));
+    if nearest == start && oldest.is_some_and(|oldest| oldest > nanos.saturating_add(tolerance)) {
+        return Err(ReadMiss::Behind);
+    }
+    if nearest
+        .checked_add(u64::from(frames))
+        .is_none_or(|last| last > end)
+    {
+        return Err(ReadMiss::Ahead);
     }
     for offset in 0..frames {
-        let expected = nanos.checked_add(u64::from(offset) * 1_000_000_000 / u64::from(rate))?;
-        let actual = time(nearest + u64::from(offset))?;
-        // One output-frame quantization bound; scheduling delay never relaxes this bound.
-        if actual.abs_diff(expected) > 1_000_000_000 / u64::from(rate) + 2 {
-            return None;
+        let expected = nanos
+            .checked_add(u64::from(offset) * 1_000_000_000 / u64::from(rate))
+            .ok_or(ReadMiss::Mismatch)?;
+        let actual = time(nearest + u64::from(offset)).ok_or(ReadMiss::Mismatch)?;
+        if actual.abs_diff(expected) > tolerance {
+            return Err(ReadMiss::Mismatch);
         }
     }
-    Some(nearest)
+    Ok(nearest)
 }
 
 pub(super) fn select(
@@ -167,18 +254,16 @@ pub(super) fn select(
     previous: super::Latency,
     policy: &mut super::Latency,
     (rate, frames, requested): (u32, u32, Option<u64>),
-) -> bool {
-    let Some(time) = requested else { return true };
+) -> Result<(), ReadMiss> {
+    let Some(time) = requested else { return Ok(()) };
     let minimum = if previous.started && previous.epoch == stats.epoch {
         previous.next
     } else {
         0
     };
-    let Some(next) = locate(source, stats, time, rate, (frames, minimum)) else {
-        return false;
-    };
+    let next = locate(source, stats, time, rate, (frames, minimum))?;
     policy.next = next;
     policy.target = u32::try_from(stats.published_through_frame.saturating_sub(next))
         .unwrap_or(source.capacity);
-    true
+    Ok(())
 }

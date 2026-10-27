@@ -251,7 +251,15 @@ impl AlignedInput {
         let frames = cycle.frames;
         let frontier = self
             .registry
-            .source_time_for_credit(self.token, 48_000, frames, available_frames)
+            .source_time_for_credit(
+                self.token,
+                48_000,
+                mixrelay_macos_transport::source_registry::GraphCredit {
+                    frames,
+                    available_frames,
+                    published: None,
+                },
+            )
             .map(|time| CaptureFrontier::new(self.token, time));
         let period = self
             .registry

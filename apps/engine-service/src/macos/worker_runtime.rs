@@ -8,6 +8,7 @@
 use std::time::{Duration, Instant};
 
 mod reporting;
+use super::external_io::TimeReadMisses;
 use reporting::Reporter;
 
 use mixrelay_realtime::{
@@ -43,6 +44,7 @@ struct Counts {
     timer: u64,
     idle_waits: u64,
     timeouts: u64,
+    time_reads: TimeReadMisses,
 }
 
 /// One report window, handed to the reporting thread.
@@ -166,6 +168,11 @@ impl WorkerRuntime {
         *count += 1;
         // Entering direct mode may last indefinitely: close the window now.
         self.report(matches!(path, Path::Direct));
+    }
+
+    /// Adds one graph cycle's time-addressed read misses to the current window.
+    pub(super) fn record_time_reads(&mut self, misses: TimeReadMisses) {
+        self.counts.time_reads += misses;
     }
 
     /// Waits for frame credit. A device clock wakes the worker from its callback; other

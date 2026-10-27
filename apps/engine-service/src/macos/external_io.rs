@@ -2,9 +2,48 @@
 #[cfg(test)]
 mod tests;
 use super::endpoint_service;
+use crate::macos_pacing::Publication;
 use mixrelay_audio_engine::{ExternalBinding, ExternalIo};
 use mixrelay_audio_io::capture_alignment::CaptureFrontier;
 use mixrelay_audio_io::process::{ProcessCycle, TransferOutcome};
+use mixrelay_macos_transport::source_registry::{GraphCredit, ReadMiss};
+
+/// Time-addressed source reads without PCM, by reason, and the shared-cursor
+/// reacquisitions they caused. Plain counters owned by the graph worker thread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct TimeReadMisses {
+    pub(super) unavailable: u64,
+    pub(super) not_ready: u64,
+    pub(super) ahead: u64,
+    pub(super) behind: u64,
+    pub(super) mismatch: u64,
+    pub(super) incomplete: u64,
+    pub(super) reacquisitions: u64,
+}
+impl TimeReadMisses {
+    fn record(&mut self, miss: ReadMiss) {
+        let count = match miss {
+            ReadMiss::Unavailable => &mut self.unavailable,
+            ReadMiss::NotReady => &mut self.not_ready,
+            ReadMiss::Ahead => &mut self.ahead,
+            ReadMiss::Behind => &mut self.behind,
+            ReadMiss::Mismatch => &mut self.mismatch,
+            ReadMiss::Incomplete => &mut self.incomplete,
+        };
+        *count = count.saturating_add(1);
+    }
+}
+impl std::ops::AddAssign for TimeReadMisses {
+    fn add_assign(&mut self, other: Self) {
+        self.unavailable = self.unavailable.saturating_add(other.unavailable);
+        self.not_ready = self.not_ready.saturating_add(other.not_ready);
+        self.ahead = self.ahead.saturating_add(other.ahead);
+        self.behind = self.behind.saturating_add(other.behind);
+        self.mismatch = self.mismatch.saturating_add(other.mismatch);
+        self.incomplete = self.incomplete.saturating_add(other.incomplete);
+        self.reacquisitions = self.reacquisitions.saturating_add(other.reacquisitions);
+    }
+}
 
 pub(super) struct MacEngineExternalIo<'a> {
     pub(super) sources: Option<&'a mixrelay_macos_transport::source_registry::SourceRegistry>,
@@ -13,6 +52,10 @@ pub(super) struct MacEngineExternalIo<'a> {
     pub(super) align_inputs: bool,
     /// Acquisition covers all pending clock credit; each transfer still uses cycle.frames.
     pub(super) capture_frames: u32,
+    /// The pacing source publication that granted `capture_frames`.
+    pub(super) publication: Option<Publication>,
+    /// This cycle's time-addressed read misses, collected by the worker after the cycle.
+    pub(super) time_reads: TimeReadMisses,
     devices: &'a crate::macos_devices::DeviceSet,
     /// The admitted cycle's one host label for all of its device transfers.
     host: u64,
@@ -28,14 +71,33 @@ impl<'a> MacEngineExternalIo<'a> {
             capture_time: None,
             align_inputs: false,
             capture_frames: 0,
+            publication: None,
+            time_reads: TimeReadMisses::default(),
+        }
+    }
+
+    /// Counts a time-addressed miss. The pacing source's credit covers all PCM
+    /// the graph consumes, so its cursor beyond the newest publication can never
+    /// recover by waiting: the shared cursor reacquires at the next frontier.
+    /// Every other miss stays an input shortage at the unchanged cursor.
+    fn missed(&mut self, binding: &ExternalBinding, token: u64, miss: ReadMiss) {
+        // A device binding without its native adapter has no registry source to miss.
+        if shared_source(binding) {
+            self.time_reads.record(miss);
+        }
+        if miss == ReadMiss::Ahead
+            && self
+                .publication
+                .is_some_and(|publication| publication.token == token)
+        {
+            self.alignment.reacquire();
         }
     }
 
     fn source_active(&self, binding: &ExternalBinding) -> bool {
         let id = binding.node_id().as_str();
         self.devices.binding_present(id, true)
-            || ((binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture
-                || binding.virtual_endpoint_id().is_some())
+            || (shared_source(binding)
                 && binding_sources(binding, self.sources)
                     .and_then(|sources| sources.clock(binding_token(binding)))
                     .is_some_and(|clock| clock.running != 0))
@@ -87,14 +149,19 @@ impl ExternalIo for MacEngineExternalIo<'_> {
             let id = binding.node_id().as_str();
             let token = binding_token(binding);
             let sources = binding_sources(binding, self.sources);
+            // The pacing source's frontier follows the publication its credit
+            // covers, not PCM committed after the pacer's snapshot.
+            let credit = GraphCredit {
+                frames: cycle.frames,
+                available_frames: capture_frames,
+                published: self
+                    .publication
+                    .filter(|publication| publication.token == token)
+                    .map(|publication| publication.credit),
+            };
             let time = self.devices.capture_time(id, capture_frames).or_else(|| {
                 sources.and_then(|sources| {
-                    sources.source_time_for_credit(
-                        token,
-                        cycle.sample_rate,
-                        cycle.frames,
-                        capture_frames,
-                    )
+                    sources.source_time_for_credit(token, cycle.sample_rate, credit)
                 })
             });
             if self.source_active(binding) {
@@ -120,7 +187,9 @@ impl ExternalIo for MacEngineExternalIo<'_> {
                 .frame_period(cycle.sample_rate)
                 .or(source_period)
                 .unwrap_or(1e9 / f64::from(cycle.sample_rate));
-            self.alignment.begin(*cycle, latest, period)
+            let time = self.alignment.begin(*cycle, latest, period);
+            self.time_reads.reacquisitions += u64::from(self.alignment.reacquired());
+            time
         } else {
             None
         };
@@ -150,31 +219,40 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         }
         if self.align_inputs && binding.is_routed_source() {
             if let Some(time) = self.capture_time {
-                if let Some(outcome) = self.devices.read_aligned(
+                // A reacquired shared cursor resets the history each aligned input reaches.
+                let discontinuity = self.alignment.reacquired();
+                if let Some(mut outcome) = self.devices.read_aligned(
                     binding.node_id().as_str(),
                     destination,
                     (self.host, time, cycle.sample_rate),
                 ) {
+                    outcome.discontinuity |= discontinuity;
                     return outcome;
                 }
                 let token = binding_token(binding);
                 let sources = binding_sources(binding, self.sources);
                 let available = if let Some(sources) = sources {
-                    sources.read_audio_time(
-                        token,
-                        destination,
-                        cycle.frames,
-                        mixrelay_macos_transport::source_registry::content_latency::ReadTiming {
-                            rate: cycle.sample_rate,
-                            first_nanos: Some(time),
-                            host_ticks: Some(self.host),
-                        },
-                    )
+                    sources
+                        .read_audio_timed(
+                            token,
+                            destination,
+                            cycle.frames,
+                            mixrelay_macos_transport::source_registry::content_latency::ReadTiming {
+                                rate: cycle.sample_rate,
+                                first_nanos: Some(time),
+                                host_ticks: Some(self.host),
+                            },
+                        )
+                        .unwrap_or_else(|miss| {
+                            self.missed(binding, token, miss);
+                            0
+                        })
                 } else {
                     destination.fill(0.0);
                     0
                 };
                 return TransferOutcome {
+                    discontinuity,
                     source_sample_faults: sources
                         .map_or(0, |sources| sources.take_source_faults(token)),
                     ..TransferOutcome::complete(available)
@@ -207,13 +285,17 @@ impl ExternalIo for MacEngineExternalIo<'_> {
     }
 }
 
+/// Application captures and virtual endpoints are served by a source registry.
+fn shared_source(binding: &ExternalBinding) -> bool {
+    binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture
+        || binding.virtual_endpoint_id().is_some()
+}
+
 pub(super) fn application_epoch(
     binding: &ExternalBinding,
     sources: Option<&mixrelay_macos_transport::source_registry::SourceRegistry>,
 ) -> Option<u64> {
-    (binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture
-        || binding.virtual_endpoint_id().is_some())
-    .then(|| {
+    shared_source(binding).then(|| {
         binding_sources(binding, sources)
             .and_then(|sources| sources.clock(binding_token(binding)))
             .filter(|clock| clock.running != 0)

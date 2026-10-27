@@ -137,7 +137,9 @@ mixer의 forward cursor로 보존된 PCM을 순서대로 배출한다. 외부 HA
 `cadence::next`는 native anchor에서 다음 절대 128프레임 경계를 계산한다.
 `Scheduling`은 그 deadline까지 기다리며 제어·종료 확인을 위해 대기를 5ms 이내로 제한한다.
 누적 credit은 `Pace::Block.available_frames` → `MacTimeline` → `MacEngineExternalIo`로 전달한다.
-획득 frontier는 이번 읽기 quantum과 아직 처리하지 않은 전체 credit을 구분한다.
+shared source가 준 credit은 `Pace::Block.publication`으로 그 게시 snapshot을 함께 전달한다.
+획득 frontier는 이번 읽기 quantum과 아직 처리하지 않은 전체 credit을 구분하고, 그 source의
+frontier는 snapshot의 게시 끝에서 계산한다.
 보존 용량 안의 가장 오래된 PCM부터 읽고, 같은 epoch에서 이미 읽은 시각으로 되돌아가지 않는다.
 
 `NativePacers`는 그래프가 기다리는 shared source의 신원을 생산자 실행 전에 선택한다.
@@ -192,6 +194,10 @@ HAL의 호스트 I/O 요청 크기와 설정 가능한 버퍼 크기는 별개�
 스케줄링 burst·reserve 증가로 frontier가 과거로 움직여도 이미 읽는 좌표를 되돌리지 않는다.
 다른 입력이 현재 좌표보다 오래된 frontier로 합류하거나 clock·rate·graph 연속성이 바뀌면
 공통 좌표를 다시 획득한다. 개별 source reader의 cursor는 앞으로만 진행한다.
+`SourceRegistry::read_audio_timed`는 시각 읽기 실패의 이유를 `ReadMiss`로 돌려준다. 그래프를
+진행시키는 source가 최신 게시보다 앞선(`Ahead`) 읽기를 보고하면 `CaptureAlignment::reacquire`로
+다음 frontier를 받고, 그 cycle의 정렬 입력은 불연속으로 이력을 초기화한다. 이유별 계수는
+graph worker가 주기 보고에 모은다.
 
 `HalIoContext`는 기존 공유 매핑의 클럭·epoch·producer activity를 게시한다.
 공유 PCM 링은 현재 매핑 형식의 수명 메타데이터를 보존하며 클라이언트 PCM의 저장소로 사용하지 않는다.
