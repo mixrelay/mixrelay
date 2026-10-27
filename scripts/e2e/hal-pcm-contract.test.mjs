@@ -1,0 +1,75 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { analyseHalPcmContract } from './hal-pcm-contract.mjs';
+import { pcmHash } from './pcm-hash.mjs';
+
+const hash = bytes => pcmHash(bytes.length / 8, 2, (frame, channel) => bytes.readUInt32LE(frame * 8 + channel * 4));
+function fixture() {
+  const source = Buffer.alloc(12 * 8);
+  for (let frame = 0; frame < 8; frame++) {
+    source.writeFloatLE(0.125 + frame / 32, frame * 8);
+    source.writeFloatLE(0.5 + frame / 32, frame * 8 + 4);
+  }
+  const returned = Buffer.from(source); returned.fill(0, 4 * 8, 8 * 8);
+  const rows = [
+    [1, 1, 1000, 4, 1, 4, 0, hash(source.subarray(0, 4 * 8)), 17, 10, 11],
+    [2, 1, 1008, 4, 1, 4, 4, hash(source.subarray(8 * 8)), 17, 12, 13],
+    [3, 0, 1000, 12, 1, 8, 8, hash(returned), 0, 20, 21],
+  ];
+  return { source, origin: 1000, channels: 2, sourceQuantum: 4,
+    trace: { version: 3, issued: 3, dropped: 0, capacity: 8192, rows } };
+}
+const analyse = ({ trace, ...reference }) => analyseHalPcmContract(trace, reference);
+
+test('the HAL preserves delivered signal and silence and zero-fills a source callback gap', () => {
+  const result = analyse(fixture());
+  assert.equal(result.passed, true);
+  assert.equal(result.unpublishedFrames, 4);
+  assert.equal(result.comparedFrames, 12);
+  assert.deepEqual(result.sourceRanges, [{ start: 0, end: 4 }, { start: 8, end: 12 }]);
+});
+
+test('dropping received PCM fails even when all missing frames are returned as zero', () => {
+  const data = fixture(), read = data.trace.rows[2];
+  read[5] = 4; read[6] = 12; read[7] = hash(Buffer.alloc(12 * 8));
+  const result = analyse(data);
+  assert.equal(result.passed, false);
+  assert.equal(result.violations[0].boundary, 'hal_read');
+  assert.equal(result.violations[0].expected.available, 8);
+});
+
+test('old audible PCM during published silence or an unpublished gap fails exact sample comparison', () => {
+  for (const first of [4, 8]) {
+    const data = fixture(), replay = Buffer.from(data.source); replay.fill(0, 4 * 8);
+    data.source.copy(replay, first * 8, 0, 4 * 8);
+    const read = data.trace.rows[2]; read[7] = hash(replay); read[6] = 4;
+    assert.equal(analyse(data).passed, false);
+  }
+});
+
+test('corrupt publication is not selected away by searching for a matching source hash', () => {
+  const data = fixture(); data.trace.rows[0][7] = '0000000000000000';
+  const result = analyse(data);
+  assert.equal(result.sourceClient, 17);
+  assert.equal(result.passed, false);
+  assert.equal(result.violations[0].reason, 'changed_source_pcm');
+});
+
+test('missing trace rows, native rejection and an overlapping publication cannot produce acceptance', () => {
+  const missing = fixture(); missing.trace.rows.pop();
+  assert.equal(analyse(missing).passed, false);
+  const rejected = fixture(); rejected.trace.rows[0][4] = 0; rejected.trace.rows[0][5] = 0;
+  assert.equal(analyse(rejected).passed, false);
+  const concurrent = fixture(); concurrent.trace.rows[0][10] = 21;
+  const result = analyse(concurrent);
+  assert.equal(result.passed, false);
+  assert.equal(result.evidenceComplete, false);
+  assert.equal(result.evidenceIssues[0].reason, 'concurrent_publication');
+});
+
+test('a native inactive rejection remains a product failure despite matching retained PCM', () => {
+  const data = fixture(); data.trace.version = 4;
+  data.trace.admission = { read: 1, write: 2, timestamp: 0, extent: 0, stream: 0,
+    frozen: 0, inactive: 1, native: 0, lastRejectedTimestampBits: '0000000000000000' };
+  assert.equal(analyse(data).passed, false);
+});

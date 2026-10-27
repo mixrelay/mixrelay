@@ -11,6 +11,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { analyseSystemMix } from './system-capture.mjs';
+import { writeProbeEvidence } from './fixtures/probe-pcm-evidence.mjs';
 
 function consentFixture(program, args, directory) {
   if (program !== 'open' || !args.includes('--authorize-input')) return false;
@@ -54,19 +55,21 @@ test('real consent precedes observer suspension and the single finite signal ret
       } else {
         assert.equal(observing, false, 'AX scans must stop before finite PCM begins');
         events.push('one finite signal');
-        writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify({
+        writeProbeEvidence(directory, {
           inputAuthorization: { initial: 3, final: 3, requested: false }, activityProtection: true,
           complete: true, channelOrder: true, missingFrames: 6724,
           repeatedFrames: 0, corruptFrames: 2984, nonfiniteSamples: 0, receivedFrames: 137276,
-        }));
+        });
       }
     },
   }), error => {
-    assert.match(error.message, /macOS\/CoreAudio\/os_roundtrip/);
+    assert.match(error.message, /macOS\/CoreAudio\/hal_pcm/);
     assert.match(error.message, /missingFrames=6724/);
     assert.match(error.message, /corruptFrames=2984/);
-    assert.deepEqual(error.measurementFailure, { os: 'macos', backend: 'CoreAudio', boundary: 'os_roundtrip',
+    assert.equal(error.measurementFailure.boundary, 'hal_pcm');
+    assert.deepEqual(error.measurementFailure.osRoundtrip, {
       missingFrames: 6724, repeatedFrames: 0, corruptFrames: 2984, nonfiniteSamples: 0 });
+    assert.equal(error.measurementFailure.violations[0].boundary, 'hal_read');
     return true;
   });
   assert.equal(observing, true);
@@ -91,6 +94,28 @@ test('denied consent never suspends permission handling or starts native audio',
   assert.deepEqual(events, ['zsh', 'open', 'pkill']);
 });
 
+test('OS roundtrip counters remain diagnostic when observed HAL publications and reads satisfy the product contract', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'mr-native-boundary-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  await nativeSignal({ nativeDeviceIds: ['io.mixrelay.audio.endpoint.fixture'] }, directory, 'macos', {
+    snapshot() {}, diagnostics() { assert.fail('A healthy product boundary must not trigger failure collection'); },
+    execute(program, args) {
+      if (program === 'zsh') return '/probe.app';
+      if (consentFixture(program, args, directory)) return;
+      if (program === 'open') writeProbeEvidence(directory, {
+        inputAuthorization: { initial: 3, final: 3, requested: false }, activityProtection: true,
+        complete: true, channelOrder: true, missingFrames: 1264, repeatedFrames: 0,
+        corruptFrames: 632, nonfiniteSamples: 0, receivedFrames: 142736,
+      }, { corruptRead: false });
+    },
+  });
+  const report = JSON.parse(readFileSync(join(directory, 'native-signal.json')));
+  assert.equal(report.product.passed, true);
+  assert.equal(report.hostRoundtrip.passed, false);
+  assert.equal(report.hostRoundtrip.missingFrames, 1264);
+  assert.equal(report.hostRoundtrip.corruptFrames, 632);
+});
+
 test('observation and cleanup failures retain the original PCM boundary and every failure', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'mr-combined-pcm-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -104,18 +129,18 @@ test('observation and cleanup failures retain the original PCM boundary and ever
       if (program === 'zsh') return '/probe.app';
       if (consentFixture(program, args, directory)) return;
       if (program === 'pkill') throw new Error('probe cleanup failed');
-      if (program === 'open') writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify({
+      if (program === 'open') writeProbeEvidence(directory, {
         inputAuthorization: { initial: 3, final: 3, requested: false }, activityProtection: true,
         complete: true, channelOrder: true, missingFrames: 84, repeatedFrames: 84,
         corruptFrames: 0, nonfiniteSamples: 0, receivedFrames: 143916,
-      }));
+      });
     },
   }), error => {
     assert.equal(error.errors.length, 2);
     assert.equal(error.errors[0].errors.length, 2);
     assert.match(error.message, /missingFrames=84.*observer resume failed.*probe cleanup failed/);
-    assert.equal(error.measurementFailure.repeatedFrames, 84);
-    assert.equal(error.measurementFailure.boundary, 'os_roundtrip');
+    assert.equal(error.measurementFailure.osRoundtrip.repeatedFrames, 84);
+    assert.equal(error.measurementFailure.boundary, 'hal_pcm');
     return true;
   });
 });
@@ -136,7 +161,7 @@ test('a scheduler trace cannot turn measured PCM loss into acceptance', async t 
         calls.push(program);
         if (consentFixture(program, args, directory)) return;
         if (program === 'zsh') return '/probe.app';
-        if (program === 'open') writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
+        if (program === 'open') writeProbeEvidence(directory, measured);
       },
     }), /missingFrames/);
     assert.deepEqual(calls, ['zsh', 'open', 'trace-start', 'open', 'trace-stop', 'pkill']);
@@ -345,13 +370,14 @@ test('failed Mac PCM keeps the original verdict and collects host load only afte
       if (program === 'zsh') return '/probe.app';
       if (program === 'open') {
         assert.equal(args[args.indexOf('--capture-file') + 1], join(directory, 'native-signal.f32'));
-        writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
+        writeProbeEvidence(directory, measured);
       }
     },
     snapshot() { phases.push('snapshot'); },
     diagnostics(output) {
       assert.deepEqual(phases, ['zsh', 'open', 'open', 'pkill', 'snapshot']);
-      assert.deepEqual(JSON.parse(readFileSync(join(output, 'native-probe.stdout.json'))), measured);
+      const original = JSON.parse(readFileSync(join(output, 'native-probe.stdout.json')));
+      assert.deepEqual(Object.fromEntries(Object.keys(measured).map(key => [key, original[key]])), measured);
       phases.push('diagnostics');
       throw new Error('diagnostic collection unavailable');
     },
@@ -376,7 +402,7 @@ test('installed audio stops recording before post-signal observers, retaining th
             if (program === 'zsh') return '/probe.app';
             if (program === 'open') {
               phases.push('finite signal');
-              writeFileSync(join(directory, 'native-probe.stdout.json'), JSON.stringify(measured));
+              writeProbeEvidence(directory, measured);
             }
           },
         });

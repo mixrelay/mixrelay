@@ -9,7 +9,7 @@ import { analyseSourceComparison } from './source-comparison-analysis.mjs';
 import { recordSourceComparison } from './source-comparison-recording.mjs';
 import { prepareSourceComparison } from './prepare-source-comparison.mjs';
 import { compareMacosSources } from './macos-source-comparison.mjs';
-import { probeRangeHash } from './probe-signal.mjs';
+import { pcmHash } from './pcm-hash.mjs';
 
 function fixture(order) {
   const plan = sourceComparisonPlan(order), source = sourceComparisonPcm(plan), frames = Math.ceil(plan.frames / 512) * 512;
@@ -118,12 +118,16 @@ test('both fixed source orders run once with the same executable and retain a fa
     writeFileSync(output, JSON.stringify(data.metrics));
     writeFileSync(args[args.indexOf('--stderr') + 1], `timebase,125,3\n${data.rows.map(row => row.join(',')).join('\n')}\n`);
     writeFileSync(args.at(-2), data.capture);
-    const rows = [];
+    const rows = [], paddedSource = Buffer.concat([data.source, Buffer.alloc(data.capture.length - data.source.length)]);
     for (let first = 0; first < data.metrics.recordedFrames; first += 512) {
-      const full = data.plan.segments.find(segment => first >= segment.start && first + 512 <= segment.end);
-      const hash = full?.kind === 'audible' ? probeRangeHash(first, 512, 2) : '51d88627df287325';
-      for (const render of [1, 0]) rows.push([rows.length + 1, render, 100000 + first, 512, 1, 512,
-        full?.kind === 'audible' ? 0 : 512, hash, render ? 3 : 0, 10 + first, 11 + first]);
+      for (const render of [1, 0]) {
+        const pcm = render ? paddedSource : data.capture;
+        const hash = pcmHash(512, 2, (frame, channel) => pcm.readUInt32LE((first + frame) * 8 + channel * 4));
+        let zero = 0;
+        for (let frame = first; frame < first + 512; frame++) zero += Number(pcm.readFloatLE(frame * 8) === 0 && pcm.readFloatLE(frame * 8 + 4) === 0);
+        rows.push([rows.length + 1, render, 100000 + first, 512, 1, 512,
+          zero, hash, render ? 3 : 0, (render ? 10 : 12) + first, (render ? 11 : 13) + first]);
+      }
     }
     writeFileSync(args.at(-1), JSON.stringify({ version: 3, capacity: 8192, issued: rows.length, dropped: 0, rows }));
   };

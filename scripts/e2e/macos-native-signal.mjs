@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { verifyMeasurement } from './macos-probe-verdict.mjs';
+import { readProbePcmEvidence } from './macos-pcm-evidence.mjs';
 
 export function macosProbeCommand(bundle, directory, uid) {
   const args = ['-W', '-n', '-g', '--stdout', join(directory, 'native-probe.stdout.json'),
@@ -31,7 +32,7 @@ export async function macosSignal(device, directory, { execute, snapshot, schedu
   const bundle = execute('zsh', ['scripts/probe-macos-roundtrip.sh', '--prepare-bundle', 'io.mixrelay.qualification.probe'],
     { encoding: 'utf8', timeout: 60000 }).trim();
   const stdout = join(directory, 'native-probe.stdout.json');
-  let measured, measurementFailure;
+  let measured, measurementFailure, product, hostRoundtrip;
   const errors = [];
   try {
     try {
@@ -48,7 +49,10 @@ export async function macosSignal(device, directory, { execute, snapshot, schedu
       try { execute(command.program, command.args, { timeout: command.timeout }); }
       catch (error) { processFailure = error; }
       measured = readMeasurement(stdout, processFailure);
-      try { verifyMeasurement(measured); }
+      const evidence = readProbePcmEvidence(directory, measured);
+      product = evidence.product;
+      writeFileSync(join(directory, 'native-product-pcm.json'), JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx' });
+      try { hostRoundtrip = verifyMeasurement(measured, product); }
       catch (error) { measurementFailure = error.measurementFailure; throw error; }
     };
     await measurementBoundary(() => schedulerTrace ? trace(directory, measure) : measure());
@@ -68,5 +72,5 @@ export async function macosSignal(device, directory, { execute, snapshot, schedu
     if (measurementFailure) failure.measurementFailure = measurementFailure;
     throw failure;
   }
-  writeFileSync(join(directory, 'native-signal.json'), JSON.stringify(measured, null, 2) + '\n', { flag: 'wx' });
+  writeFileSync(join(directory, 'native-signal.json'), JSON.stringify({ ...measured, product, hostRoundtrip }, null, 2) + '\n', { flag: 'wx' });
 }

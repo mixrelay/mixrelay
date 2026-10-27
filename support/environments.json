@@ -320,13 +320,20 @@
       "id": "AUDIO-01",
       "scope": "native-audio",
       "required": true,
-      "title": "Known stereo signal passes through the installed virtual device"
+      "title": "Installed native audio preserves the stereo PCM received at the product boundary"
     },
     {
       "id": "REC-02",
       "scope": "installed-api",
       "required": true,
-      "title": "Record native PCM to a finalized RF64 file"
+      "title": "Preserve received native PCM in a finalized RF64 recording"
+    },
+    {
+      "id": "AUDIO-12",
+      "scope": "native-audio",
+      "required": true,
+      "os": ["macos"],
+      "title": "Preserve received silence and audible PCM in both source orders"
     },
     {
       "id": "GRAPH-01",

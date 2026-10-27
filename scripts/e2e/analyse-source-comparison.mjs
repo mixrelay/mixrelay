@@ -8,6 +8,9 @@ import { sourceComparisonPlan, sourceComparisonPcm, sourceOrders } from './sourc
 import { analyseSourceNative } from './source-comparison-native.mjs';
 import { analyseSourceComparison } from './source-comparison-analysis.mjs';
 import { analyseSourceRecording } from './source-recording-analysis.mjs';
+import { analyseHalPcmContract } from './hal-pcm-contract.mjs';
+import { requireObservedSegments, sourcePcmReference } from './macos-pcm-evidence.mjs';
+import { analyseRecordingPcmContract } from './recording-pcm-contract.mjs';
 
 const { values, positionals } = parseArgs({ allowPositionals: true,
   options: { help: { type: 'boolean' }, output: { type: 'string' } } });
@@ -25,14 +28,16 @@ else {
     const originalEvidenceSha256 = Object.fromEntries(['plan.json', 'source.f32', 'native.json', 'timing.csv',
       'capture.f32', 'hal-io.json', 'analysis.json', 'native-permission-observation.json'].map(file => [file,
       createHash('sha256').update(readFileSync(join(directory, file))).digest('hex')]));
-    return { order, originalEvidenceSha256,
+    const product = requireObservedSegments(analyseHalPcmContract(trace, { source, origin: metrics.origin, channels: 2 }), canonical.segments);
+    return { order, originalEvidenceSha256, product, reference: sourcePcmReference(canonical, product),
       callbackAndPayload: analyseSourceComparison(plan, source, metrics, readFileSync(join(directory, 'timing.csv'), 'utf8'), readFileSync(join(directory, 'capture.f32'))),
       ...analyseSourceNative(trace, plan, source, metrics.origin) };
   });
   const recording = readFileSync(join(positionals[0], 'recording.wav'));
   const result = { analysisRevision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     qualificationReplacement: false, reports,
-    recording: { recordingSha256: createHash('sha256').update(recording).digest('hex'), ...analyseSourceRecording(recording) } };
+    recording: { recordingSha256: createHash('sha256').update(recording).digest('hex'), ...analyseSourceRecording(recording) },
+    recordingContract: analyseRecordingPcmContract(recording, reports.map(report => report.reference)) };
   const json = JSON.stringify(result, null, 2) + '\n';
   if (values.output) writeFileSync(values.output, json, { flag: 'wx' });
   else process.stdout.write(json);

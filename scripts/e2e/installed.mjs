@@ -22,6 +22,7 @@ import { wholeSystemCapture } from './system-capture.mjs';
 import { controlRecorder } from './recorder-control.mjs';
 import { startLinuxControlTrace } from './linux-control-trace.mjs';
 import { recordSourceComparison } from './source-comparison-recording.mjs';
+import { readProbeRecordingEvidence } from './macos-pcm-evidence.mjs';
 import {
   isolateFreshState,
   prepareUpgradeDriver,
@@ -478,20 +479,26 @@ export async function qualifyMode({
         assert.equal(stopped.state, 'stopped');
         assert.equal(stopped.error, null);
         const analysis = analyseRecording(recording);
+        const product = target.os === 'macos' ? readProbeRecordingEvidence(output) : null;
+        if (product) {
+          evidence('recording-pcm-contract.json', product);
+          assert.ok(product.passed, 'Recorded PCM does not preserve the observed native input; see recording-pcm-contract.json');
+        }
         return [
           evidence('recording-analysis.json', { stopped, analysis }),
           { file: 'recording.wav', sha256: digest(readFileSync(recording)) },
+          ...(product ? [{ file: 'recording-pcm-contract.json', sha256: digest(readFileSync(join(output, 'recording-pcm-contract.json'))) }] : []),
         ];
       }),
     });
-    if (target.os === 'macos' && process.env.MIXRELAY_E2E_SOURCE_COMPARISON === 'true') {
-      try {
+    if (target.os === 'macos') {
+      await scenario('AUDIO-12', async () => {
         await recordSourceComparison({ api, controlTake, recorderPath, revision: applied.revision,
           device, directory: join(output, 'source-comparison'), measurementBoundary: ui.measurementBoundary });
-      } catch (error) {
-        report.error = `Silent/audible source diagnosis failed: ${error.message}`;
-        evidence('source-comparison.failure.json', { message: error.message, stack: error.stack });
-      }
+        return ['comparison.json', 'recording-contract.json', 'recording.wav',
+          'silent-audible/analysis.json', 'audible-silent/analysis.json']
+          .map(file => ({ file: join('source-comparison', file), sha256: digest(readFileSync(join(output, 'source-comparison', file))) }));
+      });
     }
     if (target.os === 'macos')
       await scenario('AUDIO-11', async () => {

@@ -292,14 +292,33 @@ and WebContent samples run after `REC-02` finalizes the recording. Diagnostic to
 must not suspend threads or consume CPU while that recording is still being measured.
 Collection preserves the PCM failure and never repeats the signal.
 
-PCM failures retain all four counters in `measurementFailure`, with `os=macos`,
-`backend=CoreAudio` and `boundary=os_roundtrip`. This boundary identifies the
-measurement, without assigning the fault to the driver or the client.
+macOS PCM acceptance starts at the product's native boundary. `AUDIO-01` compares
+the actual HAL writes with every observed HAL read. Received source frames must
+retain their exact sample bits; unpublished positions must return zero. Admission
+rejection, changed samples, incorrect availability, incomplete trace retention and
+ambiguous concurrent publication prevent acceptance. Each compared source segment
+must contain at least 24,000 distinct published and read frames. Native timestamps
+establish publication before a read; a callback that the OS never delivers does
+not create expected input for the product.
+
+`native-probe.stdout.json`, callback timing and raw capture preserve the original
+OS roundtrip counters. `native-signal.json` reports them under `hostRoundtrip`,
+separately from the `hal_pcm` product result. Their cause remains unassigned.
+Product failures retain the native violations and evidence limitations in
+`measurementFailure`; the OS counters remain nested under `osRoundtrip`.
 `macos-probe-verdict.mjs` owns acceptance; the process runner owns launch and cleanup.
-Offline reference analysis also checks HAL capture hashes when the retained output
-contains one reference signal and only digital silence from other clients.
-It reports exact previous-period PCM matches and trace admission limits without
-changing the original qualification verdict.
+
+`REC-02` checks the finalized recording against those actual source publications,
+including every delivered audible frame. `AUDIO-12` is required on every macOS target
+and always runs the same silent/audible input in both fixed orders. Its finalized
+take must preserve the published frame IDs once, in order, at one recording offset
+per source order. Source gaps occupy their corresponding zero positions; an
+additional lost frame, inserted silence, replay, changed channel or nonfinite
+sample fails. Both three-second quiet phases are checked at the signal alignment.
+These comparisons use coordinate ranges rather than subtracting missing-frame counts.
+Missing publication evidence and an insufficient signal cannot qualify a case.
+The original full-signal analysis remains diagnostic evidence alongside the product
+recording contract. Historical Actions results retain their original verdicts.
 
 For a hosted diagnostic job, prepare these tools before invoking the installed runner:
 

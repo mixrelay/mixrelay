@@ -8,6 +8,8 @@ import { prepareSourceComparison } from './prepare-source-comparison.mjs';
 import { sourceComparisonPlan, sourceComparisonPcm, sourceOrders } from './source-comparison-plan.mjs';
 import { analyseSourceComparison } from './source-comparison-analysis.mjs';
 import { analyseSourceNative } from './source-comparison-native.mjs';
+import { analyseHalPcmContract } from './hal-pcm-contract.mjs';
+import { requireObservedSegments, sourcePcmReference } from './macos-pcm-evidence.mjs';
 
 const save = (directory, file, value) => writeFileSync(join(directory, file), JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 
@@ -50,9 +52,10 @@ export async function compareMacosSources(device, directory, { measurementBounda
         const trace = analyseHalIo(rawTrace), native = analyseSourceNative(rawTrace, plan, source, metrics.origin);
         const traceComplete = trace.retention.issued > 0 && trace.retention.writerDropped === 0
           && trace.retention.notRetainedRecentRows === 0 && trace.retention.observationsBeyondCapacity === 0;
-        const passed = analysis.passed && traceComplete && native.nativeEvidenceComplete;
-        save(output, 'analysis.json', { ...analysis, passed, callbackAndPayloadPassed: analysis.passed, trace, traceComplete, native });
-        results.push({ order, passed, segments: analysis.segments,
+        const product = requireObservedSegments(analyseHalPcmContract(rawTrace, { source, origin: metrics.origin, channels: 2 }), plan.segments);
+        const passed = analysis.nativeErrors.length === 0 && product.passed;
+        save(output, 'analysis.json', { ...analysis, passed, callbackAndPayloadPassed: analysis.passed, trace, traceComplete, native, product });
+        results.push({ order, passed, segments: analysis.segments, reference: sourcePcmReference(plan, product),
           traceRetention: trace.retention });
       } catch (error) { errors.push({ order, boundary: 'evidence_analysis', message: error.message }); }
       // A timed-out LaunchServices wait may leave the app running. Reap it before any further IO.

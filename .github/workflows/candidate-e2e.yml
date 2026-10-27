@@ -35,10 +35,6 @@ on:
         description: Focused diagnosis of one fresh-install PCM measurement with Apple System Trace
         type: boolean
         default: false
-      macos_source_comparison:
-        description: Compare silent and audible PCM on the same input graph in both fixed orders
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -177,7 +173,6 @@ jobs:
           TARGET: ${{ matrix.id }}
           MIXRELAY_E2E_MACOS_UI_TOOLS: ${{ github.workspace }}/installed-ui-tools
           MIXRELAY_E2E_SCHEDULER_TRACE: ${{ inputs.macos_scheduler_trace }}
-          MIXRELAY_E2E_SOURCE_COMPARISON: ${{ inputs.macos_source_comparison }}
         run: node scripts/e2e/installed.mjs --target "$TARGET" --directory candidate --candidate candidate/mix-relay.candidate.json --output evidence --disposable-environment
       - name: Preserve macOS failure diagnostics
         if: always()

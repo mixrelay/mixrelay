@@ -8,6 +8,7 @@ import { decodeRecordingCodewords } from './recording-codewords.mjs';
 import { analyseSourceRecording } from './source-recording-analysis.mjs';
 import { recordSourceComparison } from './source-comparison-recording.mjs';
 import { sourceComparisonPlan, sourceComparisonPcm } from './source-comparison-plan.mjs';
+import { analyseRecordingPcmContract } from './recording-pcm-contract.mjs';
 
 function recording(pcm) {
   const header = Buffer.alloc(80);
@@ -24,6 +25,53 @@ function recording(pcm) {
 const first = () => sourceComparisonPcm(sourceComparisonPlan('silent-audible'));
 const second = () => sourceComparisonPcm(sourceComparisonPlan('audible-silent'));
 const take = (a = first(), b = second()) => recording(Buffer.concat([Buffer.alloc(337 * 8), a, Buffer.alloc(2003 * 8), b]));
+const references = () => ['silent-audible', 'audible-silent'].map(order => {
+  const plan = sourceComparisonPlan(order);
+  return { ...plan, sourceFrames: plan.frames, productPassed: true, sourceRanges: [{ start: 0, end: plan.frames }] };
+});
+
+test('recording acceptance requires every published frame while retaining an unproduced source gap as zero', () => {
+  const source = first(), start = 241152, end = 242148, refs = references();
+  source.fill(0, start * 8, end * 8);
+  refs[0].sourceRanges = [{ start: 0, end: start }, { start: end, end: refs[0].sourceFrames }];
+  const bytes = take(source), result = analyseRecordingPcmContract(bytes, refs);
+  assert.equal(analyseSourceRecording(bytes).passed, false, 'The original planned-signal diagnosis is retained');
+  assert.equal(result.passed, true);
+  assert.equal(result.orders[0].sourceUnavailableFrames, 996);
+  assert.equal(result.orders[0].missingFrames, 0);
+  assert.equal(result.orders[0].quiet.comparedFrames, 144000);
+});
+
+test('a same-sized source gap elsewhere cannot excuse lost delivered PCM', () => {
+  const source = first(), refs = references(); source.fill(0, 241152 * 8, 242148 * 8);
+  refs[0].sourceRanges = [{ start: 0, end: 200000 }, { start: 200996, end: refs[0].sourceFrames }];
+  const result = analyseRecordingPcmContract(take(source), refs);
+  assert.equal(result.passed, false);
+  assert.deepEqual(result.orders[0].missing, [{ start: 241152, end: 242148 }]);
+  assert.deepEqual(result.orders[0].unexpected, [{ start: 200000, end: 200996 }]);
+});
+
+test('one additional lost sample, an inserted quiet block or an old audible replay still fails the product contract', () => {
+  const refs = references(), source = first(), start = 241152, end = 242148;
+  refs[0].sourceRanges = [{ start: 0, end: start }, { start: end, end: refs[0].sourceFrames }];
+  source.fill(0, start * 8, end * 8);
+  const lost = Buffer.from(source); lost.fill(0, 250000 * 8, 250001 * 8);
+  assert.equal(analyseRecordingPcmContract(take(lost), refs).passed, false);
+  const inserted = Buffer.concat([source.subarray(0, 260000 * 8), Buffer.alloc(128 * 8), source.subarray(260000 * 8)]);
+  assert.equal(analyseRecordingPcmContract(take(inserted), refs).passed, false);
+  const replay = second(); replay.copy(replay, 153200 * 8, 136816 * 8, 136872 * 8);
+  const measured = analyseRecordingPcmContract(take(source, replay), refs);
+  assert.equal(measured.passed, false);
+  assert.equal(measured.orders[1].quiet.nonzeroFrames, 56);
+});
+
+test('incomplete publication proof and an absent input cannot qualify a complete-looking recording', () => {
+  const refs = references(); refs[0].productPassed = false;
+  assert.equal(analyseRecordingPcmContract(take(), refs).passed, false);
+  refs[0].productPassed = true; refs[0].sourceRanges = [];
+  assert.equal(analyseRecordingPcmContract(take(), refs).passed, false);
+  assert.throws(() => analyseRecordingPcmContract(take(), []), /Missing recording input publication evidence/);
+});
 
 test('the finalized take identifies every frame in both source orders at arbitrary recording offsets', () => {
   const measured = analyseSourceRecording(take());
@@ -85,7 +133,10 @@ test('recording finalization retains the native failure and the independent reco
       state = value.request.action === 'record' ? 'recording' : 'stopped';
       if (state === 'stopped') writeFileSync(join(directory, 'recording.wav'), bytes);
       return { state, error: null };
-    }, compare: async () => { throw new Error('native PCM mismatch'); } }), error => {
+    }, compare: async () => {
+      writeFileSync(join(directory, 'comparison.json'), JSON.stringify({ results: references().map(reference => ({ reference })) }));
+      throw new Error('native PCM mismatch');
+    } }), error => {
     assert.equal(error.errors.length, 2);
     assert.match(error.errors[0].message, /native PCM mismatch/);
     assert.match(error.errors[1].message, /recording lost/);
@@ -112,6 +163,7 @@ test('a terminal failed take retains its finalized PCM evidence and cannot pass 
     }, compare: async () => {
       writeFileSync(join(directory, 'recording.wav'), bytes);
       state = 'failed';
+      return references().map(reference => ({ reference }));
     } }), AggregateError);
   assert.equal(existsSync(join(directory, 'recording-analysis.json')), true,
     'the recorder already closed its failed take, so its PCM must remain analysable');
