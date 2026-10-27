@@ -1,6 +1,9 @@
+mod blocking;
+
 use std::{
     io::Read,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 
@@ -14,6 +17,7 @@ use crate::{DriverCommand, DriverError, DriverSnapshot, SNAPSHOT_ROUTE, contract
 #[derive(Debug, Clone)]
 pub struct DriverClient {
     client: reqwest::Client,
+    blocking: Arc<blocking::Transport>,
     endpoint: String,
     socket_path: PathBuf,
     paid_claim: bool,
@@ -50,6 +54,7 @@ impl DriverClient {
             .build()?;
         Ok(Self {
             client,
+            blocking: Arc::default(),
             endpoint: format!("{DRIVER_AUTHORITY}{SNAPSHOT_ROUTE}"),
             socket_path,
             paid_claim: false,
@@ -170,7 +175,7 @@ impl DriverClient {
     /// Returns transport, size, JSON or service rejection errors. Must not run on a Tokio reactor.
     pub fn snapshot_blocking(&self) -> Result<DriverSnapshot, DriverError> {
         read_blocking_response(
-            self.claim_blocking(blocking_client(&self.socket_path)?.get(&self.endpoint))
+            self.claim_blocking(self.blocking.client(&self.socket_path)?.get(&self.endpoint))
                 .send()?,
         )
     }
@@ -180,7 +185,7 @@ impl DriverClient {
     /// Returns transport, size, JSON or service rejection errors. Must not run on a Tokio reactor.
     pub fn mutate_blocking(&self, command: &DriverCommand) -> Result<DriverSnapshot, DriverError> {
         let response = self
-            .claim_blocking(blocking_client(&self.socket_path)?.put(&self.endpoint))
+            .claim_blocking(self.blocking.client(&self.socket_path)?.put(&self.endpoint))
             // Native inventory ACK/drain can take six seconds; allow its bounded result.
             .timeout(
                 if matches!(
@@ -210,15 +215,6 @@ fn decode_latency_response(
         });
     }
     Ok(serde_json::from_slice(bytes)?)
-}
-
-fn blocking_client(socket_path: &Path) -> Result<reqwest::blocking::Client, DriverError> {
-    Ok(reqwest::blocking::Client::builder()
-        .unix_socket(socket_path.to_path_buf())
-        .timeout(Duration::from_secs(5))
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?)
 }
 
 fn command_bytes(command: &DriverCommand) -> Result<Vec<u8>, DriverError> {

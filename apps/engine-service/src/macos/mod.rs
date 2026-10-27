@@ -50,13 +50,15 @@ use external_io::MacEngineExternalIo;
 use external_io::{application_epoch, binding_sources, binding_token, read_application};
 use worker::AudioContext;
 
-fn prepare_runtime() -> AdapterRuntimeStatus {
+fn prepare_runtime() -> (Arc<AdapterRuntimeStatus>, RenderFormat) {
     // The processing domain is independent of each endpoint's native rate.
     // Endpoint format changes are ID-directed through VirtualEndpointBackend.
-    AdapterRuntimeStatus::new(format::profile(
+    let mut status = AdapterRuntimeStatus::new(format::profile(
         mixrelay_audio_io::formats::SAMPLE_RATES.to_vec(),
     ))
-    .with_graph_format_control()
+    .with_graph_format_control();
+    let format = status.restore_preferences();
+    (Arc::new(status), format)
 }
 
 pub(super) async fn run() -> Result<(), String> {
@@ -116,9 +118,7 @@ async fn run_owned(
         .await
         .map_err(|error| error.to_string())?;
     initialize_native_transport()?;
-    let mut runtime_status = prepare_runtime();
-    let format = runtime_status.restore_preferences();
-    let runtime_status = Arc::new(runtime_status);
+    let (runtime_status, format) = prepare_runtime();
     let meters = default_peak_meter_bank();
     let initial_document = mixrelay_audio_graph::GraphDocument::new(1, Vec::new(), Vec::new());
     let processor = create_initial_processor(&initial_document, format, Arc::clone(&meters))?;
@@ -165,8 +165,12 @@ async fn run_owned(
     let (worker, mut completion) =
         worker::start(processor, exchange, devices, runtime_status.clone())
             .map_err(|error| format!("could not start audio worker: {error}"))?;
-    let observers =
-        maintenance::ControlObservers::start(&runtime_status, &controller, &monitor_devices)?;
+    let observers = maintenance::ControlObservers::start(
+        &runtime_status,
+        &controller,
+        &monitor_devices,
+        &endpoint_backend,
+    )?;
     let serving = service
         .serve(
             controller,

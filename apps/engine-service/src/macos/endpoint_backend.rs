@@ -5,17 +5,20 @@ use mixrelay_audio_io::{
 };
 use mixrelay_driver_control::{DriverClient, DriverCommand, DriverSnapshot};
 use mixrelay_macos_transport::endpoint_identity::parse_endpoint_id;
+use parking_lot::Mutex;
 
 pub(super) const MAX_ENDPOINT_CHANNELS: u16 = 64;
 
 pub(super) struct MacVirtualEndpointBackend {
     capabilities: VirtualEndpointCapabilities,
+    driver: Mutex<Option<DriverClient>>,
 }
 
 impl MacVirtualEndpointBackend {
     /// Declares product channel/rate limits without starting Driver or graph IO.
     pub(super) fn new(rates: Vec<u32>) -> Self {
         Self {
+            driver: Mutex::new(None),
             capabilities: VirtualEndpointCapabilities {
                 max_render_channels: MAX_ENDPOINT_CHANNELS,
                 max_capture_channels: MAX_ENDPOINT_CHANNELS,
@@ -29,10 +32,18 @@ impl MacVirtualEndpointBackend {
     /// Reads actual Driver settings on a non-async control worker.
     /// # Errors
     /// Returns service transport or native discovery failures; never call on DSP.
-    pub(super) fn snapshot() -> Result<DriverSnapshot, HostAudioBackendError> {
-        DriverClient::new()
-            .and_then(|client| client.snapshot_blocking())
-            .map_err(backend_error)
+    pub(super) fn snapshot(&self) -> Result<DriverSnapshot, HostAudioBackendError> {
+        self.driver()?.snapshot_blocking().map_err(backend_error)
+    }
+
+    fn driver(&self) -> Result<DriverClient, HostAudioBackendError> {
+        let mut driver = self.driver.lock();
+        if let Some(client) = driver.as_ref() {
+            return Ok(client.clone());
+        }
+        let client = DriverClient::new().map_err(backend_error)?;
+        *driver = Some(client.clone());
+        Ok(client)
     }
 }
 
@@ -93,7 +104,7 @@ fn resolve(
 
 impl VirtualEndpointBackend for MacVirtualEndpointBackend {
     fn settings(&self) -> Option<mixrelay_audio_io::VirtualEndpointSettings> {
-        Self::snapshot().ok().map(|snapshot| snapshot.settings)
+        self.snapshot().ok().map(|snapshot| snapshot.settings)
     }
 
     fn capabilities(&self) -> &VirtualEndpointCapabilities {
@@ -101,7 +112,7 @@ impl VirtualEndpointBackend for MacVirtualEndpointBackend {
     }
 
     fn sample_rate(&self, id: &VirtualEndpointId) -> Result<u32, HostAudioBackendError> {
-        device(&Self::snapshot()?, id)?
+        device(&self.snapshot()?, id)?
             .observed_sample_rate
             .ok_or_else(|| {
                 backend_error(format!(
@@ -116,7 +127,7 @@ impl VirtualEndpointBackend for MacVirtualEndpointBackend {
         id: &VirtualEndpointId,
         rate: u32,
     ) -> Result<(), HostAudioBackendError> {
-        let client = DriverClient::new().map_err(backend_error)?;
+        let client = self.driver()?;
         let snapshot = client.snapshot_blocking().map_err(backend_error)?;
         let actual = device(&snapshot, id)?;
         if !actual.can_set_sample_rate || !actual.supported_sample_rates.contains(&rate) {
@@ -148,7 +159,7 @@ impl VirtualEndpointBackend for MacVirtualEndpointBackend {
         if desired.is_empty() {
             return Ok(Vec::new());
         }
-        resolve(&Self::snapshot()?, desired)
+        resolve(&self.snapshot()?, desired)
     }
 
     fn prepare_graph_attachments(

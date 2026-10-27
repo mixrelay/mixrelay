@@ -5,6 +5,24 @@
 OS·CPU별 지원 범위와 같은 사용자 시나리오의 확인·부분·미확인 결과는
 [OS별 지원·검증 인벤토리](platform-matrix.md)에서 비교한다. 각 결과의 실행 날짜·빌드는 아래 기록을 따른다.
 
+## 2026-10-27 출력 콜백 누락과 Driver 조회 부하
+
+`abf09f6`의 [전체 설치본 실행 40375187739](https://github.com/mixrelay/mixrelay/actions/runs/40375187739)은
+13개 중 10개 통과, macOS 14 ARM·15 Intel·26 Intel의 `AUDIO-01` 실패다.
+Ubuntu ARM은 새 설치·업그레이드와 정리가 통과했다. macOS 세 실패 대상도 무음·유음 양 순서
+비교와 정리가 통과했다. 전체 수락은 실패 상태로 유지한다.
+
+원본 출력 콜백·HAL 쓰기·HAL 읽기·입력 PCM을 분리한
+[절차별 분석](2026-10-26-native-boundary-analysis.md#2026-10-27-출력-콜백과-driver-조회-수명)은
+소스 output에 없는 구간과 실제 공급한 PCM의 손상을 구별한다. Driver 조회마다 동기 HTTP
+runtime을 만들고 회수하는 경로는 client 수명 동안 재사용하도록 수정했다. 실제 Unix 연결 회귀는
+같은 11번의 요청에서 수정 전 연결 11개, 수정 후 1개를 관찰했다.
+이 부하 수정이 설치본 PCM 실패를 해소했는지는 새 후보에서 확인해야 한다.
+
+탭 회수 시험은 두 번째 실패 결과를 선택한 뒤에만 성공을 허용한다. 호출 진입만 기다리던
+경쟁을 고쳤으며 기존 비차단·재시도·admission 회수 assertion을 유지한다. 해당 크레이트의
+65개 시험은 ignore 없이 통과했다.
+
 ## 2026-10-27 보존된 PCM의 획득 범위와 backlog 용량
 
 `a88eada`의 [집중 실행 40329569555](https://github.com/mixrelay/mixrelay/actions/runs/40329569555)은

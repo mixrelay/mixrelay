@@ -30,6 +30,7 @@ impl ControlObservers {
         status: &Arc<AdapterRuntimeStatus>,
         controller: &Arc<EngineGraphController>,
         devices: &Arc<MacDevices>,
+        endpoint: &Arc<super::endpoint_backend::MacVirtualEndpointBackend>,
     ) -> Result<Self, String> {
         // If monitor startup fails, control maintenance still finalizes and joins.
         let mut observers = Self {
@@ -37,7 +38,8 @@ impl ControlObservers {
             control: Some(controller.start_control_maintenance()?),
             devices: Arc::downgrade(devices),
         };
-        observers.format_monitor = Some(start_format_monitor(status, controller, devices)?);
+        observers.format_monitor =
+            Some(start_format_monitor(status, controller, devices, endpoint)?);
         Ok(observers)
     }
 
@@ -162,20 +164,25 @@ fn start_format_monitor(
     status: &Arc<AdapterRuntimeStatus>,
     controller: &Arc<EngineGraphController>,
     devices: &Arc<MacDevices>,
+    endpoint: &Arc<super::endpoint_backend::MacVirtualEndpointBackend>,
 ) -> Result<MaintenanceWorker, String> {
     let weak_status = Arc::downgrade(status);
     let weak_controller = Arc::downgrade(controller);
     let weak_devices = Arc::downgrade(devices);
+    let weak_endpoint = Arc::downgrade(endpoint);
     MaintenanceWorker::start("mixrelay-device-format-monitor", move |stop| {
         let mut last_error = None;
         let mut last_trace = Instant::now();
         while !stop.load(Ordering::Acquire) {
-            let (Some(status), Some(controller)) =
-                (weak_status.upgrade(), weak_controller.upgrade())
-            else {
+            let (Some(status), Some(controller), Some(endpoint)) = (
+                weak_status.upgrade(),
+                weak_controller.upgrade(),
+                weak_endpoint.upgrade(),
+            ) else {
                 break;
             };
-            if super::endpoint_backend::MacVirtualEndpointBackend::snapshot()
+            if endpoint
+                .snapshot()
                 .is_ok_and(|snapshot| snapshot.state == mixrelay_driver_control::DriverState::Ready)
             {
                 status.observe_endpoint(true);
@@ -203,6 +210,7 @@ fn start_format_monitor(
             }
             drop(status);
             drop(controller);
+            drop(endpoint);
             thread::park_timeout(Duration::from_millis(if last_error.is_some() {
                 1000
             } else {

@@ -2,6 +2,8 @@ use mixrelay_audio_io::VirtualEndpointId;
 
 use super::*;
 
+mod blocking;
+
 #[test]
 fn clients_use_the_socket_directories_and_commands_use_canonical_wire_fields() {
     let client = DriverClient::with_socket_path("/fixture/driver.sock").unwrap();
@@ -323,16 +325,22 @@ async fn claiming_clients_reach_the_policy_with_their_verified_peer() {
     assert!(!plain.snapshot().await.unwrap().settings.can_create);
     assert!(claiming.snapshot().await.unwrap().settings.can_create);
     let blocking = claiming.clone();
-    let snapshot = tokio::task::spawn_blocking(move || blocking.snapshot_blocking().unwrap())
-        .await
-        .unwrap();
+    let snapshot = tokio::task::spawn_blocking(move || {
+        let snapshot = blocking.snapshot_blocking().unwrap();
+        assert!(snapshot.settings.can_create);
+        let plain = blocking.claiming_paid_access(false);
+        assert!(!plain.snapshot_blocking().unwrap().settings.can_create);
+        snapshot
+    })
+    .await
+    .unwrap();
     assert!(snapshot.settings.can_create);
     let seen = seen.lock().clone();
     assert_eq!(
         seen.iter()
             .map(|request| request.claimed)
             .collect::<Vec<_>>(),
-        [false, true, true]
+        [false, true, true, false]
     );
     for request in seen {
         let peer = request.peer.expect("connection info");

@@ -69,6 +69,12 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 클라이언트의 `background::connection`은 요청 전달과 구독을, `background::process`는 자식 프로세스 수명을,
 `background::directories`는 OS별 경로 결정을 맡는다. 서버 내부 구현을 클라이언트의 계약으로 사용하지 않는다.
 
+`DriverClient`의 동기 전송은 첫 동기 조회에서 준비한 HTTP runtime·연결 pool을 같은 client와
+clone 사이에서 공유한다. 준비 잠금은 소켓 I/O 전에 해제하며 실패한 준비는 다음 호출에서
+재시도한다. macOS endpoint backend와 format monitor는 같은 client 소유자를 사용한다.
+상태 응답은 매번 Driver에서 읽으며 권한 claim은 요청별로 적용한다. 이 전송은 비실시간
+제어 작업이며 오디오 콜백에서 호출하지 않는다.
+
 제어 전송 실패는 `ControlFailureContext`에 OS·경계·단계·실패 코드·전달 확실성·OS 오류 번호를 남긴다.
 `editor_runtime`은 편집기와 사용자 런타임 사이의 소켓, `runtime_engine`은 런타임과 엔진 사이의 HTTP다.
 연결 거부, 응답 본문 실패, 영수증 관찰 실패를 구분하며 전달이 불확실한 변경 명령은 재전송하지 않는다.

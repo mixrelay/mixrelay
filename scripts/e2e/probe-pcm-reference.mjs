@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import { probeSampleBits } from './probe-signal.mjs';
 import { analyseNativeReference } from './probe-native-reference.mjs';
+import { probeTimelineCoverage } from './probe-timeline-coverage.mjs';
 
 export function analyseProbeReference(trace, metrics, timing, pcm) {
   assert.equal(metrics.sameDevice, true, 'Reference requires the same native device');
@@ -65,7 +66,10 @@ export function analyseProbeReference(trace, metrics, timing, pcm) {
     mismatch.retainedWriteRows = trace.rows.filter(row => row[1] === 1
       && row[2] < mismatch.deviceEnd && row[2] + row[3] > mismatch.deviceStart);
   }
-  return { origin, signalWindow: { start, end }, ...native, inputDifferences,
+  const timelineCoverage = probeTimelineCoverage(rows, trace, {
+    start, end, sourceClient: native.nativeWrites.sourceClient,
+  });
+  return { origin, signalWindow: { start, end }, ...native, timelineCoverage, inputDifferences,
     limitations: ['Reference applies to the integer-coded default probe signal and its original timing/capture files.',
       'Native trace retention and missing epoch labels still limit attribution. This comparison does not change qualification.'] };
 }

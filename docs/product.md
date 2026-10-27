@@ -515,7 +515,7 @@ Driver 실행부·엔진·가상 장치 종료, 명시적 재연결 전 중지 �
 | E11 | VST3 / module·instance·event exchange | 필수 module hook 검증, COM 이벤트·포인터 저장소 준비, checked bus 범위와 typed 오류 전달 | 111개 회귀·strict clippy 완료 | 잘못된 native 이벤트·geometry의 무할당 거절, 출력 이벤트 전달 |
 | E12 | CLAP / processing·events·state | 4,096개+pending 입력 저장소 준비, header 검증, 입력 초과·start 거절의 typed 오류 전달 | 69개 회귀·strict clippy 완료 | 초과 입력 전에 native 호출 차단, 출력 prefix 보존, RT 할당 0 |
 | E13 | LV2 / atoms·ports·instance | 정렬된 포트별 Atom 저장소·전체 용량·payload 범위 검증, 초과 입력의 명시 오류 | Linux 54개·strict clippy 완료 | 격리된 Lilv fixture 5개도 필수 실행, 실제 PCM·state·다중 bus 검증 |
-| E14 | 최종 수락 / 통합 담당 | 모든 변경을 한 HEAD로 통합해 회귀·성능·서명·설치 검증 | macOS·Ubuntu ARM 소스 회귀 완료, 전체 CI·설치본 수락 대기 | 동일 최종 네 설치 파일로 13개 대상·필수 skip 0·정리 성공 |
+| E14 | 최종 수락 / 통합 담당 | 모든 변경을 한 HEAD로 통합해 회귀·성능·서명·설치 검증 | 직전 설치본 10개 통과·macOS 3개 PCM 실패, Driver 조회 부하 수정본 검증 중 | 동일 최종 네 설치 파일로 13개 대상·필수 skip 0·정리 성공 |
 
 | 영역 | 남은 확인·구현 |
 | --- | --- |

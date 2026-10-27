@@ -1,5 +1,37 @@
 # 설치본의 네이티브 경계 실패 분석
 
+## 2026-10-27 출력 콜백과 Driver 조회 수명
+
+`abf09f6`의 전체 실행 `40375187739`에서 실패한 원본 PCM과 callback timing,
+native trace를 같은 장치 sample 좌표로 대조했다. 아래는 새 설치의 유음 구간이다.
+
+| 대상 | 출력 콜백 좌표의 누락 | 같은 source의 HAL 쓰기 누락 | 공급한 HAL 쓰기의 해시 불일치 |
+| --- | ---: | ---: | ---: |
+| macOS 14 ARM | 1,412프레임 | 1,412프레임 | 0행 |
+| macOS 15 Intel | 3,596프레임 | 3,596프레임 | 0행 |
+| macOS 26 Intel | 7,760프레임 | 7,760프레임 | 0행 |
+
+`MRRoundTripProbe::mr_play`는 `sampleTime - origin`에서 출력 신호를 생성한다.
+콜백 좌표가 건너뛰면 그 구간의 신호를 만들지 않는다. HAL `ReadInput`은 실제 요청받은
+범위를 읽고 게시하지 않은 구간을 0으로 채운다. 14 ARM의 최대 native 호출 간격은 약
+39.7ms였으며 뒤따른 프로브 콜백 본문은 8.1µs였다. CoreAudio overload도 기록됐다.
+읽을 수 없는 source 구간을 가짜 PCM으로 채우거나 기존 PCM으로 되돌려서는 안 된다.
+Loopback ARK의 `ECSharedQueue::readSampleTime` `0x14694`도 보존 범위 밖을 0으로 채우고,
+`_eraseSampleTime` `0x148d0`은 저장량 안에서만 전진·초기화한다. 이는 보관된 Ghidra
+procedure의 정적 관찰이며 동일 호스트에서 Loopback의 성공을 측정한 결과는 아니다.
+
+실패 직후 3초 engine sample에는 짧게 생성된 `reqwest-internal-sync-runtime` thread가
+14 ARM 16개·15 Intel 15개·26 Intel 17개 관찰됐다. macOS 26 Intel 실행 파일 UUID는
+로컬 최종 Universal 실행 파일의 x64 UUID `95C33BCB-46F0-3330-BD6E-ECD791626032`와 일치한다.
+`MacVirtualEndpointBackend::snapshot`은 client를 매번 만들고, `DriverClient::snapshot_blocking`은
+매번 blocking client를 만든다. reqwest 0.13.4의 `ClientHandle::new`는 내부 runtime thread를
+생성하며 마지막 handle의 `Drop`은 thread를 종료·join한다.
+
+후속 소스는 endpoint 소유자와 format monitor가 같은 client를 사용하고 동기 runtime·연결을
+첫 동기 호출부터 공유한다. 실제 Unix 연결 회귀는 같은 11요청에 수정 전 11연결, 수정 후
+1연결을 확인했다. 권한·응답·revision·실패 조건은 유지한다. 이 반복 초기화 부하와 PCM
+실패의 인과관계는 아직 설치본에서 확정하지 않았으며, 원래 PCM 실패 판정도 유지한다.
+
 ## 2026-10-27 누적 credit과 보존 용량
 
 `a88eada` 집중 실행 `40329569555`의 macOS 26 Intel 새 설치는 뒤 순서의 소스 output에
