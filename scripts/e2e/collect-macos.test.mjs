@@ -4,7 +4,24 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { collectCoreaudioLog, collectCoreaudioServers, collectMacosLoad, snapshotMacosProcesses } from './collect-macos.mjs';
+import { collectCoreaudioLog, collectCoreaudioServers, collectMacosLoad, collectSchedulerTrace, snapshotMacosProcesses } from './collect-macos.mjs';
+
+test('recorded scheduler evidence exports CPU, thread and stack tables once without recording again', () => {
+  const files = new Set(['evidence/scheduler.trace', 'evidence/scheduler-trace-toc.xml']);
+  const calls = [];
+  const capture = (file, program, args, timeout) => {
+    assert.equal(program, 'xcrun'); assert.deepEqual(args.slice(0, 2), ['xctrace', 'export']);
+    assert.equal(timeout, 60000); files.add(args.at(-1)); calls.push({ file, args });
+  };
+  const path = name => `evidence/${name}`;
+  collectSchedulerTrace(capture, path, 'evidence/scheduler.trace', file => files.has(file));
+  assert.deepEqual(calls.map(call => call.file), ['process-info', 'thread-info', 'cpu-state', 'thread-state', 'time-sample']
+    .map(schema => `scheduler-trace-${schema}-export.log`));
+  assert.ok(calls.every(call => call.args.includes('--xpath') && call.args.includes('--input')));
+  collectSchedulerTrace(capture, path, 'evidence/scheduler.trace', file => files.has(file));
+  collectSchedulerTrace(capture, path, 'absent.trace', file => files.has(file));
+  assert.equal(calls.length, 5);
+});
 
 test('post-signal evidence records process CPU without command arguments or changing host services', t => {
   const directory = mkdtempSync(join(tmpdir(), 'mr-post-signal-'));
