@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { applyDesktopGraph, applyNativeGraph, signalGraph, installedReadyStatus } from './installed.mjs';
+import { digest } from '../support-contract.mjs';
 
 test('cold HAL and emulated startup wait for actual Driver readiness without accepting a missing observation', async () => {
   for (const [os, accelerator, cold] of [['linux', 'kvm', false], ['linux', 'tcg', true], ['macos', undefined, true]]) {
@@ -122,7 +123,7 @@ test('unity-level acceptance records the Driver mix without adding a feedback re
 
 test('fresh and upgrade share the target, retain independent full suites and produce one gate report', async (t) => {
   const { writeFileSync, mkdirSync } = await import('node:fs');
-  const { join } = await import('node:path');
+  const { dirname, join } = await import('node:path');
   const { qualifyInstalled } = await import('./installed.mjs');
   const { qualificationFixture } = await import('./qualification.fixture.mjs');
   const { readReports, evaluateQualification } = await import('../qualification.mjs');
@@ -134,9 +135,16 @@ test('fresh and upgrade share the target, retain independent full suites and pro
     calls.push(options);
     mkdirSync(options.output);
     writeFileSync(join(options.output, 'unit-evidence.txt'), 'Synthetic scenario evidence\n');
+    const nested = ['source-comparison/comparison.json', 'source-comparison/silent-audible/analysis.json'];
+    for (const file of nested) {
+      mkdirSync(dirname(join(options.output, file)), { recursive: true });
+      writeFileSync(join(options.output, file), '{"passed":true}\n');
+    }
     return {
       ...structuredClone(target),
-      scenarios: target.scenarios.filter((item) => item.id !== 'UPGRADE-01'),
+      scenarios: target.scenarios.filter((item) => item.id !== 'UPGRADE-01').map(item => item.id === 'AUDIO-12'
+        ? { ...item, evidence: nested.map(file => ({ file, sha256: digest(Buffer.from('{"passed":true}\n')) })) }
+        : item),
     };
   };
   const report = await qualifyInstalled(
@@ -157,7 +165,9 @@ test('fresh and upgrade share the target, retain independent full suites and pro
   );
   const all = f.reports.map((item) => (item.targetId === target.targetId ? reports[0] : item));
   assert.equal(evaluateQualification(f.candidate, all).passed, true);
-  writeFileSync(join(output, 'upgrade-unit-evidence.txt'), 'changed upgrade evidence');
+  assert.deepEqual(report.scenarios.find(item => item.id === 'AUDIO-12').evidence.map(item => item.file),
+    ['fresh-source-comparison%2Fcomparison.json', 'fresh-source-comparison%2Fsilent-audible%2Fanalysis.json']);
+  writeFileSync(join(output, 'upgrade-source-comparison%2Fsilent-audible%2Fanalysis.json'), 'changed upgrade evidence');
   assert.throws(() => readReports(output), /changed raw evidence/);
 });
 

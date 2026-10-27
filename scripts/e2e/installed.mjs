@@ -671,7 +671,8 @@ export async function qualifyInstalled(options, runMode = qualifyMode) {
   const upgrade = await runMode({ ...options, output: upgradeOutput, baselineDirectory });
   const flatten = (directory, prefix, items) =>
     items.map((item) => {
-      const file = `${prefix}-${item.file}`;
+      // Gate evidence uses flat filenames; encode the complete relative path to retain its identity.
+      const file = `${prefix}-${encodeURIComponent(item.file)}`;
       copyFileSync(join(directory, item.file), join(output, file));
       return { file, sha256: item.sha256 };
     });
