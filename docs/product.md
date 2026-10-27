@@ -502,7 +502,7 @@ Driver 실행부·엔진·가상 장치 종료, 명시적 재연결 전 중지 �
 
 | ID | 책임·소유자 | procedure 대조와 구현 | TODO 상태 | 완료 조건 |
 | --- | --- | --- | --- | --- |
-| E1 | PCM·버퍼·주기 / native transport·macOS worker | 누적 credit 전체를 획득 frontier로 전달, 절대 native 주기 대기, 최대 192kHz에서도 최소 4초 저장량 준비 | macOS·Ubuntu ARM 소스 회귀 완료, 설치본 수락 대기 | 무음·유음, 부분 게시·지연·ring 끝·초과의 실제 PCM 보존과 RT 할당 0 |
+| E1 | PCM·버퍼·주기 / native transport·macOS worker | 누적 credit 전체와 대기 중인 source의 첫 credit을 획득 frontier로 전달, 절대 native 주기 대기, 최대 192kHz에서도 최소 4초 저장량 준비 | macOS·Ubuntu ARM 소스 회귀와 macOS 초기 source PCM 보존 회귀 완료, 설치본 수락 대기 | 무음·유음, 생산자 시작·부분 게시·지연·ring 끝·초과의 실제 PCM 보존과 RT 할당 0 |
 | E2 | 그래프 / audio-engine | GKAudioGraph update/perform/stop/remove와 plan publication·retirement 대조. 미사용 병렬 엔진 제거, meter·processor exchange·render ownership 분리 | 185개 소스 회귀 완료 | 실제 publication·rollback·Off/Mute·off-RT 회수 계약 유지 |
 | E3 | macOS 앱 입력 / process-tap | Stop 실패 때 delivery 차단, callback 배출 후 재시작, 이전 PCM·clock 철회, 제어 절차별 OSStatus 관찰 | 65개 native 회귀·Desktop 오류 표시 회귀 완료 | 실패한 Start/Stop·late callback이 다른 세션이나 새 PCM으로 전파되지 않음 |
 | E4 | macOS HAL / HAL registry·client mix | 실제 stream 시작 성공 후 running 게시, tags/header 포함 용량 admission, client 수명·configuration 거래 분리 | 133개 소스 회귀 완료 | 시작·예약 실패 때 기존 client·revision·PCM 보존 |

@@ -7,6 +7,7 @@ use crate::macos_devices::{
 use mixrelay_audio_io::{process::ClockDomain, session::ClockAuthority};
 use mixrelay_realtime::Timebase;
 
+mod application_start;
 mod startup;
 
 #[test]

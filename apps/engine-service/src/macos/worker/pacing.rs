@@ -60,6 +60,9 @@ pub(in crate::macos) struct NativePacers {
 }
 impl NativePacers {
     fn select_application_master(&mut self, token: Option<(u64, SourceKind)>) {
+        if token.is_none() {
+            self.application = ApplicationPacer::default();
+        }
         if token != self.selected_application
             && let Some(previous) = self.selected_application
         {
@@ -99,6 +102,17 @@ fn binding_clock(binding: &ExternalBinding) -> Option<ApplicationClockSnapshot> 
         synchronized: clock.synchronized,
         capacity_frames,
     })
+}
+
+fn application_identity(binding: &ExternalBinding) -> Option<(u64, SourceKind)> {
+    let kind = if binding.virtual_endpoint_id().is_some() {
+        SourceKind::Virtual
+    } else if binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture {
+        SourceKind::Application
+    } else {
+        return None;
+    };
+    Some((binding_token(binding), kind))
 }
 
 pub(in crate::macos) fn next_native_pace(
@@ -161,17 +175,14 @@ pub(in crate::macos) fn next_native_pace(
     // Master selection follows graph identity. A producer format rearm can
     // temporarily hide native running state without removing the selected source.
     let retained = pacers.selected_application.filter(|(token, kind)| {
-        plan.source_bindings().iter().any(|binding| {
-            let candidate = if binding.virtual_endpoint_id().is_some() {
-                SourceKind::Virtual
-            } else if binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture {
-                SourceKind::Application
-            } else {
-                return false;
-            };
-            candidate == *kind && binding_token(binding) == *token
-        })
+        plan.source_bindings()
+            .iter()
+            .any(|binding| application_identity(binding) == Some((*token, *kind)))
     });
-    pacers.select_application_master(retained);
+    let waiting = retained.or_else(|| plan.source_bindings().iter().find_map(application_identity));
+    if let Some((token, _)) = waiting {
+        pacers.application.await_source(token);
+    }
+    pacers.select_application_master(waiting);
     (Pace::Unknown, 0)
 }

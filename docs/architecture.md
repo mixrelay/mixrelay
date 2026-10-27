@@ -140,6 +140,12 @@ mixer의 forward cursor로 보존된 PCM을 순서대로 배출한다. 외부 HA
 획득 frontier는 이번 읽기 quantum과 아직 처리하지 않은 전체 credit을 구분한다.
 보존 용량 안의 가장 오래된 PCM부터 읽고, 같은 epoch에서 이미 읽은 시각으로 되돌아가지 않는다.
 
+`NativePacers`는 그래프가 기다리는 shared source의 신원을 생산자 실행 전에 선택한다.
+`ApplicationPacer`는 이미 기다리던 source의 첫 credit과 같은 source의 새 producer epoch를
+0부터 보존 범위 안에서 소비한다. 첫 관찰까지 생산된 PCM을 준비 이전의 이력으로 버리지 않는다.
+이미 실행 중인 source에 처음 연결할 때와 물리 장치의 `HardwarePacer`는 현재 credit을
+시작 기준으로 사용한다. 다른 native pacing 소유자로 전환하면 대기 중인 application 상태를 회수한다.
+
 `audio-io::retention`은 최대 지원 샘플레이트에서도 최소 4초의 backlog 저장량을 정한다.
 macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭제곱인 1,048,576프레임으로 올림한다.
 녹음 전달 큐는 256프레임 × 3,000개이며 192kHz에서 4초다. 모두 제어 경로에서 준비하고,

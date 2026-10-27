@@ -26,11 +26,17 @@ pub(super) struct ApplicationClockSnapshot {
 #[derive(Default)]
 pub(super) struct ApplicationPacer {
     master: Option<(u64, u64)>,
+    awaited_source: Option<u64>,
     generation: u64,
     hardware: HardwarePacer,
 }
 
 impl ApplicationPacer {
+    /// Arms a graph that is already consuming before its producer becomes live.
+    pub(super) fn await_source(&mut self, token: u64) {
+        self.awaited_source = Some(token);
+    }
+
     pub(super) fn next(
         &mut self,
         source: (u64, ApplicationClockSnapshot),
@@ -39,17 +45,26 @@ impl ApplicationPacer {
         let (token, clock) = source;
         let (rate, maximum, capacity) = format;
         if clock.running == 0 {
+            self.await_source(token);
             return Pace::Idle;
         }
         // The graph consumer must publish its new format to the producer. Until
         // acknowledgment, the worker can run that handshake; waiting here
         // would deadlock an application-only graph after a sample-rate change.
-        if clock.graph_rate != rate {
+        if clock.graph_rate != rate || clock.native_rate == 0 {
             return Pace::Unknown;
         }
+        let awaited = self.awaited_source.take() == Some(token);
         if self.master != Some((token, clock.epoch)) {
+            let continuing = self.master.is_some_and(|(previous, _)| previous == token);
             self.master = Some((token, clock.epoch));
             self.generation = self.generation.wrapping_add(1);
+            if awaited || continuing {
+                // A new producer epoch starts at zero. Retain the input published
+                // while this active consumer was waiting for its first observation.
+                self.hardware
+                    .begin((self.generation, 0, clock.native_rate), rate);
+            }
         }
         self.hardware.next(
             (self.generation, clock.native_frames, clock.native_rate),
@@ -100,6 +115,11 @@ pub(super) struct HardwarePacer {
 }
 
 impl HardwarePacer {
+    fn begin(&mut self, (epoch, baseline, native_rate): (u64, u64, u32), graph_rate: u32) {
+        self.origin = Some((epoch, baseline, native_rate, graph_rate));
+        self.pacing.reset();
+    }
+
     pub(super) fn next(
         &mut self,
         progress: (u64, u64, u32),
@@ -120,8 +140,7 @@ impl HardwarePacer {
             || previous_rate != native_rate
             || previous_graph_rate != graph_rate
         {
-            self.origin = Some((epoch, native_frames, native_rate, graph_rate));
-            self.pacing.reset();
+            self.begin((epoch, native_frames, native_rate), graph_rate);
             return Pace::Wait;
         }
         let through = u64::try_from(
@@ -427,6 +446,64 @@ mod tests {
     }
 
     #[test]
+    fn source_start_after_an_idle_observation_preserves_its_first_retained_credit() {
+        let mut pacer = ApplicationPacer::default();
+        let format = (48_000, 128, 16_384);
+        let mut clock = ApplicationClockSnapshot {
+            epoch: 7,
+            native_frames: 0,
+            native_rate: 48_000,
+            graph_rate: 48_000,
+            running: 0,
+            synchronized: 1,
+            capacity_frames: 16_384,
+        };
+        assert_eq!(pacer.next((11, clock), format), Pace::Idle);
+        clock.native_frames = 8_192;
+        clock.running = 1;
+        clock.native_rate = 0;
+        assert_eq!(pacer.next((11, clock), format), Pace::Unknown);
+        clock.native_rate = 48_000;
+        let mut received = 0;
+        for _ in 0..64 {
+            let Pace::Block { frames, .. } = pacer.next((11, clock), format) else {
+                break;
+            };
+            received += frames;
+        }
+        assert_eq!(
+            received, 8_192,
+            "the active consumer lost the producer's startup PCM"
+        );
+        assert_eq!(pacer.next((11, clock), format), Pace::Wait);
+    }
+
+    #[test]
+    fn a_continuing_source_new_epoch_preserves_only_its_new_native_credit() {
+        let mut pacer = ApplicationPacer::default();
+        let format = (48_000, 128, 16_384);
+        let mut clock = ApplicationClockSnapshot {
+            epoch: 7,
+            native_frames: 8_192,
+            native_rate: 48_000,
+            graph_rate: 48_000,
+            running: 1,
+            synchronized: 1,
+            capacity_frames: 16_384,
+        };
+        // Attaching to an already running source still excludes its pre-admission history.
+        assert_eq!(pacer.next((11, clock), format), Pace::Wait);
+        clock.epoch = 8;
+        clock.native_frames = 384;
+        for first in [0, 128, 256] {
+            assert!(matches!(pacer.next((11, clock), format), Pace::Block {
+                first_frame, frames: 128, overrun: false, ..
+            } if first_frame == first));
+        }
+        assert_eq!(pacer.next((11, clock), format), Pace::Wait);
+    }
+
+    #[test]
     fn application_master_tracks_identity_epoch_and_format_handshake() {
         let mut pacer = ApplicationPacer::default();
         let format = (48_000, 128, 4096);
@@ -448,6 +525,7 @@ mod tests {
         assert_eq!(processed, 480);
         assert_eq!(pacer.next((12, clock), format), Pace::Wait);
         clock.epoch += 1;
+        clock.native_frames = 0;
         assert_eq!(pacer.next((12, clock), format), Pace::Wait);
         clock.graph_rate = 44_100;
         assert_eq!(pacer.next((12, clock), format), Pace::Unknown);
