@@ -1,5 +1,6 @@
 //! Native frame-credit pacing. Sleeping only polls for new credits; elapsed wall
 //! time cannot manufacture a device callback, sample position, or host timestamp.
+use mixrelay_macos_transport::source_registry::PublishedCredit;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct NativeClockSnapshot {
@@ -64,13 +65,30 @@ impl ApplicationPacer {
                 self.hardware.begin((self.generation, 0, rate), rate);
             }
         }
-        self.hardware.next(
+        let mut pace = self.hardware.next(
             (self.generation, clock.published_frames, rate),
             rate,
             maximum,
             capacity,
-        )
+        );
+        if let Pace::Block { publication, .. } = &mut pace {
+            *publication = Some(Publication {
+                token,
+                credit: PublishedCredit {
+                    epoch: clock.epoch,
+                    through: clock.published_frames,
+                },
+            });
+        }
+        pace
     }
+}
+
+/// The shared-source publication snapshot that granted a block's credit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Publication {
+    pub token: u64,
+    pub credit: PublishedCredit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,6 +105,8 @@ pub(super) enum Pace {
         epoch: u64,
         discontinuity: bool,
         overrun: bool,
+        /// The pacing source's credited publication; device clocks have none.
+        publication: Option<Publication>,
     },
 }
 
@@ -245,6 +265,7 @@ impl NativePacer {
             epoch: clock.epoch,
             discontinuity: restarted || lost_window,
             overrun: lost_window,
+            publication: None,
         }
     }
 }
@@ -333,6 +354,7 @@ mod tests {
                 epoch: 1,
                 discontinuity: true,
                 overrun: false,
+                publication: None,
             }
         );
         let restarted = NativeClockSnapshot {
@@ -348,6 +370,7 @@ mod tests {
                 epoch: 2,
                 discontinuity: true,
                 overrun: false,
+                publication: None,
             }
         );
         let overrun = NativeClockSnapshot {
@@ -363,6 +386,7 @@ mod tests {
                 epoch: 2,
                 discontinuity: true,
                 overrun: true,
+                publication: None,
             }
         );
     }
@@ -464,9 +488,25 @@ mod tests {
         clock.native_rate = 48_000;
         let mut received = 0;
         for _ in 0..64 {
-            let Pace::Block { frames, .. } = pacer.next((11, clock), format) else {
+            let Pace::Block {
+                frames,
+                publication,
+                ..
+            } = pacer.next((11, clock), format)
+            else {
                 break;
             };
+            // Every block names the exact publication snapshot that granted it.
+            assert_eq!(
+                publication,
+                Some(Publication {
+                    token: 11,
+                    credit: PublishedCredit {
+                        epoch: 7,
+                        through: 8_192,
+                    },
+                })
+            );
             received += frames;
         }
         assert_eq!(

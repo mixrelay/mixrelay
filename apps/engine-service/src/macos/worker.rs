@@ -1,6 +1,6 @@
 //! Owns the graph worker, its capture timeline and block-by-block DSP handoff.
 use super::{direct, external_io::MacEngineExternalIo, runtime_latency, worker_runtime};
-use crate::macos_pacing::Pace;
+use crate::macos_pacing::{Pace, Publication};
 use mixrelay_audio_engine::{BlockProcessor, ExternalIo, ProcessorExchange};
 use mixrelay_audio_io::process::{ProcessCycle, ProcessReport};
 use mixrelay_engine_service::session::AdapterRuntimeStatus;
@@ -251,6 +251,7 @@ fn process_worker_block(
         },
     );
     timeline.capture_alignment = io.alignment;
+    block.runtime.record_time_reads(io.time_reads);
     let report = result?;
     block
         .devices
@@ -283,6 +284,8 @@ pub(super) struct MacTimeline {
     pub(super) capture_alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment,
     pub(super) frame: u64,
     pub(super) available_frames: u32,
+    /// The pacing source publication that granted `available_frames`.
+    pub(super) publication: Option<Publication>,
     pub(super) epoch: u64,
     pub(super) deadline: Instant,
     pub(super) native: bool,
@@ -298,6 +301,7 @@ impl MacTimeline {
     ) -> MacEngineExternalIo<'a> {
         let mut io = MacEngineExternalIo::new(devices);
         io.capture_frames = self.available_frames;
+        io.publication = self.publication;
         io.alignment = std::mem::take(&mut self.capture_alignment);
         io
     }
@@ -307,6 +311,7 @@ impl MacTimeline {
             capture_alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment::default(),
             frame: 0,
             available_frames: 0,
+            publication: None,
             epoch: 0,
             deadline: Instant::now(),
             native: false,
@@ -318,6 +323,7 @@ impl MacTimeline {
         self.capture_alignment = mixrelay_audio_io::capture_alignment::CaptureAlignment::default();
         self.frame = 0;
         self.available_frames = 0;
+        self.publication = None;
         self.epoch = self.epoch.wrapping_add(1);
         self.deadline = Instant::now();
     }
@@ -337,12 +343,14 @@ impl MacTimeline {
                 epoch,
                 discontinuity,
                 overrun,
+                publication,
             } => {
                 let switched = !self.native || self.clock_id != clock_id;
                 self.native = true;
                 self.clock_id = clock_id;
                 self.frame = first_frame;
                 self.available_frames = available_frames;
+                self.publication = publication;
                 self.epoch = epoch;
                 if overrun {
                     status.record_process(ProcessReport {
@@ -366,6 +374,7 @@ impl MacTimeline {
                 self.native = false;
                 self.clock_id = 0;
                 self.available_frames = route.maximum_frames;
+                self.publication = None;
                 if route.independent_idle {
                     status.observe_clock_idle();
                 } else {

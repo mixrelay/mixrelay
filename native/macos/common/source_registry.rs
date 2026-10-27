@@ -47,7 +47,13 @@ pub mod content_latency;
 mod latency;
 mod timestamps;
 use latency::{Latency, Observation, transition};
+pub use timestamps::{GraphCredit, PublishedCredit, ReadMiss};
 const MAX_LEASE: u64 = (1 << 48) - 1;
+
+/// Opaque `SourceClock::epoch`: a lease above its 16-bit shared-buffer epoch.
+const fn stream_epoch(lease: u64, epoch: u64) -> u64 {
+    (lease << 16) | epoch
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
@@ -626,7 +632,7 @@ impl SourceRegistry {
         }
         Some(SourcePcmProgress {
             clock: SourceClock {
-                epoch: (lease << 16) | epoch,
+                epoch: stream_epoch(lease, epoch),
                 native_frames: frames,
                 native_rate: rate,
                 graph_rate: u32::try_from(format & u64::from(u32::MAX)).ok()?,
@@ -660,6 +666,21 @@ impl SourceRegistry {
         frames: u32,
         timing: content_latency::ReadTiming,
     ) -> u32 {
+        self.read_audio_timed(token, samples, frames, timing)
+            .unwrap_or(0)
+    }
+
+    /// Reads one complete block like `read_audio_time`, reporting why none was read.
+    ///
+    /// # Errors
+    /// Returns the [`ReadMiss`] reason; `samples` is then silent and the cursor not advanced.
+    pub fn read_audio_timed(
+        &self,
+        token: u64,
+        samples: &mut [f32],
+        frames: u32,
+        timing: content_latency::ReadTiming,
+    ) -> Result<u32, ReadMiss> {
         let content_latency::ReadTiming {
             rate,
             first_nanos: requested_time,
@@ -667,14 +688,13 @@ impl SourceRegistry {
         } = timing;
         samples.fill(0.0);
         let read = self.read(token);
-        let Some(source) = read.source().filter(|source| {
-            frames != 0 && samples.len() == frames as usize * source.channels as usize
-        }) else {
-            return 0;
-        };
-        let Some(_claim) = source.claim_consumer() else {
-            return 0;
-        };
+        let source = read
+            .source()
+            .filter(|source| {
+                frames != 0 && samples.len() == frames as usize * source.channels as usize
+            })
+            .ok_or(ReadMiss::Unavailable)?;
+        let _claim = source.claim_consumer().ok_or(ReadMiss::Unavailable)?;
         let mut attempt = content_latency::Attempt::new(&source.measurements);
         // SAFETY: this nonblocking consumer claim is the only access to the
         // timeline; no control method modifies it, including replacement.
@@ -694,7 +714,7 @@ impl SourceRegistry {
             timeline.previous_read = None;
             timeline.policy.next = 0;
             timeline.publish(source, stats.epoch, frames, false);
-            return 0;
+            return Err(ReadMiss::Unavailable);
         }
         let observation = timeline.observe(source, stats, frames, (rate, self.clock.now()));
         let (mut policy, ready) = transition(timeline.policy, observation);
@@ -703,9 +723,9 @@ impl SourceRegistry {
                 timeline.policy = policy;
             }
             timeline.publish(source, stats.epoch, frames, false);
-            return 0;
+            return Err(ReadMiss::NotReady);
         }
-        if !timestamps::select(
+        if let Err(miss) = timestamps::select(
             source,
             stats,
             timeline.policy,
@@ -718,7 +738,7 @@ impl SourceRegistry {
                 timeline.policy = policy;
             }
             timeline.publish(source, stats.epoch, frames, false);
-            return 0;
+            return Err(miss);
         }
         let copied = timeline.copy_audio(
             source,
@@ -732,7 +752,10 @@ impl SourceRegistry {
             },
         );
         attempt.completed = copied != 0;
-        copied
+        if copied == 0 {
+            return Err(ReadMiss::Incomplete);
+        }
+        Ok(copied)
     }
 
     /// Takes normalized-sample faults once for the current source lease.
