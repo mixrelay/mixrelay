@@ -27,6 +27,8 @@ pub(super) struct ApplicationClockSnapshot {
 pub(super) struct ApplicationPacer {
     master: Option<(u64, u64)>,
     awaited_source: Option<u64>,
+    /// The source consumed from its first credit: awaited, then each new epoch of it.
+    head: Option<u64>,
     generation: u64,
     hardware: HardwarePacer,
 }
@@ -35,6 +37,13 @@ impl ApplicationPacer {
     /// Arms a graph that is already consuming before its producer becomes live.
     pub(super) fn await_source(&mut self, token: u64) {
         self.awaited_source = Some(token);
+        self.head = Some(token);
+    }
+
+    /// The source this pacer consumes from its first credit, which alone may receive
+    /// PCM its producer retained before admission.
+    pub(super) const fn head(&self) -> Option<u64> {
+        self.head
     }
 
     pub(super) fn next(
@@ -57,6 +66,12 @@ impl ApplicationPacer {
         let awaited = self.awaited_source.take() == Some(token);
         if self.master != Some((token, clock.epoch)) {
             let continuing = self.master.is_some_and(|(previous, _)| previous == token);
+            if awaited {
+                self.head = Some(token);
+            } else if !continuing {
+                // A source joined while already running starts at its current credit.
+                self.head = None;
+            }
             self.master = Some((token, clock.epoch));
             self.generation = self.generation.wrapping_add(1);
             if awaited || continuing {

@@ -59,6 +59,35 @@ const _: () = assert!(
     "the bridge holds a cycle of catch-up, its priming and the 256-tap sinc history"
 );
 
+/// First and longest delay before preparing a converter again after a failure. The
+/// delay doubles per failure: an allocation failure under memory pressure clears within
+/// that time or keeps retrying once a second, never on every 2.7 ms period.
+const RETRY_FIRST: Duration = Duration::from_millis(10);
+const RETRY_LONGEST: Duration = Duration::from_secs(1);
+
+/// Bounded exponential backoff for converter preparation, in host ticks.
+#[derive(Debug, Default)]
+struct Retry {
+    at: Option<u64>,
+    delay: Option<Duration>,
+}
+impl Retry {
+    fn waiting(&self, now: u64) -> bool {
+        self.at.is_some_and(|at| now < at)
+    }
+    fn failed(&mut self, now: u64, timebase: Timebase) -> Duration {
+        let delay = self
+            .delay
+            .map_or(RETRY_FIRST, |delay| (delay * 2).min(RETRY_LONGEST));
+        self.delay = Some(delay);
+        self.at = Some(now.saturating_add(timebase.ticks(delay)));
+        delay
+    }
+    fn succeeded(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// Control-owned signals shared with one pump.
 pub(super) struct Signals {
     pub(super) update: Arc<parking_lot::Mutex<Option<Vec<ClientPcmReader>>>>,
@@ -82,10 +111,12 @@ pub(super) struct Pump {
     head: bool,
     /// When the feed first stopped at the current run boundary.
     boundary: Option<u64>,
-    /// The last published route left the source unrouted: routing starts retention.
-    unrouted: bool,
     /// Queue skips while the source was not routed, which are not losses.
     unwanted_skips: u64,
+    /// Backoff after conversion storage could not be prepared.
+    retry: Retry,
+    #[cfg(test)]
+    failing_converters: u32,
     report: Report,
 }
 impl Pump {
@@ -114,8 +145,10 @@ impl Pump {
             stream: None,
             head: false,
             boundary: None,
-            unrouted: false,
             unwanted_skips: 0,
+            retry: Retry::default(),
+            #[cfg(test)]
+            failing_converters: 0,
             report: Report::new(host_time()),
         })
     }
@@ -170,23 +203,25 @@ impl Pump {
             self.boundary = None;
             return Ok(Some(native));
         }
-        match self.transport.consumer_route() {
-            // A plan publishes each source's route on its next cycle; until then the
-            // client PCM stays in its queue.
-            ConsumerRoute::Unknown => return Ok(native),
-            ConsumerRoute::Unrouted => {
-                self.unrouted = true;
-                self.discard(now, timebase)?;
+        let route = self.transport.consumer_route();
+        let routed = matches!(route, ConsumerRoute::Routed { .. });
+        self.drain(now, timebase, routed)?;
+        match route {
+            // A plan publishes each source's route on its first cycle. Until then the
+            // pump keeps what one client queue would hold, without converting it, so a
+            // head consumer still finds the client's first frames.
+            ConsumerRoute::Unknown => {
+                self.backlog.keep_newest(u64::from(QUEUE_FRAMES));
                 return Ok(native);
             }
-            // PCM queued before the route is not delivered: routing starts retention.
-            ConsumerRoute::Routed { .. } if std::mem::take(&mut self.unrouted) => {
-                self.discard(now, timebase)?;
-                return Ok(native);
-            }
-            ConsumerRoute::Routed { .. } => self.drain(now, timebase, true)?,
+            // An unrouted source still publishes for meters and pacing, at its live edge
+            // and without retaining: only what one cycle can convert stays.
+            ConsumerRoute::Unrouted => self
+                .backlog
+                .keep_newest((FEED_PERIODS * cadence::FRAMES as usize) as u64),
+            ConsumerRoute::Routed { .. } => {}
         }
-        if let Some(losses) = self.report.due_losses(now, timebase, self.losses()) {
+        if routed && let Some(losses) = self.report.due_losses(now, timebase, self.losses()) {
             scheduling.outside(|| losses.log());
         }
         let SourceClockRead::Ready(clock) = source else {
@@ -210,17 +245,9 @@ impl Pump {
         )
     }
 
-    /// Ends retention and drains the queues without retaining.
-    fn discard(&mut self, now: u64, timebase: Timebase) -> Result<(), Error> {
-        self.backlog.clear();
-        self.stream = None;
-        self.boundary = None;
-        self.drain(now, timebase, false)
-    }
-
-    /// Moves every published client frame up to the native playhead into the backlog,
-    /// or past it when nothing is retained.
-    fn drain(&mut self, now: u64, timebase: Timebase, retain: bool) -> Result<(), Error> {
+    /// Moves every published client frame up to the native playhead into the backlog.
+    /// Queue skips count as loss only for a routed source.
+    fn drain(&mut self, now: u64, timebase: Timebase, routed: bool) -> Result<(), Error> {
         let channels = self.input.len() / 128;
         let skipped = self.mixer.skipped_frames();
         for _ in 0..DRAIN_WINDOWS {
@@ -232,20 +259,18 @@ impl Pump {
             }) else {
                 break;
             };
-            if retain {
-                let input = &mut self.input[..window.frames as usize * channels];
-                match ClientPcmMixer::mix(&self.queues, window, input, &mut self.scratch) {
-                    Ok(()) => {}
-                    // A clock or membership change in progress; the next cycle sees it settled.
-                    Err(MixError::Changed) => break,
-                    Err(MixError::Geometry) => return Err(Error::Geometry),
-                }
-                self.backlog.push(window, input);
-                self.report.retained(now);
+            let input = &mut self.input[..window.frames as usize * channels];
+            match ClientPcmMixer::mix(&self.queues, window, input, &mut self.scratch) {
+                Ok(()) => {}
+                // A clock or membership change in progress; the next cycle sees it settled.
+                Err(MixError::Changed) => break,
+                Err(MixError::Geometry) => return Err(Error::Geometry),
             }
+            self.backlog.push(window, input);
+            self.report.retained(now);
             self.mixer.commit(window);
         }
-        if !retain {
+        if !routed {
             self.unwanted_skips += self.mixer.skipped_frames() - skipped;
         }
         Ok(())
@@ -313,7 +338,7 @@ impl Pump {
                     };
                     chunk = newest;
                 }
-                if !self.restart(chunk, clock, now, scheduling)? {
+                if !self.restart(chunk, clock, now, scheduling) {
                     ready = false;
                     break;
                 }
@@ -351,14 +376,15 @@ impl Pump {
     }
 
     /// Starts a new source epoch for `chunk`, reusing the converter's storage when its
-    /// geometry is unchanged. Returns false when the format acknowledgement defers.
+    /// geometry is unchanged. Returns false when the format acknowledgement defers or
+    /// conversion storage waits for its next attempt.
     fn restart(
         &mut self,
         chunk: Chunk,
         clock: SourceClockSnapshot,
         now: u64,
         scheduling: &Scheduling,
-    ) -> Result<bool, Error> {
+    ) -> bool {
         let reused = match self.converter.as_mut() {
             Some(converter) if converter.reusable(clock, chunk.clock.rate) => {
                 Some(converter.restart(&mut self.transport, clock))
@@ -367,21 +393,38 @@ impl Pump {
         };
         let started = match reused {
             Some(started) => started,
+            None if self.retry.waiting(now) => return false,
             None => scheduling.outside(|| {
                 scheduling.retune(chunk.clock.rate);
                 let native = (chunk.clock.rate, self.input.len() / 128);
-                let Some(converter) = Converter::new(&mut self.transport, clock, native)? else {
-                    return Ok::<bool, Error>(false);
-                };
-                self.converter = Some(converter);
-                Ok(true)
-            })?,
+                match self.new_converter(clock, native) {
+                    Ok(Some(converter)) => {
+                        self.converter = Some(converter);
+                        self.retry.succeeded();
+                        true
+                    }
+                    Ok(None) => false,
+                    // Conversion storage could not be prepared: the source keeps its
+                    // retained PCM and tries again later instead of ending the endpoint.
+                    Err(error) => {
+                        let delay = self.retry.failed(now, Timebase::current());
+                        tracing::warn!(
+                            boundary = "hal_shared_pcm",
+                            stage = "source_admission",
+                            %error,
+                            retry_ms = delay.as_millis(),
+                            "virtual input converter preparation failed"
+                        );
+                        false
+                    }
+                }
+            }),
         };
         if !started {
             // Deferred acknowledgement keeps the retained PCM and cannot leave an old
             // converter attached to a newly committed epoch.
             self.report.deferred();
-            return Ok(false);
+            return false;
         }
         self.report.converter_ready(
             now,
@@ -391,7 +434,20 @@ impl Pump {
         );
         self.backlog.restarted();
         self.boundary = None;
-        Ok(true)
+        true
+    }
+
+    fn new_converter(
+        &mut self,
+        clock: SourceClockSnapshot,
+        native: (u32, usize),
+    ) -> Result<Option<Converter>, Error> {
+        #[cfg(test)]
+        if self.failing_converters != 0 {
+            self.failing_converters -= 1;
+            return Err(Error::Geometry);
+        }
+        Converter::new(&mut self.transport, clock, native)
     }
 
     /// Writes converted output left by a failed publication while its stream is still

@@ -93,7 +93,9 @@ fn run_audio_worker(
     let mut active_devices = crate::macos_devices::DeviceSet::default();
     let mut timeline = MacTimeline::new();
     let mut pacers = NativePacers::default();
-    let mut routes = pacing::PlanRoutes::default();
+    let mut routes = pacing::PlanRoutes::new(
+        mixrelay_engine_service::endpoint_service::virtual_source_registry(),
+    );
     let mut awaiting_format = false;
     let mut runtime = worker_runtime::WorkerRuntime::new();
     // Whether a direct (IOProc-rendered) plan must be looked for again. Looking allocates
@@ -260,6 +262,7 @@ fn process_worker_block(
         _ => worker_runtime::Path::Timer,
     });
     let mut io = timeline.take_external_io(block.devices);
+    io.head = pacers.head();
     let result = process_native_cycle(
         block.processor,
         &mut io,

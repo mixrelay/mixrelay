@@ -464,34 +464,38 @@ fn a_hardware_paced_graph_joins_a_late_virtual_source_at_its_live_edge() {
     );
 }
 
+/// A metered-only source keeps publishing at its live edge, so its meter and any pacing
+/// on it follow the client, while it retains nothing and reports no loss. Routing it
+/// later continues the same stream: nothing from before the route reaches the graph.
 #[test]
-fn an_unrouted_endpoint_retains_nothing_and_a_later_route_starts_at_routing() {
+fn an_unrouted_source_publishes_its_live_edge_and_a_later_route_continues_it() {
     let mut fixture = Fixture::new(48_000);
     // The plan meters the source without carrying it to an output.
     fixture.route(ConsumerRoute::Unrouted);
-    // Three seconds, longer than a client queue holds, without a route.
+    fixture.request(true);
+    let mut published = 0;
+    // Three seconds, longer than a client queue holds.
     for _ in 0..1_125 {
         fixture.period();
-        assert_eq!(fixture.pump.backlog.frames(), 0);
+        let (_, total, credit) = fixture.progress();
+        assert!(fixture.pump.backlog.frames() <= FEED_PERIODS as u64 * 128);
+        assert!(total > published, "publication froze while unrouted");
+        assert_eq!(credit, total);
+        published = total;
     }
-    assert_eq!(fixture.pump.losses(), (0, 0));
-    assert_eq!(
-        fixture.pump.report.final_losses(fixture.pump.losses()),
-        None
-    );
-    // Even the plan's head consumer gets nothing from before its route.
+    assert_eq!(published, fixture.written);
+    // The meter reads the newest period, at its original coordinate.
+    fixture.verify(fixture.written - 128);
+    let epoch = fixture.progress().0;
     fixture.route(ConsumerRoute::Routed { head: true });
-    fixture.request(true);
-    fixture.period();
-    let routed = fixture.written;
     for _ in 0..16 {
         fixture.period();
     }
-    // Publication starts exactly at the route: nothing from before it reached the source.
-    assert_eq!(fixture.progress().1, fixture.written - routed);
-    for first in (routed..fixture.written).step_by(128) {
-        fixture.verify(first);
-    }
+    assert_eq!(
+        fixture.progress(),
+        (epoch, fixture.written, fixture.written)
+    );
+    assert_eq!(fixture.pump.losses(), (0, 0));
     assert_eq!(
         fixture.pump.report.final_losses(fixture.pump.losses()),
         None
@@ -604,15 +608,16 @@ fn native_stop_ends_retention_while_the_graph_format_is_unset() {
 }
 
 /// HAL grants can create the source before the graph's next cycle publishes its route.
-/// Until then client PCM stays in its queue, and a plan that already routed the source
-/// to its head consumer receives it from the client's first frame.
+/// Until then the pump keeps what a client queue holds, without converting it, and a
+/// plan that already routed the source to its head consumer receives it from the
+/// client's first frame.
 #[test]
 fn a_source_created_before_its_route_is_published_keeps_the_head_in_its_queue() {
     let mut fixture = Fixture::new(48_000);
     for _ in 0..32 {
         fixture.period();
     }
-    assert_eq!(fixture.pump.backlog.frames(), 0);
+    assert_eq!(fixture.pump.backlog.frames(), 32 * 128);
     assert_eq!(fixture.progress(), (0, 0, 0));
     fixture.route(ConsumerRoute::Routed { head: true });
     fixture.request(true);
@@ -625,9 +630,9 @@ fn a_source_created_before_its_route_is_published_keeps_the_head_in_its_queue() 
     }
 }
 
-/// A routed source that is not the plan's head joins at its live edge even when the
-/// pacer has already made it clock master, so a later master choice cannot be handed a
-/// retained head the plan did not mean it to consume.
+/// A routed source the pacer did not await, such as one it chose while already running,
+/// joins at its live edge even as clock master: the pacer starts it at current credit,
+/// so a retained head would only rewind the graph.
 #[test]
 fn a_routed_source_that_is_not_the_head_joins_at_the_live_edge() {
     let mut fixture = Fixture::new(48_000);
@@ -645,4 +650,75 @@ fn a_routed_source_that_is_not_the_head_joins_at_the_live_edge() {
     );
     assert!(fixture.read(0).is_err(), "the retained head was published");
     assert_eq!(fixture.pump.losses(), (0, 0));
+}
+
+/// A route that stays unpublished for longer than a client queue holds (a format-gated
+/// or direct-rendered worker) keeps one queue of PCM, and reports no loss for the rest.
+#[test]
+fn a_long_unpublished_route_keeps_one_queue_without_reporting_loss() {
+    let mut fixture = Fixture::new(48_000);
+    for _ in 0..1_125 {
+        fixture.period();
+    }
+    assert_eq!(fixture.pump.backlog.frames(), u64::from(QUEUE_FRAMES));
+    fixture.route(ConsumerRoute::Routed { head: true });
+    fixture.request(true);
+    for _ in 0..128 {
+        fixture.period();
+    }
+    let first = fixture.written - 128 * 128 - u64::from(QUEUE_FRAMES);
+    assert_eq!(fixture.progress().1, fixture.written - first);
+    fixture.verify(first);
+    assert_eq!(fixture.pump.losses(), (0, 0));
+}
+
+/// Conversion storage that cannot be prepared delays admission with a bounded backoff
+/// instead of ending the endpoint, and the retained head still arrives whole.
+#[test]
+fn a_failed_converter_preparation_retries_and_keeps_the_head() {
+    let mut fixture = Fixture::new(48_000);
+    fixture.route(ConsumerRoute::Routed { head: true });
+    for _ in 0..64 {
+        fixture.period();
+    }
+    fixture.pump.failing_converters = 3;
+    fixture.request(true);
+    // 10 + 20 + 40 ms of backoff, then admission.
+    let mut cycles = 0;
+    while fixture.progress().1 == 0 {
+        assert!(cycles < 64, "admission never retried");
+        fixture.period();
+        cycles += 1;
+    }
+    assert!(
+        cycles >= 26,
+        "retried after {cycles} periods, inside the backoff"
+    );
+    for _ in 0..64 {
+        fixture.period();
+    }
+    assert_eq!(fixture.progress().1, fixture.written);
+    for first in (0..fixture.written).step_by(128) {
+        fixture.verify(first);
+    }
+}
+
+/// Gated rendering leaves a routed source filling its retention for seconds: the loss
+/// episode is reported once, after the losses stop, not on every cycle.
+#[test]
+fn a_loss_episode_is_reported_once() {
+    let timebase = Timebase::current();
+    let mut report = Report::new(0);
+    let period = timebase.ticks(Duration::from_nanos(2_666_667));
+    let mut reports = Vec::new();
+    // Five seconds of growing losses, then two quiet seconds.
+    for cycle in 0..2_625_u64 {
+        let dropped = cycle.min(1_875) * 128;
+        if let Some(episode) = report.due_losses(cycle * period, timebase, (0, dropped)) {
+            reports.push((cycle, episode.dropped));
+        }
+    }
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert_eq!(reports[0].1, 1_875 * 128);
+    assert!(reports[0].0 > 1_875, "reported before the episode ended");
 }

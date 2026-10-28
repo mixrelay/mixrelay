@@ -57,6 +57,8 @@ pub(super) struct MacEngineExternalIo<'a> {
     pub(super) capture_frames: u32,
     /// The pacing source publication that granted `capture_frames`.
     pub(super) publication: Option<Publication>,
+    /// The shared source the pacer consumes from its first credit.
+    pub(super) head: Option<u64>,
     /// This cycle's time-addressed read misses, collected by the worker after the cycle.
     pub(super) time_reads: TimeReadMisses,
     devices: &'a crate::macos_devices::DeviceSet,
@@ -75,6 +77,7 @@ impl<'a> MacEngineExternalIo<'a> {
             align_inputs: false,
             capture_frames: 0,
             publication: None,
+            head: None,
             time_reads: TimeReadMisses::default(),
         }
     }
@@ -133,7 +136,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
             self.devices
                 .set_binding_active(binding.node_id().as_str(), false, enabled);
         }
-        publish_routes(&controls);
+        publish_routes(&controls, self.head);
         let mut active = 0;
         let mut latest = None::<CaptureFrontier>;
         let mut source_period = None;
@@ -290,43 +293,35 @@ impl ExternalIo for MacEngineExternalIo<'_> {
 }
 
 /// Publishes how this plan uses each virtual source to its producer.
-fn publish_routes(controls: &mixrelay_audio_engine::ExternalControlState<'_>) {
+fn publish_routes(controls: &mixrelay_audio_engine::ExternalControlState<'_>, head: Option<u64>) {
     if let Some(sources) = endpoint_service::virtual_source_registry() {
-        let device_clocked = controls.sinks().len() != 0
-            || controls
-                .sources()
-                .any(|(binding, _)| !shared_source(binding));
-        for (token, route) in plan_routes(controls.sources(), device_clocked) {
+        for (token, route) in plan_routes(controls.sources(), head) {
             sources.set_consumer_route(token, route);
         }
     }
 }
 
 /// How a plan uses each virtual source. A source is routed while its node is on and
-/// carries it to an output. A plan without device-clocked bindings is paced by its
-/// first routed shared source, which the pacer awaits and so consumes from its first
-/// credit; only that source is the head consumer of PCM retained before admission.
+/// the plan carries it to an output. `head` is the source the pacer consumes from its
+/// first credit; only that source receives PCM retained before admission.
 pub(super) fn plan_routes<'a>(
     sources: impl Iterator<Item = (&'a ExternalBinding, bool)>,
-    device_clocked: bool,
+    head: Option<u64>,
 ) -> impl Iterator<Item = (u64, ConsumerRoute)> {
-    sources
-        .scan(!device_clocked, |head, (binding, enabled)| {
-            let routed = enabled && binding.is_routed_source();
-            let paces = routed && *head;
-            *head &= !routed;
-            let route = if routed {
-                ConsumerRoute::Routed { head: paces }
+    sources.filter_map(move |(binding, enabled)| {
+        binding.virtual_endpoint_id()?;
+        let token = binding_token(binding);
+        Some((
+            token,
+            if enabled && binding.is_routed_source() {
+                ConsumerRoute::Routed {
+                    head: head == Some(token),
+                }
             } else {
                 ConsumerRoute::Unrouted
-            };
-            Some(
-                binding
-                    .virtual_endpoint_id()
-                    .map(|_| (binding_token(binding), route)),
-            )
-        })
-        .flatten()
+            },
+        ))
+    })
 }
 
 /// Application captures and virtual endpoints are served by a source registry.

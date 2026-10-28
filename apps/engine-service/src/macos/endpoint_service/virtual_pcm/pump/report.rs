@@ -4,8 +4,9 @@ use mixrelay_macos_transport::client_pcm::ClientPcmClock;
 use mixrelay_realtime::Timebase;
 use std::time::Duration;
 
-/// Loss reports repeat at most this often while losses continue.
-const LOSS_INTERVAL: Duration = Duration::from_secs(1);
+/// A loss episode ends once no client frame has been lost for this long; each episode is
+/// reported once, with its frames.
+const LOSS_QUIET: Duration = Duration::from_secs(1);
 
 /// Milestones since the previous admission was logged, in host ticks.
 #[derive(Default)]
@@ -16,7 +17,7 @@ struct Admission {
     converter: Option<(u64, ClientPcmClock, u64, u64)>,
 }
 
-/// Cumulative client frames that never reached the source.
+/// Client frames that never reached the source.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Losses {
     /// Overwritten in a client queue before the pump drained them.
@@ -27,6 +28,13 @@ pub(super) struct Losses {
     pub(super) stopped: u64,
 }
 impl Losses {
+    fn since(self, earlier: Self) -> Self {
+        Self {
+            skipped: self.skipped.saturating_sub(earlier.skipped),
+            dropped: self.dropped.saturating_sub(earlier.dropped),
+            stopped: self.stopped.saturating_sub(earlier.stopped),
+        }
+    }
     pub(super) fn log(self) {
         tracing::warn!(
             boundary = "hal_shared_pcm",
@@ -43,8 +51,10 @@ pub(super) struct Report {
     prepared: u64,
     admission: Admission,
     stopped: u64,
+    /// Totals when the last episode was reported, and as last observed.
     reported: Losses,
-    reported_at: Option<u64>,
+    seen: Losses,
+    changed_at: u64,
 }
 
 impl Report {
@@ -55,7 +65,8 @@ impl Report {
             admission: Admission::default(),
             stopped: 0,
             reported: Losses::default(),
-            reported_at: None,
+            seen: Losses::default(),
+            changed_at: 0,
         }
     }
     pub(super) fn retained(&mut self, now: u64) {
@@ -118,7 +129,7 @@ impl Report {
         );
     }
 
-    /// Losses changed since the last report, once its interval has passed.
+    /// The frames of a loss episode once it has ended, reported once per episode.
     pub(super) fn due_losses(
         &mut self,
         now: u64,
@@ -130,25 +141,28 @@ impl Report {
             dropped,
             stopped: self.stopped,
         };
+        if losses != self.seen {
+            self.seen = losses;
+            self.changed_at = now;
+            return None;
+        }
         if losses == self.reported
-            || self
-                .reported_at
-                .is_some_and(|at| now.saturating_sub(at) < timebase.ticks(LOSS_INTERVAL))
+            || now.saturating_sub(self.changed_at) < timebase.ticks(LOSS_QUIET)
         {
             return None;
         }
+        let episode = losses.since(self.reported);
         self.reported = losses;
-        self.reported_at = Some(now);
-        Some(losses)
+        Some(episode)
     }
 
-    /// Losses not yet reported when the pump ends.
+    /// The frames of an episode still open when the pump ends.
     pub(super) fn final_losses(&self, (skipped, dropped): (u64, u64)) -> Option<Losses> {
         let losses = Losses {
             skipped,
             dropped,
             stopped: self.stopped,
         };
-        (losses != self.reported).then_some(losses)
+        (losses != self.reported).then(|| losses.since(self.reported))
     }
 }

@@ -112,34 +112,36 @@ fn unrouted_virtual_input_negotiates_format_and_stopped_input_cannot_drain_old_p
 }
 
 #[test]
-fn a_plan_routes_its_recorded_virtual_input_as_the_head_consumer_only_without_devices() {
+fn a_plan_routes_its_recorded_virtual_input_and_marks_only_the_pacers_head() {
     let routed = qualification_plan(true);
     let token = binding_token(&routed.source_bindings()[0]);
-    let published = |plan: &RenderPlan, enabled: bool, device_clocked: bool| -> Vec<_> {
+    let published = |plan: &RenderPlan, enabled: bool, head: Option<u64>| -> Vec<_> {
         plan_routes(
             plan.source_bindings()
                 .iter()
                 .map(|binding| (binding, enabled)),
-            device_clocked,
+            head,
         )
         .collect()
     };
     assert_eq!(
-        published(&routed, true, false),
+        published(&routed, true, Some(token)),
         [(token, ConsumerRoute::Routed { head: true })]
     );
-    // A device clock paces the graph, so the source joins at its live edge.
+    // A device clock, or another source the pacer awaited, leaves it at the live edge.
+    for head in [None, Some(token ^ 1)] {
+        assert_eq!(
+            published(&routed, true, head),
+            [(token, ConsumerRoute::Routed { head: false })]
+        );
+    }
+    // An off node and a metered-only input are not routed, even as the awaited source.
     assert_eq!(
-        published(&routed, true, true),
-        [(token, ConsumerRoute::Routed { head: false })]
-    );
-    // An off node and a metered-only input are not routed.
-    assert_eq!(
-        published(&routed, false, false),
+        published(&routed, false, Some(token)),
         [(token, ConsumerRoute::Unrouted)]
     );
     assert_eq!(
-        published(&unrouted_virtual_plan(), true, false),
+        published(&unrouted_virtual_plan(), true, Some(token)),
         [(token, ConsumerRoute::Unrouted)]
     );
 }
