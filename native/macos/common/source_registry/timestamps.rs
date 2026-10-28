@@ -271,9 +271,10 @@ pub(super) fn select(
                 .time_at(source.capacity, stats.epoch, minimum)
         })
         .flatten();
-    policy.timing = previous
-        .timing
-        .follow(continuing, (time, frames), unread, rate);
+    policy.timing =
+        previous
+            .timing
+            .follow((continuing, next > minimum), (time, frames), unread, rate);
     policy.next = next;
     // Occupancy once this read consumes its frames, as the producer measures it.
     policy.target = u32::try_from(
@@ -286,9 +287,12 @@ pub(super) fn select(
 }
 
 /// A time-addressed reader's clock against the frame timestamps. The period is the
-/// reader's requested time per frame read, measured from the start of its continuous
-/// run; the phase is how far the next unread frame lies after the requested time. A
-/// cursor jump, reacquisition or new epoch starts a new run without either.
+/// reader's requested time per frame read, averaged over its current run; the phase is
+/// how far the next unread frame lies after the requested time. A skipped frame or a
+/// phase beyond half a frame shows that the reader's clock moved against the frames, so
+/// the run restarts from the last step and the period follows the new rate at once. A
+/// cursor jump, reacquisition or new epoch also restarts the run; the period measured so
+/// far stays published, since the reader's clock did not change with its cursor.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Timing {
     last: Option<(u64, u32)>,
@@ -306,7 +310,7 @@ impl Timing {
     )]
     fn follow(
         self,
-        continuing: bool,
+        (continuing, skipped): (bool, bool),
         (time, frames): (u64, u32),
         unread: Option<u64>,
         rate: u32,
@@ -317,29 +321,35 @@ impl Timing {
             .last
             .filter(|_| continuing)
             .and_then(|(last, last_frames)| {
-                let step = time.checked_sub(last)? as f64 / f64::from(last_frames);
+                let span = time.checked_sub(last)?;
                 (nominal * 0.99..=nominal * 1.01)
-                    .contains(&step)
-                    .then_some(last_frames)
+                    .contains(&(span as f64 / f64::from(last_frames)))
+                    .then_some((last, last_frames))
             });
-        let Some(last_frames) = step else {
+        let Some((last, last_frames)) = step else {
             return Self {
                 last: Some((time, frames)),
                 start: time,
-                ..Self::default()
+                frames: 0,
+                period_ns: self.period_ns,
+                phase_ns: None,
             };
         };
-        let run = self.frames + u64::from(last_frames);
         let phase = unread
             .map(|unread| unread as f64 - time as f64)
-            .filter(|phase| phase.abs() <= nominal)
-            .map(|phase| phase.round() as i32);
+            .filter(|phase| phase.abs() <= nominal);
+        let disturbed = skipped || phase.is_none_or(|phase| phase.abs() > nominal / 2.0);
+        let (start, run) = if disturbed {
+            (last, u64::from(last_frames))
+        } else {
+            (self.start, self.frames + u64::from(last_frames))
+        };
         Self {
             last: Some((time, frames)),
-            start: self.start,
+            start,
             frames: run,
-            period_ns: Some((time - self.start) as f64 / run as f64),
-            phase_ns: phase,
+            period_ns: Some((time - start) as f64 / run as f64),
+            phase_ns: phase.map(|phase| phase.round() as i32),
         }
     }
 

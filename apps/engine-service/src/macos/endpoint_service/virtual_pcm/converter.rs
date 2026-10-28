@@ -10,10 +10,12 @@ use mixrelay_macos_transport::application_source_transport::{
 };
 
 /// Correction per frame of phase between a time-addressed consumer's request and the
-/// next frame's timestamp. It holds that phase against a period measurement error of a
-/// few ppm to a small fraction of a frame, while the phase's own half-frame quantization
-/// at a skipped frame moves the ratio by only 10 ppm.
-const PHASE_PPM_PER_FRAME: f64 = 20.0;
+/// next frame's timestamp. The measured period follows a change in the consumer's clock
+/// once the phase passes half a frame; this term holds the phase inside that half frame
+/// meanwhile, so a 200 ppm step or a 30 s ramp to 200 ppm costs at most two skipped
+/// frames. A full-frame phase jump at a skipped frame moves the ratio by 120 ppm, far
+/// below an audible pitch change.
+const PHASE_PPM_PER_FRAME: f64 = 120.0;
 
 /// Bridge input FIFO, in native frames. The pump pushes one period and flushes it before
 /// the next, so the FIFO holds at most a period below the converter's input batch plus

@@ -112,12 +112,16 @@ struct Consumer {
 
 impl Consumer {
     #[expect(clippy::cast_precision_loss, reason = "host nanoseconds below 2^52")]
-    fn new(drift_ppm: f64) -> Self {
+    fn new() -> Self {
         Self {
-            period: 1e9 / f64::from(RATE) * (1.0 + drift_ppm * 1e-6),
             device: native_time(0) as f64,
             ..Self::default()
         }
+    }
+
+    /// The device clock now runs `drift_ppm` slow.
+    fn drift(&mut self, drift_ppm: f64) {
+        self.period = 1e9 / f64::from(RATE) * (1.0 + drift_ppm * 1e-6);
     }
 
     /// Every device block the device clock completed by the native playhead.
@@ -176,26 +180,40 @@ impl Consumer {
     }
 }
 
-/// Two minutes against a device `drift_ppm` slow, with a 20 ms forward cursor jump at
-/// one minute when `jump` is set. The correction must settle at the drift, and no
-/// read may miss or skip more than the one frame the period measurement may cost.
-fn hold(drift_ppm: f64, jump: bool) {
+/// Runs `periods` native periods against a device whose drift at each period
+/// `drift(period)` gives, with a 20 ms forward cursor jump halfway when `jump` is set.
+/// Returns the consumer and the correction range once the drift has been constant for
+/// two seconds.
+fn hold(periods: u64, drift: impl Fn(u64) -> f64, jump: bool) -> (Consumer, Producer, (f64, f64)) {
     let mut producer = Producer::new();
-    let mut consumer = Consumer::new(drift_ppm);
+    let mut consumer = Consumer::new();
     let mut settled = (f64::MAX, f64::MIN);
-    for period in 0..PERIODS {
+    let mut changed = 0;
+    for period in 0..periods {
+        let ppm = drift(period);
+        if period == 0 || (ppm - drift(period - 1)).abs() > f64::EPSILON {
+            changed = period;
+        }
+        consumer.drift(ppm);
         producer.period(period * 128);
-        let jump = if jump && period == PERIODS / 2 {
+        let jump = if jump && period == periods / 2 {
             20e6
         } else {
             0.0
         };
         consumer.run(&producer, period * 128 + 128, jump);
-        if period >= SETTLE {
+        if period >= changed + SETTLE {
             let correction = producer.converter.correction_ppm();
             settled = (settled.0.min(correction), settled.1.max(correction));
         }
     }
+    (consumer, producer, settled)
+}
+
+/// Two minutes at a constant drift: no read may miss, at most the one frame the first
+/// period measurement may cost is skipped, and the correction settles at the drift.
+fn constant(drift_ppm: f64, jump: bool) {
+    let (consumer, producer, settled) = hold(PERIODS, |_| drift_ppm, jump);
     assert_eq!(consumer.misses, [], "a time-addressed read missed");
     assert!(
         consumer.skipped <= 1,
@@ -214,17 +232,58 @@ fn hold(drift_ppm: f64, jump: bool) {
     );
 }
 
+/// Ninety seconds whose drift changes from 0 to `to_ppm` from 30 s on, over `ramp`
+/// periods (0 for a step). The correction follows within `skipped` frames and no miss.
+fn change(to_ppm: f64, ramp: u64, skipped: u64) {
+    let start = 30 * u64::from(RATE) / 128;
+    #[expect(clippy::cast_precision_loss, reason = "period counts below 2^24")]
+    let drift = move |period: u64| {
+        if period < start {
+            0.0
+        } else if period >= start + ramp {
+            to_ppm
+        } else {
+            to_ppm * (period - start) as f64 / ramp as f64
+        }
+    };
+    let (consumer, producer, _) = hold(90 * u64::from(RATE) / 128, drift, false);
+    assert_eq!(consumer.misses, [], "a time-addressed read missed");
+    assert!(
+        consumer.skipped <= skipped,
+        "{} frames skipped changing to {to_ppm} ppm over {ramp} periods",
+        consumer.skipped
+    );
+    let correction = producer.converter.correction_ppm();
+    assert!(
+        (correction + to_ppm).abs() < 5.0,
+        "ended at {correction} ppm"
+    );
+}
+
 #[test]
 fn a_time_addressed_consumer_holds_two_minutes_without_drift_through_a_cursor_jump() {
-    hold(0.0, true);
+    constant(0.0, true);
 }
 
 #[test]
 fn a_time_addressed_consumer_follows_a_slow_device_for_two_minutes() {
-    hold(200.0, false);
+    constant(200.0, false);
 }
 
 #[test]
 fn a_time_addressed_consumer_follows_a_fast_device_for_two_minutes() {
-    hold(-200.0, false);
+    constant(-200.0, false);
+}
+
+#[test]
+fn a_time_addressed_consumer_follows_a_step_in_device_drift() {
+    change(200.0, 0, 2);
+    change(-200.0, 0, 2);
+}
+
+#[test]
+fn a_time_addressed_consumer_follows_a_ramp_in_device_drift() {
+    let ramp = 30 * u64::from(RATE) / 128;
+    change(200.0, ramp, 3);
+    change(-200.0, ramp, 3);
 }
