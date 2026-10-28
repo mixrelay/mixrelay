@@ -8,6 +8,7 @@ use mixrelay_macos_transport::{
     endpoint_identity::format_endpoint_id, source_control::SourceRequest,
     source_registry::SourceRegistry,
 };
+use mixrelay_realtime::{Timebase, host_time};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -49,8 +50,8 @@ impl Endpoint {
         let source_id = format!("virtual:{}", format_endpoint_id(first.endpoint()));
         let mut request = SourceRequest {
             channels,
-            // HAL client queues hold only a playback target; this source retains the
-            // backlog a delayed graph may still read.
+            // HAL client queues hold only a playback target; the pump's backlog and this
+            // source retain the PCM a delayed graph may still read.
             capacity_frames: mixrelay_audio_io::retention::RING_FRAMES,
             transport_version: mixrelay_macos_transport::application_clock::VERSION,
             ..SourceRequest::default()
@@ -138,6 +139,7 @@ impl VirtualPcm {
             })
         });
         for (id, queues) in groups {
+            log_grants(&queues, !endpoints.contains_key(&id));
             if let Some(endpoint) = endpoints.get(&id) {
                 *endpoint.update.lock() = Some(queues);
                 // Release publishes the prepared replacement before the pump takes it on control.
@@ -151,4 +153,24 @@ impl VirtualPcm {
     pub(super) fn clear(&self) {
         self.endpoints.lock().clear();
     }
+}
+
+/// Records when HAL grants reach the engine, relative to native sample zero (the
+/// device's IO start), so installed logs separate grant delivery from source admission.
+fn log_grants(queues: &[ClientPcmReader], started: bool) {
+    let native_ms = queues
+        .iter()
+        .find_map(ClientPcmReader::clock)
+        .filter(|clock| clock.running)
+        .map(|clock| {
+            Timebase::current().nanoseconds(host_time().saturating_sub(clock.anchor)) / 1_000_000
+        });
+    tracing::info!(
+        boundary = "hal_shared_pcm",
+        stage = "grant_snapshot",
+        started,
+        clients = queues.len(),
+        native_ms = ?native_ms,
+        "virtual input grants received"
+    );
 }

@@ -154,7 +154,8 @@ incarnation이 완료 표시를 보내면 이전 incarnation의 연결은 버린
 
 엔진의 `endpoint_service::virtual_pcm`은 가상 입력 source registry와 endpoint별 pump 수명을
 소유한다. `ClientPcmMixer`는 native sample 좌표의 큐 합산과 forward cursor만 관리하고,
-`Converter`는 기존 SRC·포맷 승인·보류 출력을, `Scheduling`은 worker 정책과 제어 작업의
+pump의 `Backlog`는 비운 클라이언트 PCM의 native 보존을, `Converter`는 기존 SRC·포맷 승인·보류
+출력을, `Scheduling`은 worker 정책과 제어 작업의
 실시간 밖 실행을 맡는다. `cadence`는 coherent native clock을 완료된 128프레임 주기의
 좌표로 투영한다. 이 주기는 worker의 실시간 정책과 같은 상수를 사용한다. 늦게 깨어나도
 mixer의 forward cursor로 보존된 PCM을 순서대로 배출한다. 외부 HAL 독자의 부분 읽기는
@@ -185,9 +186,19 @@ native 단위로 재환산해 버리지 않는다. 물리 장치는 기존 하�
 
 `audio-io::retention`은 최대 지원 샘플레이트에서도 최소 4초의 backlog 저장량을 정한다.
 macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭제곱인 1,048,576프레임으로 올림한다.
-가상 입력의 보존은 엔진 source가 맡는다. 그래프가 포맷을 승인하기 전에는 pump가 큐를 비우지 않으므로
-그동안 보존되는 클라이언트 PCM은 큐 크기(65,536프레임)까지이며, 이는 첫 그래프 승인 때 준비 중 PCM을
-버리는 정책과 맞는다. HAL 클라이언트 렌더 큐와 endpoint 매핑 링은 `client_pcm::QUEUE_FRAMES`
+가상 입력의 보존은 엔진 pump가 맡는다. pump는 그래프의 포맷 승인·변환기 준비·source 승인과 관계없이
+매 주기 클라이언트 큐를 native playhead까지 비워, endpoint별 backlog에 native rate와 native 좌표 그대로
+보존한다. backlog는 `retention::RING_FRAMES` × endpoint 캡처 채널 수의 Float32(채널당 4MiB, 64채널에서
+256MiB)이며, endpoint를 시작할 때 제어 경로에서 확보하고 모든 페이지를 미리 fault한다. 같은 timeline의
+공백과 timeline 변경은 앞선 run을 유지하고 그 경계에서만 변환 stream을 새 epoch로 다시 시작한다. 가득 차면
+가장 오래된 프레임을 버린다. source가 승인되면 backlog를 원래 좌표의 시각으로 순서대로 변환하되 한 주기에
+최대 8주기(1,024 native 프레임)까지만 변환한다. 늦게 승인된 source도 실시간의 8배 속도로 따라잡고, graph
+credit은 게시한 PCM만큼만 순서대로 늘어난다. native clock이 멈추면 포맷·backlog 상태와 관계없이 먼저 native
+정지를 게시하고 그 timeline의 남은 backlog를 버린다. 큐에서 덮어쓰인 프레임(`ClientPcmMixer::skipped_frames`),
+backlog에서 버린 프레임, 정지 때문에 게시하지 못한 프레임은 제어 경로 경고로 남긴다. grant 수신과 source
+승인(변환기 준비·첫 게시)의 시각은 native sample 0 기준으로 기록한다. 물리 입력의 `HardwarePacer`는 첫
+그래프 승인 때 준비 중 PCM을 버리지만, 앱이 가상 장치에 게시한 PCM은 위의 `ApplicationPacer` 계약대로 첫
+프레임부터 보존한다. HAL 클라이언트 렌더 큐와 endpoint 매핑 링은 `client_pcm::QUEUE_FRAMES`
 (65,536프레임)로 준비한다. 쓰는 쪽은 최대 렌더 span(`MAX_RENDER_SPAN_FRAMES`, 장치의 zero timestamp
 period인 16,384프레임)만큼 앞서고 `ReadInput`은 그만큼 뒤처질 수 있으며, 큐는 그 합의 두 배다. 새 익명 매핑은 커널의 0 채움을 사용하므로 ring을 지우지 않고, 준비 단계에서 모든 페이지를
 미리 fault해 HAL IO 스레드가 page fault를 겪지 않게 한다.

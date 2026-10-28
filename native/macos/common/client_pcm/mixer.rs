@@ -7,6 +7,7 @@ pub struct ClientPcmMixer {
     timeline: Option<([u8; 16], u64, u64, u32)>,
     next: u64,
     discontinuity: bool,
+    skipped: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -67,8 +68,13 @@ impl ClientPcmMixer {
         let capacity = u64::from(queues.iter().map(ClientPcmReader::capacity).min()?);
         let oldest = first.max(published.saturating_sub(capacity));
         let timeline = (clock.incarnation, clock.epoch, clock.anchor, clock.rate);
-        let discontinuity = !self.is_current(clock) || self.next < oldest;
+        let current = self.is_current(clock);
+        let discontinuity = !current || self.next < oldest;
         if discontinuity {
+            // Published frames the queue no longer holds: an overrun behind this cursor,
+            // or a timeline joined after its first frames were overwritten.
+            let from = if current { self.next } else { first };
+            self.skipped = self.skipped.saturating_add(oldest.saturating_sub(from));
             self.timeline = Some(timeline);
             self.next = oldest;
             self.discontinuity = true;
@@ -134,10 +140,14 @@ impl ClientPcmMixer {
         }
         Ok(())
     }
-    /// Whether pending converted PCM still belongs to the active native timeline.
-    #[must_use]
-    pub fn is_current(&self, clock: ClientPcmClock) -> bool {
+    fn is_current(&self, clock: ClientPcmClock) -> bool {
         self.timeline == Some((clock.incarnation, clock.epoch, clock.anchor, clock.rate))
+    }
+
+    /// Cumulative published frames the cursor skipped because the queues no longer held them.
+    #[must_use]
+    pub fn skipped_frames(&self) -> u64 {
+        self.skipped
     }
 
     pub fn commit(&mut self, window: MixWindow) {

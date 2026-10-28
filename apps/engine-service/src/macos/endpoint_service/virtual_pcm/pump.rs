@@ -1,18 +1,38 @@
-//! One bounded virtual-input reader owns mixing, conversion and publication.
+//! One bounded virtual-input reader owns mixing, retention, conversion and publication.
+//!
+//! Every cycle drains each client queue up to the native playhead into the engine's
+//! backlog, whether or not the graph has admitted a format, so the HAL queues only
+//! cover pump scheduling. Conversion takes the backlog in native order, with each
+//! frame at its original native coordinate, a bounded number of periods per cycle.
+mod backlog;
+mod report;
+#[cfg(test)]
+mod tests;
+
 use super::{
     Error, cadence,
     converter::Converter,
     scheduling::{self, Scheduling},
 };
+use backlog::{Backlog, Chunk};
 use mixrelay_macos_transport::{
-    application_source_transport::{SourceClockRead, SourceTransport},
-    client_pcm::{ClientPcmMixer, ClientPcmReader, MixError, MixWindow},
+    application_source_transport::{SourceClockRead, SourceClockSnapshot, SourceTransport},
+    client_pcm::{ClientPcmClock, ClientPcmMixer, ClientPcmReader, MixError, QUEUE_FRAMES},
 };
 use mixrelay_realtime::{Timebase, host_time};
+use report::Report;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+
+/// Converter periods per cycle: the live period and seven of catch-up. A source admitted
+/// four seconds late catches up in 0.6 s, and a full retention (5.5 s at 192 kHz) in
+/// 0.8 s, while one cycle converts at most 1,024 native frames, never the whole backlog.
+/// Graph credit grows by the same bound, in publication order.
+const FEED_PERIODS: usize = 8;
+/// Mix windows covering a full client queue, so one cycle drains it after any stall.
+const DRAIN_WINDOWS: u32 = QUEUE_FRAMES / cadence::FRAMES + 1;
 
 pub(super) struct Pump {
     queues: Vec<ClientPcmReader>,
@@ -24,7 +44,9 @@ pub(super) struct Pump {
     scratch: Vec<f32>,
     times: Vec<u64>,
     mixer: ClientPcmMixer,
+    backlog: Backlog,
     converter: Option<Converter>,
+    report: Report,
 }
 impl Pump {
     pub(super) fn prepare(
@@ -51,7 +73,9 @@ impl Pump {
             scratch,
             times,
             mixer: ClientPcmMixer::default(),
+            backlog: Backlog::new(channels)?,
             converter: None,
+            report: Report::new(host_time()),
         })
     }
     pub(super) fn run(mut self) -> Result<(), Error> {
@@ -68,91 +92,182 @@ impl Pump {
                         }
                     });
                 }
-                let clock = match self.transport.observe_clock() {
-                    SourceClockRead::Ready(clock) => clock,
-                    SourceClockRead::Deferred => {
-                        scheduling::wait_for_period(None, timebase);
-                        continue;
-                    }
-                    SourceClockRead::Revoked => return Err(Error::Stale),
-                };
-                let now = host_time();
-                let Some(window) = self.mixer.window(&self.queues, |clock| {
-                    cadence::frame(
-                        timebase.nanoseconds(now.saturating_sub(clock.anchor)),
-                        clock.rate,
-                    )
-                }) else {
-                    let native = self.queues.iter().find_map(ClientPcmReader::clock);
-                    if let Some(native) = native {
-                        if !native.running {
-                            self.transport.stop_native();
-                        } else if self.mixer.is_current(native)
-                            && let Some(converter) = self.converter.as_mut()
-                            && converter.acknowledged(clock)
-                        {
-                            // Drain a deferred final output even when no new native input arrived.
-                            let _ = converter.flush(&mut self.transport)?;
-                        }
-                    }
-                    scheduling::wait_for_period(native, timebase);
-                    continue;
-                };
-                if clock.format_word == 0 {
-                    scheduling::wait_for_period(None, timebase);
-                    continue;
-                }
-                if !self.configure(window, clock, &scheduling)?
-                    || !self.transfer(window, clock, timebase)?
-                {
-                    scheduling::wait_for_period(None, timebase);
-                }
+                let wait = self.cycle(host_time(), timebase, &scheduling)?;
+                scheduling::wait_for_period(wait, timebase);
             }
             Ok(())
         })();
         // Complete demotion before conversion buffers and VM mappings leave scope.
         let demoted = scheduling.finish();
         self.transport.stop_native();
+        if let Some(losses) = self.report.final_losses(self.losses()) {
+            losses.log();
+        }
         result.and(demoted)
     }
-    fn configure(
+
+    /// One period: native stop, then retention of every readable client frame, then
+    /// bounded conversion. Returns the native clock whose next period ends the wait,
+    /// or `None` for a control poll while the source handshake is pending.
+    fn cycle(
         &mut self,
-        window: MixWindow,
-        clock: mixrelay_macos_transport::application_source_transport::SourceClockSnapshot,
+        now: u64,
+        timebase: Timebase,
+        scheduling: &Scheduling,
+    ) -> Result<Option<ClientPcmClock>, Error> {
+        let source = self.transport.observe_clock();
+        if source == SourceClockRead::Revoked {
+            return Err(Error::Stale);
+        }
+        let native = self.queues.iter().find_map(ClientPcmReader::clock);
+        if let Some(native) = native.filter(|native| !native.running) {
+            // Stop precedes the format and backlog gates. A stopped virtual source's
+            // unpublished PCM is not read, so its retained run ends here as well.
+            self.transport.stop_native();
+            self.report.stopped(self.backlog.clear());
+            return Ok(Some(native));
+        }
+        self.retain(now, timebase)?;
+        if let Some(losses) = self.report.due_losses(now, timebase, self.losses()) {
+            scheduling.outside(|| losses.log());
+        }
+        let SourceClockRead::Ready(clock) = source else {
+            return Ok(None);
+        };
+        if clock.format_word == 0 {
+            return Ok(None);
+        }
+        self.report.format_requested(now);
+        Ok(if self.feed(clock, now, timebase, scheduling)? {
+            native
+        } else {
+            None
+        })
+    }
+
+    fn losses(&self) -> (u64, u64) {
+        (self.mixer.skipped_frames(), self.backlog.dropped_frames())
+    }
+
+    /// Moves every published client frame up to the native playhead into the backlog.
+    fn retain(&mut self, now: u64, timebase: Timebase) -> Result<(), Error> {
+        let channels = self.input.len() / 128;
+        for _ in 0..DRAIN_WINDOWS {
+            let Some(window) = self.mixer.window(&self.queues, |clock| {
+                cadence::frame(
+                    timebase.nanoseconds(now.saturating_sub(clock.anchor)),
+                    clock.rate,
+                )
+            }) else {
+                break;
+            };
+            let input = &mut self.input[..window.frames as usize * channels];
+            match ClientPcmMixer::mix(&self.queues, window, input, &mut self.scratch) {
+                Ok(()) => {}
+                // A clock or membership change in progress; the next cycle sees it settled.
+                Err(MixError::Changed) => break,
+                Err(MixError::Geometry) => return Err(Error::Geometry),
+            }
+            self.backlog.push(window, input);
+            self.mixer.commit(window);
+            self.report.retained(now);
+        }
+        Ok(())
+    }
+
+    /// Converts retained PCM in native order, at most `FEED_PERIODS` windows. Each
+    /// window observes the source again: a new converter commits a new epoch.
+    fn feed(
+        &mut self,
+        mut clock: SourceClockSnapshot,
+        now: u64,
+        timebase: Timebase,
         scheduling: &Scheduling,
     ) -> Result<bool, Error> {
-        if window.discontinuity
+        let mut published = 0;
+        let mut ready = true;
+        for period in 0..FEED_PERIODS {
+            let Some(chunk) = self.backlog.peek(128) else {
+                break;
+            };
+            if period != 0 {
+                clock = match self.transport.observe_clock() {
+                    SourceClockRead::Ready(clock) => clock,
+                    SourceClockRead::Deferred => {
+                        ready = false;
+                        break;
+                    }
+                    SourceClockRead::Revoked => return Err(Error::Stale),
+                };
+            }
+            ready = self.configure(chunk, clock, now, scheduling)?
+                && self.transfer(chunk, clock, timebase)?;
+            if !ready {
+                break;
+            }
+            published += chunk.frames;
+        }
+        if published != 0 {
+            if self.report.awaiting_publication() {
+                scheduling.outside(|| self.report.log_admission(now, timebase, published));
+            }
+        } else if ready
+            && let Some(converter) = self.converter.as_mut()
+            && converter.acknowledged(clock)
+        {
+            // Drain a deferred final output even when no retained input remains.
+            let _ = converter.flush(&mut self.transport)?;
+        }
+        Ok(ready)
+    }
+
+    fn configure(
+        &mut self,
+        chunk: Chunk,
+        clock: SourceClockSnapshot,
+        now: u64,
+        scheduling: &Scheduling,
+    ) -> Result<bool, Error> {
+        if chunk.restart
             || self
                 .converter
                 .as_ref()
-                .is_none_or(|converter| !converter.current(clock, window.clock.rate))
+                .is_none_or(|converter| !converter.current(clock, chunk.clock.rate))
         {
             let native = (
-                window.clock.rate,
+                chunk.clock.rate,
                 self.input.len() / 128,
                 mixrelay_audio_io::retention::RING_FRAMES,
             );
             let result = scheduling.outside(|| {
-                scheduling.retune(window.clock.rate);
+                scheduling.retune(chunk.clock.rate);
                 let Some(converter) = Converter::new(&mut self.transport, clock, native)? else {
+                    self.report.deferred();
                     return Ok::<bool, Error>(false);
                 };
                 self.converter = Some(converter);
+                self.report.converter_ready(
+                    now,
+                    chunk.clock,
+                    clock.format_word & u64::from(u32::MAX),
+                    self.backlog.frames(),
+                );
                 Ok(true)
             });
-            // Deferred format acknowledgment keeps this native window and
-            // cannot leave an old converter attached to a newly committed epoch.
+            // Deferred format acknowledgment keeps the retained PCM and cannot leave
+            // an old converter attached to a newly committed epoch.
             if !result? {
                 return Ok(false);
             }
+            self.backlog.restarted();
         }
         Ok(true)
     }
 
     fn transfer(
         &mut self,
-        window: MixWindow,
-        clock: mixrelay_macos_transport::application_source_transport::SourceClockSnapshot,
+        chunk: Chunk,
+        clock: SourceClockSnapshot,
         timebase: Timebase,
     ) -> Result<bool, Error> {
         let converter = self.converter.as_mut().ok_or(Error::Stale)?;
@@ -161,27 +276,23 @@ impl Pump {
             return Ok(false);
         }
         let channels = self.input.len() / 128;
-        let frames = window.frames as usize;
-        let input = &mut self.input[..frames * channels];
-        match ClientPcmMixer::mix(&self.queues, window, input, &mut self.scratch) {
-            Ok(()) => {}
-            Err(MixError::Changed) => return Ok(false),
-            Err(MixError::Geometry) => return Err(Error::Geometry),
-        }
-        for (index, time) in self.times[..frames].iter_mut().enumerate() {
-            let offset = u128::from(window.first + index as u64) * 1_000_000_000
-                / u128::from(window.clock.rate);
+        let input = &mut self.input[..chunk.frames * channels];
+        self.backlog.copy(input);
+        for (index, time) in self.times[..chunk.frames].iter_mut().enumerate() {
+            let offset = u128::from(chunk.first + index as u64) * 1_000_000_000
+                / u128::from(chunk.clock.rate);
             *time = timebase
-                .nanoseconds(window.clock.anchor)
+                .nanoseconds(chunk.clock.anchor)
                 .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX));
         }
-        converter.push(&mut self.transport, input, &self.times[..frames])?;
-        self.mixer.commit(window);
+        converter.push(&mut self.transport, input, &self.times[..chunk.frames])?;
+        self.backlog.consume(chunk.frames);
         let graph_rate = clock.format_word & u64::from(u32::MAX);
-        let producer = u32::try_from(
-            (u64::from(window.frames) * graph_rate).div_ceil(u64::from(window.clock.rate)),
-        )
-        .unwrap_or(u32::MAX);
+        // One period's publication, also during catch-up: the consumer keeps the largest
+        // burst as its reserve for the whole epoch, and its credit already spans catch-up.
+        let producer =
+            u32::try_from((chunk.frames as u64 * graph_rate).div_ceil(u64::from(chunk.clock.rate)))
+                .unwrap_or(u32::MAX);
         self.transport.publish_measurements(
             producer,
             u32::try_from(converter.output_quantum()).unwrap_or(u32::MAX),

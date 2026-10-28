@@ -28,10 +28,10 @@ pub const MAX_PCM_BYTES_PER_ENDPOINT: usize = 1 << 30;
 pub const MAX_RENDER_SPAN_FRAMES: u32 = 16_384;
 /// Frames in every HAL client render queue. A writer leads the device position by at
 /// most one render span, and `ReadInput` trails it by at most one more. Twice that sum
-/// leaves the engine pump 32,768 frames (170 ms at 192 kHz) of scheduling slack. While
-/// the graph has not admitted a format, the pump does not drain, so this is also all the
-/// client PCM retained before admission, which drops preparation PCM anyway. Capture
-/// retention lives in the engine, so this size does not grow with `retention::RING_FRAMES`.
+/// leaves the engine pump 32,768 frames (170 ms at 192 kHz) of scheduling slack. The pump
+/// drains every cycle whether or not the graph has admitted a format, and capture
+/// retention lives in its engine backlog, so this size does not grow with
+/// `retention::RING_FRAMES`.
 pub const QUEUE_FRAMES: u32 = 65_536;
 const _: () = assert!(
     QUEUE_FRAMES.is_power_of_two()
