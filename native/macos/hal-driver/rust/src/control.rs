@@ -3,6 +3,7 @@
 
 use std::{
     cell::{Cell, RefCell},
+    collections::BTreeMap,
     ffi::c_void,
     ptr,
 };
@@ -30,6 +31,17 @@ enum Request {
         endpoint: [u8; 16],
         generation: u64,
     },
+    Configured {
+        endpoint: [u8; 16],
+        settled: crate::device::Settled,
+    },
+}
+
+/// Request settlements already sent on one connection, newest sequence per endpoint.
+#[derive(Default)]
+struct Reported {
+    authority: u64,
+    sequences: BTreeMap<[u8; 16], u64>,
 }
 
 /// The adapter owns queue/timer handles; each connection value owns its socket.
@@ -48,6 +60,7 @@ struct Control<B: Backend> {
     connection: RefCell<Option<B::Connection>>,
     backend: B,
     settled: Cell<Option<(u64, u64, crate::inventory::Settlement)>>,
+    configured: RefCell<Reported>,
 }
 
 impl<B: Backend> Control<B> {
@@ -58,6 +71,7 @@ impl<B: Backend> Control<B> {
             connection: RefCell::new(None),
             backend,
             settled: Cell::new(None),
+            configured: RefCell::default(),
         }
     }
 
@@ -120,10 +134,29 @@ impl<B: Backend> Control<B> {
             });
             self.settled.set(Some((authority, generation, settlement)));
         }
+        self.send_configurations(authority);
         match action {
             TickAction::Maintain => {}
             TickAction::Reconnect => self.open(),
             TickAction::RefreshInventory => self.send(Request::Inventory),
+        }
+    }
+
+    /// Reports each device's newest settled rate/format/mapping request once per
+    /// connection, so the Driver service can tell a rejection from a slow Perform.
+    fn send_configurations(&self, authority: u64) {
+        let settled = self.registry.settled_configurations();
+        let mut sent = self.configured.borrow_mut();
+        if sent.authority != authority {
+            *sent = Reported {
+                authority,
+                sequences: BTreeMap::new(),
+            };
+        }
+        for (endpoint, settled) in settled {
+            if sent.sequences.insert(endpoint, settled.sequence) != Some(settled.sequence) {
+                self.send(Request::Configured { endpoint, settled });
+            }
         }
     }
 

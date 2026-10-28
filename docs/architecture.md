@@ -127,11 +127,14 @@ clock publication과 membership revision을 소유하고, 개별 writer가 PCM·
 Driver 서비스는 장치 인벤토리의 소유자로 유지한다. coreaudiod의 engine Mach-service 접근은
 HAL 번들에 선언하며 엔진은 audio-server UID의 grant 게시와 console 사용자 source 요청을 구분한다.
 
-Driver 서비스의 구성 거래는 단계마다 6초 안에 HAL의 적용을 기다린다. HAL은 인벤토리 세대마다
-적용 또는 거부(abort·native 실패)를 보고한다. 시간을 넘긴 단계는 HAL이 그 단계를 끝낼 때까지
-최대 24초 더 기다린 뒤 이전 인벤토리를 새 예산으로 되돌린다. HAL은 수행 중인 단계가 끝나기
-전에는 새 인벤토리를 처리하지 않기 때문이다. 그때까지도 수행 중이면 되돌림을 게시만 하고
-`ConfigurationPending`으로 보고하며, 관리자는 이전 인벤토리와 revision을 유지한다.
+Driver 서비스의 구성 거래는 단계마다 6초 안에 HAL의 적용을 기다린다. HAL은 인벤토리 세대마다,
+그리고 장치별로 마지막 rate·format 요청마다 적용 또는 거부(abort·native 실패)를 보고한다.
+서비스는 요청 뒤에 보고된 거부만 그 요청의 거부로 보고 곧바로 이전 상태를 새 예산으로 되돌린다.
+6초를 넘긴 단계는 최대 24초 더 기다린다. HAL은 수행 중인 단계가 끝나기 전에는 새 인벤토리를
+처리하지 않기 때문이다. 그 안에 적용되면 경고만 남기고 거래를 계속한다. 그때까지도 수행 중이면
+되돌림을 게시만 하고 `ConfigurationPending`으로 보고하며, 관리자는 이전 인벤토리와 revision을
+유지한다. 다음 조회는 HAL readback으로 상태를 다시 관찰하고, rate·format 요청은 캐시한 의도가
+아니라 readback과 다를 때만 보낸다.
 
 엔진의 `endpoint_service::virtual_pcm`은 가상 입력 source registry와 endpoint별 pump 수명을
 소유한다. `ClientPcmMixer`는 native sample 좌표의 큐 합산과 forward cursor만 관리하고,
@@ -179,7 +182,8 @@ macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭�
 확인한다. 녹음 큐가 한계를 넘으면 받아 둔 prefix를 마무리하고 `Failed`로 보고한다.
 
 HAL의 호스트 I/O 요청 크기와 설정 가능한 버퍼 크기는 별개다. 한 요청은 준비한
-1,048,576프레임 보존량으로 제한하며, 2,048프레임을 넘는 요청은 같은 I/O pin 안에서
+1,048,576프레임 보존량으로 제한한다. 렌더 요청은 클라이언트 큐를 넘으면 자기 앞부분을 덮어쓰므로
+32,768프레임으로 제한하고 같은 extent 거부로 기록한다. 2,048프레임을 넘는 요청은 같은 I/O pin 안에서
 기존 scratch 크기로 나눠 처리한다. Float32·정수 변환·복수 클라이언트 믹스 모두 같은 경로다.
 정상 quantum은 추가 scratch 조회 없이 기존 처리로 보낸다. HAL trace v5는 null 버퍼와
 보존량 초과를 분리하고 마지막 거부의 크기·포인터 유무·방향을 기록한다.

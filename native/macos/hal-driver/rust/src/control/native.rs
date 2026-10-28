@@ -221,6 +221,42 @@ impl Backend for Native {
                     message
                 }
             }
+            Request::Configured { endpoint, settled } => {
+                let (high, low) = endpoint.split_at(8);
+                // SAFETY: static keys/operation are copied into a new dictionary.
+                unsafe {
+                    let message = xpc_dictionary_create(ptr::null(), ptr::null(), 0);
+                    if !message.is_null() {
+                        xpc_dictionary_set_uint64(message, c"version".as_ptr(), 1);
+                        xpc_dictionary_set_string(
+                            message,
+                            c"operation".as_ptr(),
+                            c"configuration_settled".as_ptr(),
+                        );
+                        for (key, half) in [(c"endpoint_high", high), (c"endpoint_low", low)] {
+                            let mut bytes = [0; 8];
+                            bytes.copy_from_slice(half);
+                            xpc_dictionary_set_uint64(
+                                message,
+                                key.as_ptr(),
+                                u64::from_be_bytes(bytes),
+                            );
+                        }
+                        xpc_dictionary_set_uint64(message, c"sequence".as_ptr(), settled.sequence);
+                        xpc_dictionary_set_uint64(
+                            message,
+                            c"rate".as_ptr(),
+                            u64::from(settled.rate),
+                        );
+                        xpc_dictionary_set_uint64(
+                            message,
+                            c"applied".as_ptr(),
+                            u64::from(settled.applied),
+                        );
+                    }
+                    message
+                }
+            }
             Request::Replacement {
                 endpoint,
                 generation,

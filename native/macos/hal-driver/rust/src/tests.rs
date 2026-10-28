@@ -792,6 +792,40 @@ fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration()
     }
 }
 
+#[test]
+fn rate_requests_report_native_failure_abort_and_success_in_order() {
+    unsafe extern "C" fn reject(_: *mut c_void, _: u32) -> bool {
+        false
+    }
+    let mut fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    let settled = |fixture: &Fixture| {
+        let configurations = fixture.registry.settled_configurations();
+        assert_eq!(configurations.len(), 1);
+        assert_eq!(configurations[0].0, [1; 16]);
+        configurations[0].1
+    };
+    assert!(fixture.registry.settled_configurations().is_empty());
+    let accept = fixture.registry.native.set_rate;
+    fixture.registry.native.set_rate = reject;
+    assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
+    assert_eq!(fixture.perform(), NATIVE_ERROR);
+    let failed = settled(&fixture);
+    assert_eq!((failed.rate, failed.applied), (96_000, false));
+    fixture.registry.native.set_rate = accept;
+    assert_eq!(fixture.registry.set_rate(id, 88_200), OK);
+    let (_, generation) = fixture.pending();
+    assert_eq!(fixture.registry.abort(id, CONFIG_ACTION, generation), OK);
+    let aborted = settled(&fixture);
+    assert_eq!((aborted.rate, aborted.applied), (88_200, false));
+    assert!(aborted.sequence > failed.sequence);
+    assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
+    assert_eq!(fixture.perform(), OK);
+    let applied = settled(&fixture);
+    assert_eq!((applied.rate, applied.applied), (96_000, true));
+    assert!(applied.sequence > aborted.sequence);
+}
+
 fn eventually(condition: impl Fn() -> bool) {
     for _ in 0..10_000 {
         if condition() {

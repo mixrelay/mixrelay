@@ -6,7 +6,7 @@ use std::ffi::c_void;
 use std::ops::Deref;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 
 use crate::abi::{
     ALIVE, CAPACITY, Geometry, HostOps, INVALID, LIST, MAX_DEVICES, NAME, NATIVE_ERROR, NOT_FOUND,
@@ -47,6 +47,8 @@ pub(crate) struct Registry {
     pub(crate) transport: crate::transport::Transport,
     inspection: crate::transport::ProcessInspection,
     host: HostOps,
+    /// Orders every settled configuration request for the Driver service.
+    settlements: AtomicU64,
     // Object generation is shared across slots. Slots are not reused until a
     // retired device has no clients and all reader pins have been released.
     generation: Mutex<u32>,
@@ -89,6 +91,7 @@ impl Registry {
             inspection,
             client_identity_gate: Mutex::new(()),
             host,
+            settlements: AtomicU64::new(0),
             generation: Mutex::new(0),
             slots: std::array::from_fn(|_| Slot {
                 pointer: AtomicPtr::default(),

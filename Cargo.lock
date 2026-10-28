@@ -2932,6 +2932,7 @@ dependencies = [
  "mixrelay-macos-transport",
  "parking_lot",
  "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]

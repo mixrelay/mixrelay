@@ -13,8 +13,8 @@ mod xpc;
 
 use endpoint_registry::{CallbackEndpoint, EndpointRegistry, EndpointSpec, OwnedInventory};
 use mixrelay_audio_io::{
-    NativeDeviceFormats, VirtualEndpointCapabilities, VirtualEndpointDeviceSettings,
-    VirtualEndpointId, VirtualEndpointSettings, VirtualEndpointSpec,
+    NativeDeviceFormats, NativeStreamFormat, VirtualEndpointCapabilities,
+    VirtualEndpointDeviceSettings, VirtualEndpointId, VirtualEndpointSettings, VirtualEndpointSpec,
 };
 use mixrelay_driver_control::{DriverBackend, DriverDeviceConfig, DriverError, DriverState};
 use mixrelay_macos_transport::{
@@ -168,7 +168,7 @@ impl MacDriver {
                 settle::step(&Polling, || {
                     inventory_progress(service, generation, &pins, &old_specs, &specs)
                 })?;
-                apply_formats(desired, &previous)
+                apply_formats(service, desired)
             },
             // Rollback uses a fresh publication generation, so HAL fencing never
             // mistakes the old active mappings for a stale provisional message.
@@ -181,7 +181,7 @@ impl MacDriver {
                 settle::step(&Polling, || {
                     inventory_progress(service, generation, &old_pins, &specs, &old_specs)
                 })?;
-                restore_formats(&old_formats)
+                restore_formats(service, &old_formats)
             },
         )?;
         prepared.commit()?;
@@ -383,86 +383,124 @@ fn inventory_applied(
         .all(|spec| device::device(spec.id).is_none())
 }
 
-fn apply_formats(
-    desired: &[DriverDeviceConfig],
-    previous: &[DriverDeviceConfig],
-) -> Result<(), settle::Failure> {
+/// Requests the rate and formats `desired` still lacks. The HAL readback, not the
+/// service's cached intent, decides what is missing: a Perform reported pending may
+/// have settled since, and a DAW may have changed the device.
+fn apply_formats(service: &Service, desired: &[DriverDeviceConfig]) -> Result<(), settle::Failure> {
     for config in desired {
         let id = identity(&config.spec.id)?;
-        let old = previous.iter().find(|old| old.spec.id == config.spec.id);
-        if old.is_none_or(|old| old.spec.default_sample_rate != config.spec.default_sample_rate) {
-            let rate = config.spec.default_sample_rate;
-            if !device::set_rate(id, rate) {
-                return Err(rejected("native nominal rate rejected"));
-            }
-            settle::step(&Polling, || {
-                Progress::applied(device::rate(id) == Some(rate))
-            })?;
+        if let Some(rate) = missing(Some(config.spec.default_sample_rate), device::rate(id)) {
+            request(
+                service,
+                id,
+                Some(rate),
+                || issued(device::set_rate(id, rate), "native nominal rate rejected"),
+                || device::rate(id) == Some(rate),
+            )?;
         }
-        for (render, wanted, old_format) in [
-            (
-                true,
-                config.render_format,
-                old.and_then(|old| old.render_format),
-            ),
-            (
-                false,
-                config.capture_format,
-                old.and_then(|old| old.capture_format),
-            ),
-        ] {
-            if let Some(wanted) = wanted.filter(|wanted| Some(*wanted) != old_format) {
-                if !device::set_format(id, render, wanted) {
-                    return Err(rejected("native directional ASBD rejected"));
-                }
-                settle::step(&Polling, || {
-                    let formats = device::native_formats(id);
-                    Progress::applied(
-                        (if render {
-                            formats.render.current
-                        } else {
-                            formats.capture.current
-                        }) == Some(wanted),
-                    )
-                })?;
+        for (render, wanted) in [(true, config.render_format), (false, config.capture_format)] {
+            if let Some(wanted) = missing(wanted, current_format(id, render)) {
+                request(
+                    service,
+                    id,
+                    None,
+                    || {
+                        issued(
+                            device::set_format(id, render, wanted),
+                            "native directional ASBD rejected",
+                        )
+                    },
+                    || current_format(id, render) == Some(wanted),
+                )?;
             }
         }
     }
     Ok(())
 }
 
-fn restore_formats(previous: &[PreviousDeviceFormat]) -> Result<(), settle::Failure> {
+fn restore_formats(
+    service: &Service,
+    previous: &[PreviousDeviceFormat],
+) -> Result<(), settle::Failure> {
     for PreviousDeviceFormat { id, formats, rate } in previous {
-        if let Some(rate) = rate {
-            if !device::set_rate(*id, *rate) {
-                return Err(rejected("nominal-rate rollback rejected"));
-            }
-            settle::step(&Polling, || {
-                Progress::applied(device::rate(*id) == Some(*rate))
-            })?;
+        let id = *id;
+        if let Some(rate) = missing(*rate, device::rate(id)) {
+            request(
+                service,
+                id,
+                Some(rate),
+                || issued(device::set_rate(id, rate), "nominal-rate rollback rejected"),
+                || device::rate(id) == Some(rate),
+            )?;
         }
         for (render, format) in [
             (true, formats.render.current),
             (false, formats.capture.current),
         ] {
-            if let Some(format) = format {
-                if !device::set_format(*id, render, format) {
-                    return Err(rejected("directional-format rollback rejected"));
-                }
-                settle::step(&Polling, || {
-                    let current = device::native_formats(*id);
-                    Progress::applied(
-                        (if render {
-                            current.render.current
-                        } else {
-                            current.capture.current
-                        }) == Some(format),
-                    )
-                })?;
+            if let Some(format) = missing(format, current_format(id, render)) {
+                request(
+                    service,
+                    id,
+                    None,
+                    || {
+                        issued(
+                            device::set_format(id, render, format),
+                            "directional-format rollback rejected",
+                        )
+                    },
+                    || current_format(id, render) == Some(format),
+                )?;
             }
         }
     }
     Ok(())
+}
+
+/// The wanted value when HAL readback does not already report it.
+fn missing<T: Copy + PartialEq>(wanted: Option<T>, observed: Option<T>) -> Option<T> {
+    wanted.filter(|wanted| observed != Some(*wanted))
+}
+
+fn current_format(id: endpoint_registry::EndpointId, render: bool) -> Option<NativeStreamFormat> {
+    let formats = device::native_formats(id);
+    if render {
+        formats.render.current
+    } else {
+        formats.capture.current
+    }
+}
+
+/// Issues one rate or format request and waits until the HAL applies or rejects it.
+/// Only settlements reported after the request count, so an older rejection is ignored.
+fn request(
+    service: &Service,
+    id: endpoint_registry::EndpointId,
+    rate: Option<u32>,
+    issue: impl FnOnce() -> Result<(), settle::Failure>,
+    applied: impl Fn() -> bool,
+) -> Result<(), settle::Failure> {
+    let since = service
+        .peers
+        .lock()
+        .configuration(id)
+        .map_or(0, |settled| settled.sequence);
+    issue()?;
+    settle::step(&Polling, || {
+        settle::request_progress(
+            applied(),
+            since,
+            service.peers.lock().configuration(id),
+            rate,
+        )
+    })
+}
+
+fn issued(accepted: bool, reason: &str) -> Result<(), settle::Failure> {
+    if accepted {
+        Ok(())
+    } else {
+        Err(rejected(reason))
+    }
 }
 
 fn rejected(reason: &str) -> settle::Failure {

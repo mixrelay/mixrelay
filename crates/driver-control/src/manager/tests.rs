@@ -362,6 +362,62 @@ fn native_apply_failure_preserves_active_inventory_and_store() {
 }
 
 #[test]
+fn next_change_after_a_pending_apply_starts_from_where_the_hal_settled() {
+    let fixture = FixtureDir::new("driver-pending").unwrap();
+    let path = fixture.join("drivers.json");
+    let (backend, observed) = FakeBackend::ready();
+    let mut manager = DriverManager::open(backend, &path).unwrap();
+    let before = manager.snapshot().unwrap();
+    let configure = |manager: &mut DriverManager, revision, rate| {
+        let mut spec = before.settings.devices[0].spec.clone();
+        spec.default_sample_rate = rate;
+        manager.mutate(DriverCommand::Configure {
+            expected_revision: revision,
+            spec,
+        })
+    };
+    observed.lock().pending_apply = true;
+    assert!(matches!(
+        configure(&mut manager, before.revision, 96_000),
+        Err(DriverError::ConfigurationPending)
+    ));
+    assert_eq!(manager.snapshot().unwrap(), before);
+    // The HAL drains and lands the forward rate after the service reported pending.
+    {
+        let mut observation = observed.lock();
+        observation.pending_apply = false;
+        let device = &mut observation.settings.devices[0];
+        device.spec.default_sample_rate = 96_000;
+        device.observed_sample_rate = Some(96_000);
+        for formats in [
+            &mut device.native_formats.render,
+            &mut device.native_formats.capture,
+        ] {
+            formats.current.as_mut().unwrap().sample_rate = 96_000;
+        }
+    }
+    // Readback, not the intent kept at the pending error, becomes the current state.
+    let settled = manager.snapshot().unwrap();
+    assert!(settled.revision > before.revision);
+    assert_eq!(
+        settled.settings.devices[0].observed_sample_rate,
+        Some(96_000)
+    );
+    assert_eq!(
+        store::load(&path).unwrap().unwrap().devices[0]
+            .spec
+            .default_sample_rate,
+        96_000
+    );
+    assert!(matches!(
+        configure(&mut manager, before.revision, 48_000),
+        Err(DriverError::RevisionMismatch { .. })
+    ));
+    let after = configure(&mut manager, settled.revision, 48_000).unwrap();
+    assert_eq!(after.settings.devices[0].observed_sample_rate, Some(48_000));
+}
+
+#[test]
 fn external_native_change_invalidates_revision_and_survives_name_change() {
     let fixture = FixtureDir::new("driver-external-rate").unwrap();
     let path = fixture.join("drivers.json");

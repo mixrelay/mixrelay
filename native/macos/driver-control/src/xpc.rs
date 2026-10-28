@@ -1,7 +1,7 @@
 //! Authenticated HAL inventory transport; no graph or application-capture API.
 use super::{MacDriver, SERVICE, Service};
 use mixrelay_macos_transport::control_inventory::{
-    mr_hal_control_create_inventory_snapshot, mr_hal_control_parse_inventory_request,
+    MAX_ENTRIES, mr_hal_control_create_inventory_snapshot, mr_hal_control_parse_inventory_request,
     mr_hal_control_parse_transport_replacement_request,
 };
 use std::{
@@ -53,6 +53,7 @@ struct Peer {
     object: Owned,
     subscribed: bool,
     settled: Option<(u64, Settlement)>,
+    configurations: BTreeMap<[u8; 16], super::settle::Configured>,
 }
 
 #[derive(Default)]
@@ -73,6 +74,14 @@ impl Peers {
                     .filter(|(settled, _)| *settled == generation)
                     .map(|(_, settlement)| settlement)
             })
+    }
+    /// The newest rate/format/mapping settlement any subscribed HAL reported for `endpoint`.
+    pub(super) fn configuration(&self, endpoint: [u8; 16]) -> Option<super::settle::Configured> {
+        self.values
+            .iter()
+            .filter(|peer| peer.subscribed)
+            .filter_map(|peer| peer.configurations.get(&endpoint).copied())
+            .max_by_key(|configured| configured.sequence)
     }
     pub(super) fn send_inventory(&self, service: &Service) {
         let Some(message) = inventory(service) else {
@@ -170,6 +179,41 @@ fn acknowledge(service: &Service, entry: &mut Peer, event: Object) -> bool {
     true
 }
 
+fn configured(entry: &mut Peer, event: Object) -> bool {
+    // SAFETY: peer_event has authenticated the retained peer and borrows its live
+    // event throughout this helper. XPC owns each returned string extent.
+    unsafe {
+        if xpc_get_type(event) != (&raw const _xpc_type_dictionary).cast() {
+            return false;
+        }
+        let operation = xpc_dictionary_get_string(event, c"operation".as_ptr());
+        if operation.is_null()
+            || CStr::from_ptr(operation) != c"configuration_settled"
+            || xpc_dictionary_get_uint64(event, c"version".as_ptr()) != 1
+        {
+            return false;
+        }
+        let mut endpoint = [0; 16];
+        endpoint[..8].copy_from_slice(
+            &xpc_dictionary_get_uint64(event, c"endpoint_high".as_ptr()).to_be_bytes(),
+        );
+        endpoint[8..].copy_from_slice(
+            &xpc_dictionary_get_uint64(event, c"endpoint_low".as_ptr()).to_be_bytes(),
+        );
+        let configured = super::settle::Configured {
+            sequence: xpc_dictionary_get_uint64(event, c"sequence".as_ptr()),
+            rate: u32::try_from(xpc_dictionary_get_uint64(event, c"rate".as_ptr())).unwrap_or(0),
+            applied: xpc_dictionary_get_uint64(event, c"applied".as_ptr()) == 1,
+        };
+        // The HAL reports live devices only; never retain more than one inventory.
+        if entry.configurations.len() < MAX_ENTRIES || entry.configurations.contains_key(&endpoint)
+        {
+            entry.configurations.insert(endpoint, configured);
+        }
+    }
+    true
+}
+
 /// # Safety
 /// Peer is a borrowed live XPC connection from the listener block.
 #[unsafe(no_mangle)]
@@ -195,6 +239,7 @@ pub(crate) unsafe extern "C" fn mr_driver_service_accept_peer(peer: Object) -> b
         object,
         subscribed: false,
         settled: None,
+        configurations: BTreeMap::new(),
     });
     true
 }
@@ -230,7 +275,7 @@ pub(crate) unsafe extern "C" fn mr_driver_service_peer_event(peer: Object, event
     };
     // Only the authenticated HAL sends ACKs, after all attachment perform
     // callbacks have drained and committed. Never accept a future generation.
-    if acknowledge(service, entry, event) {
+    if acknowledge(service, entry, event) || configured(entry, event) {
         return;
     }
     let mut id = [0; 16];

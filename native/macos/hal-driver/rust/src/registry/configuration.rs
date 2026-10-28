@@ -2,7 +2,7 @@
 use super::{CONFIG_ACK_TIMEOUT_TICKS, Registry};
 use crate::{
     abi::{CAPACITY, CONFIG_ACTION, FORMAT, INVALID, NAME, NATIVE_ERROR, NOT_FOUND, OK},
-    device::{Control, ConversionScratch, Device, Pending, Prepared, lock},
+    device::{Control, ConversionScratch, Device, Pending, Prepared, Settled, lock},
 };
 use mixrelay_pcm_ring::SampleFormat;
 use std::{os::fd::AsRawFd, sync::atomic::Ordering};
@@ -157,6 +157,30 @@ impl Registry {
         attachment.prepared = Prepared::new(change, device.native);
     }
 
+    /// Records how one rate, format or mapping request ended, so the Driver service
+    /// rolls back a rejected request instead of waiting out its timeout.
+    fn settle(&self, control: &mut Control, rate: u32, applied: bool) {
+        // Relaxed: the sequence only orders settlements; control publishes the record.
+        let sequence = self.settlements.fetch_add(1, Ordering::Relaxed) + 1;
+        control.settled = Some(Settled {
+            sequence,
+            rate,
+            applied,
+        });
+    }
+
+    /// The latest settled request of every live device, read on the control queue.
+    pub(crate) fn settled_configurations(&self) -> Vec<([u8; 16], Settled)> {
+        self.devices()
+            .into_iter()
+            .filter_map(|id| {
+                let device = self.pin(id)?;
+                let settled = lock(&device.control).settled?;
+                Some((device.endpoint, settled))
+            })
+            .collect()
+    }
+
     pub(crate) fn perform(&self, id: u32, action: u64, generation: u64) -> i32 {
         self.perform_with_scratch(id, action, generation, Device::prepare_scratch)
     }
@@ -194,6 +218,7 @@ impl Registry {
         // Allocate bounded directional storage on control, before draining callbacks.
         let Ok(scratch) = prepare(&device, &pending) else {
             control.attachment_failed = pending.attachment.is_some();
+            self.settle(&mut control, pending.rate, false);
             return CAPACITY;
         };
         let frozen = device.freeze();
@@ -218,6 +243,7 @@ impl Registry {
         };
         if !success {
             control.attachment_failed = pending.attachment.is_some();
+            self.settle(&mut control, pending.rate, false);
             return NATIVE_ERROR;
         }
         // SAFETY: control and freeze are held, all IO pins are drained, and the native
@@ -225,6 +251,7 @@ impl Registry {
         unsafe {
             device.publish_configuration(&pending, scratch);
         }
+        self.settle(&mut control, pending.rate, true);
         let renamed = control.name != pending.name;
         control.name = pending.name;
         drop(frozen);
@@ -246,15 +273,12 @@ impl Registry {
             return NOT_FOUND;
         };
         let mut control = lock(&device.control);
-        if control
+        if let Some(pending) = control
             .pending
-            .as_ref()
-            .is_some_and(|pending| pending.generation == generation)
+            .take_if(|pending| pending.generation == generation)
         {
-            control.attachment_failed = control
-                .pending
-                .take()
-                .is_some_and(|pending| pending.attachment.is_some());
+            control.attachment_failed = pending.attachment.is_some();
+            self.settle(&mut control, pending.rate, false);
         }
         OK
     }

@@ -65,6 +65,17 @@ pub(crate) struct Pending {
     pub formats: [SampleFormat; 2],
 }
 
+/// How the HAL finished the latest configuration request of one device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Settled {
+    /// Registry-wide order of settled requests; never reused within a HAL process.
+    pub sequence: u64,
+    /// The nominal rate the request asked for.
+    pub rate: u32,
+    /// False when Perform failed natively or coreaudiod aborted the request.
+    pub applied: bool,
+}
+
 pub(crate) struct Control {
     pub name: String,
     pub latency_lease: u64,
@@ -73,6 +84,7 @@ pub(crate) struct Control {
     pub pending: Option<Pending>,
     pub next_generation: u64,
     pub attachment_failed: bool,
+    pub settled: Option<Settled>,
 }
 
 pub(crate) struct Device {
@@ -137,6 +149,7 @@ impl Device {
                 pending: None,
                 next_generation: 1,
                 attachment_failed: false,
+                settled: None,
             }),
             native: native_runtime.0,
             runtime: AtomicPtr::new(native_runtime.1),

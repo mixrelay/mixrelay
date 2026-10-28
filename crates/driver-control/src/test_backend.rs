@@ -20,6 +20,8 @@ pub(crate) struct Observation {
     pub(crate) failed_latencies: BTreeSet<String>,
     pub(crate) readbacks: usize,
     pub(crate) fail_apply: bool,
+    /// The HAL is still performing; the change lands only if the test applies it.
+    pub(crate) pending_apply: bool,
     pub(crate) fail_read: bool,
     pub(crate) failed_devices: BTreeSet<String>,
     pub(crate) recovered_devices: Vec<String>,
@@ -41,6 +43,7 @@ impl FakeBackend {
             failed_latencies: BTreeSet::new(),
             readbacks: 0,
             fail_apply: false,
+            pending_apply: false,
             fail_read: false,
             failed_devices: BTreeSet::new(),
             recovered_devices: Vec::new(),
@@ -77,6 +80,9 @@ impl DriverBackend for FakeBackend {
         observation.applies += 1;
         if observation.fail_apply {
             return Err(DriverError::Backend("fixture apply failed".into()));
+        }
+        if observation.pending_apply {
+            return Err(DriverError::ConfigurationPending);
         }
         observation.settings.devices = desired
             .iter()

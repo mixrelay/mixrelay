@@ -1,8 +1,10 @@
 //! Bounded HAL configuration steps and the rollback that follows a failed transaction.
 //!
 //! While the HAL performs a step it processes no newer inventory, so a rollback
-//! published earlier would spend its own budget queued behind that step. A failed
-//! step therefore returns only once the HAL has settled it or the settle bound ends.
+//! published earlier would spend its own budget queued behind that step. A step
+//! therefore returns only once the HAL has applied or rejected it, or the settle
+//! bound ends. A step applied late still succeeds: rolling it back would cost a
+//! second Perform and undo a configuration the HAL holds.
 use mixrelay_driver_control::DriverError;
 use std::time::{Duration, Instant};
 
@@ -14,6 +16,16 @@ pub(crate) const ACK_TIMEOUT: Duration = Duration::from_secs(6);
 pub(crate) const SETTLE_TIMEOUT: Duration = Duration::from_secs(24);
 // Control-only polling interval, never audio pacing or a callback wait.
 const POLL: Duration = Duration::from_millis(10);
+
+/// The HAL's newest settled rate, format or mapping request for one endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Configured {
+    /// HAL-wide settlement order.
+    pub(crate) sequence: u64,
+    /// The nominal rate the request asked for.
+    pub(crate) rate: u32,
+    pub(crate) applied: bool,
+}
 
 /// What the Driver service observes about one HAL step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,13 +64,11 @@ impl Pacing for Polling {
     }
 }
 
-/// Why a step did not apply within `ACK_TIMEOUT`.
+/// Why a step did not apply.
 #[derive(Debug)]
 pub(crate) enum Failure {
     /// Rejected before or during the step; the HAL is not performing it.
     Rejected(DriverError),
-    /// Applied, but only after `ACK_TIMEOUT`.
-    Late,
     /// Still performing when the settle bound ended.
     Pending,
 }
@@ -74,23 +84,53 @@ impl From<Failure> for DriverError {
     fn from(failure: Failure) -> Self {
         match failure {
             Failure::Rejected(error) => error,
-            Failure::Late => Self::Backend("HAL configuration perform/readback timed out".into()),
             Failure::Pending => Self::ConfigurationPending,
         }
     }
 }
 
-/// Waits for one step to apply, then for a late step to settle within the bound.
+/// Progress of a rate or format request issued after the HAL had settled `since`.
+/// A rate request is rejected only by a settlement for its own rate, so a concurrent
+/// request for another rate is not taken for it.
+pub(crate) fn request_progress(
+    applied: bool,
+    since: u64,
+    settled: Option<Configured>,
+    rate: Option<u32>,
+) -> Progress {
+    if applied {
+        Progress::Applied
+    } else if settled.is_some_and(|settled| {
+        settled.sequence > since && !settled.applied && rate.is_none_or(|rate| rate == settled.rate)
+    }) {
+        Progress::Rejected
+    } else {
+        Progress::Performing
+    }
+}
+
+/// Waits for one step to apply or be rejected, through `ACK_TIMEOUT` and then the
+/// settle bound. A step applied within the bound succeeds; a late one is logged.
 pub(crate) fn step(
     pacing: &impl Pacing,
     mut observe: impl FnMut() -> Progress,
 ) -> Result<(), Failure> {
-    let mut deadline = pacing.now() + ACK_TIMEOUT;
+    let start = pacing.now();
+    let mut deadline = start + ACK_TIMEOUT;
     let mut late = false;
     loop {
         match observe() {
-            Progress::Applied if late => return Err(Failure::Late),
-            Progress::Applied => return Ok(()),
+            Progress::Applied => {
+                if late {
+                    let elapsed = pacing.now().saturating_duration_since(start);
+                    tracing::warn!(
+                        elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+                        budget_ms = u64::try_from(ACK_TIMEOUT.as_millis()).unwrap_or(u64::MAX),
+                        "HAL applied a configuration step after its acknowledgement budget"
+                    );
+                }
+                return Ok(());
+            }
             Progress::Rejected => {
                 return Err(Failure::Rejected(DriverError::Backend(
                     "HAL rejected the configuration".into(),
@@ -125,8 +165,7 @@ pub(crate) fn transact<T>(
         return Err(DriverError::ConfigurationPending);
     }
     match restore(rollback) {
-        // A late rollback still restored the previous state.
-        Ok(()) | Err(Failure::Late) => Err(failure.into()),
+        Ok(()) => Err(failure.into()),
         Err(Failure::Pending) => Err(DriverError::ConfigurationPending),
         Err(Failure::Rejected(rollback)) => Err(DriverError::Backend(format!(
             "{}; rollback failed: {rollback}",
