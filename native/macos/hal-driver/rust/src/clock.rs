@@ -1,8 +1,11 @@
 //! Nominal host-derived timestamps and the host's matching clock metadata.
 use crate::abi::Timestamp;
 
-// Power-of-two timestamp period above the SDK minimum of 10,923 frames.
+// Power-of-two timestamp period above the SDK minimum of 10,923 frames. It is the host's
+// IO ring span, which bounds a render request and so sizes every client queue.
 pub(crate) const TIMESTAMP_PERIOD: u32 = 16_384;
+const _: () =
+    assert!(TIMESTAMP_PERIOD == mixrelay_macos_transport::client_pcm::MAX_RENDER_SPAN_FRAMES);
 
 pub(crate) fn property(selector: u32) -> Option<u32> {
     match &selector.to_be_bytes() {

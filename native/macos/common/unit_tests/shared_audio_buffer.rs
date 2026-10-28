@@ -269,6 +269,50 @@ fn initialization_and_attach_reject_invalid_or_old_geometry() {
 }
 
 #[test]
+fn zeroed_storage_keeps_its_ring_untouched_and_reused_storage_is_cleared() {
+    let (capacity, channels) = (8, 2);
+    let size = mr_shared_audio_buffer_required_bytes(capacity, channels);
+    let layout = Layout::from_size_align(size, align_of::<SharedAudioBuffer>()).unwrap();
+    let stamps = size_of::<SharedAudioBuffer>();
+    let pcm = stamps + capacity as usize * size_of::<u64>();
+    let read = |buffer: *mut SharedAudioBuffer| {
+        let mut samples = [9.0; 16];
+        let mut coverage = [true; 8];
+        // SAFETY: the test owns the initialized allocation and disjoint outputs.
+        let available = unsafe { read_with_frame_coverage(buffer, 0, &mut samples, &mut coverage) };
+        (available, samples.map(f32::to_bits), coverage)
+    };
+    // SAFETY: each allocation is exclusive, aligned and exactly the ring's extent.
+    unsafe {
+        let memory = alloc_zeroed(layout);
+        assert!(!memory.is_null());
+        // The PCM cells hold a sentinel that a full clear would erase. Zero stamps alone
+        // must reject every frame, so the zeroed initializer leaves the ring untouched.
+        memory.add(pcm).write_bytes(0x5a, size - pcm);
+        let buffer = initialize_zeroed(memory.cast(), size, capacity, channels);
+        assert!(!buffer.is_null());
+        assert!((pcm..size).all(|offset| memory.add(offset).read() == 0x5a));
+        assert_eq!(read(buffer), (0, [0; 16], [false; 8]));
+        dealloc(memory, layout);
+
+        // Reused storage may contain stamps of the epoch a new header starts at.
+        let memory = alloc_zeroed(layout);
+        assert!(!memory.is_null());
+        for slot in 0..capacity as usize {
+            memory
+                .add(stamps + slot * size_of::<u64>())
+                .cast::<[u8; 8]>()
+                .write(stamp(1, slot as u64).to_ne_bytes());
+        }
+        memory.add(pcm).write_bytes(0x5a, size - pcm);
+        let buffer = mr_shared_audio_buffer_initialize(memory.cast(), size, capacity, channels);
+        assert!(!buffer.is_null());
+        assert_eq!(read(buffer), (0, [0; 16], [false; 8]));
+        dealloc(memory, layout);
+    }
+}
+
+#[test]
 fn pcm_bits_activity_and_counters_roundtrip() {
     let buffer = Buffer::new(8, 2);
     let bits = [0x8000_0000, 0x7fc0_1234, 0x3f00_0000, 0xbf80_0000];

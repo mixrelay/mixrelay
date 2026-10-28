@@ -16,6 +16,8 @@ mixrelay-pcm-ring = { path = "../../../pcm-ring" }
 [dev-dependencies]
 # Proves the property reads answered on IO threads never allocate.
 allocation-counter = "0.8.1"
+# Holds a producer claim and observes queue release in rearm and retirement tests.
+mixrelay-macos-transport = { path = "../../common", features = ["test-observation"] }
 
 [build-dependencies]
 # Compile the SDK Blocks adapter; Rust owns connection and timer lifetime.

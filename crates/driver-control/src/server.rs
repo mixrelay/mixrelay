@@ -278,7 +278,9 @@ impl IntoResponse for ApiError {
             DriverError::RevisionMismatch { .. } => StatusCode::CONFLICT,
             DriverError::NotFound(_) => StatusCode::NOT_FOUND,
             DriverError::AccessDenied => StatusCode::FORBIDDEN,
-            DriverError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            DriverError::Unavailable(_) | DriverError::ConfigurationPending => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
             DriverError::Backend(_)
             | DriverError::Io(_)
             | DriverError::Http(_)

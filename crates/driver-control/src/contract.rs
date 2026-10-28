@@ -187,6 +187,10 @@ pub enum DriverError {
     /// Native adapter failure.
     #[error("Driver backend: {0}")]
     Backend(String),
+    /// The HAL is still performing an earlier configuration step. The previous
+    /// inventory remains current and is republished for the HAL to converge to.
+    #[error("Driver configuration is still pending in the HAL; retry after it settles")]
+    ConfigurationPending,
     /// Filesystem failure.
     #[error("Driver settings I/O: {0}")]
     Io(#[from] std::io::Error),

@@ -135,3 +135,50 @@ fn large_host_render_and_multiclient_capture_keep_each_tile_and_channel_once() {
         );
     }
 }
+
+#[test]
+fn a_render_span_longer_than_the_queue_sizing_span_is_rejected_and_traced() {
+    use mixrelay_macos_transport::client_pcm::MAX_RENDER_SPAN_FRAMES as SPAN;
+    let fixture = native_fixture();
+    let transport = Transport::new(93, 2, 2);
+    let id = transport.add(&fixture, "Queue extent", 48_000);
+    start(&fixture, id);
+    let device = fixture.registry.pin(id).unwrap();
+    device.io_trace.set_enabled(true);
+    let frames = SPAN + 1;
+    let mut samples = vec![0.25_f32; frames as usize * 2];
+    let io = |render: bool, frames: u32, samples: &mut [f32]| {
+        // SAFETY: each exclusive buffer owns `frames` stereo Float32 frames.
+        unsafe {
+            fixture.registry.io(IoOperation {
+                device: id,
+                stream: id + if render { 2 } else { 1 },
+                render,
+                client: 42,
+                frame: 0,
+                samples: samples.as_mut_ptr().cast(),
+                frames,
+            })
+        }
+    };
+    // A longer span could be overwritten in its queue before ReadInput or the pump reads it.
+    assert!(!io(true, frames, &mut samples));
+    let counters = device.io_trace.admission.snapshot();
+    let words = crate::io_admission::COUNTERS;
+    assert_eq!(counters[words + 3], 1);
+    assert_eq!(
+        counters[words + 1],
+        u64::from(frames) | (1 << 32) | (1 << 33)
+    );
+    assert!(io(true, SPAN, &mut samples));
+    // Capture keeps the retention bound; unpublished frames are silence.
+    assert!(io(false, frames, &mut samples));
+    assert_eq!(device.io_trace.admission.snapshot()[words + 3], 1);
+    let (published, unpublished) = samples.split_at(SPAN as usize * 2);
+    assert!(
+        published
+            .iter()
+            .all(|sample| sample.to_bits() == 0.25_f32.to_bits())
+    );
+    assert!(unpublished.iter().all(|sample| sample.to_bits() == 0));
+}

@@ -4,6 +4,7 @@
 #![cfg(target_os = "macos")]
 
 mod latency;
+pub mod report;
 pub use latency::{InputLatency, parse_input_latencies, write_input_latencies};
 
 use std::{

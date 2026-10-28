@@ -208,6 +208,27 @@ pub unsafe fn mr_hal_io_clock_state(context: *mut HalIoContext, sample_rate: u32
     };
 }
 
+/// Whether `mr_hal_io_begin_stream` would rearm every endpoint ring, checked without
+/// changing any shared state, so a caller can refuse before mutating anything else.
+/// # Safety
+/// Non-null context and its attached mapping remain live; control has drained its writers.
+pub unsafe fn can_begin_stream(context: *const HalIoContext) -> bool {
+    let Some(context) = (unsafe { context.as_ref() }) else {
+        return false;
+    };
+    let transport = context.transport.load(Ordering::Acquire);
+    let capture = context.capture();
+    let render = context.render_buffer.load(Ordering::Relaxed);
+    !transport.is_null()
+        && (context.capture_channels == 0 || !capture.is_null())
+        && (context.render_channels == 0 || !render.is_null())
+        && !unsafe { mr_endpoint_transport_requires_replacement(transport) }
+        && [render, capture]
+            .into_iter()
+            // SAFETY: each non-null ring belongs to the live attached mapping.
+            .all(|ring| ring.is_null() || unsafe { buffer::can_begin_epoch(ring) })
+}
+
 /// # Safety
 /// Control has serialized lifecycle transitions and drained this HAL writer.
 /// Remote readers need not be drained: no shared storage clears.

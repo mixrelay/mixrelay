@@ -105,7 +105,19 @@ HAL의 `ClientMix`는 등록된 클라이언트별 PCM 큐와 등록·제거·�
 장치 sample 좌표에서 게시된 큐를 한 번씩 합산한다. 큐의 게시 범위를 벗어난 프레임은 0을 더하며
 다른 클라이언트의 공급을 기다리지 않는다. 입력의 네이티브 정수 변환과 출력 볼륨·mute는
 `Device::process_io`가 맡는다. `ClientChange`와 `Transfer`는 등록 변경과 PCM 전송을 구분한다.
-제어 소유자는 `Device::freeze`로 콜백을 회수한 동안만 큐를 할당·교체·폐기한다.
+큐는 IO를 시작하는 클라이언트만 가진다. 장치가 이미 실행 중일 때 등록된 클라이언트는 자기 StartIO
+전에도 렌더할 수 있으므로 등록 때 받는다. 큐가 없거나 ring epoch를 다 쓴 클라이언트는 StartIO 때
+제어 스레드에서 freeze 밖에 새 큐를 매핑하고 미리 fault한 뒤, freeze 안에서는 게시만 한다.
+`PerformDeviceConfigurationChange`의 freeze 구간은 큐를 매핑하지도, 메모리를 할당하지도 않는다.
+샘플레이트만 바뀌면 큐와 grant를 유지하고 ring epoch·clock을 다시 게시해 이전 rate의 PCM을 버리며,
+epoch가 남지 않은 큐는 떼어 낸다. 형식이 바뀌면 새 endpoint 매핑(인벤토리를 받을 때 미리 매핑)으로
+바꾸고 이전 모양의 큐를 떼어 낸다. 떼어 낸 큐와 매핑은 freeze가 끝난 뒤 해제한다. coreaudiod는 이
+호출 앞뒤로 IO를 일시정지할 뿐 StopIO·StartIO를 부르지 않는다. 그래서 같은 호출이 반환하기 전에, IO가
+아직 멈춘 동안 IO를 가진 클라이언트의 새 큐를 freeze 밖에서 매핑하고 짧은 freeze에서 게시한다. IO를
+가지지 않은 클라이언트는 다음 StartIO에서 받는다. 큐가 필요 없으면 freeze도 잡지 않는다. 큐 메모리
+예산은 등록 때뿐 아니라 매핑·게시할 때마다 현재 형식 기준으로 다시 검사한다. 매핑하지 못하거나 예산을
+넘는 클라이언트는 설정을 되돌리지 않고 수를 기록한다. 제어 tick이 다시 시도하고, Driver service에 그 수와 회복을 보고해 로그에 남긴다. endpoint
+ring을 다시 열 수 없으면 rate 변경과 시작은 아무것도 바꾸지 않고 거부된다.
 `Registry`는 장치의 시작 참조를 세고 최초 시작·최종 종료를 네이티브 런타임에 요청한다.
 최초 시작은 모든 큐의 PCM 타임라인을 초기화한다. 다른 클라이언트의 시작·정지는 게시된 PCM을
 지우지 않으며, 등록된 출력 클라이언트가 직접 StartIO를 받아야 한다는 조건을 두지 않는다.
@@ -123,6 +135,22 @@ clock publication과 membership revision을 소유하고, 개별 writer가 PCM·
 `control::native::pcm`은 엔진 lease가 살아 있을 때만 별도 XPC peer로 완전한 grant 목록을 보낸다.
 Driver 서비스는 장치 인벤토리의 소유자로 유지한다. coreaudiod의 engine Mach-service 접근은
 HAL 번들에 선언하며 엔진은 audio-server UID의 grant 게시와 console 사용자 source 요청을 구분한다.
+
+Driver 서비스의 구성 거래는 단계마다 6초 안에 HAL의 적용을 기다린다. HAL은 인벤토리 세대의
+적용 또는 거부(검증·native 적용 실패 포함)를, 그리고 모든 rate·format·매핑 요청의 결과를 요청한
+rate·format, HAL incarnation과 함께 순서대로 보고한다. 순번은 보관 큐의 잠금 안에서 매기므로 여러
+장치가 동시에 끝나도 순서가 뒤바뀌지 않는다. 새 연결은 보관한 결과를 다시 보낸 뒤 완료 표시를 보낸다.
+서비스는 완료 표시를 받은 가장 새 연결에서 기준을 정하고, 같은 incarnation의 연결에서 그 기준보다
+나중에 같은 값을 요청한 거부만 그 요청의 거부로 보고 곧바로 이전 상태를 새 예산으로 되돌린다. 새
+incarnation이 완료 표시를 보내면 이전 incarnation의 연결은 버린다. 두 쪽은 `macos-transport`의 한
+보고 codec을 쓰고, 보고 버전이 다르면 부분 설치로 보고
+즉시 재설치가 필요하다는 오류를 낸다. HAL이 요청한 매핑 교체는 매핑만 바꾸고 rate·format을 요청하지
+않는다.
+6초를 넘긴 단계는 최대 24초 더 기다린다. HAL은 수행 중인 단계가 끝나기 전에는 새 인벤토리를
+처리하지 않기 때문이다. 그 안에 적용되면 경고만 남기고 거래를 계속한다. 그때까지도 수행 중이면
+되돌림을 게시만 하고 `ConfigurationPending`으로 보고하며, 관리자는 이전 인벤토리와 revision을
+유지한다. 다음 조회는 HAL readback으로 상태를 다시 관찰하고, rate·format 요청은 캐시한 의도가
+아니라 readback과 다를 때만 보낸다.
 
 엔진의 `endpoint_service::virtual_pcm`은 가상 입력 source registry와 endpoint별 pump 수명을
 소유한다. `ClientPcmMixer`는 native sample 좌표의 큐 합산과 forward cursor만 관리하고,
@@ -157,16 +185,24 @@ native 단위로 재환산해 버리지 않는다. 물리 장치는 기존 하�
 
 `audio-io::retention`은 최대 지원 샘플레이트에서도 최소 4초의 backlog 저장량을 정한다.
 macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭제곱인 1,048,576프레임으로 올림한다.
+가상 입력의 보존은 엔진 source가 맡는다. 그래프가 포맷을 승인하기 전에는 pump가 큐를 비우지 않으므로
+그동안 보존되는 클라이언트 PCM은 큐 크기(65,536프레임)까지이며, 이는 첫 그래프 승인 때 준비 중 PCM을
+버리는 정책과 맞는다. HAL 클라이언트 렌더 큐와 endpoint 매핑 링은 `client_pcm::QUEUE_FRAMES`
+(65,536프레임)로 준비한다. 쓰는 쪽은 최대 렌더 span(`MAX_RENDER_SPAN_FRAMES`, 장치의 zero timestamp
+period인 16,384프레임)만큼 앞서고 `ReadInput`은 그만큼 뒤처질 수 있으며, 큐는 그 합의 두 배다. 새 익명 매핑은 커널의 0 채움을 사용하므로 ring을 지우지 않고, 준비 단계에서 모든 페이지를
+미리 fault해 HAL IO 스레드가 page fault를 겪지 않게 한다.
 녹음 전달 큐는 256프레임 × 3,000개이며 192kHz에서 4초다. 모두 제어 경로에서 준비하고,
 실시간 중에는 확장하지 않는다. 이 저장 용량은 재생 priming·지연 목표와 별개다.
 지연 목표는 관찰한 callback burst와 클록 관계에서 정한다. `QueueBounds.maximum_target_frames`는
-저장량과 별도로 지정하며 macOS bridge의 기존 상한은 8,192프레임이다. Linux 출력 링은
+저장량과 별도로 지정하며 macOS bridge는 `buffer_policy::MAXIMUM_TARGET_FRAMES`(8,192프레임)를
+상한으로 쓴다. Linux 출력 링은
 최대 RAW 전송 32,768프레임을 수용하도록 65,536프레임으로 준비한다. 가득 찬 private FIFO는 실패한 쓰기를
 거부하며 기존 PCM을 보존한다. 시각 공유 링은 오래된 구간을 덮어쓰므로 독자가 누락·불연속을
 확인한다. 녹음 큐가 한계를 넘으면 받아 둔 prefix를 마무리하고 `Failed`로 보고한다.
 
 HAL의 호스트 I/O 요청 크기와 설정 가능한 버퍼 크기는 별개다. 한 요청은 준비한
-1,048,576프레임 보존량으로 제한하며, 2,048프레임을 넘는 요청은 같은 I/O pin 안에서
+1,048,576프레임 보존량으로 제한한다. 렌더 요청은 클라이언트 큐가 감당하도록 정한 span을 넘으면 독자가 읽기 전에 덮일 수 있으므로
+`MAX_RENDER_SPAN_FRAMES`로 제한하고 같은 extent 거부로 기록한다. 2,048프레임을 넘는 요청은 같은 I/O pin 안에서
 기존 scratch 크기로 나눠 처리한다. Float32·정수 변환·복수 클라이언트 믹스 모두 같은 경로다.
 정상 quantum은 추가 scratch 조회 없이 기존 처리로 보낸다. HAL trace v5는 null 버퍼와
 보존량 초과를 분리하고 마지막 거부의 크기·포인터 유무·방향을 기록한다.

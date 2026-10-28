@@ -175,6 +175,58 @@ pub unsafe extern "C" fn mr_shared_audio_buffer_initialize(
     capacity_frames: u32,
     channels: u32,
 ) -> *mut SharedAudioBuffer {
+    // SAFETY: the caller's exclusive storage contract is forwarded unchanged.
+    unsafe {
+        initialize(
+            memory,
+            memory_size,
+            capacity_frames,
+            channels,
+            Storage::Reused,
+        )
+    }
+}
+
+/// Initializes only the header of storage the kernel has just zero-filled, such as a
+/// new anonymous mapping. Untouched ring pages stay unfaulted: a zero stamp never
+/// matches an active epoch, so every frame reads as missing until a writer commits it.
+/// # Safety
+/// `memory` must own `memory_size` writable bytes exclusively for this call, and every
+/// byte must still be zero. Reused or caller-recycled storage must use
+/// [`mr_shared_audio_buffer_initialize`].
+pub unsafe fn initialize_zeroed(
+    memory: *mut c_void,
+    memory_size: usize,
+    capacity_frames: u32,
+    channels: u32,
+) -> *mut SharedAudioBuffer {
+    // SAFETY: the caller guarantees exclusive, still-zero storage.
+    unsafe {
+        initialize(
+            memory,
+            memory_size,
+            capacity_frames,
+            channels,
+            Storage::Zeroed,
+        )
+    }
+}
+
+/// Whether stamp and PCM cells may hold bytes from a previous user of the storage.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Storage {
+    Reused,
+    Zeroed,
+}
+
+// SAFETY: memory owns memory_size exclusive writable bytes; Zeroed storage is all zero.
+unsafe fn initialize(
+    memory: *mut c_void,
+    memory_size: usize,
+    capacity_frames: u32,
+    channels: u32,
+    storage: Storage,
+) -> *mut SharedAudioBuffer {
     let Some(bytes) = required_bytes(capacity_frames, channels) else {
         return ptr::null_mut();
     };
@@ -189,9 +241,12 @@ pub unsafe extern "C" fn mr_shared_audio_buffer_initialize(
     };
     let buffer = memory.cast::<SharedAudioBuffer>();
     // SAFETY: exclusive, suitably aligned caller storage was extent-checked.
-    // Zero is a valid bit pattern for every trailing atomic PCM/stamp cell.
+    // Zero is a valid bit pattern for every trailing atomic PCM/stamp cell, and a
+    // zero stamp is never a committed frame. Only reused storage needs clearing.
     unsafe {
-        ptr::write_bytes(memory.cast::<u8>(), 0, bytes);
+        if storage == Storage::Reused {
+            ptr::write_bytes(memory.cast::<u8>(), 0, bytes);
+        }
         buffer.write(SharedAudioBuffer {
             magic: MAGIC,
             version: VERSION,
@@ -351,6 +406,40 @@ pub unsafe extern "C" fn mr_shared_audio_buffer_retire_busy_producer_after_drain
     }
     buffer.epoch.fetch_or(REQUESTED | RETIRED, Ordering::AcqRel);
     true
+}
+
+/// Holds the producer claim as an in-flight writer callback does, for tests of callers
+/// that must not mistake it for exhaustion.
+/// # Safety
+/// A non-null buffer must reference an initialized mapping that outlives the claim.
+#[cfg(any(test, feature = "test-observation"))]
+pub unsafe fn hold_producer<'a>(buffer: *const SharedAudioBuffer) -> Option<impl Drop + 'a> {
+    unsafe { buffer.as_ref::<'a>() }.and_then(SharedAudioBuffer::claim_producer)
+}
+
+/// Whether the ring can never open another epoch: retired, or its last generation used.
+/// A producer claim held by an in-flight writer is transient and does not count.
+/// # Safety
+/// A non-null buffer must reference an initialized, attached, live mapping.
+pub unsafe fn epoch_exhausted(buffer: *const SharedAudioBuffer) -> bool {
+    unsafe { buffer.as_ref() }.is_none_or(|buffer| {
+        let epoch = buffer.epoch.load(Ordering::Acquire);
+        epoch & !(REQUESTED | MAX_EPOCH) != 0 || !(1..MAX_EPOCH).contains(&(epoch & MAX_EPOCH))
+    })
+}
+
+/// Whether `mr_shared_audio_buffer_try_begin_epoch` would open another epoch now,
+/// without claiming the producer or changing any shared state.
+/// # Safety
+/// A non-null buffer must reference an initialized, attached, live mapping.
+pub unsafe fn can_begin_epoch(buffer: *const SharedAudioBuffer) -> bool {
+    unsafe { buffer.as_ref() }.is_some_and(|buffer| {
+        let epoch = buffer.epoch.load(Ordering::Acquire);
+        let generation = epoch & MAX_EPOCH;
+        buffer.producer_busy.load(Ordering::Acquire) == 0
+            && epoch & !(REQUESTED | MAX_EPOCH) == 0
+            && (1..MAX_EPOCH).contains(&generation)
+    })
 }
 
 /// One producer claim and one epoch CAS, with no retry or storage clearing.
