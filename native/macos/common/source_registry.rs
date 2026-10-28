@@ -3,7 +3,9 @@
 //! Old producer mappings stay isolated after replacement and are reclaimed on
 //! control after local readers drain, never on an audio callback.
 use crate::{
-    application_clock::{ApplicationClock, VERSION, mr_application_clock_request_rate},
+    application_clock::{
+        ApplicationClock, ConsumerRoute, VERSION, mr_application_clock_request_rate,
+    },
     application_source_mapping::Mapping,
     shared_audio_buffer::{
         mr_shared_audio_buffer_read, mr_shared_audio_buffer_request_epoch,
@@ -366,6 +368,21 @@ impl Default for SourceRegistry {
     }
 }
 impl SourceRegistry {
+    /// Publishes how the graph's active plan uses a source to its producer. Returns
+    /// false when the identified source is absent.
+    pub fn set_consumer_route(&self, token: u64, route: ConsumerRoute) -> bool {
+        let read = self.read(token);
+        let Some(source) = read.source() else {
+            return false;
+        };
+        // Release publishes the route to the producer's next retention decision.
+        source
+            .mapping
+            .clock()
+            .consumer_route
+            .store(route.word(), Ordering::Release);
+        true
+    }
     /// Selects pacing authority without changing PCM, format, or producer ownership.
     pub fn set_clock_master(&self, token: u64, master: bool) -> bool {
         let read = self.read(token);

@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering},
 };
 
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 mod timestamps;
 const HEADER_BYTES: u32 = 176;
 const _: () = assert!(size_of::<ApplicationClock>() == HEADER_BYTES as usize);
@@ -47,6 +47,8 @@ pub struct ApplicationClock {
     /// Nanoseconds from a time-addressed consumer's requested time to the timestamp of
     /// its next unread frame, or `NO_PHASE`. Published with the consumer position.
     pub consumer_phase: AtomicI32,
+    /// How the consumer's published plan uses this source, as `ConsumerRoute` bits.
+    pub consumer_route: AtomicU32,
     /// That consumer's measured nanoseconds per graph frame as `f64` bits, or 0 for a
     /// consumer that reads in sequence. Published with the consumer position.
     pub consumer_period: AtomicU64,
@@ -54,6 +56,44 @@ pub struct ApplicationClock {
 
 /// `consumer_phase` of a consumer without a continuous time-addressed read.
 pub const NO_PHASE: i32 = i32::MIN;
+
+/// How the consumer's active graph plan uses a source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConsumerRoute {
+    /// No plan has published a route since the source was created.
+    Unknown,
+    /// The plan does not carry the source to an output, or the node is off.
+    Unrouted,
+    /// The plan carries the source. `head` marks the source the plan paces from its
+    /// first credit, which consumes PCM retained before admission.
+    Routed { head: bool },
+}
+const ROUTE_PUBLISHED: u32 = 1;
+const ROUTE_ROUTED: u32 = 2;
+const ROUTE_HEAD: u32 = 4;
+impl ConsumerRoute {
+    #[must_use]
+    pub const fn word(self) -> u32 {
+        match self {
+            Self::Unknown => 0,
+            Self::Unrouted => ROUTE_PUBLISHED,
+            Self::Routed { head: false } => ROUTE_PUBLISHED | ROUTE_ROUTED,
+            Self::Routed { head: true } => ROUTE_PUBLISHED | ROUTE_ROUTED | ROUTE_HEAD,
+        }
+    }
+    #[must_use]
+    pub const fn from_word(word: u32) -> Self {
+        if word & ROUTE_PUBLISHED == 0 {
+            Self::Unknown
+        } else if word & ROUTE_ROUTED == 0 {
+            Self::Unrouted
+        } else {
+            Self::Routed {
+                head: word & ROUTE_HEAD != 0,
+            }
+        }
+    }
+}
 
 fn offset(capacity: u32, channels: u32) -> Option<usize> {
     let bytes = mr_shared_audio_buffer_required_bytes(capacity, channels);
@@ -157,6 +197,7 @@ pub unsafe extern "C" fn mr_application_clock_initialize(
             insufficient_headroom: AtomicU32::new(0),
             source_sample_faults: mixrelay_audio_io::pcm::SampleFaultCounter::default(),
             consumer_phase: AtomicI32::new(NO_PHASE),
+            consumer_route: AtomicU32::new(0),
             consumer_period: AtomicU64::new(0),
         });
         // SAFETY: required_bytes includes the prepared per-frame atomic sidecar.

@@ -3,6 +3,7 @@ use super::super::external_io::{binding_sources, binding_token};
 use crate::macos_pacing::{ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, Pace};
 use mixrelay_audio_engine::{BlockProcessor, ExternalBinding, RenderPlan};
 use mixrelay_engine_service::endpoint_service;
+use mixrelay_macos_transport::application_clock::ConsumerRoute;
 
 pub(in crate::macos) struct RouteClock {
     pub(in crate::macos) maximum_frames: u32,
@@ -77,6 +78,42 @@ impl NativePacers {
 impl Drop for NativePacers {
     fn drop(&mut self) {
         self.select_application_master(None);
+    }
+}
+
+/// Virtual sources of the active plan. Graph cycles publish each one's route; a source
+/// the next plan drops, or every source when the worker ends, is published unrouted.
+/// The set lives for the worker, so checkpoints and gated rendering keep every route.
+#[derive(Default)]
+pub(in crate::macos) struct PlanRoutes {
+    tokens: Vec<u64>,
+}
+impl PlanRoutes {
+    /// Adopts a newly activated plan. Allocates; call outside realtime.
+    pub(in crate::macos) fn activate(&mut self, plan: &RenderPlan) {
+        let tokens: Vec<_> = plan
+            .source_bindings()
+            .iter()
+            .filter(|binding| binding.virtual_endpoint_id().is_some())
+            .map(binding_token)
+            .collect();
+        for token in self.tokens.iter().filter(|token| !tokens.contains(token)) {
+            unroute(*token);
+        }
+        self.tokens = tokens;
+    }
+}
+impl Drop for PlanRoutes {
+    fn drop(&mut self) {
+        for token in &self.tokens {
+            unroute(*token);
+        }
+    }
+}
+
+fn unroute(token: u64) {
+    if let Some(sources) = endpoint_service::virtual_source_registry() {
+        sources.set_consumer_route(token, ConsumerRoute::Unrouted);
     }
 }
 

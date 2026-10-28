@@ -13,9 +13,9 @@ const FRAMES: u64 = mixrelay_audio_io::retention::RING_FRAMES as u64;
 const MAX_RUNS: usize = 16;
 
 /// The client timeline identity that frame coordinates are relative to.
-type Timeline = ([u8; 16], u64, u64, u32);
+pub(super) type Timeline = ([u8; 16], u64, u64, u32);
 
-fn timeline(clock: ClientPcmClock) -> Timeline {
+pub(super) fn timeline(clock: ClientPcmClock) -> Timeline {
     (clock.incarnation, clock.epoch, clock.anchor, clock.rate)
 }
 
@@ -41,7 +41,7 @@ pub(super) struct Chunk {
 }
 
 /// One endpoint's drained, not yet converted PCM. Positions grow monotonically and
-/// map onto a preallocated ring, so retention never allocates or first-touches on RT.
+/// map onto a preallocated ring, so retention never allocates on RT.
 pub(super) struct Backlog {
     samples: Vec<f32>,
     channels: usize,
@@ -55,7 +55,8 @@ pub(super) struct Backlog {
 }
 
 impl Backlog {
-    /// Reserves and pre-faults the whole store on control.
+    /// Reserves and pre-faults the whole store on control, so no page is first touched
+    /// on RT whatever the allocator does with a zeroed reservation.
     /// # Errors
     /// Returns the reservation failure before any pump state exists.
     pub(super) fn new(channels: usize) -> std::io::Result<Self> {
@@ -96,7 +97,10 @@ impl Backlog {
         let frames = u64::from(window.frames);
         let identity = timeline(window.clock);
         let continues = !window.discontinuity && self.tail == Some((identity, window.first));
-        self.discard((self.written + frames).saturating_sub(self.read + FRAMES));
+        self.discard(
+            (self.written + frames).saturating_sub(self.read + FRAMES),
+            true,
+        );
         if !continues || self.runs.is_empty() {
             if self.read == self.written {
                 self.runs.clear();
@@ -110,7 +114,7 @@ impl Backlog {
             }
             if self.runs.len() == MAX_RUNS {
                 let end = self.runs[1].start;
-                self.discard(end - self.read);
+                self.discard(end - self.read, true);
             }
             self.runs.push_back(Run {
                 clock: window.clock,
@@ -163,6 +167,15 @@ impl Backlog {
         }
     }
 
+    /// Keeps only the newest `frames` of the newest run, for a stream that must not
+    /// start behind live PCM. The trimmed head is policy, not loss, and the stream
+    /// restarts after it.
+    pub(super) fn keep_newest(&mut self, frames: u64) {
+        let run = self.runs.back().map_or(self.written, |run| run.start);
+        let first = self.written.saturating_sub(frames).max(run).max(self.read);
+        self.discard(first - self.read, false);
+    }
+
     /// Ends retention of a stopped timeline; returns the unconverted frames it held.
     pub(super) fn clear(&mut self) -> u64 {
         let frames = self.frames();
@@ -173,12 +186,14 @@ impl Backlog {
     }
 
     /// Drops the oldest unconverted frames; the run continuing after them restarts.
-    fn discard(&mut self, frames: u64) {
+    fn discard(&mut self, frames: u64, lost: bool) {
         if frames == 0 {
             return;
         }
         self.read += frames;
-        self.dropped += frames;
+        if lost {
+            self.dropped += frames;
+        }
         while self.runs.len() > 1 && self.runs[1].start <= self.read {
             self.runs.pop_front();
         }

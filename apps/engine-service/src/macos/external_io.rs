@@ -6,7 +6,10 @@ use crate::macos_pacing::Publication;
 use mixrelay_audio_engine::{ExternalBinding, ExternalIo};
 use mixrelay_audio_io::capture_alignment::CaptureFrontier;
 use mixrelay_audio_io::process::{ProcessCycle, TransferOutcome};
-use mixrelay_macos_transport::source_registry::{GraphCredit, ReadMiss};
+use mixrelay_macos_transport::{
+    application_clock::ConsumerRoute,
+    source_registry::{GraphCredit, ReadMiss},
+};
 
 /// Time-addressed source reads without PCM, by reason, and the shared-cursor
 /// reacquisitions they caused. Plain counters owned by the graph worker thread.
@@ -130,6 +133,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
             self.devices
                 .set_binding_active(binding.node_id().as_str(), false, enabled);
         }
+        publish_routes(&controls);
         let mut active = 0;
         let mut latest = None::<CaptureFrontier>;
         let mut source_period = None;
@@ -283,6 +287,46 @@ impl ExternalIo for MacEngineExternalIo<'_> {
             .write(binding.node_id().as_str(), source, self.host)
             .unwrap_or_else(|| TransferOutcome::complete(0))
     }
+}
+
+/// Publishes how this plan uses each virtual source to its producer.
+fn publish_routes(controls: &mixrelay_audio_engine::ExternalControlState<'_>) {
+    if let Some(sources) = endpoint_service::virtual_source_registry() {
+        let device_clocked = controls.sinks().len() != 0
+            || controls
+                .sources()
+                .any(|(binding, _)| !shared_source(binding));
+        for (token, route) in plan_routes(controls.sources(), device_clocked) {
+            sources.set_consumer_route(token, route);
+        }
+    }
+}
+
+/// How a plan uses each virtual source. A source is routed while its node is on and
+/// carries it to an output. A plan without device-clocked bindings is paced by its
+/// first routed shared source, which the pacer awaits and so consumes from its first
+/// credit; only that source is the head consumer of PCM retained before admission.
+pub(super) fn plan_routes<'a>(
+    sources: impl Iterator<Item = (&'a ExternalBinding, bool)>,
+    device_clocked: bool,
+) -> impl Iterator<Item = (u64, ConsumerRoute)> {
+    sources
+        .scan(!device_clocked, |head, (binding, enabled)| {
+            let routed = enabled && binding.is_routed_source();
+            let paces = routed && *head;
+            *head &= !routed;
+            let route = if routed {
+                ConsumerRoute::Routed { head: paces }
+            } else {
+                ConsumerRoute::Unrouted
+            };
+            Some(
+                binding
+                    .virtual_endpoint_id()
+                    .map(|_| (binding_token(binding), route)),
+            )
+        })
+        .flatten()
 }
 
 /// Application captures and virtual endpoints are served by a source registry.

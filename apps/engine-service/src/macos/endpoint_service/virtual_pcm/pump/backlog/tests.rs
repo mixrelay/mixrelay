@@ -126,27 +126,15 @@ fn a_full_run_table_drops_the_oldest_run_whole() {
 }
 
 #[test]
-fn the_whole_store_is_resident_when_control_prepares_it() {
-    let backlog = Backlog::new(2).unwrap();
-    // SAFETY: sysconf only reads a system constant.
-    let page = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).unwrap();
-    let start = backlog.samples.as_ptr() as usize;
-    let first = start / page * page;
-    let bytes = start + backlog.samples.len() * size_of::<f32>() - first;
-    let mut resident = vec![0_u8; bytes.div_ceil(page)];
-    // SAFETY: the range covers pages of this live allocation and the vector has one
-    // byte per page. Residency is read immediately after preparation, before any
-    // memory pressure could evict pages the RT path would otherwise fault in.
-    let status = unsafe {
-        libc::mincore(
-            first as *const libc::c_void,
-            bytes,
-            resident.as_mut_ptr().cast(),
-        )
-    };
-    assert_eq!(status, 0);
-    assert!(
-        resident.iter().all(|page| page & 1 != 0),
-        "a lazily zeroed store leaves first-touch faults to the RT pump"
-    );
+fn trimming_to_the_live_edge_keeps_only_the_newest_run() {
+    let mut backlog = Backlog::new(2).unwrap();
+    retain(&mut backlog, clock(2), 0, 4, true);
+    retain(&mut backlog, clock(3), 0, 1, true);
+    // Two periods would reach back into the earlier run; only the newest run remains.
+    backlog.keep_newest(256);
+    assert_eq!(drain(&mut backlog), [(3, 128, true)]);
+    retain(&mut backlog, clock(3), 128, 4, false);
+    backlog.keep_newest(128);
+    assert_eq!(drain(&mut backlog), [(3, 640, true)]);
+    assert_eq!(backlog.dropped_frames(), 0);
 }

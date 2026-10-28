@@ -77,7 +77,7 @@ fn shared_client_pcm_preserves_signal_and_silence_across_independent_reader_gaps
     registry.read_audio(token, &mut output, 128, 48_000);
     assert!(registry.set_clock_master(token, true));
     let clock = transport.clock().unwrap();
-    let mut converter = Converter::new(&mut transport, clock, (48_000, 2, 16_384))
+    let mut converter = Converter::new(&mut transport, clock, (48_000, 2))
         .unwrap()
         .unwrap();
     let (writer, queues) = client_grants();

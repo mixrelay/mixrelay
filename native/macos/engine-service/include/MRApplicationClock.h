@@ -5,7 +5,7 @@
 #include <stdint.h>
 /* Current shared application clock ABI. Policy and initialization live in Rust;
  * C producers access only these atomics and the exported functions below. */
-enum { MR_APPLICATION_CLOCK_VERSION = 6U, MR_APPLICATION_CLOCK_ALIGNMENT = 64U };
+enum { MR_APPLICATION_CLOCK_VERSION = 7U, MR_APPLICATION_CLOCK_ALIGNMENT = 64U };
 #define MR_APPLICATION_CLOCK_MAGIC UINT64_C(0x4d52415050434c4b)
 #define MR_APPLICATION_CLOCK_FRAME_MASK UINT64_C(0x0000ffffffffffff)
 typedef struct MRApplicationClock {
@@ -36,6 +36,7 @@ typedef struct MRApplicationClock {
     _Atomic uint32_t insufficient_headroom;
     _Atomic uint64_t source_sample_faults;
     _Atomic int32_t consumer_phase;
+    _Atomic uint32_t consumer_route;
     _Atomic uint64_t consumer_period;
 } MRApplicationClock;
 size_t mr_application_clock_required_bytes(uint32_t capacity, uint32_t channels);

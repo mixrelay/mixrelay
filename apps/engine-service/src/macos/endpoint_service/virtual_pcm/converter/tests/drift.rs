@@ -50,7 +50,7 @@ impl Producer {
         // A device-paced graph is not this source's clock master: conversion is sinc.
         let _ = registry.source_time(source_token("virtual:fixture"), RATE, 128);
         let clock = transport.clock().unwrap();
-        let converter = Converter::new(&mut transport, clock, (RATE, 2, 16_384))
+        let converter = Converter::new(&mut transport, clock, (RATE, 2))
             .unwrap()
             .unwrap();
         let (writer, queues) = client_grants();

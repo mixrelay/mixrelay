@@ -93,6 +93,7 @@ fn run_audio_worker(
     let mut active_devices = crate::macos_devices::DeviceSet::default();
     let mut timeline = MacTimeline::new();
     let mut pacers = NativePacers::default();
+    let mut routes = pacing::PlanRoutes::default();
     let mut awaiting_format = false;
     let mut runtime = worker_runtime::WorkerRuntime::new();
     // Whether a direct (IOProc-rendered) plan must be looked for again. Looking allocates
@@ -101,6 +102,7 @@ fn run_audio_worker(
     let mut direct_recheck = true;
     let mut direct_checked = Instant::now();
     let result = (|| {
+        runtime.off_realtime(|| routes.activate(processor.plan()));
         while !runtime_status.stop_requested() {
             if runtime_status.checkpoint() {
                 timeline.reset();
@@ -115,18 +117,12 @@ fn run_audio_worker(
             if context.activate(&mut processor, &mut active_devices, &mut activation) {
                 timeline.reset();
                 pacers = NativePacers::default();
+                runtime.off_realtime(|| routes.activate(processor.plan()));
                 direct_recheck = true;
             }
             let format = processor.plan().format();
             if !active_devices.processing_ready(format.sample_rate) {
-                if !std::mem::replace(&mut awaiting_format, true) {
-                    runtime.off_realtime(|| {
-                        tracing::info!(
-                            processing_rate = format.sample_rate,
-                            "CoreAudio rendering gated until device format is ready"
-                        );
-                    });
-                }
+                log_format_gate(&mut runtime, &mut awaiting_format, true, format.sample_rate);
                 runtime_status.observe_clock_idle();
                 timeline.reset();
                 pacers = NativePacers::default();
@@ -134,14 +130,12 @@ fn run_audio_worker(
                 runtime.off_realtime(|| std::thread::sleep(Duration::from_millis(1)));
                 continue;
             }
-            if std::mem::take(&mut awaiting_format) {
-                runtime.off_realtime(|| {
-                    tracing::info!(
-                        processing_rate = format.sample_rate,
-                        "CoreAudio device format ready; rendering admitted"
-                    );
-                });
-            }
+            log_format_gate(
+                &mut runtime,
+                &mut awaiting_format,
+                false,
+                format.sample_rate,
+            );
             runtime_status.activate_format(format);
             if direct_recheck || direct_checked.elapsed() >= Duration::from_secs(1) {
                 direct_recheck = false;
@@ -168,6 +162,31 @@ fn run_audio_worker(
     })();
     runtime.finish();
     result
+}
+
+/// Logs entering and leaving the device-format gate once per change, off realtime.
+fn log_format_gate(
+    runtime: &mut worker_runtime::WorkerRuntime,
+    awaiting: &mut bool,
+    gated: bool,
+    processing_rate: u32,
+) {
+    if std::mem::replace(awaiting, gated) == gated {
+        return;
+    }
+    runtime.off_realtime(|| {
+        if gated {
+            tracing::info!(
+                processing_rate,
+                "CoreAudio rendering gated until device format is ready"
+            );
+        } else {
+            tracing::info!(
+                processing_rate,
+                "CoreAudio device format ready; rendering admitted"
+            );
+        }
+    });
 }
 
 /// Hands rendering to a device `IOProc` when a direct plan exists, and supervises it until

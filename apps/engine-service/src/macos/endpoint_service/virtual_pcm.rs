@@ -13,7 +13,7 @@ use std::{
     collections::BTreeMap,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
 };
@@ -66,9 +66,11 @@ impl Endpoint {
         let context = pump::Pump::prepare(
             queues,
             transport,
-            update.clone(),
-            stop.clone(),
-            updated.clone(),
+            pump::Signals {
+                update: update.clone(),
+                updated: updated.clone(),
+                stop: stop.clone(),
+            },
         )?;
         let worker = thread::Builder::new().name("mixrelay-virtual-input".into()).spawn(move || {
             if let Err(error) = context.run() {
@@ -98,12 +100,15 @@ impl Drop for Endpoint {
 pub(super) struct VirtualPcm {
     pub(super) sources: SourceRegistry,
     endpoints: parking_lot::Mutex<BTreeMap<[u8; 16], Endpoint>>,
+    /// Counts `clear` calls, so endpoints prepared outside the lock never outlive one.
+    cleared: AtomicU64,
 }
 impl VirtualPcm {
     pub(super) fn new() -> Self {
         Self {
             sources: SourceRegistry::new(),
             endpoints: parking_lot::Mutex::new(BTreeMap::new()),
+            cleared: AtomicU64::new(0),
         }
     }
     pub(super) fn replace(&self, queues: Vec<ClientPcmReader>) -> Result<(), Error> {
@@ -128,16 +133,21 @@ impl VirtualPcm {
             return Err(Error::Geometry);
         }
         let mut endpoints = self.endpoints.lock();
-        endpoints.retain(|id, endpoint| {
-            groups.get(id).is_some_and(|queues| {
-                endpoint
-                    .worker
-                    .as_ref()
-                    .is_some_and(|worker| !worker.is_finished())
-                    && endpoint.channels == queues[0].capture_channels()
-                    && endpoint.capacity == queues[0].capacity()
+        // Ended or reshaped endpoints leave the map here; their workers join after unlock.
+        let mut retired: Vec<Endpoint> = endpoints
+            .extract_if(.., |id, endpoint| {
+                !groups.get(id).is_some_and(|queues| {
+                    endpoint
+                        .worker
+                        .as_ref()
+                        .is_some_and(|worker| !worker.is_finished())
+                        && endpoint.channels == queues[0].capture_channels()
+                        && endpoint.capacity == queues[0].capacity()
+                })
             })
-        });
+            .map(|(_, endpoint)| endpoint)
+            .collect();
+        let mut starts = Vec::new();
         for (id, queues) in groups {
             log_grants(&queues, !endpoints.contains_key(&id));
             if let Some(endpoint) = endpoints.get(&id) {
@@ -145,13 +155,47 @@ impl VirtualPcm {
                 // Release publishes the prepared replacement before the pump takes it on control.
                 endpoint.updated.store(true, Ordering::Release);
             } else {
-                endpoints.insert(id, Endpoint::start(&self.sources, queues)?);
+                starts.push((id, queues));
             }
         }
-        Ok(())
+        // Acquire pairs with `clear`; a clear while endpoints are prepared discards them.
+        let generation = self.cleared.load(Ordering::Acquire);
+        drop(endpoints);
+        drop(std::mem::take(&mut retired));
+        // Sources and retention stores are prepared without holding the endpoint lock.
+        let mut started = Vec::with_capacity(starts.len());
+        let mut result = Ok(());
+        for (id, queues) in starts {
+            match Endpoint::start(&self.sources, queues) {
+                Ok(endpoint) => started.push((id, endpoint)),
+                Err(error) => {
+                    result = Err(error);
+                    break;
+                }
+            }
+        }
+        let mut endpoints = self.endpoints.lock();
+        if self.cleared.load(Ordering::Acquire) == generation {
+            // An overlapping snapshot may have started the same endpoint meanwhile; the
+            // later insertion wins and the displaced one retires.
+            for (id, endpoint) in started {
+                retired.extend(endpoints.insert(id, endpoint));
+            }
+        } else {
+            retired.extend(started.into_iter().map(|(_, endpoint)| endpoint));
+        }
+        drop(endpoints);
+        // Joining retired workers happens after the lock is released.
+        drop(retired);
+        result
     }
     pub(super) fn clear(&self) {
-        self.endpoints.lock().clear();
+        let mut endpoints = self.endpoints.lock();
+        // Release under the lock orders this clear before any later insertion check.
+        self.cleared.fetch_add(1, Ordering::Release);
+        let retired = std::mem::take(&mut *endpoints);
+        drop(endpoints);
+        drop(retired);
     }
 }
 

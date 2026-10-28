@@ -81,7 +81,7 @@ fn consumer_publication_during_converter_setup_keeps_the_new_epoch_and_pcm() {
     let consumer = unsafe { &*mapping.clock };
     consumer.consumer_sequence.fetch_add(1, Ordering::AcqRel);
     assert_eq!(transport.observe_clock(), SourceClockRead::Deferred);
-    let mut converter = Converter::new(&mut transport, before, (48_000, 2, 16_384))
+    let mut converter = Converter::new(&mut transport, before, (48_000, 2))
         .unwrap()
         .expect("producer reset is independent of the busy consumer snapshot");
     assert_eq!(transport.observe_clock(), SourceClockRead::Deferred);

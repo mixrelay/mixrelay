@@ -1,9 +1,10 @@
 //! One bounded virtual-input reader owns mixing, retention, conversion and publication.
 //!
-//! Every cycle drains each client queue up to the native playhead into the engine's
-//! backlog, whether or not the graph has admitted a format, so the HAL queues only
-//! cover pump scheduling. Conversion takes the backlog in native order, with each
-//! frame at its original native coordinate, a bounded number of periods per cycle.
+//! Every cycle drains each client queue up to the native playhead. While the graph's
+//! active plan routes this source, the PCM is retained in the engine's backlog whether
+//! or not the graph has admitted a format; while it does not, the queue drains and
+//! nothing is retained. Conversion takes the backlog in native order, with each frame
+//! at its original native coordinate, within a bounded amount of work per cycle.
 mod backlog;
 mod report;
 #[cfg(test)]
@@ -11,50 +12,87 @@ mod tests;
 
 use super::{
     Error, cadence,
-    converter::Converter,
+    converter::{BRIDGE_FRAMES, Converter, PRIMING_FRAMES},
     scheduling::{self, Scheduling},
 };
-use backlog::{Backlog, Chunk};
+use backlog::{Backlog, Chunk, Timeline, timeline};
 use mixrelay_macos_transport::{
+    application_clock::ConsumerRoute,
     application_source_transport::{SourceClockRead, SourceClockSnapshot, SourceTransport},
     client_pcm::{ClientPcmClock, ClientPcmMixer, ClientPcmReader, MixError, QUEUE_FRAMES},
 };
 use mixrelay_realtime::{Timebase, host_time};
 use report::Report;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
 };
 
-/// Converter periods per cycle: the live period and seven of catch-up. A source admitted
-/// four seconds late catches up in 0.6 s, and a full retention (5.5 s at 192 kHz) in
-/// 0.8 s, while one cycle converts at most 1,024 native frames, never the whole backlog.
-/// Graph credit grows by the same bound, in publication order.
+/// Converter periods per cycle: the live period and up to seven of catch-up. A source
+/// admitted four seconds late catches up in 0.6 s, and a full retention (5.5 s at
+/// 192 kHz) in 0.8 s, while a cycle never converts the whole backlog at once. Graph
+/// credit grows by the same bound, in publication order.
 const FEED_PERIODS: usize = 8;
+/// Channel-frames the sinc resampler may convert in one cycle at 48 kHz, scaled by the
+/// period at other rates. The 256-tap bridge measured 99 ns per channel-frame in stereo
+/// and 32 ns at 64 channels (release build, Apple M2 Pro), so this budget costs 0.41 ms
+/// in stereo and 0.13 ms at 64 channels there, against the 1.07 ms computation budget
+/// of a 48 kHz period. Slower hosts, the Intel CI runners among them, were not
+/// measured; the budget assumes they are at most 2.5 times slower. Stereo keeps all
+/// eight periods up to 96 kHz and four at 192 kHz; from 16 channels at 48 kHz the
+/// two-period floor applies.
+const SINC_FRAMES_AT_48K: usize = 4_096;
+/// Catch-up must outpace the live period, or a backlog would never drain.
+const MIN_FEED_PERIODS: usize = 2;
 /// Mix windows covering a full client queue, so one cycle drains it after any stall.
 const DRAIN_WINDOWS: u32 = QUEUE_FRAMES / cadence::FRAMES + 1;
+/// Longest wait at a run boundary of a head stream for its consumer to read the current
+/// epoch, whose unread PCM a new epoch would discard. Only the head consumer reads an
+/// epoch from its first credit, so only its unread catch-up can be large; it reads its
+/// credit within a few periods, and a stalled one does not hold the new run longer.
+const BOUNDARY_WAIT: Duration = Duration::from_millis(200);
+const _: () = assert!(
+    BRIDGE_FRAMES >= FEED_PERIODS * cadence::FRAMES as usize + PRIMING_FRAMES + 256,
+    "the bridge holds a cycle of catch-up, its priming and the 256-tap sinc history"
+);
+
+/// Control-owned signals shared with one pump.
+pub(super) struct Signals {
+    pub(super) update: Arc<parking_lot::Mutex<Option<Vec<ClientPcmReader>>>>,
+    pub(super) updated: Arc<AtomicBool>,
+    pub(super) stop: Arc<AtomicBool>,
+}
 
 pub(super) struct Pump {
     queues: Vec<ClientPcmReader>,
     transport: SourceTransport,
-    update: Arc<parking_lot::Mutex<Option<Vec<ClientPcmReader>>>>,
-    updated: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
+    signals: Signals,
     input: Vec<f32>,
     scratch: Vec<f32>,
     times: Vec<u64>,
     mixer: ClientPcmMixer,
     backlog: Backlog,
     converter: Option<Converter>,
+    /// The native timeline of the PCM last pushed into the converter.
+    stream: Option<Timeline>,
+    /// Whether the current stream started for the plan's head consumer.
+    head: bool,
+    /// When the feed first stopped at the current run boundary.
+    boundary: Option<u64>,
+    /// The last published route left the source unrouted: routing starts retention.
+    unrouted: bool,
+    /// Queue skips while the source was not routed, which are not losses.
+    unwanted_skips: u64,
     report: Report,
 }
 impl Pump {
     pub(super) fn prepare(
         queues: Vec<ClientPcmReader>,
         transport: SourceTransport,
-        update: Arc<parking_lot::Mutex<Option<Vec<ClientPcmReader>>>>,
-        stop: Arc<AtomicBool>,
-        updated: Arc<AtomicBool>,
+        signals: Signals,
     ) -> Result<Self, Error> {
         let channels = queues.first().ok_or(Error::Geometry)?.capture_channels() as usize;
         let input =
@@ -66,15 +104,18 @@ impl Pump {
         Ok(Self {
             queues,
             transport,
-            update,
-            updated,
-            stop,
+            signals,
             input,
             scratch,
             times,
             mixer: ClientPcmMixer::default(),
             backlog: Backlog::new(channels)?,
             converter: None,
+            stream: None,
+            head: false,
+            boundary: None,
+            unrouted: false,
+            unwanted_skips: 0,
             report: Report::new(host_time()),
         })
     }
@@ -82,12 +123,12 @@ impl Pump {
         let timebase = Timebase::current();
         let scheduling = Scheduling::new();
         let result = (|| {
-            while !self.stop.load(Ordering::Acquire) {
+            while !self.signals.stop.load(Ordering::Acquire) {
                 // AcqRel consumes a control notification; the replacement mutex
                 // is entered only after demotion, outside the PCM transfer.
-                if self.updated.swap(false, Ordering::AcqRel) {
+                if self.signals.updated.swap(false, Ordering::AcqRel) {
                     scheduling.outside(|| {
-                        if let Some(queues) = self.update.lock().take() {
+                        if let Some(queues) = self.signals.update.lock().take() {
                             self.queues = queues;
                         }
                     });
@@ -106,9 +147,9 @@ impl Pump {
         result.and(demoted)
     }
 
-    /// One period: native stop, then retention of every readable client frame, then
-    /// bounded conversion. Returns the native clock whose next period ends the wait,
-    /// or `None` for a control poll while the source handshake is pending.
+    /// One period: native stop, then the plan's route, retention of every readable
+    /// client frame, and bounded conversion. Returns the native clock whose next period
+    /// ends the wait, or `None` for a control poll during a handshake.
     fn cycle(
         &mut self,
         now: u64,
@@ -125,9 +166,26 @@ impl Pump {
             // unpublished PCM is not read, so its retained run ends here as well.
             self.transport.stop_native();
             self.report.stopped(self.backlog.clear());
+            self.stream = None;
+            self.boundary = None;
             return Ok(Some(native));
         }
-        self.retain(now, timebase)?;
+        match self.transport.consumer_route() {
+            // A plan publishes each source's route on its next cycle; until then the
+            // client PCM stays in its queue.
+            ConsumerRoute::Unknown => return Ok(native),
+            ConsumerRoute::Unrouted => {
+                self.unrouted = true;
+                self.discard(now, timebase)?;
+                return Ok(native);
+            }
+            // PCM queued before the route is not delivered: routing starts retention.
+            ConsumerRoute::Routed { .. } if std::mem::take(&mut self.unrouted) => {
+                self.discard(now, timebase)?;
+                return Ok(native);
+            }
+            ConsumerRoute::Routed { .. } => self.drain(now, timebase, true)?,
+        }
         if let Some(losses) = self.report.due_losses(now, timebase, self.losses()) {
             scheduling.outside(|| losses.log());
         }
@@ -146,12 +204,25 @@ impl Pump {
     }
 
     fn losses(&self) -> (u64, u64) {
-        (self.mixer.skipped_frames(), self.backlog.dropped_frames())
+        (
+            self.mixer.skipped_frames() - self.unwanted_skips,
+            self.backlog.dropped_frames(),
+        )
     }
 
-    /// Moves every published client frame up to the native playhead into the backlog.
-    fn retain(&mut self, now: u64, timebase: Timebase) -> Result<(), Error> {
+    /// Ends retention and drains the queues without retaining.
+    fn discard(&mut self, now: u64, timebase: Timebase) -> Result<(), Error> {
+        self.backlog.clear();
+        self.stream = None;
+        self.boundary = None;
+        self.drain(now, timebase, false)
+    }
+
+    /// Moves every published client frame up to the native playhead into the backlog,
+    /// or past it when nothing is retained.
+    fn drain(&mut self, now: u64, timebase: Timebase, retain: bool) -> Result<(), Error> {
         let channels = self.input.len() / 128;
+        let skipped = self.mixer.skipped_frames();
         for _ in 0..DRAIN_WINDOWS {
             let Some(window) = self.mixer.window(&self.queues, |clock| {
                 cadence::frame(
@@ -161,22 +232,38 @@ impl Pump {
             }) else {
                 break;
             };
-            let input = &mut self.input[..window.frames as usize * channels];
-            match ClientPcmMixer::mix(&self.queues, window, input, &mut self.scratch) {
-                Ok(()) => {}
-                // A clock or membership change in progress; the next cycle sees it settled.
-                Err(MixError::Changed) => break,
-                Err(MixError::Geometry) => return Err(Error::Geometry),
+            if retain {
+                let input = &mut self.input[..window.frames as usize * channels];
+                match ClientPcmMixer::mix(&self.queues, window, input, &mut self.scratch) {
+                    Ok(()) => {}
+                    // A clock or membership change in progress; the next cycle sees it settled.
+                    Err(MixError::Changed) => break,
+                    Err(MixError::Geometry) => return Err(Error::Geometry),
+                }
+                self.backlog.push(window, input);
+                self.report.retained(now);
             }
-            self.backlog.push(window, input);
             self.mixer.commit(window);
-            self.report.retained(now);
+        }
+        if !retain {
+            self.unwanted_skips += self.mixer.skipped_frames() - skipped;
         }
         Ok(())
     }
 
-    /// Converts retained PCM in native order, at most `FEED_PERIODS` windows. Each
-    /// window observes the source again: a new converter commits a new epoch.
+    /// Periods one cycle may convert: all of `FEED_PERIODS` for a same-clock copy, and
+    /// a channel-frame budget scaled by the native period through the sinc resampler.
+    fn feed_periods(&self, clock: SourceClockSnapshot, rate: u32) -> usize {
+        if clock.clock_master != 0 && clock.format_word & u64::from(u32::MAX) == u64::from(rate) {
+            return FEED_PERIODS;
+        }
+        let channels = self.input.len() / 128;
+        (SINC_FRAMES_AT_48K * 48_000 / rate.max(1) as usize / (128 * channels.max(1)))
+            .clamp(MIN_FEED_PERIODS, FEED_PERIODS)
+    }
+
+    /// Converts retained PCM in native order within the cycle's bound. Each window
+    /// observes the source again: a new stream commits a new epoch.
     fn feed(
         &mut self,
         mut clock: SourceClockSnapshot,
@@ -186,8 +273,12 @@ impl Pump {
     ) -> Result<bool, Error> {
         let mut published = 0;
         let mut ready = true;
-        for period in 0..FEED_PERIODS {
-            let Some(chunk) = self.backlog.peek(128) else {
+        let periods = self
+            .backlog
+            .peek(128)
+            .map_or(0, |first| self.feed_periods(clock, first.clock.rate));
+        for period in 0..periods {
+            let Some(mut chunk) = self.backlog.peek(128) else {
                 break;
             };
             if period != 0 {
@@ -200,68 +291,120 @@ impl Pump {
                     SourceClockRead::Revoked => return Err(Error::Stale),
                 };
             }
-            ready = self.configure(chunk, clock, now, scheduling)?
-                && self.transfer(chunk, clock, timebase)?;
-            if !ready {
+            let restart = chunk.restart
+                || self
+                    .converter
+                    .as_ref()
+                    .is_none_or(|converter| !converter.current(clock, chunk.clock.rate));
+            if restart {
+                // A new epoch discards unread PCM of the current one: end this cycle's
+                // feed at the boundary, then wait for the consumer to read it.
+                if published != 0 || !self.boundary_read(clock, now, timebase) {
+                    break;
+                }
+                let head = self.transport.consumer_route() == ConsumerRoute::Routed { head: true };
+                if !head {
+                    // Only the plan's head consumer reads from its first credit. Any other
+                    // joins at the live edge, so its cursor and the shared capture
+                    // frontier never move back to a retained head.
+                    self.backlog.keep_newest(u64::from(cadence::FRAMES));
+                    let Some(newest) = self.backlog.peek(128) else {
+                        break;
+                    };
+                    chunk = newest;
+                }
+                if !self.restart(chunk, clock, now, scheduling)? {
+                    ready = false;
+                    break;
+                }
+                self.head = head;
+            }
+            if !self.transfer(chunk, clock, timebase)? {
+                ready = false;
                 break;
             }
             published += chunk.frames;
         }
-        if published != 0 {
-            if self.report.awaiting_publication() {
-                scheduling.outside(|| self.report.log_admission(now, timebase, published));
+        if published == 0 {
+            if ready {
+                self.flush_idle(clock)?;
             }
-        } else if ready
-            && let Some(converter) = self.converter.as_mut()
-            && converter.acknowledged(clock)
-        {
-            // Drain a deferred final output even when no retained input remains.
-            let _ = converter.flush(&mut self.transport)?;
+        } else if self.report.awaiting_publication() {
+            scheduling.outside(|| self.report.log_admission(now, timebase, published));
         }
         Ok(ready)
     }
 
-    fn configure(
+    /// Whether a new epoch may start: the current stream is not a head stream, or its
+    /// consumer has read it, has stopped reading it, or has had `BOUNDARY_WAIT`.
+    fn boundary_read(&mut self, clock: SourceClockSnapshot, now: u64, timebase: Timebase) -> bool {
+        if !self.head
+            || self.converter.is_none()
+            || clock.produced_frames == 0
+            || clock.consumer_running == 0
+            || clock.consumed_frames >= clock.produced_frames
+        {
+            return true;
+        }
+        let since = *self.boundary.get_or_insert(now);
+        now.saturating_sub(since) >= timebase.ticks(BOUNDARY_WAIT)
+    }
+
+    /// Starts a new source epoch for `chunk`, reusing the converter's storage when its
+    /// geometry is unchanged. Returns false when the format acknowledgement defers.
+    fn restart(
         &mut self,
         chunk: Chunk,
         clock: SourceClockSnapshot,
         now: u64,
         scheduling: &Scheduling,
     ) -> Result<bool, Error> {
-        if chunk.restart
-            || self
-                .converter
-                .as_ref()
-                .is_none_or(|converter| !converter.current(clock, chunk.clock.rate))
-        {
-            let native = (
-                chunk.clock.rate,
-                self.input.len() / 128,
-                mixrelay_audio_io::retention::RING_FRAMES,
-            );
-            let result = scheduling.outside(|| {
+        let reused = match self.converter.as_mut() {
+            Some(converter) if converter.reusable(clock, chunk.clock.rate) => {
+                Some(converter.restart(&mut self.transport, clock))
+            }
+            _ => None,
+        };
+        let started = match reused {
+            Some(started) => started,
+            None => scheduling.outside(|| {
                 scheduling.retune(chunk.clock.rate);
+                let native = (chunk.clock.rate, self.input.len() / 128);
                 let Some(converter) = Converter::new(&mut self.transport, clock, native)? else {
-                    self.report.deferred();
                     return Ok::<bool, Error>(false);
                 };
                 self.converter = Some(converter);
-                self.report.converter_ready(
-                    now,
-                    chunk.clock,
-                    clock.format_word & u64::from(u32::MAX),
-                    self.backlog.frames(),
-                );
                 Ok(true)
-            });
-            // Deferred format acknowledgment keeps the retained PCM and cannot leave
-            // an old converter attached to a newly committed epoch.
-            if !result? {
-                return Ok(false);
-            }
-            self.backlog.restarted();
+            })?,
+        };
+        if !started {
+            // Deferred acknowledgement keeps the retained PCM and cannot leave an old
+            // converter attached to a newly committed epoch.
+            self.report.deferred();
+            return Ok(false);
         }
+        self.report.converter_ready(
+            now,
+            chunk.clock,
+            clock.format_word & u64::from(u32::MAX),
+            self.backlog.frames(),
+        );
+        self.backlog.restarted();
+        self.boundary = None;
         Ok(true)
+    }
+
+    /// Writes converted output left by a failed publication while its stream is still
+    /// wanted. A stopped or unwanted timeline ends the stream, so its output can never
+    /// restore credit or running state after `stop_native`.
+    fn flush_idle(&mut self, clock: SourceClockSnapshot) -> Result<(), Error> {
+        if let Some(converter) = self.converter.as_mut()
+            && converter.acknowledged(clock)
+            && self.stream.is_some()
+        {
+            let _ = converter.flush(&mut self.transport)?;
+        }
+        Ok(())
     }
 
     fn transfer(
@@ -287,6 +430,7 @@ impl Pump {
         }
         converter.push(&mut self.transport, input, &self.times[..chunk.frames])?;
         self.backlog.consume(chunk.frames);
+        self.stream = Some(timeline(chunk.clock));
         let graph_rate = clock.format_word & u64::from(u32::MAX);
         // One period's publication, also during catch-up: the consumer keeps the largest
         // burst as its reserve for the whole epoch, and its credit already spans catch-up.

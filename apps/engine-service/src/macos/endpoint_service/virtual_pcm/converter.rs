@@ -15,6 +15,14 @@ use mixrelay_macos_transport::application_source_transport::{
 /// at a skipped frame moves the ratio by only 10 ppm.
 const PHASE_PPM_PER_FRAME: f64 = 20.0;
 
+/// Bridge input FIFO, in native frames. The pump pushes one period and flushes it before
+/// the next, so the FIFO holds at most a period below the converter's input batch plus
+/// that period. The size also covers a whole cycle of catch-up, priming and the sinc
+/// history, so it never limits the pump's bounded feed.
+pub(super) const BRIDGE_FRAMES: usize = 2_048;
+/// Input frames converted before the first output, and the converter's input batch.
+pub(super) const PRIMING_FRAMES: usize = 128;
+
 pub(super) struct Converter {
     bridge: AsyncClockBridge,
     format: u64,
@@ -28,12 +36,18 @@ pub(super) struct Converter {
     drain_limit: usize,
 }
 impl Converter {
+    /// Acknowledges the requested format, then prepares conversion storage, so a deferred
+    /// acknowledgement allocates nothing. An allocation failure ends the pump, and its
+    /// dropped transport withdraws the acknowledgement with its lease.
     pub(super) fn new(
         transport: &mut SourceTransport,
         clock: SourceClockSnapshot,
-        native: (u32, usize, u32),
+        native: (u32, usize),
     ) -> Result<Option<Self>, Error> {
-        let (rate, channels, capacity) = native;
+        let (rate, channels) = native;
+        let Some(epoch) = transport.begin_epoch(clock.format_word, rate) else {
+            return Ok(None);
+        };
         let output_rate = u32::try_from(clock.format_word & u64::from(u32::MAX)).unwrap_or(0);
         let mut bridge = AsyncClockBridge::new(BridgeConfig {
             channels,
@@ -41,8 +55,8 @@ impl Converter {
             output_rate,
             max_input_frames: 128,
             max_output_frames: 128,
-            capacity_frames: capacity as usize,
-            priming_frames: 128,
+            capacity_frames: BRIDGE_FRAMES,
+            priming_frames: PRIMING_FRAMES,
             clock_relation: if clock.clock_master != 0 {
                 ClockRelation::ProvenSameClock
             } else {
@@ -55,9 +69,6 @@ impl Converter {
             mixrelay_audio_io::pcm_buffer::zeroed(128 * channels).map_err(std::io::Error::other)?;
         let times =
             mixrelay_audio_io::pcm_buffer::timestamps(128).map_err(std::io::Error::other)?;
-        let Some(epoch) = transport.begin_epoch(clock.format_word, rate) else {
-            return Ok(None);
-        };
         bridge.reset(epoch, Discontinuity::StreamRestart);
         Ok(Some(Self {
             bridge,
@@ -69,9 +80,33 @@ impl Converter {
             output,
             times,
             pending: 0,
-            // A bounded queue can hold at most this many complete output chunks.
-            drain_limit: capacity as usize / 128 + 2,
+            // One flush converts at most a full FIFO; each pull moves 128 output frames.
+            drain_limit: (BRIDGE_FRAMES * output_rate as usize)
+                .div_ceil(rate.max(1) as usize * 128)
+                + 2,
         }))
+    }
+    /// Starts a new source epoch on the same storage when the native rate, format and
+    /// clock relation are unchanged. Returns false when the acknowledgement defers.
+    pub(super) fn restart(
+        &mut self,
+        transport: &mut SourceTransport,
+        clock: SourceClockSnapshot,
+    ) -> bool {
+        let Some(epoch) = transport.begin_epoch(clock.format_word, self.rate) else {
+            return false;
+        };
+        self.bridge.reset(epoch, Discontinuity::StreamRestart);
+        self.epoch = epoch;
+        self.ticks = clock.consumer_ticks;
+        self.pending = 0;
+        true
+    }
+    /// Whether `restart` can keep this storage for the requested stream.
+    pub(super) fn reusable(&self, clock: SourceClockSnapshot, rate: u32) -> bool {
+        self.format == clock.format_word
+            && self.rate == rate
+            && self.master == (clock.clock_master != 0)
     }
     /// The drift correction now applied, in parts per million.
     #[cfg(test)]
@@ -98,6 +133,10 @@ impl Converter {
         transport: &SourceTransport,
         clock: SourceClockSnapshot,
     ) -> Result<(), Error> {
+        // A snapshot from before this stream began describes the previous epoch's queue.
+        if clock.epoch != self.epoch {
+            return Ok(());
+        }
         let elapsed = clock.consumer_ticks.saturating_sub(self.ticks);
         self.ticks = clock.consumer_ticks;
         let rate = self.format & u64::from(u32::MAX);
@@ -172,5 +211,10 @@ impl Converter {
         }
         self.bridge.push_timed_interleaved(input, times)?;
         Ok(())
+    }
+    /// Leaves converted output unwritten, as a failed publication would.
+    #[cfg(test)]
+    pub(super) fn hold_output(&mut self, frames: usize) {
+        self.pending = frames;
     }
 }

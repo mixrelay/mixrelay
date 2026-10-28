@@ -191,19 +191,32 @@ native 단위로 재환산해 버리지 않는다. 물리 장치는 기존 하�
 
 `audio-io::retention`은 최대 지원 샘플레이트에서도 최소 4초의 backlog 저장량을 정한다.
 macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭제곱인 1,048,576프레임으로 올림한다.
-가상 입력의 보존은 엔진 pump가 맡는다. pump는 그래프의 포맷 승인·변환기 준비·source 승인과 관계없이
-매 주기 클라이언트 큐를 native playhead까지 비워, endpoint별 backlog에 native rate와 native 좌표 그대로
-보존한다. backlog는 `retention::RING_FRAMES` × endpoint 캡처 채널 수의 Float32(채널당 4MiB, 64채널에서
-256MiB)이며, endpoint를 시작할 때 제어 경로에서 확보하고 모든 페이지를 미리 fault한다. 같은 timeline의
-공백과 timeline 변경은 앞선 run을 유지하고 그 경계에서만 변환 stream을 새 epoch로 다시 시작한다. 가득 차면
-가장 오래된 프레임을 버린다. source가 승인되면 backlog를 원래 좌표의 시각으로 순서대로 변환하되 한 주기에
-최대 8주기(1,024 native 프레임)까지만 변환한다. 늦게 승인된 source도 실시간의 8배 속도로 따라잡고, graph
-credit은 게시한 PCM만큼만 순서대로 늘어난다. native clock이 멈추면 포맷·backlog 상태와 관계없이 먼저 native
-정지를 게시하고 그 timeline의 남은 backlog를 버린다. 큐에서 덮어쓰인 프레임(`ClientPcmMixer::skipped_frames`),
-backlog에서 버린 프레임, 정지 때문에 게시하지 못한 프레임은 제어 경로 경고로 남긴다. grant 수신과 source
-승인(변환기 준비·첫 게시)의 시각은 native sample 0 기준으로 기록한다. 물리 입력의 `HardwarePacer`는 첫
-그래프 승인 때 준비 중 PCM을 버리지만, 앱이 가상 장치에 게시한 PCM은 위의 `ApplicationPacer` 계약대로 첫
-프레임부터 보존한다. HAL 클라이언트 렌더 큐와 endpoint 매핑 링은 `client_pcm::QUEUE_FRAMES`
+가상 입력의 보존은 엔진 pump가 맡는다. pump는 매 주기 클라이언트 큐를 native playhead까지 비운다.
+보존 여부는 그래프가 게시한 route(`ApplicationClock::consumer_route`)로 정한다. 그래프는 주기마다 활성 plan의
+가상 source마다 route를 게시한다. 노드가 켜져 있고 출력까지 이어지면 routed다. 장치 클록 binding이 없는
+plan에서는 첫 routed shared source가 head다. pacer는 그 source를 기다렸다가 첫 credit부터 소비한다.
+worker는 다음 plan에서 빠진 source와, 끝날 때 모든 source를 unrouted로 게시한다. 이 route는 checkpoint나
+렌더링 대기 중에도 바뀌지 않는다. route가 아직 게시되지 않았으면 PCM을 큐에 둔다. unrouted면 큐를 비우기만
+하고 보존하지 않으며, 이를 손실로 세지 않는다. unrouted였던 source가 routed가 되면 그 주기의 큐를 버리고 다음
+주기부터 보존하므로, 연결 전의 오디오는 전달하지 않는다. routed source는 포맷 승인·변환기 준비와 관계없이
+endpoint별 backlog에 native rate와 native 좌표 그대로 보존한다. backlog는 `retention::RING_FRAMES` ×
+endpoint 캡처 채널 수의 Float32(채널당 4MiB, 64채널에서 256MiB)다. endpoint를 시작할 때 endpoint 잠금 밖의
+제어 경로에서 확보하고 미리 fault한다. 같은 timeline의 공백과 timeline 변경은 앞선 run을 유지한다. 가득 차면
+가장 오래된 프레임을 버린다. 새 변환 stream은 원래 좌표의 시각으로 순서대로 변환한다. 보존한 head 전체는 head
+source에만 전달한다. 다른 source에는 첫 게시 전에 가장 새 run의 가장 새 한 주기만 남겨, 합류한 source가 공유
+획득 좌표나 다른 입력을 보존된 head로 되돌리지 않게 한다. head stream의 run 경계에서는 그 주기의 변환을 멈춘다.
+소비자가 현재 epoch를 다 읽거나 읽기를 멈추거나 200ms가 지난 뒤에만 새 epoch를 시작한다. 한 주기의 변환은 최대
+8주기다. sinc 변환은 48kHz 기준 4,096 채널·프레임을 native 주기에 비례해 줄인 예산 안에서 하되 최소 2주기는
+변환한다. 늦게 승인된 head source는 실시간의 8배 속도로 따라잡고, graph credit은 게시한 PCM만큼만 순서대로
+늘어난다. 변환기 bridge의 입력 FIFO는 한 주기분의 따라잡기·priming·sinc 이력을 담는 2,048프레임이다. 변환기는
+포맷 승인 뒤에 저장 공간을 준비하고, 같은 형식의 run 경계에서는 저장 공간을 그대로 다시 쓴다. native clock이
+멈추면 포맷·backlog 상태와 관계없이 먼저 native 정지를 게시하고, 그 timeline의 남은 backlog와 변환 stream을
+끝낸다. 끝난 stream의 변환 출력은 다시 쓰지 않는다. routed source의 큐에서 덮어쓰인 프레임
+(`ClientPcmMixer::skipped_frames`), backlog에서 버린 프레임, 정지 때문에 게시하지 못한 프레임은 제어 경로
+경고로 남긴다. grant 수신과 source 승인(변환기 준비·첫 게시)의 시각은 native sample 0 기준으로 기록한다. 물리
+입력의 `HardwarePacer`는 첫 그래프 승인 때 준비 중 PCM을 버린다. 앱이 가상 장치에 게시한 PCM은 위의
+`ApplicationPacer` 계약대로 head source의 첫 프레임부터 보존한다.
+HAL 클라이언트 렌더 큐와 endpoint 매핑 링은 `client_pcm::QUEUE_FRAMES`
 (65,536프레임)로 준비한다. 쓰는 쪽은 최대 렌더 span(`MAX_RENDER_SPAN_FRAMES`, 장치의 zero timestamp
 period인 16,384프레임)만큼 앞서고 `ReadInput`은 그만큼 뒤처질 수 있으며, 큐는 그 합의 두 배다. 새 익명 매핑은 커널의 0 채움을 사용하므로 ring을 지우지 않고, 준비 단계에서 모든 페이지를
 미리 fault해 HAL IO 스레드가 page fault를 겪지 않게 한다.

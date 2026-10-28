@@ -18,6 +18,11 @@ impl SchedulingClock for Clock {
 }
 
 fn unrouted_virtual_plan() -> RenderPlan {
+    qualification_plan(false)
+}
+
+/// REC-02's graph: one virtual input carried to a recorder, or the input alone.
+fn qualification_plan(routed: bool) -> RenderPlan {
     let mut document: GraphDocument = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../crates/audio-graph/src/fixtures/qualification-stereo.json"
@@ -27,8 +32,10 @@ fn unrouted_virtual_plan() -> RenderPlan {
         panic!("virtual source fixture")
     };
     document.nodes[0].config = NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
-    document.nodes.truncate(1);
-    document.edges.clear();
+    if !routed {
+        document.nodes.truncate(1);
+        document.edges.clear();
+    }
     let execution = GraphCompiler::default()
         .compile(
             &document,
@@ -102,4 +109,37 @@ fn unrouted_virtual_input_negotiates_format_and_stopped_input_cannot_drain_old_p
         mixrelay_audio_io::process::InputActivity::Inactive
     );
     assert_eq!(pcm.map(f32::to_bits), [0.0_f32.to_bits(); 256]);
+}
+
+#[test]
+fn a_plan_routes_its_recorded_virtual_input_as_the_head_consumer_only_without_devices() {
+    let routed = qualification_plan(true);
+    let token = binding_token(&routed.source_bindings()[0]);
+    let published = |plan: &RenderPlan, enabled: bool, device_clocked: bool| -> Vec<_> {
+        plan_routes(
+            plan.source_bindings()
+                .iter()
+                .map(|binding| (binding, enabled)),
+            device_clocked,
+        )
+        .collect()
+    };
+    assert_eq!(
+        published(&routed, true, false),
+        [(token, ConsumerRoute::Routed { head: true })]
+    );
+    // A device clock paces the graph, so the source joins at its live edge.
+    assert_eq!(
+        published(&routed, true, true),
+        [(token, ConsumerRoute::Routed { head: false })]
+    );
+    // An off node and a metered-only input are not routed.
+    assert_eq!(
+        published(&routed, false, false),
+        [(token, ConsumerRoute::Unrouted)]
+    );
+    assert_eq!(
+        published(&unrouted_virtual_plan(), true, false),
+        [(token, ConsumerRoute::Unrouted)]
+    );
 }

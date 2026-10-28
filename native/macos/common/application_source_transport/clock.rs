@@ -1,7 +1,7 @@
 //! Consumer snapshots, producer epoch acknowledgment and native clock metadata.
 use super::{ProducerClaim, SourceTransport, flush_source_faults};
 use crate::{
-    application_clock::{FRAME_MASK, NO_PHASE},
+    application_clock::{ConsumerRoute, FRAME_MASK, NO_PHASE},
     shared_audio_buffer::mr_shared_audio_buffer_try_begin_epoch,
 };
 use std::sync::atomic::Ordering;
@@ -114,6 +114,13 @@ impl SourceTransport {
                 period_ns: period,
                 phase_ns: (phase != NO_PHASE).then_some(phase),
             })
+    }
+
+    /// How the consumer's active plan uses this source.
+    #[must_use]
+    pub fn consumer_route(&self) -> ConsumerRoute {
+        // Acquire pairs with the consumer's publication of its plan's route.
+        ConsumerRoute::from_word(self.mapping.clock().consumer_route.load(Ordering::Acquire))
     }
 
     /// Compatibility projection for the C clock facade, which returns a bool.
