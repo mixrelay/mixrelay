@@ -22,6 +22,36 @@ pub(crate) struct Attachment {
     pub descriptor: OwnedFd,
     pub size: usize,
     pub geometry: Geometry,
+    /// Mapping and client queues prepared before any freeze; `None` fails the commit.
+    pub prepared: Option<Prepared>,
+}
+
+/// A native change allocated on control, outside the IO freeze. Dropping it
+/// releases the allocation unless a frozen commit has taken ownership.
+pub(crate) struct Prepared {
+    change: std::ptr::NonNull<c_void>,
+    discard: unsafe extern "C" fn(*mut c_void),
+}
+
+impl Prepared {
+    pub(crate) fn new(change: *mut c_void, native: NativeOps) -> Option<Self> {
+        std::ptr::NonNull::new(change).map(|change| Self {
+            change,
+            discard: native.discard,
+        })
+    }
+
+    /// Transfers ownership to the native operation that consumes the change.
+    pub(crate) fn into_raw(self) -> *mut c_void {
+        std::mem::ManuallyDrop::new(self).change.as_ptr()
+    }
+}
+
+impl Drop for Prepared {
+    fn drop(&mut self) {
+        // SAFETY: this owner holds the only reference to an unconsumed preparation.
+        unsafe { (self.discard)(self.change.as_ptr()) };
+    }
 }
 
 pub(crate) struct Pending {

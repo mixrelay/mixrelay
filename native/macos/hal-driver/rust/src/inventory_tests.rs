@@ -105,25 +105,51 @@ fn inventory_ack_waits_for_perform_and_newer_publication_can_restore_older_mappi
     let initial = Message::new(&[1], 90);
     assert!(initial.apply(&fixture));
     assert_eq!(
-        crate::inventory::acknowledged(&fixture.registry, 1),
-        Some(90)
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((90, crate::inventory::Settlement::Applied))
     );
-    assert_eq!(crate::inventory::acknowledged(&fixture.registry, 2), None);
+    assert_eq!(crate::inventory::settled(&fixture.registry, 2), None);
     let candidate = Message::new(&[1], 91);
     assert!(candidate.apply(&fixture));
-    assert_eq!(crate::inventory::acknowledged(&fixture.registry, 1), None);
+    assert_eq!(crate::inventory::settled(&fixture.registry, 1), None);
     assert_eq!(fixture.perform(), crate::abi::OK);
     assert_eq!(
-        crate::inventory::acknowledged(&fixture.registry, 1),
-        Some(91)
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((91, crate::inventory::Settlement::Applied))
     );
     let rollback = Message::with_entry_generation(&[1], 92, 90);
     assert!(rollback.apply(&fixture));
-    assert_eq!(crate::inventory::acknowledged(&fixture.registry, 1), None);
+    assert_eq!(crate::inventory::settled(&fixture.registry, 1), None);
     assert_eq!(fixture.perform(), crate::abi::OK);
     assert_eq!(
-        crate::inventory::acknowledged(&fixture.registry, 1),
-        Some(92)
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((92, crate::inventory::Settlement::Applied))
+    );
+}
+
+#[test]
+fn aborted_attachment_settles_as_rejected_until_a_newer_publication_applies() {
+    let fixture = inventory_fixture();
+    assert!(Message::new(&[1], 90).apply(&fixture));
+    assert!(Message::new(&[1], 91).apply(&fixture));
+    let (id, generation) = fixture.pending();
+    assert_eq!(crate::inventory::settled(&fixture.registry, 1), None);
+    // The Driver service learns of the abort instead of waiting for an ACK that never comes.
+    assert_eq!(
+        fixture
+            .registry
+            .abort(id, crate::abi::CONFIG_ACTION, generation),
+        crate::abi::OK
+    );
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((91, crate::inventory::Settlement::Rejected))
+    );
+    assert!(Message::with_entry_generation(&[1], 92, 90).apply(&fixture));
+    assert_eq!(fixture.perform(), crate::abi::OK);
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((92, crate::inventory::Settlement::Applied))
     );
 }
 
@@ -265,8 +291,8 @@ fn transport_policy_obeys_authority_generation_and_last_valid_snapshot() {
     }
     assert!(!message.apply(&fixture));
     assert_eq!(
-        crate::inventory::acknowledged(&fixture.registry, 1),
-        Some(10)
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((10, crate::inventory::Settlement::Applied))
     );
     assert_eq!(
         fixture.registry.transport.get(16, pid),

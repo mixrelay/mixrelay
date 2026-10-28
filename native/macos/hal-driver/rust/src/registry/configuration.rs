@@ -2,7 +2,7 @@
 use super::{CONFIG_ACK_TIMEOUT_TICKS, Registry};
 use crate::{
     abi::{CAPACITY, CONFIG_ACTION, FORMAT, INVALID, NAME, NATIVE_ERROR, NOT_FOUND, OK},
-    device::{ConversionScratch, Device, Pending, lock},
+    device::{Control, ConversionScratch, Device, Pending, Prepared, lock},
 };
 use mixrelay_pcm_ring::SampleFormat;
 use std::{os::fd::AsRawFd, sync::atomic::Ordering};
@@ -128,6 +128,35 @@ impl Registry {
         self.reclaim();
     }
 
+    /// Maps a pending attachment and prepares queues for every registered client, before
+    /// coreaudiod is asked to perform it. Control fixes the client set; a later
+    /// membership change prepares again, so Perform only swaps under the IO freeze.
+    pub(super) fn prepare_attachment(device: &Device, control: &mut Control) {
+        let Some(attachment) = control
+            .pending
+            .as_mut()
+            .and_then(|pending| pending.attachment.as_mut())
+        else {
+            return;
+        };
+        // Release the previous preparation before mapping its replacement.
+        attachment.prepared = None;
+        if !device.alive.load(Ordering::Acquire) {
+            return;
+        }
+        // SAFETY: held device control retains the live runtime and its client set; the
+        // attachment owns its descriptor. Preparation runs alongside IO callbacks.
+        let change = unsafe {
+            (device.native.prepare)(
+                device.runtime.load(Ordering::Acquire),
+                &raw const attachment.geometry,
+                attachment.descriptor.as_raw_fd(),
+                attachment.size,
+            )
+        };
+        attachment.prepared = Prepared::new(change, device.native);
+    }
+
     pub(crate) fn perform(&self, id: u32, action: u64, generation: u64) -> i32 {
         self.perform_with_scratch(id, action, generation, Device::prepare_scratch)
     }
@@ -159,7 +188,7 @@ impl Registry {
         {
             return OK;
         }
-        let Some(pending) = control.pending.take() else {
+        let Some(mut pending) = control.pending.take() else {
             return OK;
         };
         // Allocate bounded directional storage on control, before draining callbacks.
@@ -168,17 +197,18 @@ impl Registry {
             return CAPACITY;
         };
         let frozen = device.freeze();
-        let success = if let Some(attachment) = &pending.attachment {
-            // SAFETY: control and freeze retain the live runtime, owned descriptor and geometry.
-            unsafe {
-                (self.native.replace)(
-                    device.runtime.load(Ordering::Acquire),
-                    &raw const attachment.geometry,
-                    pending.rate,
-                    attachment.descriptor.as_raw_fd(),
-                    attachment.size,
-                )
-            }
+        let success = if let Some(attachment) = &mut pending.attachment {
+            attachment.prepared.take().is_some_and(|prepared| {
+                // SAFETY: control and freeze retain the live runtime; replace consumes
+                // the preparation made for exactly this attachment and client set.
+                unsafe {
+                    (self.native.replace)(
+                        device.runtime.load(Ordering::Acquire),
+                        prepared.into_raw(),
+                        pending.rate,
+                    )
+                }
+            })
         } else {
             device.rate.load(Ordering::Acquire) == pending.rate
                 // SAFETY: control and freeze exclude callbacks during this rate transition.

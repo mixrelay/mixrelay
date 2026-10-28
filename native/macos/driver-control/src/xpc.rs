@@ -42,10 +42,17 @@ impl Drop for Owned {
     }
 }
 
+/// How the HAL reported finishing one inventory generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Settlement {
+    Applied,
+    Rejected,
+}
+
 struct Peer {
     object: Owned,
     subscribed: bool,
-    acknowledged: u64,
+    settled: Option<(u64, Settlement)>,
 }
 
 #[derive(Default)]
@@ -57,10 +64,15 @@ impl Peers {
     pub(super) fn driver_connected(&self) -> bool {
         self.values.iter().any(|peer| peer.subscribed)
     }
-    pub(super) fn acknowledged(&self, generation: u64) -> bool {
+    pub(super) fn settlement(&self, generation: u64) -> Option<Settlement> {
         self.values
             .iter()
-            .any(|peer| peer.subscribed && peer.acknowledged == generation)
+            .filter(|peer| peer.subscribed)
+            .find_map(|peer| {
+                peer.settled
+                    .filter(|(settled, _)| *settled == generation)
+                    .map(|(_, settlement)| settlement)
+            })
     }
     pub(super) fn send_inventory(&self, service: &Service) {
         let Some(message) = inventory(service) else {
@@ -137,18 +149,22 @@ fn acknowledge(service: &Service, entry: &mut Peer, event: Object) -> bool {
         let operation = xpc_dictionary_get_string(event, c"operation".as_ptr());
         if operation.is_null()
             || CStr::from_ptr(operation) != c"inventory_ack"
-            || xpc_dictionary_get_uint64(event, c"version".as_ptr()) != 1
+            || xpc_dictionary_get_uint64(event, c"version".as_ptr()) != 2
         {
             return false;
         }
         let generation = xpc_dictionary_get_uint64(event, c"generation".as_ptr());
+        let settlement = match xpc_dictionary_get_uint64(event, c"applied".as_ptr()) {
+            1 => Settlement::Applied,
+            _ => Settlement::Rejected,
+        };
         if service
             .published
             .lock()
             .as_ref()
             .is_some_and(|snapshot| snapshot.as_abi().generation == generation)
         {
-            entry.acknowledged = generation;
+            entry.settled = Some((generation, settlement));
         }
     }
     true
@@ -178,7 +194,7 @@ pub(crate) unsafe extern "C" fn mr_driver_service_accept_peer(peer: Object) -> b
     peers.values.push(Peer {
         object,
         subscribed: false,
-        acknowledged: 0,
+        settled: None,
     });
     true
 }

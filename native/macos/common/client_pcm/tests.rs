@@ -257,3 +257,127 @@ fn membership_handoff_keeps_the_window_until_all_client_grants_arrive() {
     mixer.commit(current_window);
     assert!(mixer.window(&current, |_| Some(48_000)).is_none());
 }
+
+fn queue(channels: u32) -> ClientPcmWriter {
+    let mut writer = ClientPcmWriter::new(
+        EndpointTransportConfig {
+            endpoint_id: [1; 16],
+            capacity_frames: QUEUE_FRAMES,
+            render_channels: channels,
+            capture_channels: channels,
+        },
+        42,
+    )
+    .unwrap();
+    assert!(writer.set_clock((2, 10_000), 48_000, true, true));
+    writer
+}
+
+fn resident_pages(address: *mut std::ffi::c_void, bytes: usize) -> usize {
+    unsafe extern "C" {
+        fn mincore(address: *mut std::ffi::c_void, bytes: usize, residency: *mut i8) -> i32;
+        fn getpagesize() -> i32;
+    }
+    // SAFETY: getpagesize has no preconditions.
+    let page = usize::try_from(unsafe { getpagesize() }).unwrap();
+    let mut residency = vec![0_i8; bytes.div_ceil(page)];
+    // SAFETY: the queue retains this page-aligned mapping; residency holds one byte per page.
+    assert_eq!(
+        unsafe { mincore(address, bytes, residency.as_mut_ptr()) },
+        0
+    );
+    // MINCORE_INCORE is bit 0 on Darwin.
+    residency.iter().filter(|state| **state & 1 != 0).count()
+}
+
+#[test]
+fn a_fresh_queue_faults_only_its_headers_and_reports_every_frame_missing() {
+    let writer = queue(64);
+    let (address, bytes) = writer.region();
+    // Full-ring zeroing faulted every page (8.25 MiB at 64 channels) inside the HAL's
+    // configuration freeze. Kernel zero-fill leaves the ring unfaulted until it is written.
+    assert!(bytes > 512 * 16_384);
+    assert!(resident_pages(address, bytes) <= 2);
+    let reader = reader(&writer);
+    let clock = reader.clock().unwrap();
+    let mut output = vec![9.0; 64 * 128];
+    let mut coverage = [true; 128];
+    for frame in [0, 1, u64::from(QUEUE_FRAMES) - 128, 1 << 40] {
+        assert!(reader.read(clock, frame, &mut output, &mut coverage));
+        assert!(coverage.iter().all(|valid| !valid));
+        assert!(output.iter().all(|sample| sample.to_bits() == 0));
+    }
+}
+
+#[test]
+fn reused_slots_never_expose_wrapped_or_previous_epoch_pcm() {
+    let mut writer = queue(2);
+    let reader = reader(&writer);
+    let capacity = u64::from(QUEUE_FRAMES);
+    for block in 0..(capacity + 256) / 128 {
+        let value = if block * 128 < capacity { 0.25 } else { 0.5 };
+        assert!(writer.write(block * 128, &[value; 256], 128));
+    }
+    let clock = reader.clock().unwrap();
+    let mut output = [9.0; 512];
+    let mut coverage = [true; 256];
+    // The first 256 frames' slots now hold frames one ring later.
+    assert!(reader.read(clock, 0, &mut output, &mut coverage));
+    assert!(coverage.iter().all(|valid| !valid));
+    assert!(output.iter().all(|sample| sample.to_bits() == 0));
+    assert!(reader.read(clock, capacity, &mut output, &mut coverage));
+    assert!(coverage.iter().all(|valid| *valid));
+    assert_eq!(output.map(f32::to_bits), [0.5_f32.to_bits(); 512]);
+    // A rate rearm keeps the mapping but retires every committed slot.
+    assert!(writer.set_clock((3, 20_000), 96_000, true, true));
+    let rearmed = reader.clock().unwrap();
+    assert_eq!(rearmed.rate, 96_000);
+    assert!(reader.read(rearmed, capacity, &mut output, &mut coverage));
+    assert!(coverage.iter().all(|valid| !valid));
+    assert!(output.iter().all(|sample| sample.to_bits() == 0));
+}
+
+#[test]
+fn the_queue_covers_a_playback_target_lead_over_a_pump_one_target_late() {
+    use mixrelay_audio_io::{buffer_policy::MAXIMUM_TARGET_FRAMES, formats::MAX_BUFFER_FRAMES};
+    let span = u64::try_from(MAX_BUFFER_FRAMES).unwrap();
+    let target = u64::try_from(MAXIMUM_TARGET_FRAMES).unwrap();
+    let writer = queue(2);
+    let readers = vec![reader(&writer)];
+    let word = |frame: u64| f32::from(u16::try_from(frame % 8192).unwrap()) / 8192.0;
+    let mut mixer = ClientPcmMixer::default();
+    let (mut written, mut consumed) = (0, 0);
+    let mut samples = vec![0.0; MAX_BUFFER_FRAMES * 2];
+    let mut output = [0.0; 256];
+    let mut scratch = [0.0; 256];
+    // The host renders whole maximum buffers one target ahead of the playhead, and the
+    // pump wakes only after the playhead has moved a whole target past its cursor.
+    for playhead in (target..8 * u64::from(QUEUE_FRAMES)).step_by(MAX_BUFFER_FRAMES) {
+        while written < playhead + target + span {
+            for (index, frame) in samples.chunks_exact_mut(2).enumerate() {
+                frame.fill(word(written + index as u64));
+            }
+            assert!(writer.write(written, &samples, u32::try_from(span).unwrap()));
+            written += span;
+        }
+        if playhead - consumed < target {
+            continue;
+        }
+        while let Some(window) = mixer.window(&readers, |_| Some(playhead)) {
+            assert_eq!(
+                window.discontinuity,
+                consumed == 0,
+                "lost PCM at {consumed}"
+            );
+            assert_eq!(window.first, consumed);
+            let frames = window.frames as usize;
+            ClientPcmMixer::mix(&readers, window, &mut output[..frames * 2], &mut scratch).unwrap();
+            for (index, frame) in output[..frames * 2].chunks_exact(2).enumerate() {
+                assert_eq!(frame, [word(consumed + index as u64); 2]);
+            }
+            mixer.commit(window);
+            consumed += u64::from(window.frames);
+        }
+        assert_eq!(consumed, playhead);
+    }
+}

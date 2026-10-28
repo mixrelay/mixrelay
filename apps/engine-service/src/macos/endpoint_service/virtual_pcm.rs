@@ -49,7 +49,9 @@ impl Endpoint {
         let source_id = format!("virtual:{}", format_endpoint_id(first.endpoint()));
         let mut request = SourceRequest {
             channels,
-            capacity_frames: capacity,
+            // HAL client queues hold only a playback target; this source retains the
+            // backlog a delayed graph may still read.
+            capacity_frames: mixrelay_audio_io::retention::RING_FRAMES,
             transport_version: mixrelay_macos_transport::application_clock::VERSION,
             ..SourceRequest::default()
         };

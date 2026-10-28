@@ -197,18 +197,26 @@ impl Backend for Native {
     fn send(&self, connection: &Connection, request: Request) {
         let message = match request {
             Request::Inventory => mr_hal_control_create_inventory_request(),
-            Request::Acknowledged { generation } => {
+            Request::Settled {
+                generation,
+                settlement,
+            } => {
                 // SAFETY: static keys/operation are copied into a new dictionary.
                 unsafe {
                     let message = xpc_dictionary_create(ptr::null(), ptr::null(), 0);
                     if !message.is_null() {
-                        xpc_dictionary_set_uint64(message, c"version".as_ptr(), 1);
+                        xpc_dictionary_set_uint64(message, c"version".as_ptr(), 2);
                         xpc_dictionary_set_string(
                             message,
                             c"operation".as_ptr(),
                             c"inventory_ack".as_ptr(),
                         );
                         xpc_dictionary_set_uint64(message, c"generation".as_ptr(), generation);
+                        xpc_dictionary_set_uint64(
+                            message,
+                            c"applied".as_ptr(),
+                            u64::from(settlement == crate::inventory::Settlement::Applied),
+                        );
                     }
                     message
                 }

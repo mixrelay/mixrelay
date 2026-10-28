@@ -4,6 +4,7 @@ use mixrelay_macos_transport::{
     client_pcm::{
         ClientPcmClockOwner, ClientPcmSnapshot, ClientPcmTimeline, ClientPcmWriter as Queue,
         MAX_CLIENTS_PER_ENDPOINT as MAX_CLIENTS, MAX_PCM_BYTES_PER_ENDPOINT as MAX_PCM_BYTES,
+        QUEUE_FRAMES,
     },
     endpoint_transport::EndpointTransportConfig,
     shared_audio_buffer as buffer,
@@ -18,11 +19,11 @@ use std::sync::{
 const COPY_FRAMES: usize = 32;
 const MAX_CHANNELS: usize = 64;
 
-fn client_limit(capacity: u32, channels: u32) -> usize {
+fn client_limit(channels: u32) -> usize {
     if channels == 0 {
         return MAX_CLIENTS;
     }
-    let bytes = buffer::mr_shared_audio_buffer_required_bytes(capacity, channels);
+    let bytes = buffer::mr_shared_audio_buffer_required_bytes(QUEUE_FRAMES, channels);
     MAX_PCM_BYTES
         .checked_div(bytes)
         .map_or(0, |limit| limit.min(MAX_CLIENTS))
@@ -34,10 +35,20 @@ struct Client {
     queue: Option<Queue>,
 }
 
+/// One client's queue, allocated on control before the IO freeze that registers it.
+pub(super) struct PreparedClient {
+    id: u32,
+    queue: Option<Queue>,
+}
+impl PreparedClient {
+    pub(super) fn id(&self) -> u32 {
+        self.id
+    }
+}
+
 pub(super) struct ClientMix {
     clients: Vec<Client>,
     geometry: Geometry,
-    capacity: u32,
     revision: u64,
     clock: Arc<ClientPcmClockOwner>,
 }
@@ -48,39 +59,42 @@ impl Drop for ClientMix {
 }
 
 impl ClientMix {
-    pub(super) fn new(geometry: Geometry, capacity: u32) -> Option<Self> {
+    pub(super) fn new(geometry: Geometry) -> Option<Self> {
         let mut clients = Vec::new();
         clients.try_reserve_exact(MAX_CLIENTS).ok()?;
         Some(Self {
             clients,
             geometry,
-            capacity,
             revision: 1,
             clock: Arc::new(ClientPcmClockOwner::new().ok()?),
         })
     }
 
-    pub(super) fn geometry(&self) -> Geometry {
-        self.geometry
-    }
-
-    pub(super) fn register(&mut self, id: u32) -> bool {
-        if self.revision == u64::MAX
-            || self.clients.len() >= client_limit(self.capacity, self.geometry.render_channels)
-            || self.clients.iter().any(|client| client.id == id)
-        {
-            return false;
-        }
+    /// Maps and grants a queue without touching the published client set. Shared
+    /// access is enough: the caller holds device control, so the set cannot change.
+    pub(super) fn prepare(&self, id: u32) -> Option<PreparedClient> {
         let queue = if self.geometry.render_channels == 0 {
             None
         } else {
-            let Some(queue) =
-                Queue::with_clock(self.configuration(), id, Arc::clone(&self.clock)).ok()
-            else {
-                return false;
-            };
-            Some(queue)
+            Some(Queue::with_clock(self.configuration(), id, Arc::clone(&self.clock)).ok()?)
         };
+        Some(PreparedClient { id, queue })
+    }
+
+    /// Publishes a prepared queue. The reserved client vector never allocates here.
+    pub(super) fn register(&mut self, prepared: PreparedClient) -> bool {
+        let PreparedClient { id, queue } = prepared;
+        if self.revision == u64::MAX
+            || self.clients.len() >= client_limit(self.geometry.render_channels)
+            || self.clients.iter().any(|client| client.id == id)
+            || queue
+                .as_ref()
+                .map_or(self.geometry.render_channels != 0, |queue| {
+                    !queue.belongs_to(&self.clock)
+                })
+        {
+            return false;
+        }
         self.revision += 1;
         self.clock.publish_membership(self.revision);
         self.clients.push(Client {
@@ -99,10 +113,18 @@ impl ClientMix {
         }
     }
 
+    /// Whether both sets hold the same clients in the same order.
+    pub(super) fn same_members(&self, other: &Self) -> bool {
+        self.clients
+            .iter()
+            .map(|client| client.id)
+            .eq(other.clients.iter().map(|client| client.id))
+    }
+
     fn configuration(&self) -> EndpointTransportConfig {
         EndpointTransportConfig {
             endpoint_id: self.geometry.endpoint_id,
-            capacity_frames: self.capacity,
+            capacity_frames: QUEUE_FRAMES,
             render_channels: self.geometry.render_channels,
             capture_channels: self.geometry.capture_channels,
         }
@@ -171,16 +193,27 @@ impl ClientMix {
         })
     }
 
-    pub(super) fn replacement(&self, geometry: Geometry, capacity: u32) -> Option<Self> {
-        let mut next = Self::new(geometry, capacity)?;
+    /// Prepares the same registrations for another geometry, on control before a freeze.
+    pub(super) fn replacement(&self, geometry: Geometry) -> Option<Self> {
+        let mut next = Self::new(geometry)?;
         for client in &self.clients {
-            if !next.register(client.id) {
+            let prepared = next.prepare(client.id)?;
+            if !next.register(prepared) {
                 return None;
             }
         }
-        next.revision = self.revision.checked_add(1)?;
-        next.clock.publish_membership(next.revision);
         Some(next)
+    }
+
+    /// Orders a committed replacement's membership after the set it replaces, so readers
+    /// holding the previous grants request the new list.
+    pub(super) fn supersede(&mut self, previous: &Self) -> bool {
+        let Some(revision) = previous.revision.checked_add(1) else {
+            return false;
+        };
+        self.revision = self.revision.max(revision);
+        self.clock.publish_membership(self.revision);
+        true
     }
 
     pub(super) fn render(

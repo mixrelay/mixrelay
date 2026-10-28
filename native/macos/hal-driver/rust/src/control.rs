@@ -22,8 +22,14 @@ mod native;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Request {
     Inventory,
-    Acknowledged { generation: u64 },
-    Replacement { endpoint: [u8; 16], generation: u64 },
+    Settled {
+        generation: u64,
+        settlement: crate::inventory::Settlement,
+    },
+    Replacement {
+        endpoint: [u8; 16],
+        generation: u64,
+    },
 }
 
 /// The adapter owns queue/timer handles; each connection value owns its socket.
@@ -41,7 +47,7 @@ struct Control<B: Backend> {
     session: RefCell<ControlSession>,
     connection: RefCell<Option<B::Connection>>,
     backend: B,
-    acknowledged: Cell<(u64, u64)>,
+    settled: Cell<Option<(u64, u64, crate::inventory::Settlement)>>,
 }
 
 impl<B: Backend> Control<B> {
@@ -51,7 +57,7 @@ impl<B: Backend> Control<B> {
             session: RefCell::new(ControlSession::default()),
             connection: RefCell::new(None),
             backend,
-            acknowledged: Cell::new((0, 0)),
+            settled: Cell::new(None),
         }
     }
 
@@ -103,11 +109,16 @@ impl<B: Backend> Control<B> {
         let action = self.session.borrow_mut().tick();
         self.request_replacement();
         let authority = self.session.borrow().authority();
-        if let Some(generation) = crate::inventory::acknowledged(&self.registry, authority)
-            && self.acknowledged.get() != (authority, generation)
+        // A rejected generation is reported too, so the Driver service rolls back
+        // without waiting out its timeout. A later retry may still report Applied.
+        if let Some((generation, settlement)) = crate::inventory::settled(&self.registry, authority)
+            && self.settled.get() != Some((authority, generation, settlement))
         {
-            self.send(Request::Acknowledged { generation });
-            self.acknowledged.set((authority, generation));
+            self.send(Request::Settled {
+                generation,
+                settlement,
+            });
+            self.settled.set(Some((authority, generation, settlement)));
         }
         match action {
             TickAction::Maintain => {}

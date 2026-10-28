@@ -105,7 +105,10 @@ HAL의 `ClientMix`는 등록된 클라이언트별 PCM 큐와 등록·제거·�
 장치 sample 좌표에서 게시된 큐를 한 번씩 합산한다. 큐의 게시 범위를 벗어난 프레임은 0을 더하며
 다른 클라이언트의 공급을 기다리지 않는다. 입력의 네이티브 정수 변환과 출력 볼륨·mute는
 `Device::process_io`가 맡는다. `ClientChange`와 `Transfer`는 등록 변경과 PCM 전송을 구분한다.
-제어 소유자는 `Device::freeze`로 콜백을 회수한 동안만 큐를 할당·교체·폐기한다.
+큐 매핑과 grant는 제어 잠금 아래 freeze 전에 준비하고, `Device::freeze`로 콜백을 회수한 동안에는
+준비한 큐를 게시·교체·폐기만 한다. 매핑 교체는 인벤토리를 받을 때 준비하고 등록이 바뀌면 다시
+준비하므로 `PerformDeviceConfigurationChange`는 교체만 한다. 샘플레이트만 바뀌면 큐와 grant를
+유지하고 ring epoch·clock을 다시 게시해 이전 rate의 PCM을 버린다.
 `Registry`는 장치의 시작 참조를 세고 최초 시작·최종 종료를 네이티브 런타임에 요청한다.
 최초 시작은 모든 큐의 PCM 타임라인을 초기화한다. 다른 클라이언트의 시작·정지는 게시된 PCM을
 지우지 않으며, 등록된 출력 클라이언트가 직접 StartIO를 받아야 한다는 조건을 두지 않는다.
@@ -123,6 +126,12 @@ clock publication과 membership revision을 소유하고, 개별 writer가 PCM·
 `control::native::pcm`은 엔진 lease가 살아 있을 때만 별도 XPC peer로 완전한 grant 목록을 보낸다.
 Driver 서비스는 장치 인벤토리의 소유자로 유지한다. coreaudiod의 engine Mach-service 접근은
 HAL 번들에 선언하며 엔진은 audio-server UID의 grant 게시와 console 사용자 source 요청을 구분한다.
+
+Driver 서비스의 구성 거래는 단계마다 6초 안에 HAL의 적용을 기다린다. HAL은 인벤토리 세대마다
+적용 또는 거부(abort·native 실패)를 보고한다. 시간을 넘긴 단계는 HAL이 그 단계를 끝낼 때까지
+최대 24초 더 기다린 뒤 이전 인벤토리를 새 예산으로 되돌린다. HAL은 수행 중인 단계가 끝나기
+전에는 새 인벤토리를 처리하지 않기 때문이다. 그때까지도 수행 중이면 되돌림을 게시만 하고
+`ConfigurationPending`으로 보고하며, 관리자는 이전 인벤토리와 revision을 유지한다.
 
 엔진의 `endpoint_service::virtual_pcm`은 가상 입력 source registry와 endpoint별 pump 수명을
 소유한다. `ClientPcmMixer`는 native sample 좌표의 큐 합산과 forward cursor만 관리하고,
@@ -157,10 +166,14 @@ native 단위로 재환산해 버리지 않는다. 물리 장치는 기존 하�
 
 `audio-io::retention`은 최대 지원 샘플레이트에서도 최소 4초의 backlog 저장량을 정한다.
 macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭제곱인 1,048,576프레임으로 올림한다.
+가상 입력의 보존은 엔진 source가 맡는다. HAL 클라이언트 렌더 큐와 endpoint 매핑 링은
+`client_pcm::QUEUE_FRAMES`(32,768프레임)로 준비한다. 이 크기는 재생 목표 상한과 최대 I/O 버퍼를
+합한 값의 두 배다. 새 익명 매핑은 커널의 0 채움을 사용하므로 ring 전체를 지우지 않는다.
 녹음 전달 큐는 256프레임 × 3,000개이며 192kHz에서 4초다. 모두 제어 경로에서 준비하고,
 실시간 중에는 확장하지 않는다. 이 저장 용량은 재생 priming·지연 목표와 별개다.
 지연 목표는 관찰한 callback burst와 클록 관계에서 정한다. `QueueBounds.maximum_target_frames`는
-저장량과 별도로 지정하며 macOS bridge의 기존 상한은 8,192프레임이다. Linux 출력 링은
+저장량과 별도로 지정하며 macOS bridge는 `buffer_policy::MAXIMUM_TARGET_FRAMES`(8,192프레임)를
+상한으로 쓴다. Linux 출력 링은
 최대 RAW 전송 32,768프레임을 수용하도록 65,536프레임으로 준비한다. 가득 찬 private FIFO는 실패한 쓰기를
 거부하며 기존 PCM을 보존한다. 시각 공유 링은 오래된 구간을 덮어쓰므로 독자가 누락·불연속을
 확인한다. 녹음 큐가 한계를 넘으면 받아 둔 prefix를 마무리하고 `Failed`로 보고한다.

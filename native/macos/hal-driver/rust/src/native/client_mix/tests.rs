@@ -1,39 +1,68 @@
 use super::*;
 
+fn geometry(render: u32, capture: u32) -> Geometry {
+    Geometry {
+        endpoint_id: [1; 16],
+        render_channels: render,
+        capture_channels: capture,
+    }
+}
+
+fn add(mixer: &mut ClientMix, id: u32) -> bool {
+    mixer
+        .prepare(id)
+        .is_some_and(|prepared| mixer.register(prepared))
+}
+
 fn mixer(render: u32, capture: u32) -> ClientMix {
-    let mut mixer = ClientMix::new(
-        Geometry {
-            endpoint_id: [1; 16],
-            render_channels: render,
-            capture_channels: capture,
-        },
-        16_384,
-    )
-    .unwrap();
+    let mut mixer = ClientMix::new(geometry(render, capture)).unwrap();
     for id in [42, 43, 44] {
-        assert!(mixer.register(id));
+        assert!(add(&mut mixer, id));
     }
     mixer
 }
 
 #[test]
-fn retention_admission_includes_frame_tags_and_rejects_invalid_geometry() {
-    // At maximum retention capacity, the 1 GiB budget admits three 64-channel
-    // writers or 63 stereo writers. Per-frame tags and headers consume the rest.
-    assert_eq!(client_limit(1_048_576, 64), 3);
-    assert_eq!(client_limit(1_048_576, 2), 63);
-    assert_eq!(client_limit(16_384, 2), MAX_CLIENTS);
-    assert_eq!(client_limit(1_048_576, 0), MAX_CLIENTS);
-    for (capacity, channels) in [
-        (0, 2),
-        (3, 2),
-        (1 << 21, 2),
-        (u32::MAX, 2),
-        (128, 65),
-        (128, u32::MAX),
-    ] {
-        assert_eq!(client_limit(capacity, channels), 0);
+fn queue_admission_includes_frame_tags_and_rejects_invalid_geometry() {
+    // Per-frame tags and headers count against the 1 GiB budget. Retention-sized
+    // queues admitted only three 64-channel writers; playback-sized queues admit 124.
+    assert_eq!(client_limit(64), 124);
+    assert_eq!(client_limit(2), MAX_CLIENTS);
+    assert_eq!(client_limit(0), MAX_CLIENTS);
+    for channels in [65, u32::MAX] {
+        assert_eq!(client_limit(channels), 0);
     }
+}
+
+#[test]
+fn a_64_channel_endpoint_maps_its_full_client_budget_without_faulting_rings() {
+    let mut mixer = ClientMix::new(geometry(64, 64)).unwrap();
+    let limit = u32::try_from(client_limit(64)).unwrap();
+    for id in 0..limit {
+        assert!(add(&mut mixer, id), "client {id} rejected");
+    }
+    assert!(!add(&mut mixer, limit));
+    assert!(mixer.render(7, 0, &[0.5; 64 * 32], 32).accepted);
+    let mut output = vec![0.0; 64 * 32];
+    assert_eq!(mixer.capture(0, &mut output, 32).available, 32);
+    assert!(
+        output
+            .iter()
+            .all(|sample| sample.to_bits() == 0.5_f32.to_bits())
+    );
+}
+
+#[test]
+fn registration_rejects_a_queue_prepared_for_another_endpoint_clock() {
+    let mut first = mixer(2, 2);
+    let other = mixer(2, 2);
+    let foreign = other.prepare(99).unwrap();
+    let revision = first.revision();
+    assert!(!first.register(foreign));
+    assert_eq!(first.revision(), revision);
+    let mut capture_only = ClientMix::new(geometry(0, 2)).unwrap();
+    assert!(!capture_only.register(first.prepare(5).unwrap()));
+    assert!(add(&mut capture_only, 5));
 }
 
 #[test]
@@ -49,7 +78,7 @@ fn rejected_registration_preserves_existing_pcm_and_membership() {
         });
     }
     let revision = mixer.revision();
-    assert!(!mixer.register(999));
+    assert!(!add(&mut mixer, 999));
     assert_eq!(mixer.revision(), revision);
     let mut output = [9.0; 16];
     assert_eq!(mixer.capture(0, &mut output, 8).available, 8);
@@ -147,7 +176,7 @@ fn overlapping_clients_mix_once_and_registration_reuse_cannot_replay_or_reset_it
             .all(|frame| frame == [0.375, 0.375, 0.0, 0.0])
     );
     mixer.remove(43);
-    assert!(mixer.register(43));
+    assert!(add(&mut mixer, 43));
     assert_eq!(mixer.capture(100, &mut output, 8).available, 8);
     assert!(
         output
@@ -195,9 +224,22 @@ fn a_finished_client_supplies_zero_beyond_its_window_while_its_peer_continues() 
 
 #[test]
 fn replacement_preserves_registration_but_starts_an_empty_pcm_timeline() {
+    let mut live = mixer(2, 2);
     let mixer = mixer(2, 2);
     assert!(mixer.render(42, 0, &[0.5; 16], 8).accepted);
-    let replacement = mixer.replacement(mixer.geometry(), 16_384).unwrap();
+    let mut replacement = mixer.replacement(geometry(2, 2)).unwrap();
+    assert!(replacement.same_members(&mixer));
+    // A queue rebuilt for epoch exhaustion advances the live revision past the
+    // prepared one; the commit still orders the replacement after it.
+    let mut clock = Clock::new(48_000, 1, 1).unwrap();
+    for generation in 0..=u64::from(u16::MAX) {
+        clock.running = false;
+        assert!(clock.start(generation + 1));
+        assert!(live.publish_clock(&clock, true));
+    }
+    assert!(live.revision() >= replacement.revision());
+    assert!(replacement.supersede(&live));
+    assert!(replacement.revision() > live.revision());
     let mut output = [1.0; 16];
     assert_eq!(replacement.capture(0, &mut output, 8).available, 0);
     assert_eq!(output.map(f32::to_bits), [0; 16]);
@@ -277,17 +319,9 @@ fn client_mixing_throughput() {
     const FRAMES: u32 = 512;
     for (render, capture, contributors) in [(2, 2, 1), (2, 2, 2), (2, 2, 8), (2, 7, 2), (64, 64, 2)]
     {
-        let mut mixer = ClientMix::new(
-            Geometry {
-                endpoint_id: [1; 16],
-                render_channels: render,
-                capture_channels: capture,
-            },
-            16_384,
-        )
-        .unwrap();
+        let mut mixer = ClientMix::new(geometry(render, capture)).unwrap();
         for client in 1..=contributors {
-            assert!(mixer.register(client));
+            assert!(add(&mut mixer, client));
         }
         let input = vec![0.125; (FRAMES * render) as usize];
         let mut output = vec![0.0; (FRAMES * capture) as usize];

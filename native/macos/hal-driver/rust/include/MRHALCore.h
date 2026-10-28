@@ -34,13 +34,20 @@ typedef struct MRHALCoreNativeOps {
     bool (*inspect)(int, size_t, MRHALCoreGeometry *);
     void *(*create)(const MRHALCoreGeometry *, uint32_t, int, size_t);
     void (*destroy)(void *);
-    bool (*replace)(void *, const MRHALCoreGeometry *, uint32_t, int, size_t);
+    /* Control, outside the IO freeze: maps a replacement and its client queues. */
+    void *(*prepare)(void *, const MRHALCoreGeometry *, int, size_t);
+    void (*discard)(void *);
+    /* Frozen commit of a prepared replacement at a rate; always consumes it. */
+    bool (*replace)(void *, void *, uint32_t);
     bool (*start)(void *, uint64_t);
     void (*stop)(void *);
     void (*remaining_client)(void *);
     bool (*set_rate)(void *, uint32_t);
     bool (*timestamp)(void *, uint64_t, MRHALCoreTimestamp *);
-    bool (*client)(void *, uint32_t, uint32_t);
+    /* Control, outside the IO freeze: allocates one client's queue. */
+    void *(*prepare_client)(void *, uint32_t);
+    /* Frozen registration consuming its preparation, or removal with NULL. */
+    bool (*client)(void *, uint32_t, uint32_t, void *);
     MRHALCoreIoOutcome (*io)(void *, bool, uint32_t, uint64_t, float *, uint32_t);
     bool (*requires_replacement)(void *);
     bool (*same_transport)(void *, int, size_t);

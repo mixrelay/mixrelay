@@ -8,6 +8,7 @@
 mod device;
 mod dispatch;
 mod endpoint_registry;
+mod settle;
 mod xpc;
 
 use endpoint_registry::{CallbackEndpoint, EndpointRegistry, EndpointSpec, OwnedInventory};
@@ -21,13 +22,10 @@ use mixrelay_macos_transport::{
     endpoint_transport::{EndpointClockSnapshot, mr_endpoint_transport_clock_snapshot},
 };
 use parking_lot::Mutex;
-use std::{
-    sync::OnceLock,
-    time::{Duration, Instant},
-};
+use settle::{Polling, Progress};
+use std::sync::OnceLock;
 
 const DRIVER_BUNDLE: &str = "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver";
-const ACK_TIMEOUT: Duration = Duration::from_secs(6);
 static SERVICE: OnceLock<Service> = OnceLock::new();
 static START: Mutex<()> = Mutex::new(());
 
@@ -117,15 +115,14 @@ impl MacDriver {
         let prepared = service.registry.prepare_inventory_change(&specs, None)?;
         let pins = prepared.callback_pins();
         let generation = service.publish(prepared.snapshot()?)?;
-        if let Err(error) = wait_for(|| {
-            service.peers.lock().acknowledged(generation)
-                && inventory_applied(&pins, &specs, &specs)
+        if let Err(failure) = settle::step(&Polling, || {
+            inventory_progress(service, generation, &pins, &specs, &specs)
         }) {
             // Same actual IDs/name/geometry only: bootstrap never removes a
             // device or writes its format/rate. Preserve that HAL configuration
             // even if attaching this service's storage cannot be acknowledged.
             service.published.lock().take();
-            return Err(error);
+            return Err(failure.into());
         }
         prepared.commit()?;
         *service.configuration.lock() = observed;
@@ -166,31 +163,27 @@ impl MacDriver {
             .prepare_inventory_change(&specs, replacement)?;
         let pins = prepared.callback_pins();
         let generation = service.publish(prepared.snapshot()?)?;
-        let result = wait_for(|| {
-            service.peers.lock().acknowledged(generation)
-                && inventory_applied(&pins, &old_specs, &specs)
-        })
-        .and_then(|()| apply_formats(desired, &previous));
-        if let Err(error) = result {
+        settle::transact(
+            || {
+                settle::step(&Polling, || {
+                    inventory_progress(service, generation, &pins, &old_specs, &specs)
+                })?;
+                apply_formats(desired, &previous)
+            },
             // Rollback uses a fresh publication generation, so HAL fencing never
             // mistakes the old active mappings for a stale provisional message.
-            let generation = service.publish(service.registry.snapshot()?)?;
-            let old_pins: Vec<_> = old_specs
-                .iter()
-                .filter_map(|spec| service.registry.callback(spec.id))
-                .collect();
-            let restored = wait_for(|| {
-                service.peers.lock().acknowledged(generation)
-                    && inventory_applied(&old_pins, &specs, &old_specs)
-            })
-            .and_then(|()| restore_formats(&old_formats));
-            if let Err(rollback) = restored {
-                return Err(DriverError::Backend(format!(
-                    "{error}; rollback failed: {rollback}"
-                )));
-            }
-            return Err(error);
-        }
+            || service.publish(service.registry.snapshot()?),
+            |generation| {
+                let old_pins: Vec<_> = old_specs
+                    .iter()
+                    .filter_map(|spec| service.registry.callback(spec.id))
+                    .collect();
+                settle::step(&Polling, || {
+                    inventory_progress(service, generation, &old_pins, &specs, &old_specs)
+                })?;
+                restore_formats(&old_formats)
+            },
+        )?;
         prepared.commit()?;
         *service.configuration.lock() = desired.to_vec();
         service.registry.collect();
@@ -345,7 +338,9 @@ fn native_spec(config: &DriverDeviceConfig) -> Result<EndpointSpec, DriverError>
         id: identity(&config.spec.id)?,
         display_name: config.spec.display_name.clone(),
         sample_rate: config.spec.default_sample_rate,
-        capacity_frames: mixrelay_audio_io::retention::RING_FRAMES,
+        // Endpoint rings carry only lifecycle metadata; client PCM queues use the
+        // same playback-sized bound. Capture retention lives in the engine's sources.
+        capacity_frames: mixrelay_macos_transport::client_pcm::QUEUE_FRAMES,
         render_channels: config
             .spec
             .render
@@ -355,6 +350,20 @@ fn native_spec(config: &DriverDeviceConfig) -> Result<EndpointSpec, DriverError>
             .capture
             .map_or(0, |stream| u32::from(stream.channels)),
     })
+}
+
+fn inventory_progress(
+    service: &Service,
+    generation: u64,
+    pins: &[CallbackEndpoint<'_>],
+    before: &[EndpointSpec],
+    after: &[EndpointSpec],
+) -> Progress {
+    match service.peers.lock().settlement(generation) {
+        Some(xpc::Settlement::Applied) => Progress::applied(inventory_applied(pins, before, after)),
+        Some(xpc::Settlement::Rejected) => Progress::Rejected,
+        None => Progress::Performing,
+    }
 }
 
 fn inventory_applied(
@@ -374,35 +383,21 @@ fn inventory_applied(
         .all(|spec| device::device(spec.id).is_none())
 }
 
-fn wait_for(mut acknowledged: impl FnMut() -> bool) -> Result<(), DriverError> {
-    let deadline = Instant::now() + ACK_TIMEOUT;
-    loop {
-        if acknowledged() {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            return Err(DriverError::Backend(
-                "HAL configuration perform/readback timed out".into(),
-            ));
-        }
-        // Control-only ACK polling, never audio pacing or a callback wait.
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
 fn apply_formats(
     desired: &[DriverDeviceConfig],
     previous: &[DriverDeviceConfig],
-) -> Result<(), DriverError> {
+) -> Result<(), settle::Failure> {
     for config in desired {
         let id = identity(&config.spec.id)?;
         let old = previous.iter().find(|old| old.spec.id == config.spec.id);
         if old.is_none_or(|old| old.spec.default_sample_rate != config.spec.default_sample_rate) {
             let rate = config.spec.default_sample_rate;
             if !device::set_rate(id, rate) {
-                return Err(DriverError::Backend("native nominal rate rejected".into()));
+                return Err(rejected("native nominal rate rejected"));
             }
-            wait_for(|| device::rate(id) == Some(rate))?;
+            settle::step(&Polling, || {
+                Progress::applied(device::rate(id) == Some(rate))
+            })?;
         }
         for (render, wanted, old_format) in [
             (
@@ -418,17 +413,17 @@ fn apply_formats(
         ] {
             if let Some(wanted) = wanted.filter(|wanted| Some(*wanted) != old_format) {
                 if !device::set_format(id, render, wanted) {
-                    return Err(DriverError::Backend(
-                        "native directional ASBD rejected".into(),
-                    ));
+                    return Err(rejected("native directional ASBD rejected"));
                 }
-                wait_for(|| {
+                settle::step(&Polling, || {
                     let formats = device::native_formats(id);
-                    (if render {
-                        formats.render.current
-                    } else {
-                        formats.capture.current
-                    }) == Some(wanted)
+                    Progress::applied(
+                        (if render {
+                            formats.render.current
+                        } else {
+                            formats.capture.current
+                        }) == Some(wanted),
+                    )
                 })?;
             }
         }
@@ -436,15 +431,15 @@ fn apply_formats(
     Ok(())
 }
 
-fn restore_formats(previous: &[PreviousDeviceFormat]) -> Result<(), DriverError> {
+fn restore_formats(previous: &[PreviousDeviceFormat]) -> Result<(), settle::Failure> {
     for PreviousDeviceFormat { id, formats, rate } in previous {
         if let Some(rate) = rate {
             if !device::set_rate(*id, *rate) {
-                return Err(DriverError::Backend(
-                    "nominal-rate rollback rejected".into(),
-                ));
+                return Err(rejected("nominal-rate rollback rejected"));
             }
-            wait_for(|| device::rate(*id) == Some(*rate))?;
+            settle::step(&Polling, || {
+                Progress::applied(device::rate(*id) == Some(*rate))
+            })?;
         }
         for (render, format) in [
             (true, formats.render.current),
@@ -452,22 +447,26 @@ fn restore_formats(previous: &[PreviousDeviceFormat]) -> Result<(), DriverError>
         ] {
             if let Some(format) = format {
                 if !device::set_format(*id, render, format) {
-                    return Err(DriverError::Backend(
-                        "directional-format rollback rejected".into(),
-                    ));
+                    return Err(rejected("directional-format rollback rejected"));
                 }
-                wait_for(|| {
+                settle::step(&Polling, || {
                     let current = device::native_formats(*id);
-                    (if render {
-                        current.render.current
-                    } else {
-                        current.capture.current
-                    }) == Some(format)
+                    Progress::applied(
+                        (if render {
+                            current.render.current
+                        } else {
+                            current.capture.current
+                        }) == Some(format),
+                    )
                 })?;
             }
         }
     }
     Ok(())
+}
+
+fn rejected(reason: &str) -> settle::Failure {
+    settle::Failure::Rejected(DriverError::Backend(reason.into()))
 }
 
 #[cfg(test)]

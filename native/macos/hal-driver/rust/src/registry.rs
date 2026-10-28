@@ -151,6 +151,7 @@ impl Registry {
             descriptor,
             size,
             geometry,
+            prepared: None,
         };
         let mut generation = lock(&self.generation);
         if let Some(device) = self.endpoint(endpoint) {
@@ -258,6 +259,7 @@ impl Registry {
             formats,
         });
         control.attachment_failed = false;
+        Self::prepare_attachment(device, &mut control);
         Ok(AttachmentChange::Queued)
     }
 

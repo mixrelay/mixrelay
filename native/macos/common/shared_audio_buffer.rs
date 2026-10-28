@@ -175,6 +175,58 @@ pub unsafe extern "C" fn mr_shared_audio_buffer_initialize(
     capacity_frames: u32,
     channels: u32,
 ) -> *mut SharedAudioBuffer {
+    // SAFETY: the caller's exclusive storage contract is forwarded unchanged.
+    unsafe {
+        initialize(
+            memory,
+            memory_size,
+            capacity_frames,
+            channels,
+            Storage::Reused,
+        )
+    }
+}
+
+/// Initializes only the header of storage the kernel has just zero-filled, such as a
+/// new anonymous mapping. Untouched ring pages stay unfaulted: a zero stamp never
+/// matches an active epoch, so every frame reads as missing until a writer commits it.
+/// # Safety
+/// `memory` must own `memory_size` writable bytes exclusively for this call, and every
+/// byte must still be zero. Reused or caller-recycled storage must use
+/// [`mr_shared_audio_buffer_initialize`].
+pub unsafe fn initialize_zeroed(
+    memory: *mut c_void,
+    memory_size: usize,
+    capacity_frames: u32,
+    channels: u32,
+) -> *mut SharedAudioBuffer {
+    // SAFETY: the caller guarantees exclusive, still-zero storage.
+    unsafe {
+        initialize(
+            memory,
+            memory_size,
+            capacity_frames,
+            channels,
+            Storage::Zeroed,
+        )
+    }
+}
+
+/// Whether stamp and PCM cells may hold bytes from a previous user of the storage.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Storage {
+    Reused,
+    Zeroed,
+}
+
+// SAFETY: memory owns memory_size exclusive writable bytes; Zeroed storage is all zero.
+unsafe fn initialize(
+    memory: *mut c_void,
+    memory_size: usize,
+    capacity_frames: u32,
+    channels: u32,
+    storage: Storage,
+) -> *mut SharedAudioBuffer {
     let Some(bytes) = required_bytes(capacity_frames, channels) else {
         return ptr::null_mut();
     };
@@ -189,9 +241,12 @@ pub unsafe extern "C" fn mr_shared_audio_buffer_initialize(
     };
     let buffer = memory.cast::<SharedAudioBuffer>();
     // SAFETY: exclusive, suitably aligned caller storage was extent-checked.
-    // Zero is a valid bit pattern for every trailing atomic PCM/stamp cell.
+    // Zero is a valid bit pattern for every trailing atomic PCM/stamp cell, and a
+    // zero stamp is never a committed frame. Only reused storage needs clearing.
     unsafe {
-        ptr::write_bytes(memory.cast::<u8>(), 0, bytes);
+        if storage == Storage::Reused {
+            ptr::write_bytes(memory.cast::<u8>(), 0, bytes);
+        }
         buffer.write(SharedAudioBuffer {
             magic: MAGIC,
             version: VERSION,

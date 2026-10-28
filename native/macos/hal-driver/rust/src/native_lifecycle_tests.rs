@@ -315,6 +315,70 @@ fn every_native_rate_commit_rearms_capture_before_callbacks_resume() {
 }
 
 #[test]
+fn rate_only_perform_keeps_client_queue_grants_and_rejects_old_rate_pcm() {
+    use mixrelay_macos_transport::client_pcm::ClientPcmSnapshot;
+
+    let fixture = native_fixture();
+    let transport = Transport::new(10, 2, 2);
+    let id = transport.add(&fixture, "Rate grants", 48_000);
+    start(&fixture, id);
+    pcm(&fixture, id, true, 0, 0.75);
+    let (signature, snapshot) = crate::native::client_snapshot(&fixture.registry, None).unwrap();
+    // SAFETY: this test owns the complete snapshot and its retained immutable grants.
+    let readers = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
+    let before = readers[0].clock().unwrap();
+    assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
+    assert_eq!(fixture.perform(), OK);
+    // Rebuilding retired every grant, so the engine had to remap each queue. The same
+    // mappings now follow the new clock and no new grant list is published.
+    assert!(crate::native::client_snapshot(&fixture.registry, Some(&signature)).is_none());
+    let after = readers[0].clock().unwrap();
+    assert_eq!(
+        (after.incarnation, after.rate, after.running, after.first),
+        (before.incarnation, 96_000, true, None)
+    );
+    let mut output = [9.0; 64];
+    let mut coverage = [true; 32];
+    assert!(readers[0].read(after, 0, &mut output, &mut coverage));
+    assert_eq!((output.map(f32::to_bits), coverage), ([0; 64], [false; 32]));
+    assert_eq!(pcm(&fixture, id, false, 0, 0.9), [0; 64]);
+    pcm(&fixture, id, true, 0, 0.25);
+    assert!(readers[0].read(readers[0].clock().unwrap(), 0, &mut output, &mut coverage));
+    assert_eq!(
+        (output.map(f32::to_bits), coverage),
+        ([0.25_f32.to_bits(); 64], [true; 32])
+    );
+}
+
+#[test]
+fn client_joining_a_pending_replacement_renders_through_the_committed_mapping() {
+    let fixture = native_fixture();
+    let old = Transport::new(10, 2, 2);
+    let id = old.add(&fixture, "Before", 48_000);
+    start(&fixture, id);
+    let wider = Transport::new(10, 4, 2);
+    assert_eq!(wider.add(&fixture, "After", 48_000), id);
+    // Joining after preparation prepares the replacement again for both clients.
+    assert_eq!(fixture.registry.client(id, 43, true), OK);
+    assert_eq!(fixture.perform(), OK);
+    assert_eq!(fixture.registry.snapshot(id).unwrap().render_channels, 4);
+    let mut samples = [0.5_f32; 128];
+    // SAFETY: the client owns 32 four-channel Float32 frames in the committed format.
+    assert!(unsafe {
+        fixture.registry.io(IoOperation {
+            client: 43,
+            device: id,
+            stream: id + 2,
+            render: true,
+            frame: 0,
+            samples: samples.as_mut_ptr().cast(),
+            frames: 32,
+        })
+    });
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.5_f32.to_bits(); 64]);
+}
+
+#[test]
 fn idle_replacement_keeps_native_rate_and_does_not_emit_stale_pcm() {
     let fixture = native_fixture();
     let old = Transport::new(10, 2, 2);

@@ -101,18 +101,35 @@ impl Drop for SnapshotOwner {
     }
 }
 
-pub(crate) fn acknowledged(registry: &Registry, authority: u64) -> Option<u64> {
+/// How the HAL finished the current inventory generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Settlement {
+    /// Every attachment was performed.
+    Applied,
+    /// No attachment is still pending, but at least one was aborted or failed natively.
+    Rejected,
+}
+
+/// The validated generation once no attachment is pending; `None` while any is.
+pub(crate) fn settled(registry: &Registry, authority: u64) -> Option<(u64, Settlement)> {
     let state = registry.inventory.try_lock().ok()?;
-    (authority != 0
-        && state.connection == authority
-        && state.authority == authority
-        && state.generation != 0
-        && state.generation == state.latest_validated
-        && state
-            .entries
-            .keys()
-            .all(|id| registry.attachment_applied(*id)))
-    .then_some(state.generation)
+    if authority == 0
+        || state.connection != authority
+        || state.authority != authority
+        || state.generation == 0
+        || state.generation != state.latest_validated
+    {
+        return None;
+    }
+    let mut settlement = Settlement::Applied;
+    for id in state.entries.keys() {
+        if registry.attachment_failed(*id) {
+            settlement = Settlement::Rejected;
+        } else if !registry.attachment_applied(*id) {
+            return None;
+        }
+    }
+    Some((state.generation, settlement))
 }
 
 fn preflight(registry: &Registry, snapshot: &InventorySnapshot) -> bool {

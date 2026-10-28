@@ -130,7 +130,7 @@ impl Pump {
             let native = (
                 window.clock.rate,
                 self.input.len() / 128,
-                self.queues[0].capacity(),
+                mixrelay_audio_io::retention::RING_FRAMES,
             );
             let result = scheduling.outside(|| {
                 scheduling.retune(window.clock.rate);

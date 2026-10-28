@@ -28,6 +28,8 @@ static SERIAL: Mutex<()> = Mutex::new(());
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static REPLACEMENTS: AtomicUsize = AtomicUsize::new(0);
+static PREPARATIONS: AtomicUsize = AtomicUsize::new(0);
+static PREPARED_DURING_IO: AtomicUsize = AtomicUsize::new(0);
 static FAIL_REPLACE: AtomicBool = AtomicBool::new(false);
 static FAIL_CREATE_ENDPOINT: AtomicU8 = AtomicU8::new(0);
 static PAUSE_IO: AtomicBool = AtomicBool::new(false);
@@ -83,18 +85,44 @@ unsafe extern "C" fn destroy(runtime: *mut c_void) {
     drop(unsafe { Box::from_raw(runtime.cast::<Runtime>()) });
     LIVE.fetch_sub(1, Ordering::SeqCst);
 }
-unsafe extern "C" fn replace(
-    runtime: *mut c_void,
+/// A fake preparation records when control made it relative to in-flight IO.
+enum Change {
+    Replacement(Geometry),
+    Client(u32),
+}
+fn change(change: Change) -> *mut c_void {
+    if IO_ENTERED.load(Ordering::Acquire) && !RELEASE_IO.load(Ordering::Acquire) {
+        PREPARED_DURING_IO.fetch_add(1, Ordering::SeqCst);
+    }
+    PREPARATIONS.fetch_add(1, Ordering::SeqCst);
+    Box::into_raw(Box::new(change)).cast()
+}
+fn take(change: *mut c_void) -> Option<Change> {
+    (!change.is_null()).then(|| *unsafe { Box::from_raw(change.cast::<Change>()) })
+}
+unsafe extern "C" fn prepare(
+    _: *mut c_void,
     geometry: *const Geometry,
-    rate: u32,
     _: i32,
     _: usize,
-) -> bool {
+) -> *mut c_void {
+    change(Change::Replacement(unsafe { *geometry }))
+}
+unsafe extern "C" fn prepare_client(_: *mut c_void, client: u32) -> *mut c_void {
+    change(Change::Client(client))
+}
+unsafe extern "C" fn discard(change: *mut c_void) {
+    take(change);
+}
+unsafe extern "C" fn replace(runtime: *mut c_void, change: *mut c_void, rate: u32) -> bool {
+    let Some(Change::Replacement(geometry)) = take(change) else {
+        return false;
+    };
     if FAIL_REPLACE.load(Ordering::SeqCst) {
         return false;
     }
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
-    runtime.geometry = unsafe { *geometry };
+    runtime.geometry = geometry;
     runtime.rate = rate;
     runtime.epoch += 1;
     REPLACEMENTS.fetch_add(1, Ordering::SeqCst);
@@ -131,8 +159,22 @@ unsafe extern "C" fn timestamp(runtime: *mut c_void, now: u64, output: *mut Time
     };
     runtime.running
 }
-unsafe extern "C" fn native_client(_: *mut c_void, _: u32, _: u32) -> bool {
-    true
+unsafe extern "C" fn native_client(
+    _: *mut c_void,
+    client: u32,
+    action: u32,
+    change: *mut c_void,
+) -> bool {
+    match (
+        crate::io_outcome::ClientChange::from_raw(action),
+        take(change),
+    ) {
+        (Some(crate::io_outcome::ClientChange::Register), Some(Change::Client(prepared))) => {
+            prepared == client
+        }
+        (Some(crate::io_outcome::ClientChange::Remove), None) => true,
+        _ => false,
+    }
 }
 unsafe extern "C" fn io(
     runtime: *mut c_void,
@@ -291,6 +333,8 @@ impl Fixture {
         FAIL_REPLACE.store(false, Ordering::SeqCst);
         FAIL_CREATE_ENDPOINT.store(0, Ordering::SeqCst);
         REPLACEMENTS.store(0, Ordering::SeqCst);
+        PREPARATIONS.store(0, Ordering::SeqCst);
+        PREPARED_DURING_IO.store(0, Ordering::SeqCst);
         PAUSE_IO.store(false, Ordering::SeqCst);
         IO_ENTERED.store(false, Ordering::SeqCst);
         RELEASE_IO.store(false, Ordering::SeqCst);
@@ -306,12 +350,15 @@ impl Fixture {
             inspect,
             create,
             destroy,
+            prepare,
+            discard,
             replace,
             start,
             stop,
             remaining_client: remaining,
             set_rate,
             timestamp,
+            prepare_client,
             client: native_client,
             io,
             requires_replacement,
@@ -743,6 +790,91 @@ fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration()
         assert_eq!(fixture.registry.client(id, 1, false), OK);
         assert!(fixture.registry.snapshot(id).is_none());
     }
+}
+
+fn eventually(condition: impl Fn() -> bool) {
+    for _ in 0..10_000 {
+        if condition() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    panic!("condition did not hold within 10,000 polls");
+}
+
+#[test]
+fn geometry_replacement_is_prepared_before_perform_and_follows_membership() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 7, true), OK);
+    let registered = PREPARATIONS.load(Ordering::SeqCst);
+    fixture
+        .registry
+        .upsert([1; 16], "Wider", 48_000, (fixture.fd(1, 7, 3), 24))
+        .unwrap();
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), registered + 1);
+    // A client joining the pending change maps its own queue, then the replacement
+    // is prepared again for the new client set.
+    assert_eq!(fixture.registry.client(id, 8, true), OK);
+    let prepared = PREPARATIONS.load(Ordering::SeqCst);
+    assert_eq!(prepared, registered + 3);
+    assert_eq!(fixture.perform(), OK);
+    // Perform only consumes the preparation under the freeze.
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), prepared);
+    assert_eq!(REPLACEMENTS.load(Ordering::SeqCst), 1);
+    let snapshot = fixture.registry.snapshot(id).unwrap();
+    assert_eq!(
+        (snapshot.render_channels, snapshot.capture_channels),
+        (7, 3)
+    );
+}
+
+#[test]
+fn queue_and_replacement_preparation_run_alongside_in_flight_io() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 1, true), OK);
+    assert_eq!(fixture.registry.start(id, 1, 100), OK);
+    let descriptor = fixture.fd(1, 7, 3);
+    PAUSE_IO.store(true, Ordering::Release);
+    let registry = fixture.registry.as_ref();
+    let device = registry.pin(id).unwrap();
+    std::thread::scope(|scope| {
+        let callback = scope.spawn(|| {
+            let mut samples = [0.5_f32; 64];
+            // SAFETY: this callback exclusively owns its aligned 32-frame stereo buffer.
+            assert!(unsafe {
+                registry.io(IoOperation {
+                    client: 1,
+                    device: id,
+                    stream: id + 2,
+                    render: true,
+                    frame: 0,
+                    samples: samples.as_mut_ptr().cast(),
+                    frames: 32,
+                })
+            });
+        });
+        eventually(|| IO_ENTERED.load(Ordering::Acquire));
+        let control = scope.spawn(|| {
+            registry
+                .upsert([1; 16], "Wider", 48_000, (descriptor, 24))
+                .unwrap();
+            assert_eq!(registry.client(id, 2, true), OK);
+        });
+        // Both allocations finish while the callback still holds its pin; only the
+        // client's publication then waits for the freeze to drain it.
+        eventually(|| device.io_pin().is_none());
+        assert_eq!(PREPARED_DURING_IO.load(Ordering::SeqCst), 2);
+        RELEASE_IO.store(true, Ordering::Release);
+        callback.join().unwrap();
+        control.join().unwrap();
+    });
+    // The membership change prepared the pending replacement again after the freeze.
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 4);
+    drop(device);
+    assert_eq!(fixture.perform(), OK);
+    assert_eq!(REPLACEMENTS.load(Ordering::SeqCst), 1);
 }
 
 #[test]

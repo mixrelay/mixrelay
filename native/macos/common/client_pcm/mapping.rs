@@ -117,7 +117,9 @@ impl ClientPcmWriter {
         // SAFETY: mapping owns all bytes from one MAP_SHARED allocation.
         let grant = NonNull::new(unsafe { xpc_shmem_create(address.as_ptr().cast(), bytes) })
             .ok_or_else(|| io::Error::from(io::ErrorKind::OutOfMemory))?;
-        // SAFETY: no reader or callback has access until this constructor returns.
+        // SAFETY: no reader or callback has access until this constructor returns. The
+        // kernel zero-fills this new MAP_ANON region on demand, so only headers are written
+        // and untouched ring pages stay unfaulted until the writer commits PCM there.
         unsafe {
             address.as_ptr().write(Header {
                 magic: MAGIC,
@@ -136,18 +138,24 @@ impl ClientPcmWriter {
                 first: AtomicU64::new(u64::MAX),
                 retired: AtomicU64::new(0),
             });
-            audio::mr_shared_audio_buffer_initialize(
-                mapping.buffer().cast(),
-                ring_bytes,
-                capacity,
-                channels,
-            );
+            audio::initialize_zeroed(mapping.buffer().cast(), ring_bytes, capacity, channels);
         }
         Ok(Self {
             mapping,
             grant,
             clock,
         })
+    }
+
+    /// Whether this queue publishes under `owner`'s endpoint clock.
+    #[must_use]
+    pub fn belongs_to(&self, owner: &ClientPcmClockOwner) -> bool {
+        std::ptr::eq(owner, self.clock.as_ref())
+    }
+
+    #[cfg(test)]
+    pub(super) fn region(&self) -> (*mut c_void, usize) {
+        (self.mapping.address.as_ptr().cast(), self.mapping.bytes)
     }
 
     pub(super) fn clock_grant(&self) -> Object {
@@ -192,7 +200,7 @@ impl ClientPcmWriter {
         timeline: ClientPcmTimeline,
         rearm: bool,
     ) -> bool {
-        if !std::ptr::eq(owner, self.clock.as_ref()) {
+        if !self.belongs_to(owner) {
             return false;
         }
         let ClientPcmTimeline {

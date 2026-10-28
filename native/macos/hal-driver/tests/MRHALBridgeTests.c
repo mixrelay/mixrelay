@@ -187,8 +187,12 @@ static void fixture_changed(void *context, uint32_t object, uint32_t change) { (
 static bool fixture_request(void *context, uint32_t object, uint64_t action, uint64_t generation) {
     (void)context; (void)object; (void)action; (void)generation; return false;
 }
-static bool replace_fixture(void *runtime, const MRHALCoreGeometry *geometry, uint32_t rate, int fd, size_t size) {
-    (void)runtime; (void)geometry; (void)rate; (void)fd; (void)size; return false;
+static void *prepare_fixture(void *runtime, const MRHALCoreGeometry *geometry, int fd, size_t size) {
+    (void)runtime; (void)geometry; (void)fd; (void)size; return NULL;
+}
+static void discard_fixture(void *change) { (void)change; }
+static bool replace_fixture(void *runtime, void *change, uint32_t rate) {
+    (void)runtime; (void)change; (void)rate; return false;
 }
 static bool start_fixture(void *runtime, uint64_t time) { (void)runtime; (void)time; return true; }
 static void stop_fixture(void *runtime) { (void)runtime; }
@@ -214,7 +218,10 @@ static bool timestamp_fixture(void *runtime, uint64_t time, MRHALCoreTimestamp *
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
     return false;
 }
-static bool client_fixture(void *runtime, uint32_t client, uint32_t action) { (void)runtime; (void)client; (void)action; return true; }
+static void *prepare_client_fixture(void *runtime, uint32_t client) { (void)runtime; return (void *)(uintptr_t)(client + 1U); }
+static bool client_fixture(void *runtime, uint32_t client, uint32_t action, void *change) {
+    (void)runtime; (void)client; (void)action; (void)change; return true;
+}
 static MRHALCoreIoOutcome io_fixture(void *runtime, bool render, uint32_t client, uint64_t frame, float *data, uint32_t count) {
     (void)runtime; (void)render; (void)client; (void)frame; (void)data; (void)count;
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
@@ -223,9 +230,9 @@ static MRHALCoreIoOutcome io_fixture(void *runtime, bool render, uint32_t client
 static bool replacement_fixture(void *runtime) { (void)runtime; return false; }
 static bool same_fixture(void *runtime, int fd, size_t size) { (void)runtime; (void)fd; (void)size; return false; }
 static void transport_identity(void) {
-    const MRHALCoreNativeOps native = {inspect_fixture, create_fixture, destroy_fixture, replace_fixture,
-        start_fixture, stop_fixture, stop_fixture, rate_fixture, timestamp_fixture, client_fixture, io_fixture,
-        replacement_fixture, same_fixture};
+    const MRHALCoreNativeOps native = {inspect_fixture, create_fixture, destroy_fixture, prepare_fixture,
+        discard_fixture, replace_fixture, start_fixture, stop_fixture, stop_fixture, rate_fixture,
+        timestamp_fixture, prepare_client_fixture, client_fixture, io_fixture, replacement_fixture, same_fixture};
     const MRHALCoreHostOps host = {NULL, fixture_changed, fixture_request};
     gCore = mr_hal_core_create(&native, &host);
     assert(gCore != NULL);
@@ -328,9 +335,9 @@ static void transport_identity(void) {
 /* The SDK GetPropertyData entry forwards requester identity: apps read measured
  * content delay while coreaudiod keeps zero scheduling latency. */
 static void input_latency_requester(void) {
-    const MRHALCoreNativeOps native = {inspect_fixture, create_fixture, destroy_fixture, replace_fixture,
-        start_fixture, stop_fixture, stop_fixture, rate_fixture, timestamp_fixture, client_fixture, io_fixture,
-        replacement_fixture, same_fixture};
+    const MRHALCoreNativeOps native = {inspect_fixture, create_fixture, destroy_fixture, prepare_fixture,
+        discard_fixture, replace_fixture, start_fixture, stop_fixture, stop_fixture, rate_fixture,
+        timestamp_fixture, prepare_client_fixture, client_fixture, io_fixture, replacement_fixture, same_fixture};
     const MRHALCoreHostOps host = {NULL, fixture_changed, fixture_request};
     gCore = mr_hal_core_create(&native, &host);
     assert(gCore != NULL);

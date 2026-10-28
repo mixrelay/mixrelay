@@ -9,15 +9,13 @@ use super::{
     },
     worker::WorkerContext,
 };
-use mixrelay_audio_io::buffer_policy::{QueueBounds, QueueTargetPolicy};
+use mixrelay_audio_io::buffer_policy::{MAXIMUM_TARGET_FRAMES, QueueBounds, QueueTargetPolicy};
 use mixrelay_audio_io::clock_bridge::{
     AsyncClockBridge, BridgeConfig, BridgeError, ClockFeedback, ClockRelation, Discontinuity,
     FeedbackQueue, TransferState,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 pub(super) const PUMP_FRAMES: usize = 256;
-// Preserve the callback-derived latency ceiling while retention storage grows.
-const MAXIMUM_QUEUE_TARGET: usize = 8192;
 pub(super) const QUEUE_CAPACITY: usize = mixrelay_audio_io::retention::RING_FRAMES as usize;
 pub(super) static NEXT_DEVICE_EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -113,7 +111,7 @@ impl DeviceBridge {
         let bounds = QueueBounds {
             minimum_frames: 32,
             capacity_frames: QUEUE_CAPACITY,
-            maximum_target_frames: MAXIMUM_QUEUE_TARGET,
+            maximum_target_frames: MAXIMUM_TARGET_FRAMES,
         };
         let graph_queue_target =
             QueueTargetPolicy::new(graph_rate, native_rate, clock_relation, bounds)

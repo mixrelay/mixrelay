@@ -19,6 +19,19 @@ const VERSION: u32 = 1;
 pub const MAX_CLIENTS_PER_ENDPOINT: usize = 256;
 /// Existing HAL client-PCM budget, including each frame-tagged ring's header.
 pub const MAX_PCM_BYTES_PER_ENDPOINT: usize = 1 << 30;
+/// Frames in every HAL client render queue. Its readers consume near the device position:
+/// `ReadInput` mixes the device coordinates a writer just published, and the engine pump
+/// drains through the native playhead every 128 frames. A writer may lead its slowest
+/// reader by one playback target plus one maximum IO buffer; twice that keeps the queue
+/// policy's half-capacity headroom. Capture retention lives in the engine's source ring,
+/// never here, so this size does not grow with `retention::RING_FRAMES`.
+pub const QUEUE_FRAMES: u32 = 32_768;
+const _: () = assert!(
+    QUEUE_FRAMES.is_power_of_two()
+        && QUEUE_FRAMES as usize
+            >= 2 * (mixrelay_audio_io::buffer_policy::MAXIMUM_TARGET_FRAMES
+                + mixrelay_audio_io::formats::MAX_BUFFER_FRAMES)
+);
 
 #[repr(C)]
 struct Header {

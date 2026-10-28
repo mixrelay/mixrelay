@@ -71,13 +71,21 @@ pub(crate) struct NativeOps {
     pub inspect: unsafe extern "C" fn(i32, usize, *mut Geometry) -> bool,
     pub create: unsafe extern "C" fn(*const Geometry, u32, i32, usize) -> *mut c_void,
     pub destroy: unsafe extern "C" fn(*mut c_void),
-    pub replace: unsafe extern "C" fn(*mut c_void, *const Geometry, u32, i32, usize) -> bool,
+    /// Control, outside the IO freeze: maps a replacement and its client queues.
+    pub prepare: unsafe extern "C" fn(*mut c_void, *const Geometry, i32, usize) -> *mut c_void,
+    /// Releases a preparation that no frozen commit consumed.
+    pub discard: unsafe extern "C" fn(*mut c_void),
+    /// Frozen commit of a prepared replacement at a rate; always consumes it.
+    pub replace: unsafe extern "C" fn(*mut c_void, *mut c_void, u32) -> bool,
     pub start: unsafe extern "C" fn(*mut c_void, u64) -> bool,
     pub stop: unsafe extern "C" fn(*mut c_void),
     pub remaining_client: unsafe extern "C" fn(*mut c_void),
     pub set_rate: unsafe extern "C" fn(*mut c_void, u32) -> bool,
     pub timestamp: unsafe extern "C" fn(*mut c_void, u64, *mut Timestamp) -> bool,
-    pub client: unsafe extern "C" fn(*mut c_void, u32, u32) -> bool,
+    /// Control, outside the IO freeze: allocates one client's queue.
+    pub prepare_client: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,
+    /// Frozen registration (consuming its preparation) or removal (null preparation).
+    pub client: unsafe extern "C" fn(*mut c_void, u32, u32, *mut c_void) -> bool,
     pub io: unsafe extern "C" fn(
         *mut c_void,
         bool,
@@ -93,13 +101,16 @@ pub(crate) struct NativeOps {
 impl NativeOps {
     /// # Safety
     /// The runtime is live and the device control owner holds its IO freeze.
+    /// Registration consumes `prepared`; removal takes `None`.
     pub(crate) unsafe fn update_client(
         self,
         runtime: *mut c_void,
         id: u32,
         change: crate::io_outcome::ClientChange,
+        prepared: Option<crate::device::Prepared>,
     ) -> bool {
-        unsafe { (self.client)(runtime, id, change as u32) }
+        let prepared = prepared.map_or(std::ptr::null_mut(), crate::device::Prepared::into_raw);
+        unsafe { (self.client)(runtime, id, change as u32, prepared) }
     }
 }
 
