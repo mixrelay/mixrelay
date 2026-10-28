@@ -2,7 +2,7 @@
 use super::Registry;
 use crate::{
     abi::{CAPACITY, INVALID, NATIVE_ERROR, NOT_FOUND, OK, RUNNING},
-    device::{Control, Device, Prepared, lock},
+    device::{Control, Device, lock},
 };
 use std::sync::atomic::Ordering;
 
@@ -55,8 +55,7 @@ impl Registry {
         } else {
             // SAFETY: control retains this live runtime. Mapping the queue runs alongside
             // IO callbacks; only its publication needs the freeze.
-            let change = unsafe { (self.native.prepare_client)(runtime, client) };
-            Some(Prepared::new(change, self.native).ok_or(NATIVE_ERROR)?)
+            unsafe { self.native.prepare_queue(runtime, client) }?
         };
         let _frozen = device.freeze();
         // SAFETY: control and freeze retain this live runtime and exclude IO readers.
@@ -140,12 +139,11 @@ impl Registry {
             .clients
             .iter()
             .filter(|&(_, &running)| running)
+            // SAFETY: control retains the live runtime; mapping runs alongside IO.
             .filter_map(|(&client, _)| {
-                // SAFETY: control retains the live runtime; mapping runs alongside IO.
-                let change = unsafe { (self.native.prepare_client)(runtime, client) };
-                let prepared = Prepared::new(change, self.native);
-                missing += u32::from(prepared.is_none());
-                prepared.map(|prepared| (client, prepared))
+                let prepared = unsafe { self.native.prepare_queue(runtime, client) };
+                missing += u32::from(prepared.is_err());
+                prepared.ok().flatten().map(|prepared| (client, prepared))
             })
             .collect();
         if !prepared.is_empty() {
@@ -201,11 +199,9 @@ impl Registry {
         // epoch, maps a fresh one here: on control, outside the freeze, and only for a
         // client that actually starts IO.
         // SAFETY: control retains the live runtime; mapping runs alongside IO callbacks.
-        let Some(prepared) = Prepared::new(
-            unsafe { (self.native.prepare_client)(runtime, client) },
-            self.native,
-        ) else {
-            return NATIVE_ERROR;
+        let prepared = match unsafe { self.native.prepare_queue(runtime, client) } {
+            Ok(prepared) => prepared,
+            Err(status) => return status,
         };
         let frozen = device.freeze();
         // SAFETY: control and freeze retain the live runtime and exclude IO readers.
@@ -214,7 +210,7 @@ impl Registry {
                 runtime,
                 client,
                 crate::io_outcome::ClientChange::Install,
-                Some(prepared),
+                prepared,
             )
         } && (count != 0 || unsafe { (self.native.start)(runtime, now) });
         if started {

@@ -113,6 +113,9 @@ pub(crate) struct Device {
     pub runtime: AtomicPtr<c_void>,
     frozen: AtomicBool,
     io_readers: AtomicUsize,
+    /// Freezes taken, recorded for tests.
+    #[cfg(test)]
+    pub(crate) freezes: AtomicUsize,
 }
 
 // Runtime stays allocated while alive; control mutation and retirement exclude
@@ -160,6 +163,8 @@ impl Device {
             runtime: AtomicPtr::new(native_runtime.1),
             frozen: AtomicBool::new(false),
             io_readers: AtomicUsize::new(0),
+            #[cfg(test)]
+            freezes: AtomicUsize::new(0),
         })
     }
 
@@ -201,6 +206,8 @@ impl Device {
     /// Only call while holding `control`. Waiting and eventual reclamation are
     /// confined to the control plane, never the callback's last-reader path.
     pub(crate) fn freeze(&self) -> Freeze<'_> {
+        #[cfg(test)]
+        self.freezes.fetch_add(1, Ordering::Relaxed);
         self.frozen.store(true, Ordering::SeqCst);
         while self.io_readers.load(Ordering::SeqCst) != 0 {
             std::thread::yield_now();

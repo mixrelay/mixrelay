@@ -1,13 +1,14 @@
 //! Authenticated HAL inventory transport; no graph or application-capture API.
-use super::settlement::{Configured, Log, PROTOCOL, Since, Wanted};
+use super::settlement::{Configured, Log, Since, Wanted};
 use super::{MacDriver, SERVICE, Service};
 use mixrelay_macos_transport::control_inventory::{
     mr_hal_control_create_inventory_snapshot, mr_hal_control_parse_inventory_request,
     mr_hal_control_parse_transport_replacement_request,
+    report::{Incompatible, Report},
 };
 use std::{
     collections::BTreeMap,
-    ffi::{CStr, c_char, c_void},
+    ffi::{c_char, c_void},
     ptr::{self, NonNull},
 };
 
@@ -21,8 +22,6 @@ unsafe extern "C" {
     fn xpc_connection_get_euid(peer: Object) -> u32;
     fn xpc_connection_cancel(peer: Object);
     fn xpc_connection_send_message(peer: Object, message: Object);
-    fn xpc_dictionary_get_uint64(object: Object, key: *const c_char) -> u64;
-    fn xpc_dictionary_get_string(object: Object, key: *const c_char) -> *const c_char;
 }
 
 struct Owned(NonNull<c_void>);
@@ -77,14 +76,16 @@ impl Peers {
                     .map(|(_, settlement)| settlement)
             })
     }
-    fn subscribed(&self) -> impl Iterator<Item = &Peer> {
+    fn subscribed(&self) -> impl DoubleEndedIterator<Item = &Peer> {
         self.values.iter().filter(|peer| peer.subscribed)
     }
-    /// The bound for a request issued now, once the subscribed HAL finished its replay.
+    /// The bound for a request issued now, from the newest subscribed HAL connection
+    /// that finished its replay.
     pub(super) fn since(&self) -> Option<Since> {
-        self.subscribed().find_map(|peer| peer.log.since())
+        self.subscribed().rev().find_map(|peer| peer.log.since())
     }
-    /// The first settlement after `since` of a request for exactly `wanted`.
+    /// The first settlement after `since` of a request for exactly `wanted`, read only
+    /// from the newest connection of the incarnation `since` came from.
     pub(super) fn settled(
         &self,
         endpoint: [u8; 16],
@@ -92,7 +93,32 @@ impl Peers {
         wanted: Wanted,
     ) -> Option<Configured> {
         self.subscribed()
-            .find_map(|peer| peer.log.find(endpoint, since, wanted))
+            .rev()
+            .find(|peer| peer.log.incarnation() == Some(since.incarnation))?
+            .log
+            .find(endpoint, since, wanted)
+    }
+    /// Drops connections older than `current` that report another incarnation once
+    /// `current` has replayed: they belong to a HAL load that no longer runs.
+    fn retire_before(&mut self, current: Object) {
+        let Some(position) = self
+            .values
+            .iter()
+            .position(|peer| peer.object.raw() == current)
+        else {
+            return;
+        };
+        let incarnation = self.values[position].log.incarnation();
+        let mut index = 0;
+        self.values.retain(|peer| {
+            let older = index < position;
+            index += 1;
+            !older
+                || peer
+                    .log
+                    .incarnation()
+                    .is_none_or(|other| Some(other) == incarnation)
+        });
     }
     /// Whether a subscribed HAL reports with another protocol version.
     pub(super) fn incompatible(&self) -> bool {
@@ -163,97 +189,22 @@ fn inventory(service: &Service) -> Option<Owned> {
     .then_some(message)
 }
 
-/// One HAL report on the control connection.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Report {
-    Inventory {
-        generation: u64,
-        settlement: Settlement,
-    },
-    Configured(Configured),
-    /// The HAL resent every settlement it retained on this connection.
-    Replayed {
-        incarnation: u64,
-    },
-    /// Clients holding IO on `endpoint` that the HAL could not give a queue after a
-    /// configuration change; they are silent until it retries. 0 reports recovery.
-    Unprovisioned {
-        endpoint: [u8; 16],
-        clients: u32,
-    },
-    /// A report this service cannot read: the HAL comes from another package version.
-    Incompatible,
-}
-
-/// Reads a HAL report, or `None` for any other message.
-/// # Safety
-/// `event` is a live XPC object borrowed for this call.
-pub(super) unsafe fn report(event: Object) -> Option<Report> {
-    let uint = |key: &CStr| unsafe { xpc_dictionary_get_uint64(event, key.as_ptr()) };
-    // SAFETY: the caller borrows a live event; XPC owns each returned string extent.
-    let operation = unsafe {
-        if xpc_get_type(event) != (&raw const _xpc_type_dictionary).cast() {
-            return None;
-        }
-        let operation = xpc_dictionary_get_string(event, c"operation".as_ptr());
-        if operation.is_null() {
-            return None;
-        }
-        CStr::from_ptr(operation)
-    };
-    if operation != c"inventory_ack"
-        && operation != c"configuration_settled"
-        && operation != c"configuration_replayed"
-        && operation != c"clients_unprovisioned"
-    {
-        return None;
-    }
-    if uint(c"version") != PROTOCOL {
-        return Some(Report::Incompatible);
-    }
-    let applied = uint(c"applied") == 1;
-    if operation == c"inventory_ack" {
-        return Some(Report::Inventory {
-            generation: uint(c"generation"),
-            settlement: if applied {
-                Settlement::Applied
-            } else {
-                Settlement::Rejected
-            },
-        });
-    }
-    if operation == c"configuration_replayed" {
-        return Some(Report::Replayed {
-            incarnation: uint(c"incarnation"),
-        });
-    }
-    let mut endpoint = [0; 16];
-    endpoint[..8].copy_from_slice(&uint(c"endpoint_high").to_be_bytes());
-    endpoint[8..].copy_from_slice(&uint(c"endpoint_low").to_be_bytes());
-    let format = |key| u32::try_from(uint(key)).unwrap_or(0);
-    if operation == c"clients_unprovisioned" {
-        return Some(Report::Unprovisioned {
-            endpoint,
-            clients: format(c"clients"),
-        });
-    }
-    Some(Report::Configured(Configured {
-        incarnation: uint(c"incarnation"),
-        endpoint,
-        sequence: uint(c"sequence"),
-        rate: format(c"rate"),
-        formats: [format(c"capture_format"), format(c"render_format")],
-        applied,
-    }))
-}
-
 impl Peer {
-    fn receive(&mut self, service: &Service, report: Report) {
+    fn receive(&mut self, service: &Service, report: Result<Report, Incompatible>) {
+        let Ok(report) = report else {
+            self.incompatible = true;
+            return;
+        };
         match report {
             Report::Inventory {
                 generation,
-                settlement,
+                applied,
             } => {
+                let settlement = if applied {
+                    Settlement::Applied
+                } else {
+                    Settlement::Rejected
+                };
                 // Never accept a settlement for anything but the current publication.
                 if service
                     .published
@@ -264,8 +215,8 @@ impl Peer {
                     self.settled = Some((generation, settlement));
                 }
             }
-            Report::Configured(configured) => self.log.record(configured),
-            Report::Replayed { incarnation } => self.log.replayed(incarnation),
+            Report::Settled(configured) => self.log.record(configured),
+            Report::Replayed { incarnation, .. } => self.log.replayed(incarnation),
             Report::Unprovisioned { endpoint, clients } => {
                 let endpoint = endpoint.map(|byte| format!("{byte:02x}")).concat();
                 if clients == 0 {
@@ -278,7 +229,6 @@ impl Peer {
                     );
                 }
             }
-            Report::Incompatible => self.incompatible = true,
         }
     }
 }
@@ -345,8 +295,12 @@ pub(crate) unsafe extern "C" fn mr_driver_service_peer_event(peer: Object, event
     };
     // Only the authenticated HAL sends reports, after its Perform callbacks settled.
     // SAFETY: the dispatch block retains the event for this callback.
-    if let Some(report) = unsafe { report(event) } {
+    if let Some(report) = unsafe { Report::decode(event) } {
+        let replayed = matches!(report, Ok(Report::Replayed { .. }));
         entry.receive(service, report);
+        if replayed {
+            peers.retire_before(peer);
+        }
         return;
     }
     let mut id = [0; 16];

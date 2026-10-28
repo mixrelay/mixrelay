@@ -88,8 +88,9 @@ pub(crate) struct NativeOps {
     pub set_rate: unsafe extern "C" fn(*mut c_void, u32) -> bool,
     pub timestamp: unsafe extern "C" fn(*mut c_void, u64, *mut Timestamp) -> bool,
     /// Control, outside the IO freeze: maps a queue for a client that has none or whose
-    /// ring has no epoch left; otherwise prepares an empty change.
-    pub prepare_client: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,
+    /// ring has no epoch left, writing null when it needs none. False when the queue
+    /// could not be mapped or would exceed the endpoint's PCM budget.
+    pub prepare_client: unsafe extern "C" fn(*mut c_void, u32, *mut *mut c_void) -> bool,
     /// Frozen registration or IO-start install, consuming its preparation, or removal
     /// with null. Every queue it detaches waits for `release`.
     pub client: unsafe extern "C" fn(*mut c_void, u32, u32, *mut c_void) -> bool,
@@ -109,6 +110,23 @@ impl NativeOps {
     /// # Safety
     /// The runtime is live and the device control owner holds its IO freeze.
     /// Registration consumes `prepared`; removal takes `None`.
+    /// A queue for `client` when it needs one, `Ok(None)` when it needs none, or `Err`
+    /// when one could not be mapped within the endpoint's PCM budget.
+    /// # Safety
+    /// Control retains the live `runtime` for this call.
+    pub(crate) unsafe fn prepare_queue(
+        self,
+        runtime: *mut c_void,
+        client: u32,
+    ) -> Result<Option<crate::device::Prepared>, i32> {
+        let mut change = std::ptr::null_mut();
+        // SAFETY: forwarded from the caller; the output is a live local.
+        if !unsafe { (self.prepare_client)(runtime, client, &raw mut change) } {
+            return Err(NATIVE_ERROR);
+        }
+        Ok(crate::device::Prepared::new(change, self))
+    }
+
     pub(crate) unsafe fn update_client(
         self,
         runtime: *mut c_void,

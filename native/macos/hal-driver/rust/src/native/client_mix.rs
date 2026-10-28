@@ -28,12 +28,13 @@ const MAX_CHANNELS: usize = 64;
 /// Detached queues one freeze can hand back without growing the retired list.
 pub(super) const RETIRED_CAPACITY: usize = MAX_CLIENTS;
 
-fn client_limit(channels: u32) -> usize {
+/// Clients whose queues of `channels` fit in `budget` bytes, at most `MAX_CLIENTS`.
+fn client_limit(budget: usize, channels: u32) -> usize {
     if channels == 0 {
         return MAX_CLIENTS;
     }
     let bytes = buffer::mr_shared_audio_buffer_required_bytes(QUEUE_FRAMES, channels);
-    MAX_PCM_BYTES
+    budget
         .checked_div(bytes)
         .map_or(0, |limit| limit.min(MAX_CLIENTS))
 }
@@ -80,6 +81,8 @@ pub(super) struct ClientMix {
     geometry: Geometry,
     revision: u64,
     clock: Arc<ClientPcmClockOwner>,
+    /// Bytes every queue of this endpoint may map together.
+    budget: usize,
 }
 impl Drop for ClientMix {
     fn drop(&mut self) {
@@ -96,7 +99,35 @@ impl ClientMix {
             geometry,
             revision: 1,
             clock: Arc::new(ClientPcmClockOwner::new().ok()?),
+            budget: MAX_PCM_BYTES,
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_budget(mut self, budget: usize) -> Self {
+        self.budget = budget;
+        self
+    }
+
+    fn limit(&self) -> usize {
+        client_limit(self.budget, self.geometry.render_channels)
+    }
+
+    /// Whether one more queue of the current shape fits the budget. A geometry change
+    /// can widen every queue, so this is checked against the current shape at each
+    /// mapping and install, not only at registration.
+    fn fits_another(&self) -> bool {
+        self.clients
+            .iter()
+            .filter(|client| client.queue.is_some())
+            .count()
+            < self.limit()
+    }
+
+    fn has_queue(&self, id: u32) -> bool {
+        self.clients
+            .iter()
+            .any(|client| client.id == id && client.queue.is_some())
     }
 
     /// Whether `id` lacks a queue the next IO start can use: it has none, or its ring
@@ -113,6 +144,9 @@ impl ClientMix {
     /// Maps and grants a queue without touching the published client set. Shared
     /// access is enough: the caller holds device control, so the set cannot change.
     pub(super) fn prepare(&self, id: u32) -> Option<PreparedClient> {
+        if !self.has_queue(id) && !self.fits_another() {
+            return None;
+        }
         let queue = if self.geometry.render_channels == 0 {
             None
         } else {
@@ -130,7 +164,7 @@ impl ClientMix {
     pub(super) fn register(&mut self, prepared: &mut PreparedClient) -> bool {
         let id = prepared.id;
         if self.revision == u64::MAX
-            || self.clients.len() >= client_limit(self.geometry.render_channels)
+            || self.clients.len() >= self.limit()
             || self.clients.iter().any(|client| client.id == id)
             || !self.admits(prepared.queue.as_ref())
         {
@@ -156,7 +190,10 @@ impl ClientMix {
         if prepared.queue.is_none() {
             return true;
         }
-        if self.revision == u64::MAX || !self.admits(prepared.queue.as_ref()) {
+        if self.revision == u64::MAX
+            || !self.admits(prepared.queue.as_ref())
+            || (!self.has_queue(prepared.id) && !self.fits_another())
+        {
             return false;
         }
         let Some(client) = self

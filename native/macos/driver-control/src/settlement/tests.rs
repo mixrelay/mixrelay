@@ -64,21 +64,25 @@ fn a_replayed_old_rejection_cannot_bound_or_reject_a_new_request() {
 }
 
 #[test]
-fn a_restarted_hal_resets_the_bound_instead_of_hiding_its_rejections() {
+fn another_incarnation_never_answers_a_bound_and_offers_none_until_its_replay() {
     let mut log = replayed(&[settled(1, 50, 48_000, true)]);
     let since = log.since().unwrap();
-    // coreaudiod restarted: sequences begin again at 1 under a new incarnation.
+    // coreaudiod restarted: sequences begin again at 1 under a new incarnation, and
+    // its replayed settlements predate any request bounded by the old one.
     log.record(Configured {
         incarnation: LOADED + 1,
         ..settled(1, 1, 96_000, false)
     });
-    assert_eq!(
-        log.find([1; 16], since, Wanted::Rate(96_000))
-            .map(|entry| entry.sequence),
-        Some(1)
-    );
-    // Until the new incarnation finishes its replay, no new bound is offered.
+    assert_eq!(log.find([1; 16], since, Wanted::Rate(96_000)), None);
     assert_eq!(log.since(), None);
+    log.replayed(LOADED + 1);
+    assert_eq!(
+        log.since(),
+        Some(Since {
+            incarnation: LOADED + 1,
+            sequence: 1
+        })
+    );
 }
 
 #[test]

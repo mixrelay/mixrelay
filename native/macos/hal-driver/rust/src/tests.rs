@@ -105,11 +105,16 @@ fn take(change: *mut c_void) -> Option<Change> {
 unsafe extern "C" fn prepare(geometry: *const Geometry, _: i32, _: usize) -> *mut c_void {
     change(Change::Mapping(unsafe { *geometry }))
 }
-unsafe extern "C" fn prepare_client(_: *mut c_void, client: u32) -> *mut c_void {
+unsafe extern "C" fn prepare_client(
+    _: *mut c_void,
+    client: u32,
+    prepared: *mut *mut c_void,
+) -> bool {
     if FAIL_PREPARE_CLIENT.load(Ordering::SeqCst) {
-        return std::ptr::null_mut();
+        return false;
     }
-    change(Change::Client(client))
+    unsafe { prepared.write(change(Change::Client(client))) };
+    true
 }
 unsafe extern "C" fn release(_: *mut c_void) {
     RELEASES.fetch_add(1, Ordering::SeqCst);
@@ -940,6 +945,54 @@ fn running_clients_are_reprovisioned_off_the_freeze_while_io_is_in_flight() {
         control.join().unwrap();
     });
     assert_eq!(PREPARATIONS.load(Ordering::SeqCst), prepared + 1);
+}
+
+#[test]
+fn settlements_on_two_devices_at_once_enter_the_queue_in_sequence_order() {
+    let fixture = Fixture::new();
+    let ids = [fixture.add(1, 48_000), fixture.add(2, 48_000)];
+    let registry = fixture.registry.as_ref();
+    let start = std::sync::Barrier::new(2);
+    let ordered = |registry: &Registry| {
+        let sequences: Vec<_> = registry
+            .settled_after(0)
+            .iter()
+            .map(|settled| settled.sequence)
+            .collect();
+        sequences.windows(2).all(|pair| pair[0] < pair[1])
+    };
+    // Taking the sequence before the queue lock let [6, 5] enter it; the Driver service
+    // then dropped 5 as already seen, losing a prompt rejection.
+    let inverted = std::thread::scope(|scope| {
+        let writers = ids.map(|id| {
+            let start = &start;
+            scope.spawn(move || {
+                let device = registry.pin(id).unwrap();
+                let pending = crate::device::Pending {
+                    generation: 1,
+                    requested: false,
+                    retry_after: 0,
+                    failures: 0,
+                    attachment: None,
+                    name: String::new(),
+                    rate: 48_000,
+                    formats: [mixrelay_pcm_ring::SampleFormat::Float32; 2],
+                };
+                start.wait();
+                let mut inverted = 0;
+                for round in 0..100_000 {
+                    registry.settle(&device, &pending, true);
+                    if round % 64 == 0 && !ordered(registry) {
+                        inverted += 1;
+                    }
+                }
+                inverted
+            })
+        });
+        writers.map(|writer| writer.join().unwrap())
+    });
+    assert_eq!(inverted, [0, 0]);
+    assert!(ordered(registry));
 }
 
 #[test]

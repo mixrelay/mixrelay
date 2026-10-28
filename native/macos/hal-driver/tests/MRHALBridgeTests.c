@@ -218,7 +218,11 @@ static bool timestamp_fixture(void *runtime, uint64_t time, MRHALCoreTimestamp *
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
     return false;
 }
-static void *prepare_client_fixture(void *runtime, uint32_t client) { (void)runtime; return (void *)(uintptr_t)(client + 1U); }
+static bool prepare_client_fixture(void *runtime, uint32_t client, void **change) {
+    (void)runtime;
+    *change = (void *)(uintptr_t)(client + 1U);
+    return true;
+}
 static void release_fixture(void *runtime) { (void)runtime; }
 static bool client_fixture(void *runtime, uint32_t client, uint32_t action, void *change) {
     (void)runtime; (void)client; (void)action; (void)change; return true;

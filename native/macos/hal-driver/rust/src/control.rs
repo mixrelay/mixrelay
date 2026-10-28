@@ -19,31 +19,13 @@ use crate::{
 
 mod native;
 
+use mixrelay_macos_transport::control_inventory::report::{Report, Settled};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Request {
     Inventory,
-    Settled {
-        generation: u64,
-        settlement: crate::inventory::Settlement,
-    },
-    Replacement {
-        endpoint: [u8; 16],
-        generation: u64,
-    },
-    Configured {
-        incarnation: u64,
-        settled: crate::device::Settled,
-    },
-    /// Every retained settlement was resent on this connection.
-    Replayed {
-        incarnation: u64,
-        through: u64,
-    },
-    /// Clients holding IO on `endpoint` that have no queue; 0 reports recovery.
-    Unprovisioned {
-        endpoint: [u8; 16],
-        clients: u32,
-    },
+    Replacement { endpoint: [u8; 16], generation: u64 },
+    Report(Report),
 }
 
 /// Endpoints with running clients that hold no queue, and how many.
@@ -150,10 +132,10 @@ impl<B: Backend> Control<B> {
         if let Some((generation, settlement)) = crate::inventory::settled(&self.registry, authority)
             && self.settled.get() != Some((authority, generation, settlement))
         {
-            self.send(Request::Settled {
+            self.send(Request::Report(Report::Inventory {
                 generation,
-                settlement,
-            });
+                applied: settlement == crate::inventory::Settlement::Applied,
+            }));
             self.settled.set(Some((authority, generation, settlement)));
         }
         self.send_configurations(authority);
@@ -179,17 +161,22 @@ impl<B: Backend> Control<B> {
         let incarnation = self.registry.incarnation;
         let mut newest = after;
         for settled in self.registry.settled_after(after) {
-            self.send(Request::Configured {
+            self.send(Request::Report(Report::Settled(Settled {
                 incarnation,
-                settled,
-            });
-            newest = settled.sequence;
+                endpoint: settled.endpoint,
+                sequence: settled.sequence,
+                rate: settled.rate,
+                formats: settled.formats,
+                applied: settled.applied,
+            })));
+            // The queue is ordered; the maximum still guards the cursor.
+            newest = newest.max(settled.sequence);
         }
         if replaying {
-            self.send(Request::Replayed {
+            self.send(Request::Report(Report::Replayed {
                 incarnation,
                 through: newest,
-            });
+            }));
         }
         self.configured.set((authority, newest));
     }
@@ -208,7 +195,7 @@ impl<B: Backend> Control<B> {
             Vec::new()
         };
         for (endpoint, clients) in unprovisioned_changes(&sent, &current) {
-            self.send(Request::Unprovisioned { endpoint, clients });
+            self.send(Request::Report(Report::Unprovisioned { endpoint, clients }));
         }
         self.unprovisioned.replace((authority, current));
     }

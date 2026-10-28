@@ -176,6 +176,43 @@ fn aborted_attachment_settles_as_rejected_until_a_newer_publication_applies() {
 }
 
 #[test]
+fn a_failed_rate_request_keeps_an_earlier_mapping_failure_rejected_and_retried() {
+    let fixture = inventory_fixture();
+    assert!(Message::new(&[1], 90).apply(&fixture));
+    assert!(Message::new(&[1], 91).apply(&fixture));
+    let (id, generation) = fixture.pending();
+    assert_eq!(
+        fixture
+            .registry
+            .abort(id, crate::abi::CONFIG_ACTION, generation),
+        crate::abi::OK
+    );
+    // A later rate-only request that also fails must not clear the mapping failure:
+    // it used to report generation 91 as Applied and stop every retry.
+    assert_eq!(fixture.registry.set_rate(id, 96_000), crate::abi::OK);
+    let (_, rate_generation) = fixture.pending();
+    assert_eq!(
+        fixture
+            .registry
+            .abort(id, crate::abi::CONFIG_ACTION, rate_generation),
+        crate::abi::OK
+    );
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((91, crate::inventory::Settlement::Rejected))
+    );
+    // The same publication maps the endpoint again.
+    assert!(Message::new(&[1], 91).apply(&fixture));
+    let (_, retry) = fixture.pending();
+    assert!(retry > rate_generation);
+    assert_eq!(fixture.perform(), crate::abi::OK);
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((91, crate::inventory::Settlement::Applied))
+    );
+}
+
+#[test]
 fn replacement_requests_require_current_validated_inventory() {
     unsafe extern "C" fn requires_replacement(_: *mut c_void) -> bool {
         true

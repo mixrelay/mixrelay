@@ -33,11 +33,11 @@ fn queue_admission_includes_frame_tags_and_rejects_invalid_geometry() {
     // queues admitted only three 64-channel writers; playback-sized queues admit 62.
     // Each admitted queue is resident once prepared, so the bound is also the HAL's
     // worst-case client-PCM footprint per endpoint.
-    assert_eq!(client_limit(64), 62);
-    assert_eq!(client_limit(2), MAX_CLIENTS);
-    assert_eq!(client_limit(0), MAX_CLIENTS);
+    assert_eq!(client_limit(MAX_PCM_BYTES, 64), 62);
+    assert_eq!(client_limit(MAX_PCM_BYTES, 2), MAX_CLIENTS);
+    assert_eq!(client_limit(MAX_PCM_BYTES, 0), MAX_CLIENTS);
     for channels in [65, u32::MAX] {
-        assert_eq!(client_limit(channels), 0);
+        assert_eq!(client_limit(MAX_PCM_BYTES, channels), 0);
     }
 }
 
@@ -387,4 +387,29 @@ fn client_mixing_throughput() {
             elapsed.as_micros()
         );
     }
+}
+
+#[test]
+fn a_widened_geometry_maps_and_installs_queues_only_within_the_pcm_budget() {
+    let narrow = buffer::mr_shared_audio_buffer_required_bytes(QUEUE_FRAMES, 2);
+    let wide = buffer::mr_shared_audio_buffer_required_bytes(QUEUE_FRAMES, 16);
+    // Three 2-channel queues fit, but only one 16-channel queue.
+    let budget = (3 * narrow).max(wide);
+    assert_eq!(budget / wide, 1);
+    let mut mixer = ClientMix::new(geometry(2, 2)).unwrap().with_budget(budget);
+    for id in [42, 43, 44] {
+        assert!(add(&mut mixer, id));
+    }
+    let mut detached = retired();
+    mixer.reconfigure(geometry(16, 2), &mut detached);
+    // Registration-time admission no longer bounds what the wider shape maps.
+    let mut first = mixer.prepare(42).unwrap();
+    let mut second = mixer.prepare(43).unwrap();
+    assert!(mixer.install(&mut first, &mut detached));
+    assert!(mixer.prepare(44).is_none());
+    assert!(!mixer.install(&mut second, &mut detached));
+    assert!(second.into_queue().is_some());
+    // The installed client may still replace its own queue.
+    let mut replacement = mixer.prepare(42).unwrap();
+    assert!(mixer.install(&mut replacement, &mut detached));
 }

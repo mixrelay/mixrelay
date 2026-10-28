@@ -140,10 +140,11 @@ impl Registry {
 
     /// Records how one rate, format or mapping request ended, so the Driver service
     /// rolls back a rejected request instead of waiting out its timeout.
-    fn settle(&self, device: &Device, pending: &Pending, applied: bool) {
-        // Relaxed: the sequence only orders settlements; the queue mutex publishes them.
-        let sequence = self.settlements.fetch_add(1, Ordering::Relaxed) + 1;
+    pub(crate) fn settle(&self, device: &Device, pending: &Pending, applied: bool) {
+        // The sequence is taken under the queue mutex, so concurrent settlements on two
+        // devices enter the queue in sequence order. Relaxed: the mutex orders them.
         let mut settled = lock(&self.settled);
+        let sequence = self.settlements.fetch_add(1, Ordering::Relaxed) + 1;
         if settled.len() == SETTLED_RETAINED {
             settled.pop_front();
         }
@@ -214,7 +215,7 @@ impl Registry {
         };
         // Allocate bounded directional storage on control, before draining callbacks.
         let Ok(scratch) = prepare(&device, &pending) else {
-            control.attachment_failed = pending.attachment.is_some();
+            control.attachment_failed |= pending.attachment.is_some();
             self.settle(&device, &pending, false);
             return CAPACITY;
         };
@@ -242,7 +243,7 @@ impl Registry {
         // SAFETY: control retains the live runtime; the freeze has ended.
         unsafe { (self.native.release)(runtime) };
         if !success {
-            control.attachment_failed = pending.attachment.is_some();
+            control.attachment_failed |= pending.attachment.is_some();
             self.settle(&device, &pending, false);
             return NATIVE_ERROR;
         }
@@ -271,7 +272,7 @@ impl Registry {
             .pending
             .take_if(|pending| pending.generation == generation)
         {
-            control.attachment_failed = pending.attachment.is_some();
+            control.attachment_failed |= pending.attachment.is_some();
             self.settle(&device, &pending, false);
         }
         OK

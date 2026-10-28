@@ -330,8 +330,8 @@ fn rate_only_perform_keeps_client_queue_grants_and_rejects_old_rate_pcm() {
     let before = readers[0].clock().unwrap();
     assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
     assert_eq!(fixture.perform(), OK);
-    // Rebuilding retired every grant, so the engine had to remap each queue. The same
-    // mappings now follow the new clock and no new grant list is published.
+    // A rate-only change keeps every queue and grant: the same mappings follow the new
+    // clock and no new grant list is published.
     assert!(crate::native::client_snapshot(&fixture.registry, Some(&signature)).is_none());
     let after = readers[0].clock().unwrap();
     assert_eq!(
@@ -481,6 +481,99 @@ fn perform_maps_and_allocates_nothing_even_when_queues_run_out_of_epochs() {
     );
     assert!(render(&fixture, id, 42));
     assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.5_f32.to_bits(); 64]);
+}
+
+#[test]
+fn a_format_only_perform_with_healthy_running_clients_takes_no_extra_freeze() {
+    let fixture = native_fixture();
+    let transport = Transport::new(10, 2, 2);
+    let id = transport.add(&fixture, "Formats", 48_000);
+    start(&fixture, id);
+    let device = fixture.registry.pin(id).unwrap();
+    let grants = crate::native::client_snapshot(&fixture.registry, None)
+        .unwrap()
+        .0;
+    assert_eq!(
+        fixture
+            .registry
+            .set_format(id + 2, 48_000, mixrelay_pcm_ring::SampleFormat::Signed24),
+        OK
+    );
+    let freezes = device.freezes.load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(fixture.perform(), OK);
+    // Only the commit froze IO: client 42 keeps its queue, so re-provisioning maps,
+    // installs and republishes nothing.
+    assert_eq!(
+        device.freezes.load(std::sync::atomic::Ordering::Relaxed),
+        freezes + 1
+    );
+    assert!(crate::native::client_snapshot(&fixture.registry, Some(&grants)).is_none());
+    drop(device);
+    // A control tick with every running client provisioned freezes nothing either.
+    let device = fixture.registry.pin(id).unwrap();
+    let freezes = device.freezes.load(std::sync::atomic::Ordering::Relaxed);
+    drop(device);
+    fixture.registry.tick();
+    let device = fixture.registry.pin(id).unwrap();
+    assert_eq!(
+        device.freezes.load(std::sync::atomic::Ordering::Relaxed),
+        freezes
+    );
+}
+
+#[test]
+fn frozen_native_operations_neither_allocate_nor_free() {
+    let fixture = native_fixture();
+    let old = Transport::new(10, 2, 2);
+    let id = old.add(&fixture, "Frees", 48_000);
+    start(&fixture, id);
+    // A first commit initializes each lazily created OS lock and is not measured.
+    assert_eq!(fixture.registry.set_rate(id, 88_200), OK);
+    assert_eq!(fixture.perform(), OK);
+    let native = fixture.registry.native;
+    let device = fixture.registry.pin(id).unwrap();
+    let runtime = device.runtime.load(std::sync::atomic::Ordering::Acquire);
+    let control = crate::device::lock(&device.control);
+    // A new endpoint mapping and a client queue, each prepared on control.
+    let wider = Transport::new(10, 4, 2);
+    let fd = std::os::fd::AsRawFd::as_raw_fd(&wider.fd);
+    let mut geometry = crate::abi::Geometry::default();
+    // SAFETY: the transport owns its descriptor; the geometry is a live local.
+    assert!(unsafe { (native.inspect)(fd, wider.size, &raw mut geometry) });
+    // SAFETY: as above.
+    let mapping = unsafe { (native.prepare)(&raw const geometry, fd, wider.size) };
+    assert!(!mapping.is_null());
+    let frozen = device.freeze();
+    let usage = allocation_counter::measure(|| {
+        // SAFETY: control and the freeze retain this live runtime and exclude IO.
+        assert!(unsafe { (native.replace)(runtime, mapping, 88_200) });
+    });
+    drop(frozen);
+    // SAFETY: control retains the runtime; the freeze has ended.
+    unsafe { (native.release)(runtime) };
+    // Each preparation box used to be freed inside the freeze.
+    assert_eq!((usage.count_total, usage.count_current), (0, 0));
+    // SAFETY: control retains the live runtime; mapping runs outside the freeze.
+    let queue = unsafe { native.prepare_queue(runtime, 42) }
+        .unwrap()
+        .unwrap();
+    let frozen = device.freeze();
+    let usage = allocation_counter::measure(|| {
+        // SAFETY: control and the freeze retain this live runtime and exclude IO.
+        assert!(unsafe {
+            native.update_client(
+                runtime,
+                42,
+                crate::io_outcome::ClientChange::Install,
+                Some(queue),
+            )
+        });
+    });
+    drop(frozen);
+    // SAFETY: as above.
+    unsafe { (native.release)(runtime) };
+    assert_eq!((usage.count_total, usage.count_current), (0, 0));
+    drop(control);
 }
 
 #[test]

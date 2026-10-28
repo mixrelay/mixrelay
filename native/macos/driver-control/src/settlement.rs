@@ -2,9 +2,6 @@
 //! to the request the service issued.
 use std::collections::VecDeque;
 
-/// HAL ↔ Driver service report version. Both sides ship in one package; a report with
-/// another version means a partial install and is surfaced instead of being ignored.
-pub(crate) const PROTOCOL: u64 = 2;
 /// Reports kept per HAL connection. Older entries predate every request still waiting:
 /// a request waits at most `settle::ACK_TIMEOUT + settle::SETTLE_TIMEOUT`, and the HAL
 /// settles far fewer requests than this in that time.
@@ -22,33 +19,19 @@ pub(crate) enum Wanted {
     },
 }
 
-/// How the HAL ended one rate, format or mapping request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Configured {
-    /// The HAL load that settled it; sequences restart with each one.
-    pub(crate) incarnation: u64,
-    pub(crate) endpoint: [u8; 16],
-    /// Settlement order within the incarnation.
-    pub(crate) sequence: u64,
-    pub(crate) rate: u32,
-    /// Requested capture and render `SampleFormat` codes.
-    pub(crate) formats: [u32; 2],
-    pub(crate) applied: bool,
-}
+pub(crate) use mixrelay_macos_transport::control_inventory::report::Settled as Configured;
 
-impl Configured {
-    /// Whether this settlement ended a request for exactly `wanted` on `endpoint`.
-    fn answers(&self, endpoint: [u8; 16], wanted: Wanted) -> bool {
-        self.endpoint == endpoint
-            && match wanted {
-                Wanted::Rate(rate) => self.rate == rate,
-                Wanted::Format {
-                    render,
-                    rate,
-                    format,
-                } => self.rate == rate && self.formats[usize::from(render)] == format,
-            }
-    }
+/// Whether `configured` ended a request for exactly `wanted` on `endpoint`.
+fn answers(configured: &Configured, endpoint: [u8; 16], wanted: Wanted) -> bool {
+    configured.endpoint == endpoint
+        && match wanted {
+            Wanted::Rate(rate) => configured.rate == rate,
+            Wanted::Format {
+                render,
+                rate,
+                format,
+            } => configured.rate == rate && configured.formats[usize::from(render)] == format,
+        }
 }
 
 /// The last settlement known when a request was issued.
@@ -111,20 +94,26 @@ impl Log {
         })
     }
 
+    /// The HAL load this connection reports for, once it has reported.
+    pub(crate) fn incarnation(&self) -> Option<u64> {
+        (self.incarnation != 0).then_some(self.incarnation)
+    }
+
     /// The first settlement after `since` that ended a request for exactly `wanted`.
-    /// Every settlement of a newer incarnation follows `since`: the HAL restarted.
+    /// Sequences of another incarnation are unrelated to `since` and never match.
     pub(crate) fn find(
         &self,
         endpoint: [u8; 16],
         since: Since,
         wanted: Wanted,
     ) -> Option<Configured> {
-        let restarted = self.incarnation != since.incarnation;
+        if self.incarnation != since.incarnation {
+            return None;
+        }
         self.entries
             .iter()
             .find(|configured| {
-                (restarted || configured.sequence > since.sequence)
-                    && configured.answers(endpoint, wanted)
+                configured.sequence > since.sequence && answers(configured, endpoint, wanted)
             })
             .copied()
     }

@@ -135,7 +135,12 @@ struct Retired {
     io: Option<Box<AttachedIo>>,
     /// Reserved at creation, so detaching queues under the freeze never allocates.
     queues: Vec<Queue>,
+    /// Emptied preparation boxes, freed with the rest after the freeze.
+    shells: Vec<Shell>,
 }
+
+/// Preparations one freeze can consume: an install for every client, and a mapping.
+const SHELL_CAPACITY: usize = RETIRED_CAPACITY + 1;
 
 /// Storage mapped on control before the IO freeze that publishes it. The registry owns
 /// it until a frozen operation consumes it or `discard` releases it.
@@ -146,15 +151,34 @@ enum Change {
     Client(PreparedClient),
 }
 
+/// The heap box a preparation crosses the ABI in. A frozen operation moves its change
+/// out and retires the box, so the freeze never frees.
+type Shell = Box<Option<Change>>;
+
 /// # Safety
 /// `change` is null or was returned by `prepare`/`prepare_client` and not yet consumed.
-unsafe fn take(change: *mut c_void) -> Option<Change> {
+unsafe fn take(change: *mut c_void) -> Option<Shell> {
     // SAFETY: per the contract above, a non-null pointer owns one boxed change.
-    (!change.is_null()).then(|| *unsafe { Box::from_raw(change.cast::<Change>()) })
+    (!change.is_null()).then(|| unsafe { Box::from_raw(change.cast::<Option<Change>>()) })
 }
 
 fn boxed(change: Change) -> *mut c_void {
-    Box::into_raw(Box::new(change)).cast()
+    Box::into_raw(Box::new(Some(change))).cast()
+}
+
+/// Takes the change out of `change` inside a freeze, keeping its emptied box in
+/// `runtime` for `release`.
+/// # Safety
+/// As for `take`.
+unsafe fn unbox(runtime: &mut Runtime, change: *mut c_void) -> Option<Change> {
+    // SAFETY: forwarded from the caller.
+    let mut shell = unsafe { take(change) }?;
+    let change = shell.take();
+    let shells = &mut runtime.retired.get_mut().shells;
+    if shells.len() < shells.capacity() {
+        shells.push(shell);
+    }
+    change
 }
 
 impl Drop for Runtime {
@@ -201,14 +225,21 @@ unsafe extern "C" fn create(
         return std::ptr::null_mut();
     };
     let mut queues = Vec::new();
-    if queues.try_reserve_exact(RETIRED_CAPACITY).is_err() {
+    let mut shells = Vec::new();
+    if queues.try_reserve_exact(RETIRED_CAPACITY).is_err()
+        || shells.try_reserve_exact(SHELL_CAPACITY).is_err()
+    {
         return std::ptr::null_mut();
     }
     Box::into_raw(Box::new(Runtime {
         clock,
         io,
         clients,
-        retired: UnsafeCell::new(Retired { io: None, queues }),
+        retired: UnsafeCell::new(Retired {
+            io: None,
+            queues,
+            shells,
+        }),
     }))
     .cast()
 }
@@ -223,19 +254,26 @@ unsafe extern "C" fn prepare(geometry: *const Geometry, fd: i32, size: usize) ->
         .map_or(std::ptr::null_mut(), |io| boxed(Change::Mapping(io)))
 }
 
-unsafe extern "C" fn prepare_client(runtime: *mut c_void, client: u32) -> *mut c_void {
+unsafe extern "C" fn prepare_client(
+    runtime: *mut c_void,
+    client: u32,
+    change: *mut *mut c_void,
+) -> bool {
     // SAFETY: registry control excludes every runtime mutation. IO callbacks share this
     // runtime concurrently; preparation only reads the registered client set.
     let runtime = unsafe { &*runtime.cast::<Runtime>() };
     let clients = &runtime.clients;
-    let prepared = if clients.needs_queue(client) {
-        clients.prepare(client)
-    } else {
-        Some(PreparedClient::none(client))
+    // SAFETY: the registry passes one writable output for this call.
+    unsafe { change.write(std::ptr::null_mut()) };
+    if !clients.needs_queue(client) {
+        return true;
+    }
+    let Some(prepared) = clients.prepare(client) else {
+        return false;
     };
-    prepared.map_or(std::ptr::null_mut(), |prepared| {
-        boxed(Change::Client(prepared))
-    })
+    // SAFETY: as above.
+    unsafe { change.write(boxed(Change::Client(prepared))) };
+    true
 }
 
 unsafe extern "C" fn discard(change: *mut c_void) {
@@ -248,8 +286,9 @@ unsafe extern "C" fn release(runtime: *mut c_void) {
     // share the runtime but never read `retired`; control serializes its writers.
     let retired = unsafe { &mut *(*runtime.cast::<Runtime>()).retired.get() };
     drop(retired.io.take());
-    // Clearing keeps the reservation for the next freeze.
+    // Clearing keeps each reservation for the next freeze.
     retired.queues.clear();
+    retired.shells.clear();
 }
 
 /// Retains `change` for release after the freeze when a frozen operation refused it.
@@ -271,7 +310,7 @@ fn retire(runtime: &mut Runtime, change: Option<Change>) {
 unsafe extern "C" fn replace(runtime: *mut c_void, change: *mut c_void, rate: u32) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     // SAFETY: the registry passes ownership of its prepared mapping exactly once.
-    let Some(Change::Mapping(candidate)) = (unsafe { take(change) }) else {
+    let Some(Change::Mapping(candidate)) = (unsafe { unbox(runtime, change) }) else {
         return false;
     };
     let result = swap_mapping(runtime, candidate, rate);
@@ -473,7 +512,7 @@ unsafe extern "C" fn client(
     // SAFETY: registry control holds the device freeze, draining every IO pin.
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     // SAFETY: registration and IO start pass ownership of their prepared queue.
-    let change = unsafe { take(change) };
+    let change = unsafe { unbox(runtime, change) };
     let change = match crate::io_outcome::ClientChange::from_raw(action) {
         Some(crate::io_outcome::ClientChange::Register) => {
             // Without a preparation the client registers without a queue.
@@ -498,8 +537,14 @@ unsafe extern "C" fn client(
             return published;
         }
         Some(crate::io_outcome::ClientChange::Install) => {
-            let Some(Change::Client(mut prepared)) = change else {
-                return false;
+            let mut prepared = match change {
+                Some(Change::Client(prepared)) => prepared,
+                // The client already has a queue it can use.
+                None => return true,
+                Some(change) => {
+                    retire(runtime, Some(change));
+                    return false;
+                }
             };
             let retired = &mut runtime.retired.get_mut().queues;
             let installed = prepared.id() == client

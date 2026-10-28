@@ -117,10 +117,10 @@ fn each_connection_ends_its_settlement_replay_with_a_marker_once() {
     owner.open();
     heartbeat(&owner);
     let incarnation = owner.registry.incarnation;
-    let marker = Request::Replayed {
+    let marker = Request::Report(Report::Replayed {
         incarnation,
         through: 0,
-    };
+    });
     let markers = |counts: &Counts| {
         counts
             .requests

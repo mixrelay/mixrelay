@@ -47,8 +47,9 @@ typedef struct MRHALCoreNativeOps {
     void (*remaining_client)(void *);
     bool (*set_rate)(void *, uint32_t);
     bool (*timestamp)(void *, uint64_t, MRHALCoreTimestamp *);
-    /* Control, outside the IO freeze: a queue for a client that needs one. */
-    void *(*prepare_client)(void *, uint32_t);
+    /* Control, outside the IO freeze: a queue for a client that needs one, or NULL.
+       False when it could not be mapped within the endpoint's PCM budget. */
+    bool (*prepare_client)(void *, uint32_t, void **);
     /* Frozen registration, IO-start install or removal (NULL change). */
     bool (*client)(void *, uint32_t, uint32_t, void *);
     MRHALCoreIoOutcome (*io)(void *, bool, uint32_t, uint64_t, float *, uint32_t);

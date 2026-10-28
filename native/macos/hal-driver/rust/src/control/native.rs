@@ -39,13 +39,6 @@ unsafe extern "C" {
     fn xpc_connection_send_message(connection: Handle, message: Handle);
     fn xpc_get_type(message: Handle) -> *const c_void;
     fn xpc_release(object: Handle);
-    fn xpc_dictionary_create(
-        keys: *const *const c_char,
-        values: *const Handle,
-        count: usize,
-    ) -> Handle;
-    fn xpc_dictionary_set_uint64(object: Handle, key: *const c_char, value: u64);
-    fn xpc_dictionary_set_string(object: Handle, key: *const c_char, value: *const c_char);
     fn mr_hal_control_install_handler(
         connection: Handle,
         owner: *const c_void,
@@ -197,56 +190,7 @@ impl Backend for Native {
     fn send(&self, connection: &Connection, request: Request) {
         let message = match request {
             Request::Inventory => mr_hal_control_create_inventory_request(),
-            Request::Settled {
-                generation,
-                settlement,
-            } => report(
-                c"inventory_ack",
-                &[
-                    (c"generation", generation),
-                    (
-                        c"applied",
-                        u64::from(settlement == crate::inventory::Settlement::Applied),
-                    ),
-                ],
-            ),
-            Request::Replayed {
-                incarnation,
-                through,
-            } => report(
-                c"configuration_replayed",
-                &[(c"incarnation", incarnation), (c"through", through)],
-            ),
-            Request::Unprovisioned { endpoint, clients } => {
-                let (high, low) = halves(endpoint);
-                report(
-                    c"clients_unprovisioned",
-                    &[
-                        (c"endpoint_high", high),
-                        (c"endpoint_low", low),
-                        (c"clients", u64::from(clients)),
-                    ],
-                )
-            }
-            Request::Configured {
-                incarnation,
-                settled,
-            } => {
-                let (high, low) = halves(settled.endpoint);
-                report(
-                    c"configuration_settled",
-                    &[
-                        (c"incarnation", incarnation),
-                        (c"endpoint_high", high),
-                        (c"endpoint_low", low),
-                        (c"sequence", settled.sequence),
-                        (c"rate", u64::from(settled.rate)),
-                        (c"capture_format", u64::from(settled.formats[0])),
-                        (c"render_format", u64::from(settled.formats[1])),
-                        (c"applied", u64::from(settled.applied)),
-                    ],
-                )
-            }
+            Request::Report(report) => report.encode(),
             Request::Replacement {
                 endpoint,
                 generation,
@@ -333,34 +277,6 @@ unsafe extern "C" fn event(context: *const c_void, generation: u64, message: Han
     ) || ptr::eq(message, ptr::addr_of!(_xpc_error_connection_invalid).cast())
     {
         owner.disconnected(generation);
-    }
-}
-
-/// HAL report version; the Driver service surfaces any other as a partial install.
-const REPORT_VERSION: u64 = 2;
-
-/// A new report dictionary, or null when XPC cannot allocate one.
-/// An endpoint identity as the two big-endian words of the report wire.
-fn halves(endpoint: [u8; 16]) -> (u64, u64) {
-    let (high, low) = endpoint.split_at(8);
-    (
-        u64::from_be_bytes(high.try_into().unwrap_or_default()),
-        u64::from_be_bytes(low.try_into().unwrap_or_default()),
-    )
-}
-
-fn report(operation: &std::ffi::CStr, fields: &[(&std::ffi::CStr, u64)]) -> Handle {
-    // SAFETY: static keys and the operation string are copied into a new dictionary.
-    unsafe {
-        let message = xpc_dictionary_create(ptr::null(), ptr::null(), 0);
-        if !message.is_null() {
-            xpc_dictionary_set_uint64(message, c"version".as_ptr(), REPORT_VERSION);
-            xpc_dictionary_set_string(message, c"operation".as_ptr(), operation.as_ptr());
-            for (key, value) in fields {
-                xpc_dictionary_set_uint64(message, key.as_ptr(), *value);
-            }
-        }
-        message
     }
 }
 
