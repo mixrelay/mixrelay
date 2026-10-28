@@ -39,6 +39,27 @@ enum Request {
         incarnation: u64,
         through: u64,
     },
+    /// Clients holding IO on `endpoint` that have no queue; 0 reports recovery.
+    Unprovisioned {
+        endpoint: [u8; 16],
+        clients: u32,
+    },
+}
+
+/// Endpoints with running clients that hold no queue, and how many.
+type Unprovisioned = Vec<([u8; 16], u32)>;
+
+/// Counts that differ from those `sent`; an endpoint that left the list reports 0.
+fn unprovisioned_changes(sent: &Unprovisioned, current: &Unprovisioned) -> Unprovisioned {
+    let recovered = sent
+        .iter()
+        .filter(|(endpoint, _)| current.iter().all(|(other, _)| other != endpoint))
+        .map(|&(endpoint, _)| (endpoint, 0));
+    let changed = current
+        .iter()
+        .copied()
+        .filter(|entry| !sent.contains(entry));
+    recovered.chain(changed).collect()
 }
 
 /// The adapter owns queue/timer handles; each connection value owns its socket.
@@ -59,6 +80,8 @@ struct Control<B: Backend> {
     settled: Cell<Option<(u64, u64, crate::inventory::Settlement)>>,
     /// Authority and the newest request settlement sent on it.
     configured: Cell<(u64, u64)>,
+    /// Authority and the unprovisioned client counts last sent on it.
+    unprovisioned: RefCell<(u64, Unprovisioned)>,
 }
 
 impl<B: Backend> Control<B> {
@@ -70,6 +93,7 @@ impl<B: Backend> Control<B> {
             backend,
             settled: Cell::new(None),
             configured: Cell::new((0, 0)),
+            unprovisioned: RefCell::new((0, Vec::new())),
         }
     }
 
@@ -133,6 +157,7 @@ impl<B: Backend> Control<B> {
             self.settled.set(Some((authority, generation, settlement)));
         }
         self.send_configurations(authority);
+        self.send_unprovisioned(authority);
         match action {
             TickAction::Maintain => {}
             TickAction::Reconnect => self.open(),
@@ -167,6 +192,25 @@ impl<B: Backend> Control<B> {
             });
         }
         self.configured.set((authority, newest));
+    }
+
+    /// Reports each change in the number of clients holding IO without a queue, so a
+    /// failed re-provisioning is logged by the Driver service rather than left silent.
+    fn send_unprovisioned(&self, authority: u64) {
+        if authority == 0 {
+            return;
+        }
+        let current = self.registry.unprovisioned();
+        let (sent_authority, sent) = self.unprovisioned.replace((authority, Vec::new()));
+        let sent = if sent_authority == authority {
+            sent
+        } else {
+            Vec::new()
+        };
+        for (endpoint, clients) in unprovisioned_changes(&sent, &current) {
+            self.send(Request::Unprovisioned { endpoint, clients });
+        }
+        self.unprovisioned.replace((authority, current));
     }
 
     fn send(&self, request: Request) {

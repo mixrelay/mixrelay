@@ -217,21 +217,28 @@ impl Backend for Native {
                 c"configuration_replayed",
                 &[(c"incarnation", incarnation), (c"through", through)],
             ),
+            Request::Unprovisioned { endpoint, clients } => {
+                let (high, low) = halves(endpoint);
+                report(
+                    c"clients_unprovisioned",
+                    &[
+                        (c"endpoint_high", high),
+                        (c"endpoint_low", low),
+                        (c"clients", u64::from(clients)),
+                    ],
+                )
+            }
             Request::Configured {
                 incarnation,
                 settled,
             } => {
-                let half = |range: std::ops::Range<usize>| {
-                    let mut bytes = [0; 8];
-                    bytes.copy_from_slice(&settled.endpoint[range]);
-                    u64::from_be_bytes(bytes)
-                };
+                let (high, low) = halves(settled.endpoint);
                 report(
                     c"configuration_settled",
                     &[
                         (c"incarnation", incarnation),
-                        (c"endpoint_high", half(0..8)),
-                        (c"endpoint_low", half(8..16)),
+                        (c"endpoint_high", high),
+                        (c"endpoint_low", low),
                         (c"sequence", settled.sequence),
                         (c"rate", u64::from(settled.rate)),
                         (c"capture_format", u64::from(settled.formats[0])),
@@ -333,6 +340,15 @@ unsafe extern "C" fn event(context: *const c_void, generation: u64, message: Han
 const REPORT_VERSION: u64 = 2;
 
 /// A new report dictionary, or null when XPC cannot allocate one.
+/// An endpoint identity as the two big-endian words of the report wire.
+fn halves(endpoint: [u8; 16]) -> (u64, u64) {
+    let (high, low) = endpoint.split_at(8);
+    (
+        u64::from_be_bytes(high.try_into().unwrap_or_default()),
+        u64::from_be_bytes(low.try_into().unwrap_or_default()),
+    )
+}
+
 fn report(operation: &std::ffi::CStr, fields: &[(&std::ffi::CStr, u64)]) -> Handle {
     // SAFETY: static keys and the operation string are copied into a new dictionary.
     unsafe {

@@ -120,6 +120,67 @@ impl Registry {
         Ok(stopped)
     }
 
+    /// Maps a queue for each client holding IO on `id` that lacks one; see `perform`.
+    pub(crate) fn reprovision(&self, id: u32) {
+        if let Some(device) = self.pin(id).filter(|device| device.id == id) {
+            self.provision_running(&device, &mut lock(&device.control));
+        }
+    }
+
+    /// Queues map on control outside any freeze, while the host still pauses IO; only
+    /// their publication takes one short freeze. A client whose queue could not be
+    /// mapped or installed stays counted in `unprovisioned` for the control tick.
+    pub(super) fn provision_running(&self, device: &Device, control: &mut Control) {
+        if !device.alive.load(Ordering::Acquire) {
+            return;
+        }
+        let runtime = device.runtime.load(Ordering::Acquire);
+        let mut missing = 0;
+        let prepared: Vec<_> = control
+            .clients
+            .iter()
+            .filter(|&(_, &running)| running)
+            .filter_map(|(&client, _)| {
+                // SAFETY: control retains the live runtime; mapping runs alongside IO.
+                let change = unsafe { (self.native.prepare_client)(runtime, client) };
+                let prepared = Prepared::new(change, self.native);
+                missing += u32::from(prepared.is_none());
+                prepared.map(|prepared| (client, prepared))
+            })
+            .collect();
+        if !prepared.is_empty() {
+            let frozen = device.freeze();
+            for (client, prepared) in prepared {
+                // SAFETY: control and freeze retain the live runtime and exclude IO.
+                let installed = unsafe {
+                    self.native.update_client(
+                        runtime,
+                        client,
+                        crate::io_outcome::ClientChange::Install,
+                        Some(prepared),
+                    )
+                };
+                missing += u32::from(!installed);
+            }
+            drop(frozen);
+            // SAFETY: control retains the live runtime; the freeze has ended.
+            unsafe { (self.native.release)(runtime) };
+        }
+        control.unprovisioned = missing;
+    }
+
+    /// Running clients still without a queue, per endpoint, for the Driver service.
+    pub(crate) fn unprovisioned(&self) -> Vec<([u8; 16], u32)> {
+        self.devices()
+            .into_iter()
+            .filter_map(|id| {
+                let device = self.pin(id)?;
+                let missing = lock(&device.control).unprovisioned;
+                (missing != 0).then_some((device.endpoint, missing))
+            })
+            .collect()
+    }
+
     pub(crate) fn start(&self, id: u32, client: u32, now: u64) -> i32 {
         let Some(device) = self.pin(id).filter(|device| device.id == id) else {
             return NOT_FOUND;

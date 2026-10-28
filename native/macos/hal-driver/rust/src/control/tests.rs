@@ -182,3 +182,18 @@ fn null_host_initialization_does_not_publish_native_work() {
     assert!(!unsafe { mr_hal_control_initialize(ptr::null(), &raw mut registry) });
     assert!(registry.is_null());
 }
+
+#[test]
+fn missing_client_queues_are_reported_on_each_change_and_on_recovery() {
+    let (one, two) = ([1; 16], [2; 16]);
+    assert_eq!(unprovisioned_changes(&vec![], &vec![(one, 2)]), [(one, 2)]);
+    assert!(unprovisioned_changes(&vec![(one, 2)], &vec![(one, 2)]).is_empty());
+    assert_eq!(
+        unprovisioned_changes(&vec![(one, 2)], &vec![(one, 1), (two, 1)]),
+        [(one, 1), (two, 1)]
+    );
+    assert_eq!(
+        unprovisioned_changes(&vec![(one, 1), (two, 1)], &vec![(two, 1)]),
+        [(one, 0)]
+    );
+}

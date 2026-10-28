@@ -108,11 +108,15 @@ HAL의 `ClientMix`는 등록된 클라이언트별 PCM 큐와 등록·제거·�
 큐는 IO를 시작하는 클라이언트만 가진다. 장치가 이미 실행 중일 때 등록된 클라이언트는 자기 StartIO
 전에도 렌더할 수 있으므로 등록 때 받는다. 큐가 없거나 ring epoch를 다 쓴 클라이언트는 StartIO 때
 제어 스레드에서 freeze 밖에 새 큐를 매핑하고 미리 fault한 뒤, freeze 안에서는 게시만 한다.
-`PerformDeviceConfigurationChange`는 큐를 매핑하지 않는다. 샘플레이트만 바뀌면 큐와 grant를 유지하고
-ring epoch·clock을 다시 게시해 이전 rate의 PCM을 버리며, epoch가 남지 않은 큐는 떼어 낸다. 형식이
-바뀌면 새 endpoint 매핑(인벤토리를 받을 때 미리 매핑)으로 바꾸고 이전 모양의 큐를 떼어 낸다. 떼어 낸
-큐와 매핑은 freeze가 끝난 뒤 해제하며, 각 클라이언트는 다음 StartIO에서 새 큐를 받는다. endpoint ring을
-다시 열 수 없으면 rate 변경과 시작은 아무것도 바꾸지 않고 거부된다.
+`PerformDeviceConfigurationChange`의 freeze 구간은 큐를 매핑하지도, 메모리를 할당하지도 않는다.
+샘플레이트만 바뀌면 큐와 grant를 유지하고 ring epoch·clock을 다시 게시해 이전 rate의 PCM을 버리며,
+epoch가 남지 않은 큐는 떼어 낸다. 형식이 바뀌면 새 endpoint 매핑(인벤토리를 받을 때 미리 매핑)으로
+바꾸고 이전 모양의 큐를 떼어 낸다. 떼어 낸 큐와 매핑은 freeze가 끝난 뒤 해제한다. coreaudiod는 이
+호출 앞뒤로 IO를 일시정지할 뿐 StopIO·StartIO를 부르지 않는다. 그래서 같은 호출이 반환하기 전에, IO가
+아직 멈춘 동안 IO를 가진 클라이언트의 새 큐를 freeze 밖에서 매핑하고 짧은 freeze에서 게시한다. IO를
+가지지 않은 클라이언트는 다음 StartIO에서 받는다. 매핑하지 못한 클라이언트는 설정을 되돌리지 않고 수를
+기록한다. 제어 tick이 다시 시도하고, Driver service에 그 수와 회복을 보고해 로그에 남긴다. endpoint
+ring을 다시 열 수 없으면 rate 변경과 시작은 아무것도 바꾸지 않고 거부된다.
 `Registry`는 장치의 시작 참조를 세고 최초 시작·최종 종료를 네이티브 런타임에 요청한다.
 최초 시작은 모든 큐의 PCM 타임라인을 초기화한다. 다른 클라이언트의 시작·정지는 게시된 PCM을
 지우지 않으며, 등록된 출력 클라이언트가 직접 StartIO를 받아야 한다는 조건을 두지 않는다.

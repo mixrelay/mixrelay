@@ -32,6 +32,7 @@ static PREPARATIONS: AtomicUsize = AtomicUsize::new(0);
 static PREPARED_DURING_IO: AtomicUsize = AtomicUsize::new(0);
 static RELEASES: AtomicUsize = AtomicUsize::new(0);
 static FAIL_REPLACE: AtomicBool = AtomicBool::new(false);
+static FAIL_PREPARE_CLIENT: AtomicBool = AtomicBool::new(false);
 static FAIL_CREATE_ENDPOINT: AtomicU8 = AtomicU8::new(0);
 static PAUSE_IO: AtomicBool = AtomicBool::new(false);
 static IO_ENTERED: AtomicBool = AtomicBool::new(false);
@@ -105,6 +106,9 @@ unsafe extern "C" fn prepare(geometry: *const Geometry, _: i32, _: usize) -> *mu
     change(Change::Mapping(unsafe { *geometry }))
 }
 unsafe extern "C" fn prepare_client(_: *mut c_void, client: u32) -> *mut c_void {
+    if FAIL_PREPARE_CLIENT.load(Ordering::SeqCst) {
+        return std::ptr::null_mut();
+    }
     change(Change::Client(client))
 }
 unsafe extern "C" fn release(_: *mut c_void) {
@@ -328,6 +332,7 @@ impl Fixture {
         let serial = lock(&SERIAL);
         assert_eq!(LIVE.load(Ordering::SeqCst), 0);
         FAIL_REPLACE.store(false, Ordering::SeqCst);
+        FAIL_PREPARE_CLIENT.store(false, Ordering::SeqCst);
         FAIL_CREATE_ENDPOINT.store(0, Ordering::SeqCst);
         REPLACEMENTS.store(0, Ordering::SeqCst);
         PREPARATIONS.store(0, Ordering::SeqCst);
@@ -871,6 +876,73 @@ fn a_geometry_change_maps_only_its_endpoint_and_no_client_queue() {
 }
 
 #[test]
+fn a_running_client_left_without_a_queue_is_counted_and_retried_by_the_control_tick() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 7, true), OK);
+    assert_eq!(fixture.registry.start(id, 7, 100), OK);
+    assert_eq!(fixture.registry.client(id, 8, true), OK);
+    fixture
+        .registry
+        .upsert([1; 16], "Wider", 48_000, (fixture.fd(1, 7, 3), 24))
+        .unwrap();
+    let prepared = PREPARATIONS.load(Ordering::SeqCst);
+    FAIL_PREPARE_CLIENT.store(true, Ordering::SeqCst);
+    // The configuration has committed; the running client's missing queue is reported
+    // instead of leaving it silent.
+    assert_eq!(fixture.perform(), OK);
+    assert_eq!(fixture.registry.unprovisioned(), [([1; 16], 1)]);
+    fixture.registry.tick();
+    assert_eq!(fixture.registry.unprovisioned(), [([1; 16], 1)]);
+    FAIL_PREPARE_CLIENT.store(false, Ordering::SeqCst);
+    fixture.registry.tick();
+    assert!(fixture.registry.unprovisioned().is_empty());
+    // Only the client holding IO was retried; the idle one waits for its StartIO.
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), prepared + 1);
+    fixture.registry.tick();
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), prepared + 1);
+}
+
+#[test]
+fn running_clients_are_reprovisioned_off_the_freeze_while_io_is_in_flight() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 1, true), OK);
+    assert_eq!(fixture.registry.start(id, 1, 100), OK);
+    let prepared = PREPARATIONS.load(Ordering::SeqCst);
+    PAUSE_IO.store(true, Ordering::Release);
+    let registry = fixture.registry.as_ref();
+    let device = registry.pin(id).unwrap();
+    std::thread::scope(|scope| {
+        let callback = scope.spawn(|| {
+            let mut samples = [0.5_f32; 64];
+            // SAFETY: this callback exclusively owns its aligned 32-frame stereo buffer.
+            assert!(unsafe {
+                registry.io(IoOperation {
+                    client: 1,
+                    device: id,
+                    stream: id + 2,
+                    render: true,
+                    frame: 0,
+                    samples: samples.as_mut_ptr().cast(),
+                    frames: 32,
+                })
+            });
+        });
+        eventually(|| IO_ENTERED.load(Ordering::Acquire));
+        let control = scope.spawn(|| registry.reprovision(id));
+        // The queue is mapped while the callback still holds its pin; only the install
+        // then waits for the freeze to drain it.
+        eventually(|| device.io_pin().is_none());
+        assert_eq!(PREPARED_DURING_IO.load(Ordering::SeqCst), 1);
+        RELEASE_IO.store(true, Ordering::Release);
+        callback.join().unwrap();
+        control.join().unwrap();
+    });
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), prepared + 1);
+}
+
+#[test]
 fn a_format_only_request_and_idle_clients_prepare_nothing() {
     let fixture = Fixture::new();
     let id = fixture.add(1, 48_000);
@@ -1071,7 +1143,7 @@ fn failed_pcm_reservation_preserves_live_format_mapping_clock_and_audio() {
     assert_eq!(
         fixture
             .registry
-            .perform_with_scratch(id, CONFIG_ACTION, generation, |device, pending| {
+            .commit(id, CONFIG_ACTION, generation, |device, pending| {
                 device.prepare_scratch_with(pending, |_| {
                     mixrelay_audio_io::pcm_buffer::zeroed(usize::MAX)
                 })

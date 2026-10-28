@@ -87,6 +87,9 @@ pub(crate) struct Control {
     pub pending: Option<Pending>,
     pub next_generation: u64,
     pub attachment_failed: bool,
+    /// Clients holding IO that still lack a queue after a configuration change detached
+    /// theirs; the control tick retries them and reports the count.
+    pub unprovisioned: u32,
 }
 
 pub(crate) struct Device {
@@ -151,6 +154,7 @@ impl Device {
                 pending: None,
                 next_generation: 1,
                 attachment_failed: false,
+                unprovisioned: 0,
             }),
             native: native_runtime.0,
             runtime: AtomicPtr::new(native_runtime.1),

@@ -128,6 +128,12 @@ impl Registry {
             }
             self.request(id);
             self.notify_latency(id);
+            if let Some(device) = self.pin(id) {
+                let mut control = lock(&device.control);
+                if control.unprovisioned != 0 {
+                    self.provision_running(&device, &mut control);
+                }
+            }
         }
         self.reclaim();
     }
@@ -163,11 +169,20 @@ impl Registry {
             .collect()
     }
 
+    /// Commits a configuration change, then gives each client holding IO a queue of the
+    /// committed shape before control returns to coreaudiod. Core Audio only pauses IO
+    /// around this call; it does not call StopIO/StartIO, so a client whose queue the
+    /// commit detached would otherwise render into nothing.
     pub(crate) fn perform(&self, id: u32, action: u64, generation: u64) -> i32 {
-        self.perform_with_scratch(id, action, generation, Device::prepare_scratch)
+        let status = self.commit(id, action, generation, Device::prepare_scratch);
+        if status == OK {
+            self.reprovision(id);
+        }
+        status
     }
 
-    pub(crate) fn perform_with_scratch(
+    /// The frozen, allocation-free step of `perform`.
+    pub(crate) fn commit(
         &self,
         id: u32,
         action: u64,

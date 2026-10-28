@@ -175,6 +175,12 @@ pub(super) enum Report {
     Replayed {
         incarnation: u64,
     },
+    /// Clients holding IO on `endpoint` that the HAL could not give a queue after a
+    /// configuration change; they are silent until it retries. 0 reports recovery.
+    Unprovisioned {
+        endpoint: [u8; 16],
+        clients: u32,
+    },
     /// A report this service cannot read: the HAL comes from another package version.
     Incompatible,
 }
@@ -198,6 +204,7 @@ pub(super) unsafe fn report(event: Object) -> Option<Report> {
     if operation != c"inventory_ack"
         && operation != c"configuration_settled"
         && operation != c"configuration_replayed"
+        && operation != c"clients_unprovisioned"
     {
         return None;
     }
@@ -224,6 +231,12 @@ pub(super) unsafe fn report(event: Object) -> Option<Report> {
     endpoint[..8].copy_from_slice(&uint(c"endpoint_high").to_be_bytes());
     endpoint[8..].copy_from_slice(&uint(c"endpoint_low").to_be_bytes());
     let format = |key| u32::try_from(uint(key)).unwrap_or(0);
+    if operation == c"clients_unprovisioned" {
+        return Some(Report::Unprovisioned {
+            endpoint,
+            clients: format(c"clients"),
+        });
+    }
     Some(Report::Configured(Configured {
         incarnation: uint(c"incarnation"),
         endpoint,
@@ -253,6 +266,18 @@ impl Peer {
             }
             Report::Configured(configured) => self.log.record(configured),
             Report::Replayed { incarnation } => self.log.replayed(incarnation),
+            Report::Unprovisioned { endpoint, clients } => {
+                let endpoint = endpoint.map(|byte| format!("{byte:02x}")).concat();
+                if clients == 0 {
+                    tracing::info!(%endpoint, "HAL clients regained their output queues");
+                } else {
+                    tracing::warn!(
+                        %endpoint,
+                        clients,
+                        "HAL clients hold IO without an output queue and are silent until the HAL retries"
+                    );
+                }
+            }
             Report::Incompatible => self.incompatible = true,
         }
     }

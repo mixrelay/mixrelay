@@ -89,6 +89,28 @@ fn current_reports_carry_the_requested_values() {
 }
 
 #[test]
+fn a_running_client_left_without_a_queue_is_reported_with_its_endpoint() {
+    let missing = message(
+        c"clients_unprovisioned",
+        &[
+            (c"version", PROTOCOL),
+            (c"endpoint_high", u64::from_be_bytes([1; 8])),
+            (c"endpoint_low", u64::from_be_bytes([2; 8])),
+            (c"clients", 2),
+        ],
+    );
+    let mut endpoint = [1; 16];
+    endpoint[8..].fill(2);
+    assert_eq!(
+        read(&missing),
+        Some(Report::Unprovisioned {
+            endpoint,
+            clients: 2
+        })
+    );
+}
+
+#[test]
 fn the_replay_marker_names_its_hal_incarnation() {
     let marker = message(
         c"configuration_replayed",
