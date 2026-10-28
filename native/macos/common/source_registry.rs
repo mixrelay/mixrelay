@@ -727,7 +727,8 @@ impl SourceRegistry {
             timeline.policy.started = false;
             timeline.previous_read = None;
             timeline.policy.next = 0;
-            timeline.policy.timing = timestamps::Timing::default();
+            // The reader's clock survives an unavailable source; its next read restarts
+            // the measured run, so it is never taken for a sequential reader meanwhile.
             timeline.publish(source, stats.epoch, frames, false);
             return Err(ReadMiss::Unavailable);
         }

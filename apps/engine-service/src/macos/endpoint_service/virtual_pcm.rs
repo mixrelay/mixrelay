@@ -34,6 +34,17 @@ pub(super) enum Error {
     Stale,
 }
 
+impl Error {
+    /// Whether a later attempt can succeed: storage reservation, not configuration.
+    pub(super) fn retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Prepare(_)
+                | Self::Bridge(mixrelay_audio_io::clock_bridge::BridgeError::Allocation { .. })
+        )
+    }
+}
+
 struct Endpoint {
     channels: u32,
     capacity: u32,

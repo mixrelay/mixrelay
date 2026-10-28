@@ -6,7 +6,7 @@ use mixrelay_audio_io::clock_bridge::{
     AsyncClockBridge, BridgeConfig, ClockFeedback, ClockRelation, Discontinuity, FeedbackQueue,
 };
 use mixrelay_macos_transport::application_source_transport::{
-    SourceClockSnapshot, SourceTransport,
+    ConsumerTimingRead, SourceClockSnapshot, SourceTransport,
 };
 
 /// Correction per frame of phase between a time-addressed consumer's request and the
@@ -36,22 +36,17 @@ pub(super) struct Converter {
     times: Vec<u64>,
     pending: usize,
     drain_limit: usize,
+    /// The consumer last read by time.
+    time_addressed: bool,
 }
 impl Converter {
-    /// Acknowledges the requested format, then prepares conversion storage, so a deferred
-    /// acknowledgement allocates nothing. An allocation failure ends the pump, and its
-    /// dropped transport withdraws the acknowledgement with its lease.
-    pub(super) fn new(
-        transport: &mut SourceTransport,
-        clock: SourceClockSnapshot,
-        native: (u32, usize),
-    ) -> Result<Option<Self>, Error> {
+    /// Prepares conversion storage for the requested format without touching the
+    /// source; `restart` then commits its stream. A deferred acknowledgement reuses the
+    /// storage, and a failed preparation leaves the source's epoch as it was.
+    pub(super) fn new(clock: SourceClockSnapshot, native: (u32, usize)) -> Result<Self, Error> {
         let (rate, channels) = native;
-        let Some(epoch) = transport.begin_epoch(clock.format_word, rate) else {
-            return Ok(None);
-        };
         let output_rate = u32::try_from(clock.format_word & u64::from(u32::MAX)).unwrap_or(0);
-        let mut bridge = AsyncClockBridge::new(BridgeConfig {
+        let bridge = AsyncClockBridge::new(BridgeConfig {
             channels,
             input_rate: rate,
             output_rate,
@@ -71,25 +66,26 @@ impl Converter {
             mixrelay_audio_io::pcm_buffer::zeroed(128 * channels).map_err(std::io::Error::other)?;
         let times =
             mixrelay_audio_io::pcm_buffer::timestamps(128).map_err(std::io::Error::other)?;
-        bridge.reset(epoch, Discontinuity::StreamRestart);
-        Ok(Some(Self {
+        Ok(Self {
             bridge,
             format: clock.format_word,
             rate,
             master: clock.clock_master != 0,
-            epoch,
+            // No stream yet: no source snapshot acknowledges epoch 0.
+            epoch: 0,
             ticks: clock.consumer_ticks,
             output,
             times,
             pending: 0,
+            time_addressed: false,
             // One flush converts at most a full FIFO; each pull moves 128 output frames.
             drain_limit: (BRIDGE_FRAMES * output_rate as usize)
                 .div_ceil(rate.max(1) as usize * 128)
                 + 2,
-        }))
+        })
     }
-    /// Starts a new source epoch on the same storage when the native rate, format and
-    /// clock relation are unchanged. Returns false when the acknowledgement defers.
+    /// Acknowledges the requested format and starts a new source epoch on this storage.
+    /// Returns false when the acknowledgement defers.
     pub(super) fn restart(
         &mut self,
         transport: &mut SourceTransport,
@@ -104,7 +100,7 @@ impl Converter {
         self.pending = 0;
         true
     }
-    /// Whether `restart` can keep this storage for the requested stream.
+    /// Whether `restart` can use this storage for the requested stream.
     pub(super) fn reusable(&self, clock: SourceClockSnapshot, rate: u32) -> bool {
         self.format == clock.format_word
             && self.rate == rate
@@ -142,15 +138,23 @@ impl Converter {
         let elapsed = clock.consumer_ticks.saturating_sub(self.ticks);
         self.ticks = clock.consumer_ticks;
         let rate = self.format & u64::from(u32::MAX);
-        if let Some(timing) = transport.consumer_timing() {
-            #[expect(clippy::cast_precision_loss, reason = "graph rates below 2^24")]
-            let nominal = 1e9 / rate as f64;
-            let phase = timing.phase_ns.map_or(0.0, |phase| {
-                f64::from(phase) / nominal * PHASE_PPM_PER_FRAME
-            });
-            self.bridge
-                .set_clock_correction((nominal / timing.period_ns - 1.0) * 1e6 + phase)?;
-            return Ok(());
+        match transport.consumer_timing() {
+            ConsumerTimingRead::Timed(timing) => {
+                #[expect(clippy::cast_precision_loss, reason = "graph rates below 2^24")]
+                let nominal = 1e9 / rate as f64;
+                let phase = timing.phase_ns.map_or(0.0, |phase| {
+                    f64::from(phase) / nominal * PHASE_PPM_PER_FRAME
+                });
+                self.bridge
+                    .set_clock_correction((nominal / timing.period_ns - 1.0) * 1e6 + phase)?;
+                self.time_addressed = true;
+                return Ok(());
+            }
+            // A time-addressed consumer mid-publication, or not yet reading this epoch,
+            // keeps its last correction: its queue occupancy carries no drift.
+            ConsumerTimingRead::Unknown if self.time_addressed => return Ok(()),
+            ConsumerTimingRead::Unknown => {}
+            ConsumerTimingRead::Sequential => self.time_addressed = false,
         }
         self.bridge.observe_clock(ClockFeedback {
             queue: FeedbackQueue::Output,

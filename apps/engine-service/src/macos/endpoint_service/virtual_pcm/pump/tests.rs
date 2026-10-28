@@ -683,10 +683,13 @@ fn a_failed_converter_preparation_retries_and_keeps_the_head() {
     }
     fixture.pump.failing_converters = 3;
     fixture.request(true);
+    let epoch = fixture.pump.transport.clock().unwrap().epoch;
     // 10 + 20 + 40 ms of backoff, then admission.
     let mut cycles = 0;
     while fixture.progress().1 == 0 {
         assert!(cycles < 64, "admission never retried");
+        // Failed preparation comes before the epoch: the source keeps its stream.
+        assert_eq!(fixture.pump.transport.clock().unwrap().epoch, epoch);
         fixture.period();
         cycles += 1;
     }
@@ -721,4 +724,83 @@ fn a_loss_episode_is_reported_once() {
     assert_eq!(reports.len(), 1, "{reports:?}");
     assert_eq!(reports[0].1, 1_875 * 128);
     assert!(reports[0].0 > 1_875, "reported before the episode ended");
+}
+
+/// A configuration the converter can never accept ends the endpoint instead of retrying.
+#[test]
+fn an_invalid_converter_configuration_ends_the_endpoint() {
+    let mut fixture = Fixture::new(48_000);
+    fixture.route(ConsumerRoute::Routed { head: true });
+    fixture.period();
+    fixture.pump.failing_converters = 1;
+    fixture.pump.converter_failure = mixrelay_audio_io::clock_bridge::BridgeError::InvalidConfig;
+    fixture.request(true);
+    fixture.write();
+    let nanos = (u128::from(fixture.written) + 32) * 1_000_000_000 / 48_000;
+    let now = fixture.anchor
+        + fixture
+            .timebase
+            .ticks(Duration::from_nanos(u64::try_from(nanos).unwrap()));
+    assert!(matches!(
+        fixture
+            .pump
+            .cycle(now, fixture.timebase, &fixture.scheduling),
+        Err(Error::Bridge(
+            mixrelay_audio_io::clock_bridge::BridgeError::InvalidConfig
+        ))
+    ));
+}
+
+/// A client that plays and stops before any route is published, or while the plan
+/// only meters it, loses nothing anyone wanted, so no loss is reported.
+#[test]
+fn stopping_an_unpublished_or_unrouted_source_reports_no_loss() {
+    for route in [None, Some(ConsumerRoute::Unrouted)] {
+        let mut fixture = Fixture::new(48_000);
+        if let Some(route) = route {
+            fixture.route(route);
+        }
+        for _ in 0..1_000 {
+            fixture.period();
+        }
+        assert!(fixture.pump.backlog.frames() != 0);
+        let anchor = fixture.anchor;
+        assert!(
+            fixture
+                .writer()
+                .set_clock((2, anchor), 48_000, false, false)
+        );
+        fixture.cycle();
+        assert_eq!(fixture.pump.backlog.frames(), 0);
+        assert_eq!(
+            fixture.pump.report.final_losses(fixture.pump.losses()),
+            None,
+            "{route:?}"
+        );
+    }
+}
+
+/// The pacer can stop awaiting a source after its head stream began, before the graph
+/// republishes the route. The pump re-checks the route each cycle, so the rest of the
+/// head joins at the live edge rather than reaching a graph that will not consume it.
+#[test]
+fn a_head_stream_whose_route_loses_the_head_joins_the_live_edge() {
+    let mut fixture = Fixture::new(48_000);
+    fixture.route(ConsumerRoute::Routed { head: true });
+    for _ in 0..375 {
+        fixture.period();
+    }
+    fixture.request(true);
+    fixture.period();
+    let (head_epoch, published, _) = fixture.progress();
+    assert_eq!(published, FEED_PERIODS as u64 * 128);
+    fixture.route(ConsumerRoute::Routed { head: false });
+    fixture.period();
+    assert!(fixture.pump.backlog.frames() <= 128);
+    let (epoch, published, _) = fixture.progress();
+    assert_ne!(epoch, head_epoch, "the live edge starts a new stream");
+    assert!(
+        published <= 256,
+        "{published} frames of the old head followed"
+    );
 }

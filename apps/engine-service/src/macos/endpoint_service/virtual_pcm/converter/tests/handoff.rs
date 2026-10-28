@@ -81,9 +81,11 @@ fn consumer_publication_during_converter_setup_keeps_the_new_epoch_and_pcm() {
     let consumer = unsafe { &*mapping.clock };
     consumer.consumer_sequence.fetch_add(1, Ordering::AcqRel);
     assert_eq!(transport.observe_clock(), SourceClockRead::Deferred);
-    let mut converter = Converter::new(&mut transport, before, (48_000, 2))
-        .unwrap()
-        .expect("producer reset is independent of the busy consumer snapshot");
+    let mut converter = Converter::new(before, (48_000, 2)).unwrap();
+    assert!(
+        converter.restart(&mut transport, before),
+        "producer reset is independent of the busy consumer snapshot"
+    );
     assert_eq!(transport.observe_clock(), SourceClockRead::Deferred);
     consumer.consumer_sequence.fetch_add(1, Ordering::Release);
     let after = transport.clock().unwrap();
@@ -139,4 +141,48 @@ fn consumer_publication_during_converter_setup_keeps_the_new_epoch_and_pcm() {
     let committed = registry.clock(source_token("a")).unwrap();
     assert_eq!(committed.native_frames, 128);
     assert_eq!(committed.running, 1);
+}
+
+/// While a time-addressed consumer is mid-publication its timing is unreadable. The
+/// converter keeps the correction it measured instead of falling back for that block
+/// to queue occupancy, which carries no drift for such a consumer.
+#[test]
+fn an_unreadable_time_addressed_consumer_keeps_its_correction() {
+    let (registry, mut transport, mapping) = source();
+    assert!(registry.set_clock_master(source_token("a"), false));
+    let clock = transport.clock().unwrap();
+    let mut converter = Converter::new(clock, (48_000, 2)).unwrap();
+    assert!(converter.restart(&mut transport, clock));
+    let clock = transport.clock().unwrap();
+    // SAFETY: this fixture is the only consumer and retains the independent mapping.
+    let consumer = unsafe { &*mapping.clock };
+    consumer.publish_consumer(
+        mixrelay_macos_transport::application_clock::ConsumerPublication {
+            epoch: clock.epoch,
+            next_frame: 0,
+            frames: 128,
+            running: true,
+            target_backlog_frames: 256,
+            phase_ns: 0,
+            // A device 100 ppm fast asks for 100 ppm more frames.
+            period_ns: 1e9 / 48_000.0 * (1.0 - 100e-6),
+        },
+    );
+    let clock = transport.clock().unwrap();
+    converter.observe(&transport, clock).unwrap();
+    let measured = converter.correction_ppm();
+    assert!((measured - 100.0).abs() < 1.0, "measured {measured} ppm");
+    consumer.consumer_sequence.fetch_add(1, Ordering::AcqRel);
+    // An empty queue against its target would steer occupancy feedback away at once.
+    let starved = SourceClockSnapshot {
+        consumer_ticks: clock.consumer_ticks + 128,
+        consumer_running: 1,
+        target_backlog_frames: 4_096,
+        produced_frames: 0,
+        consumed_frames: 0,
+        ..clock
+    };
+    converter.observe(&transport, starved).unwrap();
+    assert_eq!(converter.correction_ppm().to_bits(), measured.to_bits());
+    consumer.consumer_sequence.fetch_add(1, Ordering::Release);
 }

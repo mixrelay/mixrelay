@@ -58,16 +58,14 @@ pub(in crate::macos) struct NativePacers {
     hardware: HardwarePacer,
     application: ApplicationPacer,
     selected_application: Option<(u64, SourceKind)>,
-    hardware_paced: bool,
 }
 impl NativePacers {
     /// The shared source this pacing consumes from its first credit, if any. The graph
     /// publishes it as the head route, so only that source's producer delivers PCM it
     /// retained before admission.
     pub(in crate::macos) fn head(&self) -> Option<u64> {
-        (!self.hardware_paced)
-            .then(|| self.application.head())
-            .flatten()
+        // A device clock resets the application pacer, which then has no head.
+        self.application.head()
     }
 
     fn select_application_master(&mut self, token: Option<(u64, SourceKind)>) {
@@ -198,7 +196,6 @@ pub(in crate::macos) fn next_native_pace(
             .max(format.block_frames),
         );
         pacers.select_application_master(None);
-        pacers.hardware_paced = true;
         return (
             pacers.hardware.next(
                 (hardware.epoch, hardware.native_frames, hardware.native_rate),
@@ -214,33 +211,44 @@ pub(in crate::macos) fn next_native_pace(
     next_application_pace(pacers, plan, binding_clock)
 }
 
-/// Paces the graph from its first running pacing source in plan order, or awaits the
-/// first one when none runs. `clock` observes a binding's producer.
+/// Paces the graph from its current master while it runs and may still pace, else from
+/// the first running pacing source in plan order, or awaits the first one when none
+/// runs. Keeping a running master avoids a new pacer generation and a reacquired capture
+/// cursor when an earlier-listed source starts or comes back on. `clock` observes a
+/// binding's producer.
 fn next_application_pace(
     pacers: &mut NativePacers,
     plan: &RenderPlan,
     clock: impl Fn(&ExternalBinding) -> Option<ApplicationClockSnapshot>,
 ) -> (Pace, u64) {
     let format = plan.format();
-    pacers.hardware_paced = false;
-    for binding in plan.source_bindings() {
-        if let Some(identity) = paces(plan, binding)
-            && let Some(clock) = clock(binding)
-            && clock.running != 0
-        {
-            pacers.select_application_master(Some(identity));
-            return (
-                pacers.application.next(
-                    (identity.0, clock),
-                    (
-                        format.sample_rate,
-                        format.block_frames,
-                        clock.capacity_frames,
-                    ),
+    let running = |binding: &ExternalBinding| {
+        let identity = paces(plan, binding)?;
+        clock(binding)
+            .filter(|clock| clock.running != 0)
+            .map(|clock| (identity, clock))
+    };
+    let current = pacers.selected_application.and_then(|selected| {
+        plan.source_bindings()
+            .iter()
+            .find(|binding| paces(plan, binding) == Some(selected))
+            .and_then(running)
+    });
+    if let Some((identity, clock)) =
+        current.or_else(|| plan.source_bindings().iter().find_map(running))
+    {
+        pacers.select_application_master(Some(identity));
+        return (
+            pacers.application.next(
+                (identity.0, clock),
+                (
+                    format.sample_rate,
+                    format.block_frames,
+                    clock.capacity_frames,
                 ),
-                3,
-            );
-        }
+            ),
+            3,
+        );
     }
     // Master selection follows graph identity. A producer format rearm can
     // temporarily hide native running state without removing the selected source.

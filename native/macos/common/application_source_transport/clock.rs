@@ -14,6 +14,17 @@ pub enum SourceClockRead {
     Revoked,
 }
 
+/// How the consumer reads this epoch, as far as its last coherent publication shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ConsumerTimingRead {
+    /// It reads by time, with this clock against the frame timestamps.
+    Timed(ConsumerTiming),
+    /// It reads in sequence.
+    Sequential,
+    /// It is publishing, or has not read this epoch yet: keep its last mode.
+    Unknown,
+}
+
 /// A time-addressed consumer's clock against this epoch's frame timestamps.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ConsumerTiming {
@@ -97,23 +108,27 @@ impl SourceTransport {
         })
     }
 
-    /// The timing of a consumer that reads this epoch by time, or `None` for one that
-    /// reads in sequence, has not read this epoch, or is publishing concurrently.
+    /// How the consumer reads this epoch.
     #[must_use]
-    pub fn consumer_timing(&self) -> Option<ConsumerTiming> {
+    pub fn consumer_timing(&self) -> ConsumerTimingRead {
         let clock = self.mapping.clock();
         let sequence = clock.consumer_sequence.load(Ordering::Acquire);
         let position = clock.consumer_position.load(Ordering::Acquire);
         let phase = clock.consumer_phase.load(Ordering::Acquire);
         let period = f64::from_bits(clock.consumer_period.load(Ordering::Acquire));
-        (sequence & 1 == 0
-            && sequence == clock.consumer_sequence.load(Ordering::Acquire)
-            && position >> 48 == self.owned_epoch
-            && period > 0.0)
-            .then_some(ConsumerTiming {
+        if sequence & 1 != 0
+            || sequence != clock.consumer_sequence.load(Ordering::Acquire)
+            || position >> 48 != self.owned_epoch
+        {
+            ConsumerTimingRead::Unknown
+        } else if period > 0.0 {
+            ConsumerTimingRead::Timed(ConsumerTiming {
                 period_ns: period,
                 phase_ns: (phase != NO_PHASE).then_some(phase),
             })
+        } else {
+            ConsumerTimingRead::Sequential
+        }
     }
 
     /// How the consumer's active plan uses this source.

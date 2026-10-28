@@ -167,8 +167,10 @@ mixer의 forward cursor로 보존된 PCM을 순서대로 배출한다. 외부 HA
 현재 구간에서 요청 시각이 진행한 프레임 주기와 다음 미읽음 프레임의 위상(한 프레임 이내)을 소비자 위치와 함께
 게시하고, 변환기는 그 주기로 비율을 직접 정하고 위상 항(프레임당 120ppm)으로 맞춘다. 건너뛴 프레임이나 반
 프레임을 넘는 위상은 소비자 클록이 바뀌었다는 뜻이므로 구간을 마지막 걸음부터 다시 잰다. 커서 점프·재획득·새
-epoch도 구간을 다시 시작하되, 그때까지 잰 주기는 계속 게시한다. 소비자의 목표 점유는 이번 읽기가 프레임을 소비한
-뒤의 점유다.
+epoch도 구간을 다시 시작하되, 그때까지 잰 주기는 계속 게시한다. 공칭 주기에서 변환기 보정 한계(±2,000ppm)를
+벗어난 걸음은 프레임보다 작아도 커서 점프로 보고 주기에 넣지 않는다. 소비자의 목표 점유는 이번 읽기가 프레임을
+소비한 뒤의 점유다. 시각으로 읽던 소비자의 timing을 게시 도중이라 읽지 못한 주기에는 마지막 보정을 유지하고 큐
+점유로 되돌아가지 않는다.
 
 `cadence::next`는 native anchor에서 다음 절대 128프레임 경계를 계산한다.
 `Scheduling`은 그 deadline까지 기다리며 제어·종료 확인을 위해 대기를 5ms 이내로 제한한다.
@@ -197,9 +199,11 @@ macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭�
 얼마나 남길지는 그래프가 게시한 route(`ApplicationClock::consumer_route`)로 정한다. 그래프는 주기마다 활성 plan의
 가상 source마다 route를 게시한다. 노드가 켜져 있고 출력까지 이어지면 routed다. head는 pacer가 기다렸다가 첫
 credit부터 소비하는 source(`NativePacers::head`)이며, 장치 클록이 graph를 이끄는 동안에는 없다. pacer는 켜져 있고
-출력까지 이어진 shared source만 plan 순서대로 master로 고르거나 기다린다. worker는 다음 plan에서 빠진 source와,
+출력까지 이어진 shared source만 master로 고르거나 기다린다. 실행 중인 master는 계속 pacing할 수 있는 동안
+유지하고, 멈추거나 자격을 잃었을 때만 plan 순서대로 다음 실행 중인 source를 고른다. worker는 다음 plan에서 빠진 source와,
 끝날 때 모든 source를 unrouted로 게시한다. 이 route는 checkpoint나 렌더링 대기 중에도 바뀌지 않는다. route가
 아직 게시되지 않았으면 클라이언트 큐 하나(`QUEUE_FRAMES`)만큼만 변환 없이 남기며, 그 밖은 손실로 세지 않는다.
+head로 시작한 stream도 매 변환 전에 route를 다시 읽어, head를 잃었으면 남은 backlog를 버리고 live edge에서 이어 간다.
 unrouted source는 meter와 pacing을 위해 계속 게시하되 한 주기에 변환할 만큼만 남겨 live edge에 머문다. 이때
 버린 프레임과 큐에서 덮어쓰인 프레임은 손실로 세지 않는다. routed source는 포맷 승인·변환기 준비와 관계없이
 endpoint별 backlog에 native rate와 native 좌표 그대로 보존한다. backlog는 `retention::RING_FRAMES` ×
@@ -213,10 +217,12 @@ source에만 전달한다. 다른 source에는 첫 게시 전에 가장 새 run�
 변환한다. 늦게 승인된 head source는 실시간의 8배 속도로 따라잡고, graph credit은 게시한 PCM만큼만 순서대로
 늘어난다. 변환기 bridge의 입력 FIFO는 한 주기분의 따라잡기·priming·sinc 이력을 담는 2,048프레임이다. 변환기는
 포맷 승인 뒤에 저장 공간을 준비하고, 같은 형식의 run 경계에서는 저장 공간을 그대로 다시 쓴다. 저장 공간을
-준비하지 못하면 보존한 PCM을 유지하고 10ms부터 두 배씩 늘려 최대 1초 간격으로 다시 시도한다. native clock이
+준비한 뒤에만 포맷을 승인하고 새 epoch를 시작하므로, 준비 실패는 source의 epoch를 바꾸지 않는다. 할당 실패는
+보존한 PCM을 유지하고 10ms부터 두 배씩 늘려 최대 1초 간격으로 다시 시도한다. 잘못된 변환 설정처럼 다시 시도해도
+같은 오류는 endpoint를 끝낸다. native clock이
 멈추면 포맷·backlog 상태와 관계없이 먼저 native 정지를 게시하고, 그 timeline의 남은 backlog와 변환 stream을
 끝낸다. 끝난 stream의 변환 출력은 다시 쓰지 않는다. routed source의 큐에서 덮어쓰인 프레임
-(`ClientPcmMixer::skipped_frames`), backlog에서 버린 프레임, 정지 때문에 게시하지 못한 프레임은 손실이 1초
+(`ClientPcmMixer::skipped_frames`), backlog에서 버린 프레임, 정지 때 routed였던 source가 게시하지 못한 프레임은 손실이 1초
 동안 멈춘 뒤 손실 구간마다 한 번 제어 경로 경고로 남긴다. grant 수신과 source 승인(변환기 준비·첫 게시)의
 시각은 native sample 0 기준으로 기록한다. 물리 입력의 `HardwarePacer`는 첫 그래프 승인 때 준비 중 PCM을
 버린다. 앱이 가상 장치에 게시한 PCM은 위의 `ApplicationPacer` 계약대로 head source의 첫 프레임부터 보존한다.

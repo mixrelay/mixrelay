@@ -181,25 +181,55 @@ fn a_later_listed_source_that_starts_first_leaves_no_head_to_rewind_the_cursor()
             .iter()
             .all(|(_, route)| *route != ConsumerRoute::Routed { head: true })
     );
-    // V0 joins later and takes over in plan order, still without a head.
+    // V0 starts later: V1 keeps pacing, and V0 joins at its live edge without a head.
     let routes = decide(
         &mut pacers,
         &plan,
         &[(v0, running(128)), (v1, running(4_224))],
     );
-    assert_eq!((selected(&pacers), pacers.head()), (Some(v0), None));
+    assert_eq!((selected(&pacers), pacers.head()), (Some(v1), None));
     assert_eq!(routes[0], (v0, ConsumerRoute::Routed { head: false }));
+    // Only when V1 stops does V0 take over.
+    decide(&mut pacers, &plan, &[(v0, running(256))]);
+    assert_eq!(selected(&pacers), Some(v0));
 }
 
+/// A plan with a monitor output is paced by that device only while its clock runs.
+/// Offline, the graph awaits V1 and V1 keeps the recording's head; once the device
+/// clock runs, nothing is awaited and no source has a head.
 #[test]
-fn an_offline_monitor_output_leaves_the_application_paced_head_intact() {
+fn only_a_running_device_clock_takes_the_head_from_an_application_paced_plan() {
+    use crate::macos_devices::{
+        MacDevices,
+        callback_fixture::{CallbackTime, NativeOwner, publish},
+    };
+    use mixrelay_engine_service::session::AdapterRuntimeStatus;
     let plan = plan(Some(false), true);
     let v1 = token(&plan, V1);
+    let resources = MacDevices::new(
+        std::sync::Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile())),
+        48_000,
+        128,
+    );
+    let offline = publish(&resources, &[]);
     let mut pacers = NativePacers::default();
-    // No device clock runs, so the graph awaits V1 and V1 keeps the recording's head.
-    let routes = decide(&mut pacers, &plan, &[]);
+    let _ = next_native_pace(&mut pacers, &offline, &plan, 16_384);
     assert_eq!(pacers.head(), Some(v1));
-    assert!(routes.contains(&(v1, ConsumerRoute::Routed { head: true })));
+    let output = NativeOwner::new(2, 48_000, false);
+    let online = publish(&resources, &[("out", &output)]);
+    let _bridge = output.serve();
+    output.callback(
+        &mut [0.0; 256],
+        CallbackTime {
+            now: 1,
+            host: 2,
+            sample: 0.0,
+            rate_scalar: 1.0,
+        },
+    );
+    assert!(online.hardware_clock_progress().is_some());
+    let _ = next_native_pace(&mut pacers, &online, &plan, 16_384);
+    assert_eq!(pacers.head(), None);
 }
 
 struct FixedClock(Instant);

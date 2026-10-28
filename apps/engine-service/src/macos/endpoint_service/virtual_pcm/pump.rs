@@ -75,13 +75,15 @@ impl Retry {
     fn waiting(&self, now: u64) -> bool {
         self.at.is_some_and(|at| now < at)
     }
-    fn failed(&mut self, now: u64, timebase: Timebase) -> Duration {
+    /// Schedules the next attempt; returns its delay for the first failure in a row.
+    fn failed(&mut self, now: u64, timebase: Timebase) -> Option<Duration> {
+        let first = self.delay.is_none();
         let delay = self
             .delay
             .map_or(RETRY_FIRST, |delay| (delay * 2).min(RETRY_LONGEST));
         self.delay = Some(delay);
         self.at = Some(now.saturating_add(timebase.ticks(delay)));
-        delay
+        first.then_some(delay)
     }
     fn succeeded(&mut self) {
         *self = Self::default();
@@ -117,6 +119,8 @@ pub(super) struct Pump {
     retry: Retry,
     #[cfg(test)]
     failing_converters: u32,
+    #[cfg(test)]
+    converter_failure: mixrelay_audio_io::clock_bridge::BridgeError,
     report: Report,
 }
 impl Pump {
@@ -149,6 +153,10 @@ impl Pump {
             retry: Retry::default(),
             #[cfg(test)]
             failing_converters: 0,
+            #[cfg(test)]
+            converter_failure: mixrelay_audio_io::clock_bridge::BridgeError::Allocation {
+                samples: 0,
+            },
             report: Report::new(host_time()),
         })
     }
@@ -198,7 +206,14 @@ impl Pump {
             // Stop precedes the format and backlog gates. A stopped virtual source's
             // unpublished PCM is not read, so its retained run ends here as well.
             self.transport.stop_native();
-            self.report.stopped(self.backlog.clear());
+            let unconverted = self.backlog.clear();
+            // Only PCM retained for a route was wanted; anything else is not a loss.
+            if matches!(
+                self.transport.consumer_route(),
+                ConsumerRoute::Routed { .. }
+            ) {
+                self.report.stopped(unconverted);
+            }
             self.stream = None;
             self.boundary = None;
             return Ok(Some(native));
@@ -296,6 +311,14 @@ impl Pump {
         timebase: Timebase,
         scheduling: &Scheduling,
     ) -> Result<bool, Error> {
+        if self.head && self.transport.consumer_route() != (ConsumerRoute::Routed { head: true }) {
+            // The pacer stopped awaiting this source after its head stream began, as when
+            // another source started first: the unconverted head joins at the live edge.
+            // Only catch-up converted before the graph's next cycle republished the route
+            // can have reached the graph.
+            self.head = false;
+            self.backlog.keep_newest(u64::from(cadence::FRAMES));
+        }
         let mut published = 0;
         let mut ready = true;
         let periods = self
@@ -338,7 +361,7 @@ impl Pump {
                     };
                     chunk = newest;
                 }
-                if !self.restart(chunk, clock, now, scheduling) {
+                if !self.restart(chunk, clock, now, scheduling)? {
                     ready = false;
                     break;
                 }
@@ -375,56 +398,61 @@ impl Pump {
         now.saturating_sub(since) >= timebase.ticks(BOUNDARY_WAIT)
     }
 
-    /// Starts a new source epoch for `chunk`, reusing the converter's storage when its
-    /// geometry is unchanged. Returns false when the format acknowledgement defers or
-    /// conversion storage waits for its next attempt.
+    /// Starts a new source epoch for `chunk`, preparing conversion storage first when the
+    /// current storage does not fit the stream. Returns false when the format
+    /// acknowledgement defers or preparation waits for its next attempt.
+    /// # Errors
+    /// A preparation that cannot succeed by retrying, such as an invalid configuration,
+    /// ends the endpoint; the next grant snapshot starts it again.
     fn restart(
         &mut self,
         chunk: Chunk,
         clock: SourceClockSnapshot,
         now: u64,
         scheduling: &Scheduling,
-    ) -> bool {
-        let reused = match self.converter.as_mut() {
-            Some(converter) if converter.reusable(clock, chunk.clock.rate) => {
-                Some(converter.restart(&mut self.transport, clock))
+    ) -> Result<bool, Error> {
+        if !self
+            .converter
+            .as_ref()
+            .is_some_and(|converter| converter.reusable(clock, chunk.clock.rate))
+        {
+            if self.retry.waiting(now) {
+                return Ok(false);
             }
-            _ => None,
-        };
-        let started = match reused {
-            Some(started) => started,
-            None if self.retry.waiting(now) => return false,
-            None => scheduling.outside(|| {
+            let prepared = scheduling.outside(|| {
                 scheduling.retune(chunk.clock.rate);
-                let native = (chunk.clock.rate, self.input.len() / 128);
-                match self.new_converter(clock, native) {
-                    Ok(Some(converter)) => {
+                match self.prepare_converter(clock, (chunk.clock.rate, self.input.len() / 128)) {
+                    Ok(converter) => {
                         self.converter = Some(converter);
                         self.retry.succeeded();
-                        true
+                        Ok(true)
                     }
-                    Ok(None) => false,
-                    // Conversion storage could not be prepared: the source keeps its
-                    // retained PCM and tries again later instead of ending the endpoint.
-                    Err(error) => {
-                        let delay = self.retry.failed(now, Timebase::current());
-                        tracing::warn!(
-                            boundary = "hal_shared_pcm",
-                            stage = "source_admission",
-                            %error,
-                            retry_ms = delay.as_millis(),
-                            "virtual input converter preparation failed"
-                        );
-                        false
+                    // Storage could not be reserved: the source keeps its retained PCM
+                    // and its epoch, and tries again later.
+                    Err(error) if error.retryable() => {
+                        if let Some(delay) = self.retry.failed(now, Timebase::current()) {
+                            tracing::warn!(
+                                boundary = "hal_shared_pcm",
+                                stage = "source_admission",
+                                %error,
+                                retry_ms = delay.as_millis(),
+                                "virtual input converter preparation failed"
+                            );
+                        }
+                        Ok(false)
                     }
+                    Err(error) => Err(error),
                 }
-            }),
-        };
-        if !started {
-            // Deferred acknowledgement keeps the retained PCM and cannot leave an old
-            // converter attached to a newly committed epoch.
+            })?;
+            if !prepared {
+                return Ok(false);
+            }
+        }
+        let converter = self.converter.as_mut().ok_or(Error::Stale)?;
+        if !converter.restart(&mut self.transport, clock) {
+            // Deferred acknowledgement keeps the retained PCM and the prepared storage.
             self.report.deferred();
-            return false;
+            return Ok(false);
         }
         self.report.converter_ready(
             now,
@@ -434,20 +462,24 @@ impl Pump {
         );
         self.backlog.restarted();
         self.boundary = None;
-        true
+        Ok(true)
     }
 
-    fn new_converter(
+    #[cfg_attr(
+        not(test),
+        expect(clippy::unused_self, reason = "tests inject preparation failures here")
+    )]
+    fn prepare_converter(
         &mut self,
         clock: SourceClockSnapshot,
         native: (u32, usize),
-    ) -> Result<Option<Converter>, Error> {
+    ) -> Result<Converter, Error> {
         #[cfg(test)]
         if self.failing_converters != 0 {
             self.failing_converters -= 1;
-            return Err(Error::Geometry);
+            return Err(Error::Bridge(self.converter_failure));
         }
-        Converter::new(&mut self.transport, clock, native)
+        Converter::new(clock, native)
     }
 
     /// Writes converted output left by a failed publication while its stream is still

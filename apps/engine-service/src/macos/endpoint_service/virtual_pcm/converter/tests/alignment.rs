@@ -87,9 +87,7 @@ impl AlignedInput {
         registry.read_audio(token, &mut output, 128, 48_000);
         assert!(registry.set_clock_master(token, true));
         let clock = transport.clock().unwrap();
-        let converter = Converter::new(&mut transport, clock, (48_000, 2))
-            .unwrap()
-            .unwrap();
+        let converter = started(&mut transport, clock, (48_000, 2));
         let (writer, queues) = client_grants_with_capacity(queue);
         Self {
             registry,

@@ -26,6 +26,17 @@ impl SchedulingClock for Clock {
     }
 }
 
+/// A converter whose stream has begun on the source.
+fn started(
+    transport: &mut SourceTransport,
+    clock: SourceClockSnapshot,
+    native: (u32, usize),
+) -> Converter {
+    let mut converter = Converter::new(clock, native).unwrap();
+    assert!(converter.restart(transport, clock));
+    converter
+}
+
 fn source_token(id: &str) -> u64 {
     id.bytes().fold(14_695_981_039_346_656_037, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(1_099_511_628_211)
@@ -77,9 +88,7 @@ fn shared_client_pcm_preserves_signal_and_silence_across_independent_reader_gaps
     registry.read_audio(token, &mut output, 128, 48_000);
     assert!(registry.set_clock_master(token, true));
     let clock = transport.clock().unwrap();
-    let mut converter = Converter::new(&mut transport, clock, (48_000, 2))
-        .unwrap()
-        .unwrap();
+    let mut converter = started(&mut transport, clock, (48_000, 2));
     let (writer, queues) = client_grants();
     let mut mixer = ClientPcmMixer::default();
     let mut scratch = [0.0; 256];

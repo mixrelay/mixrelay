@@ -286,6 +286,10 @@ pub(super) fn select(
     Ok(())
 }
 
+/// Largest clock rate difference a reader's period may show: the converter's 2,000 ppm
+/// correction limit, about 5.3 us over a 128-frame block at 48 kHz.
+const MAX_DRIFT: f64 = 2_000e-6;
+
 /// A time-addressed reader's clock against the frame timestamps. The period is the
 /// reader's requested time per frame read, averaged over its current run; the phase is
 /// how far the next unread frame lies after the requested time. A skipped frame or a
@@ -316,13 +320,14 @@ impl Timing {
         rate: u32,
     ) -> Self {
         let nominal = 1e9 / f64::from(rate);
-        // A step outside 1% of the nominal frame period is a cursor jump, not drift.
+        // A step the converter could not follow is a cursor jump, not drift, however
+        // small: measured as a period, even a 15 us jump would read as 5,600 ppm.
         let step = self
             .last
             .filter(|_| continuing)
             .and_then(|(last, last_frames)| {
                 let span = time.checked_sub(last)?;
-                (nominal * 0.99..=nominal * 1.01)
+                (nominal * (1.0 - MAX_DRIFT)..=nominal * (1.0 + MAX_DRIFT))
                     .contains(&(span as f64 / f64::from(last_frames)))
                     .then_some((last, last_frames))
             });

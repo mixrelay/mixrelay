@@ -50,9 +50,7 @@ impl Producer {
         // A device-paced graph is not this source's clock master: conversion is sinc.
         let _ = registry.source_time(source_token("virtual:fixture"), RATE, 128);
         let clock = transport.clock().unwrap();
-        let converter = Converter::new(&mut transport, clock, (RATE, 2))
-            .unwrap()
-            .unwrap();
+        let converter = started(&mut transport, clock, (RATE, 2));
         let (writer, queues) = client_grants();
         Self {
             registry,
@@ -181,26 +179,22 @@ impl Consumer {
 }
 
 /// Runs `periods` native periods against a device whose drift at each period
-/// `drift(period)` gives, with a 20 ms forward cursor jump halfway when `jump` is set.
-/// Returns the consumer and the correction range once the drift has been constant for
-/// two seconds.
-fn hold(periods: u64, drift: impl Fn(u64) -> f64, jump: bool) -> (Consumer, Producer, (f64, f64)) {
+/// `drift(period)` gives, moving the cursor forward by `jump` nanoseconds halfway.
+/// Returns the consumer, the producer, and the correction range once the drift has
+/// been constant for two seconds.
+fn hold(periods: u64, drift: impl Fn(u64) -> f64, jump: f64) -> (Consumer, Producer, (f64, f64)) {
     let mut producer = Producer::new();
     let mut consumer = Consumer::new();
     let mut settled = (f64::MAX, f64::MIN);
     let mut changed = 0;
     for period in 0..periods {
         let ppm = drift(period);
-        if period == 0 || (ppm - drift(period - 1)).abs() > f64::EPSILON {
+        if period == 0 || (ppm - drift(period - 1)).abs() > 50.0 {
             changed = period;
         }
         consumer.drift(ppm);
         producer.period(period * 128);
-        let jump = if jump && period == periods / 2 {
-            20e6
-        } else {
-            0.0
-        };
+        let jump = if period == periods / 2 { jump } else { 0.0 };
         consumer.run(&producer, period * 128 + 128, jump);
         if period >= changed + SETTLE {
             let correction = producer.converter.correction_ppm();
@@ -212,7 +206,7 @@ fn hold(periods: u64, drift: impl Fn(u64) -> f64, jump: bool) -> (Consumer, Prod
 
 /// Two minutes at a constant drift: no read may miss, at most the one frame the first
 /// period measurement may cost is skipped, and the correction settles at the drift.
-fn constant(drift_ppm: f64, jump: bool) {
+fn constant(drift_ppm: f64, jump: f64) {
     let (consumer, producer, settled) = hold(PERIODS, |_| drift_ppm, jump);
     assert_eq!(consumer.misses, [], "a time-addressed read missed");
     assert!(
@@ -246,7 +240,7 @@ fn change(to_ppm: f64, ramp: u64, skipped: u64) {
             to_ppm * (period - start) as f64 / ramp as f64
         }
     };
-    let (consumer, producer, _) = hold(90 * u64::from(RATE) / 128, drift, false);
+    let (consumer, producer, _) = hold(90 * u64::from(RATE) / 128, drift, 0.0);
     assert_eq!(consumer.misses, [], "a time-addressed read missed");
     assert!(
         consumer.skipped <= skipped,
@@ -262,17 +256,17 @@ fn change(to_ppm: f64, ramp: u64, skipped: u64) {
 
 #[test]
 fn a_time_addressed_consumer_holds_two_minutes_without_drift_through_a_cursor_jump() {
-    constant(0.0, true);
+    constant(0.0, 20e6);
 }
 
 #[test]
 fn a_time_addressed_consumer_follows_a_slow_device_for_two_minutes() {
-    constant(200.0, false);
+    constant(200.0, 0.0);
 }
 
 #[test]
 fn a_time_addressed_consumer_follows_a_fast_device_for_two_minutes() {
-    constant(-200.0, false);
+    constant(-200.0, 0.0);
 }
 
 #[test]
@@ -286,4 +280,41 @@ fn a_time_addressed_consumer_follows_a_ramp_in_device_drift() {
     let ramp = 30 * u64::from(RATE) / 128;
     change(200.0, ramp, 3);
     change(-200.0, ramp, 3);
+}
+
+/// A cursor jump smaller than a frame (a frontier adopted on a frame grid after a
+/// discontinuity) is not a clock change: the correction stays at the drift.
+#[test]
+fn a_sub_frame_cursor_jump_is_not_taken_for_drift() {
+    for drift_ppm in [0.0, 200.0, -200.0] {
+        for jump in [15e3, 25e3] {
+            let (consumer, _, settled) = hold(30 * u64::from(RATE) / 128, |_| drift_ppm, jump);
+            assert_eq!(consumer.misses, [], "{jump} ns jump at {drift_ppm} ppm");
+            assert!(
+                settled.0 >= -drift_ppm - 100.0 && settled.1 <= -drift_ppm + 100.0,
+                "correction left {settled:?} ppm after a {jump} ns jump at {drift_ppm} ppm"
+            );
+        }
+    }
+}
+
+/// A device clock whose block periods jitter by up to 50 ppm around 200 ppm of drift.
+#[test]
+fn a_time_addressed_consumer_holds_through_rate_noise() {
+    let noise = |period: u64| {
+        let hash = period
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .rotate_left(29);
+        #[expect(clippy::cast_precision_loss, reason = "a 16-bit sample")]
+        let unit = (hash & 0xffff) as f64 / 65_535.0;
+        200.0 + 100.0 * unit - 50.0
+    };
+    let (consumer, producer, _) = hold(60 * u64::from(RATE) / 128, noise, 0.0);
+    assert_eq!(consumer.misses, [], "a time-addressed read missed");
+    assert!(consumer.skipped <= 1, "{} frames skipped", consumer.skipped);
+    let correction = producer.converter.correction_ppm();
+    assert!(
+        (correction + 200.0).abs() < 20.0,
+        "ended at {correction} ppm"
+    );
 }
