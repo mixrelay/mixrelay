@@ -172,9 +172,7 @@ native 단위로 재환산해 버리지 않는다. 물리 장치는 기존 하�
 
 `audio-io::retention`은 최대 지원 샘플레이트에서도 최소 4초의 backlog 저장량을 정한다.
 macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭제곱인 1,048,576프레임으로 올림한다.
-가상 입력의 보존은 엔진이 맡는다. pump는 그래프의 포맷 승인이나 변환기 준비와 관계없이 매 주기
-client 큐를 native rate의 1,048,576프레임 backlog로 비우고, 준비되면 순서대로 source에 넘긴다.
-보존량을 넘거나 timeline이 바뀌면 가장 오래된 PCM을 버리고 경고로 보고한다. HAL 클라이언트 렌더 큐와 endpoint 매핑 링은
+가상 입력의 보존은 엔진 source가 맡는다. HAL 클라이언트 렌더 큐와 endpoint 매핑 링은
 `client_pcm::QUEUE_FRAMES`(65,536프레임)로 준비한다. 쓰는 쪽은 재생 목표 상한과 최대 렌더 span
 (`MAX_RENDER_SPAN_FRAMES`, 8,192프레임)의 합만큼 앞서고 독자는 그만큼 뒤처질 수 있으며, 큐는 그 합의
 두 배다. 새 익명 매핑은 커널의 0 채움을 사용하므로 ring을 지우지 않고, 준비 단계에서 모든 페이지를
