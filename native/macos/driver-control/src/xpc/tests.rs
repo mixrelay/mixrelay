@@ -63,6 +63,7 @@ fn current_reports_carry_the_requested_values() {
         c"configuration_settled",
         &[
             (c"version", PROTOCOL),
+            (c"incarnation", 7),
             (c"endpoint_high", u64::from_be_bytes([1; 8])),
             (c"endpoint_low", u64::from_be_bytes([2; 8])),
             (c"sequence", 12),
@@ -77,6 +78,7 @@ fn current_reports_carry_the_requested_values() {
     assert_eq!(
         read(&settled),
         Some(Report::Configured(Configured {
+            incarnation: 7,
             endpoint,
             sequence: 12,
             rate: 96_000,
@@ -84,4 +86,15 @@ fn current_reports_carry_the_requested_values() {
             applied: true,
         }))
     );
+}
+
+#[test]
+fn the_replay_marker_names_its_hal_incarnation() {
+    let marker = message(
+        c"configuration_replayed",
+        &[(c"version", PROTOCOL), (c"incarnation", 7), (c"through", 3)],
+    );
+    assert_eq!(read(&marker), Some(Report::Replayed { incarnation: 7 }));
+    let old = message(c"configuration_replayed", &[(c"version", 1)]);
+    assert_eq!(read(&old), Some(Report::Incompatible));
 }

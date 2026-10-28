@@ -2,7 +2,7 @@
 use crate::{
     endpoint_registry::EndpointId,
     settle::{self, Failure, Pacing, Progress},
-    settlement::{Configured, Wanted},
+    settlement::{Configured, Since, Wanted},
 };
 use mixrelay_audio_io::{NativeDeviceFormats, NativeSampleFormat, NativeStreamFormat};
 use mixrelay_driver_control::{DriverDeviceConfig, DriverError};
@@ -30,10 +30,11 @@ pub(crate) trait Native {
     fn set_rate(&self, id: EndpointId, rate: u32) -> bool;
     fn format(&self, id: EndpointId, render: bool) -> Option<NativeStreamFormat>;
     fn set_format(&self, id: EndpointId, render: bool, format: NativeStreamFormat) -> bool;
-    /// The newest request settlement received; a request issued now settles after it.
-    fn newest_settlement(&self) -> u64;
+    /// The settlement bound for a request issued now; `None` until the HAL connection
+    /// has replayed what it retained.
+    fn since(&self) -> Option<Since>;
     /// The first settlement after `since` of a request for exactly `wanted`.
-    fn settled(&self, id: EndpointId, since: u64, wanted: Wanted) -> Option<Configured>;
+    fn settled(&self, id: EndpointId, since: Since, wanted: Wanted) -> Option<Configured>;
     /// Whether the HAL reports with another protocol version.
     fn incompatible(&self) -> bool;
 }
@@ -143,7 +144,7 @@ fn request(
     issue: impl FnOnce() -> bool,
     applied: impl Fn() -> bool,
 ) -> Result<(), Failure> {
-    let since = native.newest_settlement();
+    let since = replayed(native, pacing);
     if !issue() {
         return Err(Failure::Rejected(DriverError::Backend(
             match wanted {
@@ -158,8 +159,8 @@ fn request(
             Progress::Incompatible
         } else if applied() {
             Progress::Applied
-        } else if native
-            .settled(id, since, wanted)
+        } else if since
+            .and_then(|since| native.settled(id, since, wanted))
             .is_some_and(|settled| !settled.applied)
         {
             Progress::Rejected
@@ -168,6 +169,25 @@ fn request(
         }
     })
 }
+
+/// The settlement bound once the HAL connection has replayed its retained settlements.
+/// A fresh connection replays within one control tick; past `REPLAY_TIMEOUT` the request
+/// is attributed by readback alone, and a rejection then shows up as a timeout.
+fn replayed(native: &impl Native, pacing: &impl Pacing) -> Option<Since> {
+    let deadline = pacing.now() + REPLAY_TIMEOUT;
+    loop {
+        if let Some(since) = native.since() {
+            return Some(since);
+        }
+        if pacing.now() >= deadline {
+            return None;
+        }
+        pacing.pause();
+    }
+}
+
+/// Ten HAL control ticks of 100 ms.
+const REPLAY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 #[cfg(test)]
 mod tests;

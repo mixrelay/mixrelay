@@ -25,8 +25,10 @@ pub(crate) enum Wanted {
 /// How the HAL ended one rate, format or mapping request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Configured {
+    /// The HAL load that settled it; sequences restart with each one.
+    pub(crate) incarnation: u64,
     pub(crate) endpoint: [u8; 16],
-    /// HAL-wide settlement order.
+    /// Settlement order within the incarnation.
     pub(crate) sequence: u64,
     pub(crate) rate: u32,
     /// Requested capture and render `SampleFormat` codes.
@@ -49,37 +51,81 @@ impl Configured {
     }
 }
 
-/// One HAL connection's settlements, oldest first, bounded by `RETAINED`.
+/// The last settlement known when a request was issued.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Since {
+    pub(crate) incarnation: u64,
+    pub(crate) sequence: u64,
+}
+
+/// One HAL connection's settlements, oldest first, bounded by `RETAINED`. A connection
+/// first replays what the HAL retained; only after its marker is the newest sequence a
+/// valid bound for a new request.
 #[derive(Debug, Default)]
-pub(crate) struct Log(VecDeque<Configured>);
+pub(crate) struct Log {
+    incarnation: u64,
+    replayed: bool,
+    entries: VecDeque<Configured>,
+}
 
 impl Log {
+    /// Starts over when the HAL reports from another incarnation.
+    fn adopt(&mut self, incarnation: u64) {
+        if self.incarnation != incarnation {
+            *self = Self {
+                incarnation,
+                ..Self::default()
+            };
+        }
+    }
+
     pub(crate) fn record(&mut self, configured: Configured) {
-        // The HAL resends retained settlements after a reconnect; keep each one once.
+        self.adopt(configured.incarnation);
+        // A reconnect replays retained settlements; keep each one once.
         if self.newest() >= configured.sequence {
             return;
         }
-        if self.0.len() == RETAINED {
-            self.0.pop_front();
+        if self.entries.len() == RETAINED {
+            self.entries.pop_front();
         }
-        self.0.push_back(configured);
+        self.entries.push_back(configured);
     }
 
-    /// The newest sequence received; a request issued now settles after it.
-    pub(crate) fn newest(&self) -> u64 {
-        self.0.back().map_or(0, |configured| configured.sequence)
+    /// The HAL has resent every settlement it retained.
+    pub(crate) fn replayed(&mut self, incarnation: u64) {
+        self.adopt(incarnation);
+        self.replayed = true;
+    }
+
+    fn newest(&self) -> u64 {
+        self.entries
+            .back()
+            .map_or(0, |configured| configured.sequence)
+    }
+
+    /// The bound for a request issued now, once the replay has completed.
+    pub(crate) fn since(&self) -> Option<Since> {
+        self.replayed.then(|| Since {
+            incarnation: self.incarnation,
+            sequence: self.newest(),
+        })
     }
 
     /// The first settlement after `since` that ended a request for exactly `wanted`.
+    /// Every settlement of a newer incarnation follows `since`: the HAL restarted.
     pub(crate) fn find(
         &self,
         endpoint: [u8; 16],
-        since: u64,
+        since: Since,
         wanted: Wanted,
     ) -> Option<Configured> {
-        self.0
+        let restarted = self.incarnation != since.incarnation;
+        self.entries
             .iter()
-            .find(|configured| configured.sequence > since && configured.answers(endpoint, wanted))
+            .find(|configured| {
+                (restarted || configured.sequence > since.sequence)
+                    && configured.answers(endpoint, wanted)
+            })
             .copied()
     }
 }

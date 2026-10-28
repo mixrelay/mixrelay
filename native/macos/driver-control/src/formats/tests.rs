@@ -45,7 +45,7 @@ impl Device {
             rate: Cell::new(rate),
             formats: RefCell::new([Some(format(rate, NativeSampleFormat::Float32)); 2]),
             failing: Vec::new(),
-            log: RefCell::default(),
+            log: RefCell::new(replayed_log()),
             sequence: Cell::new(0),
             requests: RefCell::default(),
             incompatible: false,
@@ -54,6 +54,7 @@ impl Device {
     fn settle(&self, rate: u32, formats: [u32; 2], applied: bool) {
         self.sequence.set(self.sequence.get() + 1);
         self.log.borrow_mut().record(Configured {
+            incarnation: 1,
             endpoint: ID,
             sequence: self.sequence.get(),
             rate,
@@ -91,15 +92,21 @@ impl Native for Device {
         self.settle(wanted.sample_rate, formats, true);
         true
     }
-    fn newest_settlement(&self) -> u64 {
-        self.log.borrow().newest()
+    fn since(&self) -> Option<Since> {
+        self.log.borrow().since()
     }
-    fn settled(&self, id: EndpointId, since: u64, wanted: Wanted) -> Option<Configured> {
+    fn settled(&self, id: EndpointId, since: Since, wanted: Wanted) -> Option<Configured> {
         self.log.borrow().find(id, since, wanted)
     }
     fn incompatible(&self) -> bool {
         self.incompatible
     }
+}
+
+fn replayed_log() -> crate::settlement::Log {
+    let mut log = crate::settlement::Log::default();
+    log.replayed(1);
+    log
 }
 
 fn format(rate: u32, sample_format: NativeSampleFormat) -> NativeStreamFormat {

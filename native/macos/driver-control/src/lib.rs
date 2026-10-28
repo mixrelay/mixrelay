@@ -428,13 +428,13 @@ impl formats::Native for Hal<'_> {
     ) -> bool {
         device::set_format(id, render, format)
     }
-    fn newest_settlement(&self) -> u64 {
-        self.0.peers.lock().newest_settlement()
+    fn since(&self) -> Option<settlement::Since> {
+        self.0.peers.lock().since()
     }
     fn settled(
         &self,
         id: endpoint_registry::EndpointId,
-        since: u64,
+        since: settlement::Since,
         wanted: settlement::Wanted,
     ) -> Option<settlement::Configured> {
         self.0.peers.lock().settled(id, since, wanted)

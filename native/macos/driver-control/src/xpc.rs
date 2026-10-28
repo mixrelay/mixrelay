@@ -1,5 +1,5 @@
 //! Authenticated HAL inventory transport; no graph or application-capture API.
-use super::settlement::{Configured, Log, PROTOCOL, Wanted};
+use super::settlement::{Configured, Log, PROTOCOL, Since, Wanted};
 use super::{MacDriver, SERVICE, Service};
 use mixrelay_macos_transport::control_inventory::{
     mr_hal_control_create_inventory_snapshot, mr_hal_control_parse_inventory_request,
@@ -80,18 +80,15 @@ impl Peers {
     fn subscribed(&self) -> impl Iterator<Item = &Peer> {
         self.values.iter().filter(|peer| peer.subscribed)
     }
-    /// The newest request settlement any subscribed HAL reported.
-    pub(super) fn newest_settlement(&self) -> u64 {
-        self.subscribed()
-            .map(|peer| peer.log.newest())
-            .max()
-            .unwrap_or(0)
+    /// The bound for a request issued now, once the subscribed HAL finished its replay.
+    pub(super) fn since(&self) -> Option<Since> {
+        self.subscribed().find_map(|peer| peer.log.since())
     }
     /// The first settlement after `since` of a request for exactly `wanted`.
     pub(super) fn settled(
         &self,
         endpoint: [u8; 16],
-        since: u64,
+        since: Since,
         wanted: Wanted,
     ) -> Option<Configured> {
         self.subscribed()
@@ -174,6 +171,10 @@ pub(super) enum Report {
         settlement: Settlement,
     },
     Configured(Configured),
+    /// The HAL resent every settlement it retained on this connection.
+    Replayed {
+        incarnation: u64,
+    },
     /// A report this service cannot read: the HAL comes from another package version.
     Incompatible,
 }
@@ -194,7 +195,10 @@ pub(super) unsafe fn report(event: Object) -> Option<Report> {
         }
         CStr::from_ptr(operation)
     };
-    if operation != c"inventory_ack" && operation != c"configuration_settled" {
+    if operation != c"inventory_ack"
+        && operation != c"configuration_settled"
+        && operation != c"configuration_replayed"
+    {
         return None;
     }
     if uint(c"version") != PROTOCOL {
@@ -211,11 +215,17 @@ pub(super) unsafe fn report(event: Object) -> Option<Report> {
             },
         });
     }
+    if operation == c"configuration_replayed" {
+        return Some(Report::Replayed {
+            incarnation: uint(c"incarnation"),
+        });
+    }
     let mut endpoint = [0; 16];
     endpoint[..8].copy_from_slice(&uint(c"endpoint_high").to_be_bytes());
     endpoint[8..].copy_from_slice(&uint(c"endpoint_low").to_be_bytes());
     let format = |key| u32::try_from(uint(key)).unwrap_or(0);
     Some(Report::Configured(Configured {
+        incarnation: uint(c"incarnation"),
         endpoint,
         sequence: uint(c"sequence"),
         rate: format(c"rate"),
@@ -242,6 +252,7 @@ impl Peer {
                 }
             }
             Report::Configured(configured) => self.log.record(configured),
+            Report::Replayed { incarnation } => self.log.replayed(incarnation),
             Report::Incompatible => self.incompatible = true,
         }
     }
