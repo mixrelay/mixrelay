@@ -25,9 +25,9 @@ impl Registry {
             .note(if render { Stage::Write } else { Stage::Read });
         // The host can coalesce IO beyond its nominal device quantum. Bound one
         // request by the prepared retention, then process it in scratch-sized tiles.
-        // A render span must also fit its client queue, or it would overwrite its own start.
+        // A render span is bounded by the coalescing its client queue is sized for.
         let limit = if render {
-            mixrelay_macos_transport::client_pcm::QUEUE_FRAMES
+            mixrelay_macos_transport::client_pcm::MAX_RENDER_SPAN_FRAMES
         } else {
             mixrelay_audio_io::retention::RING_FRAMES
         };

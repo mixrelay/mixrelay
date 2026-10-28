@@ -351,6 +351,38 @@ fn rate_only_perform_keeps_client_queue_grants_and_rejects_old_rate_pcm() {
 }
 
 #[test]
+fn perform_commits_prepared_storage_without_allocating() {
+    let fixture = native_fixture();
+    let old = Transport::new(10, 2, 2);
+    let id = old.add(&fixture, "Committed", 48_000);
+    start(&fixture, id);
+    assert_eq!(fixture.registry.client(id, 43, true), OK);
+    // A first Perform initializes each lazily created OS lock and is not measured.
+    assert_eq!(fixture.registry.set_rate(id, 88_200), OK);
+    assert_eq!(fixture.perform(), OK);
+    // Host notifications append to the fixture's own log; reserve it and skip the fixture's
+    // reentrant registry queries, which allocate on the host side of the boundary.
+    crate::device::lock(&fixture.host.changes).reserve(64);
+    let registry = fixture
+        .host
+        .registry
+        .swap(std::ptr::null_mut(), std::sync::atomic::Ordering::AcqRel);
+    let wider = Transport::new(10, 4, 2);
+    assert_eq!(wider.add(&fixture, "Committed", 48_000), id);
+    let geometry = allocation_counter::measure(|| assert_eq!(fixture.perform(), OK));
+    assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
+    let rate = allocation_counter::measure(|| assert_eq!(fixture.perform(), OK));
+    // Queues, mappings and rearm replacements were prepared before Perform; Float32
+    // streams need no conversion scratch, so the frozen commits allocate nothing.
+    assert_eq!((geometry.count_total, rate.count_total), (0, 0));
+    fixture
+        .host
+        .registry
+        .store(registry, std::sync::atomic::Ordering::Release);
+    assert_eq!(fixture.registry.snapshot(id).unwrap().sample_rate, 96_000);
+}
+
+#[test]
 fn client_joining_a_pending_replacement_renders_through_the_committed_mapping() {
     let fixture = native_fixture();
     let old = Transport::new(10, 2, 2);

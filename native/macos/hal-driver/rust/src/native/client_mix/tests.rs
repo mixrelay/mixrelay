@@ -14,6 +14,11 @@ fn add(mixer: &mut ClientMix, id: u32) -> bool {
         .is_some_and(|prepared| mixer.register(prepared))
 }
 
+/// A rearm prepared on control, as the registry does before each freeze.
+fn rearm(mixer: &ClientMix) -> Timeline {
+    Timeline::Rearm(mixer.prepare_rearm().unwrap())
+}
+
 fn mixer(render: u32, capture: u32) -> ClientMix {
     let mut mixer = ClientMix::new(geometry(render, capture)).unwrap();
     for id in [42, 43, 44] {
@@ -25,31 +30,15 @@ fn mixer(render: u32, capture: u32) -> ClientMix {
 #[test]
 fn queue_admission_includes_frame_tags_and_rejects_invalid_geometry() {
     // Per-frame tags and headers count against the 1 GiB budget. Retention-sized
-    // queues admitted only three 64-channel writers; playback-sized queues admit 124.
-    assert_eq!(client_limit(64), 124);
+    // queues admitted only three 64-channel writers; playback-sized queues admit 62.
+    // Each admitted queue is resident once prepared, so the bound is also the HAL's
+    // worst-case client-PCM footprint per endpoint.
+    assert_eq!(client_limit(64), 62);
     assert_eq!(client_limit(2), MAX_CLIENTS);
     assert_eq!(client_limit(0), MAX_CLIENTS);
     for channels in [65, u32::MAX] {
         assert_eq!(client_limit(channels), 0);
     }
-}
-
-#[test]
-fn a_64_channel_endpoint_maps_its_full_client_budget_without_faulting_rings() {
-    let mut mixer = ClientMix::new(geometry(64, 64)).unwrap();
-    let limit = u32::try_from(client_limit(64)).unwrap();
-    for id in 0..limit {
-        assert!(add(&mut mixer, id), "client {id} rejected");
-    }
-    assert!(!add(&mut mixer, limit));
-    assert!(mixer.render(7, 0, &[0.5; 64 * 32], 32).accepted);
-    let mut output = vec![0.0; 64 * 32];
-    assert_eq!(mixer.capture(0, &mut output, 32).available, 32);
-    assert!(
-        output
-            .iter()
-            .all(|sample| sample.to_bits() == 0.5_f32.to_bits())
-    );
 }
 
 #[test]
@@ -89,7 +78,7 @@ fn rejected_registration_preserves_existing_pcm_and_membership() {
 fn failed_native_start_cannot_publish_a_running_client_clock() {
     let mut mixer = mixer(2, 2);
     let mut clock = Clock::new(48_000, 1, 1).unwrap();
-    assert!(mixer.publish_clock(&clock, true));
+    assert!(mixer.publish_clock(&clock, rearm(&mixer)));
     let mut snapshot = ClientPcmSnapshot::new().unwrap();
     assert!(mixer.append_snapshot(&mut snapshot));
     // SAFETY: the test retains the complete snapshot and every immutable grant header.
@@ -100,7 +89,7 @@ fn failed_native_start_cannot_publish_a_running_client_clock() {
             .all(|reader| !reader.clock().unwrap().running)
     );
     assert!(clock.start(100));
-    assert!(!mixer.publish_clock_after(&clock, true, || {
+    assert!(!mixer.publish_clock_after(&clock, rearm(&mixer), || {
         assert!(readers.iter().all(|reader| reader.clock().is_none()));
         false
     }));
@@ -109,7 +98,7 @@ fn failed_native_start_cannot_publish_a_running_client_clock() {
             .iter()
             .all(|reader| reader.clock().is_none_or(|clock| !clock.running))
     );
-    assert!(mixer.publish_clock(&clock, true));
+    assert!(mixer.publish_clock(&clock, rearm(&mixer)));
     assert!(readers.iter().all(|reader| reader.clock().unwrap().running));
 }
 
@@ -121,7 +110,7 @@ fn private_queue_epoch_exhaustion_replaces_grants_without_reusing_old_pcm() {
     for generation in 0..=u64::from(u16::MAX) {
         clock.running = false;
         assert!(clock.start(generation + 1));
-        assert!(mixer.publish_clock(&clock, true));
+        assert!(mixer.publish_clock(&clock, rearm(&mixer)));
     }
     assert!(mixer.revision() > revision);
     let mut output = [9.0; 256];
@@ -130,6 +119,51 @@ fn private_queue_epoch_exhaustion_replaces_grants_without_reusing_old_pcm() {
     assert!(mixer.render(42, 0, &[0.375; 256], 128).accepted);
     assert_eq!(mixer.capture(0, &mut output, 128).available, 128);
     assert_eq!(output.map(f32::to_bits), [0.375_f32.to_bits(); 256]);
+}
+
+#[test]
+fn an_exhausted_rate_rearm_commits_from_prepared_queues_or_changes_nothing() {
+    let mut mixer = mixer(2, 2);
+    let mut clock = Clock::new(48_000, 1, 1).unwrap();
+    assert!(clock.start(1));
+    assert!(mixer.publish_clock(&clock, rearm(&mixer)));
+    // Prepared before exhaustion: nothing to substitute. The commit must refuse it whole.
+    let stale = mixer.prepare_rearm().unwrap();
+    assert!(stale.0.is_empty());
+    while mixer
+        .clients
+        .iter()
+        .all(|client| client.queue.as_ref().is_some_and(Queue::can_rearm))
+    {
+        assert!(mixer.publish_clock(&clock, rearm(&mixer)));
+    }
+    let mut snapshot = ClientPcmSnapshot::new().unwrap();
+    assert!(mixer.append_snapshot(&mut snapshot));
+    // SAFETY: the test retains the complete snapshot and every immutable grant header.
+    let readers = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
+    assert!(mixer.render(42, 0, &[0.375; 256], 128).accepted);
+    let before = readers[0].clock().unwrap();
+    let revision = mixer.revision();
+    let mut faster = clock.clone();
+    assert!(faster.set_rate(96_000, 2));
+    assert!(!mixer.publish_clock(&faster, Timeline::Rearm(stale)));
+    // Every queue, its PCM and the published clock are exactly as before the refusal.
+    assert_eq!(mixer.revision(), revision);
+    assert_eq!(readers[0].clock(), Some(before));
+    let mut output = [9.0; 256];
+    assert_eq!(mixer.capture(0, &mut output, 128).available, 128);
+    // Replacements are mapped on control; the frozen commit only swaps them in.
+    let prepared = mixer.prepare_rearm().unwrap();
+    assert_eq!(prepared.0.len(), 3);
+    let usage = allocation_counter::measure(|| {
+        assert!(mixer.publish_clock(&faster, Timeline::Rearm(prepared)));
+    });
+    assert_eq!(usage.count_total, 0);
+    assert!(mixer.revision() > revision);
+    assert_eq!(mixer.capture(0, &mut output, 128).available, 0);
+    assert!(mixer.render(42, 0, &[0.25; 256], 128).accepted);
+    assert_eq!(mixer.capture(0, &mut output, 128).available, 128);
+    assert_eq!(output.map(f32::to_bits), [0.25_f32.to_bits(); 256]);
 }
 
 #[test]
@@ -235,7 +269,7 @@ fn replacement_preserves_registration_but_starts_an_empty_pcm_timeline() {
     for generation in 0..=u64::from(u16::MAX) {
         clock.running = false;
         assert!(clock.start(generation + 1));
-        assert!(live.publish_clock(&clock, true));
+        assert!(live.publish_clock(&clock, rearm(&live)));
     }
     assert!(live.revision() >= replacement.revision());
     assert!(replacement.supersede(&live));

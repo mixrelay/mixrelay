@@ -128,6 +128,28 @@ fn inventory_ack_waits_for_perform_and_newer_publication_can_restore_older_mappi
 }
 
 #[test]
+fn failed_inventory_apply_settles_as_rejected_until_a_newer_snapshot_applies() {
+    let fixture = inventory_fixture();
+    assert!(Message::new(&[1], 90).apply(&fixture));
+    // A native create failure used to leave the generation unsettled, so the Driver
+    // service waited out its whole budget before reporting the change pending.
+    FAIL_CREATE_ENDPOINT.store(2, Ordering::SeqCst);
+    assert!(!Message::new(&[1, 2], 91).apply(&fixture));
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((91, crate::inventory::Settlement::Rejected))
+    );
+    FAIL_CREATE_ENDPOINT.store(0, Ordering::SeqCst);
+    assert!(Message::with_entry_generation(&[1], 92, 90).apply(&fixture));
+    // The failed snapshot already queued endpoint 1's newer mapping; restoring needs a Perform.
+    assert_eq!(fixture.perform(), crate::abi::OK);
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((92, crate::inventory::Settlement::Applied))
+    );
+}
+
+#[test]
 fn aborted_attachment_settles_as_rejected_until_a_newer_publication_applies() {
     let fixture = inventory_fixture();
     assert!(Message::new(&[1], 90).apply(&fixture));

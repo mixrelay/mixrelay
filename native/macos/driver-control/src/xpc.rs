@@ -1,7 +1,8 @@
 //! Authenticated HAL inventory transport; no graph or application-capture API.
+use super::settlement::{Configured, Log, PROTOCOL, Wanted};
 use super::{MacDriver, SERVICE, Service};
 use mixrelay_macos_transport::control_inventory::{
-    MAX_ENTRIES, mr_hal_control_create_inventory_snapshot, mr_hal_control_parse_inventory_request,
+    mr_hal_control_create_inventory_snapshot, mr_hal_control_parse_inventory_request,
     mr_hal_control_parse_transport_replacement_request,
 };
 use std::{
@@ -53,7 +54,8 @@ struct Peer {
     object: Owned,
     subscribed: bool,
     settled: Option<(u64, Settlement)>,
-    configurations: BTreeMap<[u8; 16], super::settle::Configured>,
+    log: Log,
+    incompatible: bool,
 }
 
 #[derive(Default)]
@@ -75,13 +77,29 @@ impl Peers {
                     .map(|(_, settlement)| settlement)
             })
     }
-    /// The newest rate/format/mapping settlement any subscribed HAL reported for `endpoint`.
-    pub(super) fn configuration(&self, endpoint: [u8; 16]) -> Option<super::settle::Configured> {
-        self.values
-            .iter()
-            .filter(|peer| peer.subscribed)
-            .filter_map(|peer| peer.configurations.get(&endpoint).copied())
-            .max_by_key(|configured| configured.sequence)
+    fn subscribed(&self) -> impl Iterator<Item = &Peer> {
+        self.values.iter().filter(|peer| peer.subscribed)
+    }
+    /// The newest request settlement any subscribed HAL reported.
+    pub(super) fn newest_settlement(&self) -> u64 {
+        self.subscribed()
+            .map(|peer| peer.log.newest())
+            .max()
+            .unwrap_or(0)
+    }
+    /// The first settlement after `since` of a request for exactly `wanted`.
+    pub(super) fn settled(
+        &self,
+        endpoint: [u8; 16],
+        since: u64,
+        wanted: Wanted,
+    ) -> Option<Configured> {
+        self.subscribed()
+            .find_map(|peer| peer.log.find(endpoint, since, wanted))
+    }
+    /// Whether a subscribed HAL reports with another protocol version.
+    pub(super) fn incompatible(&self) -> bool {
+        self.subscribed().any(|peer| peer.incompatible)
     }
     pub(super) fn send_inventory(&self, service: &Service) {
         let Some(message) = inventory(service) else {
@@ -148,70 +166,85 @@ fn inventory(service: &Service) -> Option<Owned> {
     .then_some(message)
 }
 
-fn acknowledge(service: &Service, entry: &mut Peer, event: Object) -> bool {
-    // SAFETY: peer_event has authenticated the retained peer and borrows its
-    // live event throughout this helper. XPC owns each returned string extent.
-    unsafe {
-        if xpc_get_type(event) != (&raw const _xpc_type_dictionary).cast() {
-            return false;
-        }
-        let operation = xpc_dictionary_get_string(event, c"operation".as_ptr());
-        if operation.is_null()
-            || CStr::from_ptr(operation) != c"inventory_ack"
-            || xpc_dictionary_get_uint64(event, c"version".as_ptr()) != 2
-        {
-            return false;
-        }
-        let generation = xpc_dictionary_get_uint64(event, c"generation".as_ptr());
-        let settlement = match xpc_dictionary_get_uint64(event, c"applied".as_ptr()) {
-            1 => Settlement::Applied,
-            _ => Settlement::Rejected,
-        };
-        if service
-            .published
-            .lock()
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.as_abi().generation == generation)
-        {
-            entry.settled = Some((generation, settlement));
-        }
-    }
-    true
+/// One HAL report on the control connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Report {
+    Inventory {
+        generation: u64,
+        settlement: Settlement,
+    },
+    Configured(Configured),
+    /// A report this service cannot read: the HAL comes from another package version.
+    Incompatible,
 }
 
-fn configured(entry: &mut Peer, event: Object) -> bool {
-    // SAFETY: peer_event has authenticated the retained peer and borrows its live
-    // event throughout this helper. XPC owns each returned string extent.
-    unsafe {
+/// Reads a HAL report, or `None` for any other message.
+/// # Safety
+/// `event` is a live XPC object borrowed for this call.
+pub(super) unsafe fn report(event: Object) -> Option<Report> {
+    let uint = |key: &CStr| unsafe { xpc_dictionary_get_uint64(event, key.as_ptr()) };
+    // SAFETY: the caller borrows a live event; XPC owns each returned string extent.
+    let operation = unsafe {
         if xpc_get_type(event) != (&raw const _xpc_type_dictionary).cast() {
-            return false;
+            return None;
         }
         let operation = xpc_dictionary_get_string(event, c"operation".as_ptr());
-        if operation.is_null()
-            || CStr::from_ptr(operation) != c"configuration_settled"
-            || xpc_dictionary_get_uint64(event, c"version".as_ptr()) != 1
-        {
-            return false;
+        if operation.is_null() {
+            return None;
         }
-        let mut endpoint = [0; 16];
-        endpoint[..8].copy_from_slice(
-            &xpc_dictionary_get_uint64(event, c"endpoint_high".as_ptr()).to_be_bytes(),
-        );
-        endpoint[8..].copy_from_slice(
-            &xpc_dictionary_get_uint64(event, c"endpoint_low".as_ptr()).to_be_bytes(),
-        );
-        let configured = super::settle::Configured {
-            sequence: xpc_dictionary_get_uint64(event, c"sequence".as_ptr()),
-            rate: u32::try_from(xpc_dictionary_get_uint64(event, c"rate".as_ptr())).unwrap_or(0),
-            applied: xpc_dictionary_get_uint64(event, c"applied".as_ptr()) == 1,
-        };
-        // The HAL reports live devices only; never retain more than one inventory.
-        if entry.configurations.len() < MAX_ENTRIES || entry.configurations.contains_key(&endpoint)
-        {
-            entry.configurations.insert(endpoint, configured);
+        CStr::from_ptr(operation)
+    };
+    if operation != c"inventory_ack" && operation != c"configuration_settled" {
+        return None;
+    }
+    if uint(c"version") != PROTOCOL {
+        return Some(Report::Incompatible);
+    }
+    let applied = uint(c"applied") == 1;
+    if operation == c"inventory_ack" {
+        return Some(Report::Inventory {
+            generation: uint(c"generation"),
+            settlement: if applied {
+                Settlement::Applied
+            } else {
+                Settlement::Rejected
+            },
+        });
+    }
+    let mut endpoint = [0; 16];
+    endpoint[..8].copy_from_slice(&uint(c"endpoint_high").to_be_bytes());
+    endpoint[8..].copy_from_slice(&uint(c"endpoint_low").to_be_bytes());
+    let format = |key| u32::try_from(uint(key)).unwrap_or(0);
+    Some(Report::Configured(Configured {
+        endpoint,
+        sequence: uint(c"sequence"),
+        rate: format(c"rate"),
+        formats: [format(c"capture_format"), format(c"render_format")],
+        applied,
+    }))
+}
+
+impl Peer {
+    fn receive(&mut self, service: &Service, report: Report) {
+        match report {
+            Report::Inventory {
+                generation,
+                settlement,
+            } => {
+                // Never accept a settlement for anything but the current publication.
+                if service
+                    .published
+                    .lock()
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.as_abi().generation == generation)
+                {
+                    self.settled = Some((generation, settlement));
+                }
+            }
+            Report::Configured(configured) => self.log.record(configured),
+            Report::Incompatible => self.incompatible = true,
         }
     }
-    true
 }
 
 /// # Safety
@@ -239,7 +272,8 @@ pub(crate) unsafe extern "C" fn mr_driver_service_accept_peer(peer: Object) -> b
         object,
         subscribed: false,
         settled: None,
-        configurations: BTreeMap::new(),
+        log: Log::default(),
+        incompatible: false,
     });
     true
 }
@@ -273,9 +307,10 @@ pub(crate) unsafe extern "C" fn mr_driver_service_peer_event(peer: Object, event
         unsafe { xpc_connection_cancel(peer) };
         return;
     };
-    // Only the authenticated HAL sends ACKs, after all attachment perform
-    // callbacks have drained and committed. Never accept a future generation.
-    if acknowledge(service, entry, event) || configured(entry, event) {
+    // Only the authenticated HAL sends reports, after its Perform callbacks settled.
+    // SAFETY: the dispatch block retains the event for this callback.
+    if let Some(report) = unsafe { report(event) } {
+        entry.receive(service, report);
         return;
     }
     let mut id = [0; 16];
@@ -334,3 +369,6 @@ pub(crate) extern "C" fn mr_driver_service_control_tick() {
     }
     service.registry.collect();
 }
+
+#[cfg(test)]
+mod tests;

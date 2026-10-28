@@ -49,6 +49,8 @@ pub(crate) struct Registry {
     host: HostOps,
     /// Orders every settled configuration request for the Driver service.
     settlements: AtomicU64,
+    /// Settled requests not yet superseded by `SETTLED_RETAINED` newer ones.
+    settled: Mutex<std::collections::VecDeque<crate::device::Settled>>,
     // Object generation is shared across slots. Slots are not reused until a
     // retired device has no clients and all reader pins have been released.
     generation: Mutex<u32>,
@@ -92,6 +94,9 @@ impl Registry {
             client_identity_gate: Mutex::new(()),
             host,
             settlements: AtomicU64::new(0),
+            settled: Mutex::new(std::collections::VecDeque::with_capacity(
+                configuration::SETTLED_RETAINED,
+            )),
             generation: Mutex::new(0),
             slots: std::array::from_fn(|_| Slot {
                 pointer: AtomicPtr::default(),
@@ -154,7 +159,6 @@ impl Registry {
             descriptor,
             size,
             geometry,
-            prepared: None,
         };
         let mut generation = lock(&self.generation);
         if let Some(device) = self.endpoint(endpoint) {
@@ -260,9 +264,10 @@ impl Registry {
             name: name.into(),
             rate,
             formats,
+            prepared: None,
         });
         control.attachment_failed = false;
-        Self::prepare_attachment(device, &mut control);
+        Self::prepare_pending(device, &mut control);
         Ok(AttachmentChange::Queued)
     }
 

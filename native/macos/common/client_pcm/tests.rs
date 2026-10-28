@@ -273,7 +273,8 @@ fn queue(channels: u32) -> ClientPcmWriter {
     writer
 }
 
-fn resident_pages(address: *mut std::ffi::c_void, bytes: usize) -> usize {
+/// Resident and total pages of one mapping.
+fn residency(address: *mut std::ffi::c_void, bytes: usize) -> (usize, usize) {
     unsafe extern "C" {
         fn mincore(address: *mut std::ffi::c_void, bytes: usize, residency: *mut i8) -> i32;
         fn getpagesize() -> i32;
@@ -287,17 +288,19 @@ fn resident_pages(address: *mut std::ffi::c_void, bytes: usize) -> usize {
         0
     );
     // MINCORE_INCORE is bit 0 on Darwin.
-    residency.iter().filter(|state| **state & 1 != 0).count()
+    let resident = residency.iter().filter(|state| **state & 1 != 0).count();
+    (resident, residency.len())
 }
 
 #[test]
-fn a_fresh_queue_faults_only_its_headers_and_reports_every_frame_missing() {
+fn a_prepared_queue_is_resident_before_publication_and_reports_every_frame_missing() {
     let writer = queue(64);
     let (address, bytes) = writer.region();
-    // Full-ring zeroing faulted every page (8.25 MiB at 64 channels) inside the HAL's
-    // configuration freeze. Kernel zero-fill leaves the ring unfaulted until it is written.
-    assert!(bytes > 512 * 16_384);
-    assert!(resident_pages(address, bytes) <= 2);
+    // Preparation runs on control outside the IO freeze. Leaving pages to kernel zero-fill
+    // moved one fault per page (over 1,000 at 64 channels) onto the HAL IO thread.
+    let (resident, pages) = residency(address, bytes);
+    assert!(pages > 1_000);
+    assert_eq!(resident, pages);
     let reader = reader(&writer);
     let clock = reader.clock().unwrap();
     let mut output = vec![9.0; 64 * 128];
@@ -338,29 +341,31 @@ fn reused_slots_never_expose_wrapped_or_previous_epoch_pcm() {
 }
 
 #[test]
-fn the_queue_covers_a_playback_target_lead_over_a_pump_one_target_late() {
-    use mixrelay_audio_io::{buffer_policy::MAXIMUM_TARGET_FRAMES, formats::MAX_BUFFER_FRAMES};
-    let span = u64::try_from(MAX_BUFFER_FRAMES).unwrap();
+fn the_queue_covers_a_coalesced_render_lead_over_a_pump_170_ms_late_at_192_khz() {
+    use mixrelay_audio_io::buffer_policy::MAXIMUM_TARGET_FRAMES;
+    let span = u64::from(MAX_RENDER_SPAN_FRAMES);
     let target = u64::try_from(MAXIMUM_TARGET_FRAMES).unwrap();
+    // Twice the lead bound: 32,768 frames, 170 ms at 192 kHz.
+    let lag = 2 * (target + span);
     let writer = queue(2);
     let readers = vec![reader(&writer)];
     let word = |frame: u64| f32::from(u16::try_from(frame % 8192).unwrap()) / 8192.0;
     let mut mixer = ClientPcmMixer::default();
     let (mut written, mut consumed) = (0, 0);
-    let mut samples = vec![0.0; MAX_BUFFER_FRAMES * 2];
+    let mut samples = vec![0.0; usize::try_from(span).unwrap() * 2];
     let mut output = [0.0; 256];
     let mut scratch = [0.0; 256];
-    // The host renders whole maximum buffers one target ahead of the playhead, and the
-    // pump wakes only after the playhead has moved a whole target past its cursor.
-    for playhead in (target..8 * u64::from(QUEUE_FRAMES)).step_by(MAX_BUFFER_FRAMES) {
+    // The host renders whole coalesced spans one target ahead of the playhead, and the
+    // pump wakes only after the playhead has moved twice that lead past its cursor.
+    for playhead in (span..8 * u64::from(QUEUE_FRAMES)).step_by(usize::try_from(span).unwrap()) {
         while written < playhead + target + span {
             for (index, frame) in samples.chunks_exact_mut(2).enumerate() {
                 frame.fill(word(written + index as u64));
             }
-            assert!(writer.write(written, &samples, u32::try_from(span).unwrap()));
+            assert!(writer.write(written, &samples, MAX_RENDER_SPAN_FRAMES));
             written += span;
         }
-        if playhead - consumed < target {
+        if playhead - consumed < lag {
             continue;
         }
         while let Some(window) = mixer.window(&readers, |_| Some(playhead)) {

@@ -26,6 +26,7 @@ unsafe extern "C" {
         offset: i64,
     ) -> Object;
     fn munmap(address: Object, bytes: usize) -> i32;
+    fn getpagesize() -> i32;
     fn xpc_shmem_create(address: Object, bytes: usize) -> Object;
     fn xpc_shmem_map(object: Object, address: *mut Object) -> usize;
     fn xpc_release(object: Object);
@@ -118,8 +119,7 @@ impl ClientPcmWriter {
         let grant = NonNull::new(unsafe { xpc_shmem_create(address.as_ptr().cast(), bytes) })
             .ok_or_else(|| io::Error::from(io::ErrorKind::OutOfMemory))?;
         // SAFETY: no reader or callback has access until this constructor returns. The
-        // kernel zero-fills this new MAP_ANON region on demand, so only headers are written
-        // and untouched ring pages stay unfaulted until the writer commits PCM there.
+        // kernel zero-fills this new MAP_ANON region, so the ring needs no clearing.
         unsafe {
             address.as_ptr().write(Header {
                 magic: MAGIC,
@@ -139,12 +139,29 @@ impl ClientPcmWriter {
                 retired: AtomicU64::new(0),
             });
             audio::initialize_zeroed(mapping.buffer().cast(), ring_bytes, capacity, channels);
+            // Fault every page in on control, before any freeze, so the HAL IO thread never
+            // takes a zero-fill fault on its first write or read of a page.
+            let page = usize::try_from(getpagesize()).unwrap_or(4096).max(1);
+            let base = address.as_ptr().cast::<u8>();
+            for offset in (0..bytes).step_by(page) {
+                // Rewriting the zero the kernel supplied keeps the initialized cells valid.
+                ptr::write_volatile(base.add(offset), base.add(offset).read());
+            }
         }
         Ok(Self {
             mapping,
             grant,
             clock,
         })
+    }
+
+    /// Whether a clock publication can open this queue's next PCM epoch. False once the
+    /// queue is retired or its ring has used every epoch; control then replaces it.
+    #[must_use]
+    pub fn can_rearm(&self) -> bool {
+        self.mapping.header().retired.load(Ordering::Acquire) == 0
+            // SAFETY: this owner retains the initialized ring for its whole lifetime.
+            && unsafe { audio::can_begin_epoch(self.mapping.buffer()) }
     }
 
     /// Whether this queue publishes under `owner`'s endpoint clock.

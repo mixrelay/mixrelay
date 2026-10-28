@@ -73,14 +73,18 @@ pub(crate) struct NativeOps {
     pub destroy: unsafe extern "C" fn(*mut c_void),
     /// Control, outside the IO freeze: maps a replacement and its client queues.
     pub prepare: unsafe extern "C" fn(*mut c_void, *const Geometry, i32, usize) -> *mut c_void,
+    /// Control, outside the IO freeze: replacement queues for rings without a spare epoch.
+    pub prepare_rearm: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
     /// Releases a preparation that no frozen commit consumed.
     pub discard: unsafe extern "C" fn(*mut c_void),
     /// Frozen commit of a prepared replacement at a rate; always consumes it.
     pub replace: unsafe extern "C" fn(*mut c_void, *mut c_void, u32) -> bool,
-    pub start: unsafe extern "C" fn(*mut c_void, u64) -> bool,
+    /// Frozen first start; always consumes its prepared rearm.
+    pub start: unsafe extern "C" fn(*mut c_void, u64, *mut c_void) -> bool,
     pub stop: unsafe extern "C" fn(*mut c_void),
     pub remaining_client: unsafe extern "C" fn(*mut c_void),
-    pub set_rate: unsafe extern "C" fn(*mut c_void, u32) -> bool,
+    /// Frozen rate commit; always consumes its prepared rearm.
+    pub set_rate: unsafe extern "C" fn(*mut c_void, u32, *mut c_void) -> bool,
     pub timestamp: unsafe extern "C" fn(*mut c_void, u64, *mut Timestamp) -> bool,
     /// Control, outside the IO freeze: allocates one client's queue.
     pub prepare_client: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,

@@ -137,15 +137,15 @@ fn large_host_render_and_multiclient_capture_keep_each_tile_and_channel_once() {
 }
 
 #[test]
-fn a_render_span_longer_than_its_client_queue_is_rejected_and_traced() {
-    use mixrelay_macos_transport::client_pcm::QUEUE_FRAMES;
+fn a_render_span_longer_than_the_queue_sizing_span_is_rejected_and_traced() {
+    use mixrelay_macos_transport::client_pcm::MAX_RENDER_SPAN_FRAMES as SPAN;
     let fixture = native_fixture();
     let transport = Transport::new(93, 2, 2);
     let id = transport.add(&fixture, "Queue extent", 48_000);
     start(&fixture, id);
     let device = fixture.registry.pin(id).unwrap();
     device.io_trace.set_enabled(true);
-    let frames = QUEUE_FRAMES + 1;
+    let frames = SPAN + 1;
     let mut samples = vec![0.25_f32; frames as usize * 2];
     let io = |render: bool, frames: u32, samples: &mut [f32]| {
         // SAFETY: each exclusive buffer owns `frames` stereo Float32 frames.
@@ -161,7 +161,7 @@ fn a_render_span_longer_than_its_client_queue_is_rejected_and_traced() {
             })
         }
     };
-    // The queue would overwrite the span's first frame with its last one.
+    // A longer span could be overwritten in its queue before ReadInput or the pump reads it.
     assert!(!io(true, frames, &mut samples));
     let counters = device.io_trace.admission.snapshot();
     let words = crate::io_admission::COUNTERS;
@@ -170,11 +170,11 @@ fn a_render_span_longer_than_its_client_queue_is_rejected_and_traced() {
         counters[words + 1],
         u64::from(frames) | (1 << 32) | (1 << 33)
     );
-    assert!(io(true, QUEUE_FRAMES, &mut samples));
+    assert!(io(true, SPAN, &mut samples));
     // Capture keeps the retention bound; unpublished frames are silence.
     assert!(io(false, frames, &mut samples));
     assert_eq!(device.io_trace.admission.snapshot()[words + 3], 1);
-    let (published, unpublished) = samples.split_at(QUEUE_FRAMES as usize * 2);
+    let (published, unpublished) = samples.split_at(SPAN as usize * 2);
     assert!(
         published
             .iter()

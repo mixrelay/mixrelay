@@ -22,7 +22,7 @@ impl Registry {
             Err(status) => return status,
         };
         // A pending replacement must carry exactly the new client set.
-        Self::prepare_attachment(&device, &mut control);
+        Self::prepare_pending(&device, &mut control);
         drop(control);
         drop(device);
         if stopped {
@@ -121,27 +121,39 @@ impl Registry {
         if !device.alive.load(Ordering::Acquire) {
             return NOT_FOUND;
         }
-        let Some(running) = control.clients.get_mut(&client) else {
-            return INVALID;
-        };
-        if *running {
+        if control.clients.get(&client) != Some(&false) {
             return INVALID;
         }
         let count = device.running.load(Ordering::Acquire);
         if count == u32::MAX {
             return CAPACITY;
         }
-        let frozen = device.freeze();
-        // SAFETY: control and freeze retain the live runtime before its first start.
-        if count == 0
-            && !unsafe { (self.native.start)(device.runtime.load(Ordering::Acquire), now) }
-        {
+        let runtime = device.runtime.load(Ordering::Acquire);
+        // SAFETY: control retains the live runtime; replacement queues for exhausted rings
+        // are mapped alongside IO callbacks, before the freeze.
+        let rearm = (count == 0)
+            .then(|| Prepared::new(unsafe { (self.native.prepare_rearm)(runtime) }, self.native));
+        if rearm.as_ref().is_some_and(Option::is_none) {
             return NATIVE_ERROR;
         }
-        *running = true;
-        device.input_latency.active(client, true);
-        device.running.store(count + 1, Ordering::Release);
+        let frozen = device.freeze();
+        // SAFETY: control and freeze retain the live runtime before its first start.
+        let started = rearm
+            .flatten()
+            .is_none_or(|rearm| unsafe { (self.native.start)(runtime, now, rearm.into_raw()) });
+        if started {
+            control.clients.insert(client, true);
+            device.input_latency.active(client, true);
+            device.running.store(count + 1, Ordering::Release);
+        }
         drop(frozen);
+        if count == 0 {
+            // The start consumed an epoch in every queue; a pending rate change prepares again.
+            Self::prepare_pending(&device, &mut control);
+        }
+        if !started {
+            return NATIVE_ERROR;
+        }
         drop(control);
         drop(device);
         if count == 0 {

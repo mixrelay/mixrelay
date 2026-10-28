@@ -24,6 +24,8 @@ pub(crate) struct InventoryState {
     generation: u64,
     latest_validated: u64,
     entries: BTreeMap<[u8; 16], Option<u64>>,
+    // The newest generation whose validation or native apply failed, and its authority.
+    rejected: Option<(u64, u64)>,
 }
 
 // The bridge owns Registry for coreaudiod's lifetime and invokes these control
@@ -113,9 +115,16 @@ pub(crate) enum Settlement {
 /// The validated generation once no attachment is pending; `None` while any is.
 pub(crate) fn settled(registry: &Registry, authority: u64) -> Option<(u64, Settlement)> {
     let state = registry.inventory.try_lock().ok()?;
-    if authority == 0
-        || state.connection != authority
-        || state.authority != authority
+    if authority == 0 || state.connection != authority {
+        return None;
+    }
+    // A snapshot that failed validation or a native apply is final until a newer one.
+    if let Some((rejected_authority, generation)) = state.rejected
+        && rejected_authority == authority
+    {
+        return Some((generation, Settlement::Rejected));
+    }
+    if state.authority != authority
         || state.generation == 0
         || state.generation != state.latest_validated
     {
@@ -166,6 +175,7 @@ fn apply(registry: &Registry, authority: u64, snapshot: &mut InventorySnapshot) 
         return true;
     }
     if !preflight(registry, snapshot) {
+        state.rejected = Some((authority, snapshot.generation));
         return false;
     }
     if authority != state.authority {
@@ -189,8 +199,10 @@ fn apply(registry: &Registry, authority: u64, snapshot: &mut InventorySnapshot) 
     if !remove_absent(registry, &mut state, &wanted)
         || !upsert_desired(registry, &mut state, snapshot)
     {
+        state.rejected = Some((authority, snapshot.generation));
         return false;
     }
+    state.rejected = None;
     state.generation = snapshot.generation;
     drop(state);
     registry.transport_policy(snapshot.transport_compatibility.identifiers());

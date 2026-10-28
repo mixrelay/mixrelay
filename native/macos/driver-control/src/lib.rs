@@ -8,13 +8,15 @@
 mod device;
 mod dispatch;
 mod endpoint_registry;
+mod formats;
 mod settle;
+mod settlement;
 mod xpc;
 
 use endpoint_registry::{CallbackEndpoint, EndpointRegistry, EndpointSpec, OwnedInventory};
 use mixrelay_audio_io::{
-    NativeDeviceFormats, NativeStreamFormat, VirtualEndpointCapabilities,
-    VirtualEndpointDeviceSettings, VirtualEndpointId, VirtualEndpointSettings, VirtualEndpointSpec,
+    NativeStreamFormat, VirtualEndpointCapabilities, VirtualEndpointDeviceSettings,
+    VirtualEndpointId, VirtualEndpointSettings, VirtualEndpointSpec,
 };
 use mixrelay_driver_control::{DriverBackend, DriverDeviceConfig, DriverError, DriverState};
 use mixrelay_macos_transport::{
@@ -28,12 +30,6 @@ use std::sync::OnceLock;
 const DRIVER_BUNDLE: &str = "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver";
 static SERVICE: OnceLock<Service> = OnceLock::new();
 static START: Mutex<()> = Mutex::new(());
-
-struct PreviousDeviceFormat {
-    id: [u8; 16],
-    formats: NativeDeviceFormats,
-    rate: Option<u32>,
-}
 
 struct Service {
     registry: EndpointRegistry,
@@ -150,9 +146,22 @@ impl MacDriver {
             .iter()
             .map(native_spec)
             .collect::<Result<Vec<_>, _>>()?;
+        // Only manager transactions change rate or format; a HAL-requested replacement
+        // must not force the cached intent over a DAW's choice the HAL now holds.
+        let origin = if replacement.is_some() {
+            formats::Origin::Replacement
+        } else {
+            formats::Origin::Manager
+        };
+        let wanted = specs
+            .iter()
+            .map(|spec| spec.id)
+            .zip(desired)
+            .collect::<Vec<_>>();
         let old_formats: Vec<_> = old_specs
             .iter()
-            .map(|spec| PreviousDeviceFormat {
+            .filter(|_| origin == formats::Origin::Manager)
+            .map(|spec| formats::Previous {
                 id: spec.id,
                 formats: device::native_formats(spec.id),
                 rate: device::rate(spec.id),
@@ -168,7 +177,7 @@ impl MacDriver {
                 settle::step(&Polling, || {
                     inventory_progress(service, generation, &pins, &old_specs, &specs)
                 })?;
-                apply_formats(service, desired)
+                formats::apply(&Hal(service), &Polling, origin, &wanted)
             },
             // Rollback uses a fresh publication generation, so HAL fencing never
             // mistakes the old active mappings for a stale provisional message.
@@ -181,7 +190,7 @@ impl MacDriver {
                 settle::step(&Polling, || {
                     inventory_progress(service, generation, &old_pins, &specs, &old_specs)
                 })?;
-                restore_formats(service, &old_formats)
+                formats::restore(&Hal(service), &Polling, origin, &old_formats)
             },
         )?;
         prepared.commit()?;
@@ -359,7 +368,13 @@ fn inventory_progress(
     before: &[EndpointSpec],
     after: &[EndpointSpec],
 ) -> Progress {
-    match service.peers.lock().settlement(generation) {
+    let peers = service.peers.lock();
+    if peers.incompatible() {
+        return Progress::Incompatible;
+    }
+    let settlement = peers.settlement(generation);
+    drop(peers);
+    match settlement {
         Some(xpc::Settlement::Applied) => Progress::applied(inventory_applied(pins, before, after)),
         Some(xpc::Settlement::Rejected) => Progress::Rejected,
         None => Progress::Performing,
@@ -383,128 +398,50 @@ fn inventory_applied(
         .all(|spec| device::device(spec.id).is_none())
 }
 
-/// Requests the rate and formats `desired` still lacks. The HAL readback, not the
-/// service's cached intent, decides what is missing: a Perform reported pending may
-/// have settled since, and a DAW may have changed the device.
-fn apply_formats(service: &Service, desired: &[DriverDeviceConfig]) -> Result<(), settle::Failure> {
-    for config in desired {
-        let id = identity(&config.spec.id)?;
-        if let Some(rate) = missing(Some(config.spec.default_sample_rate), device::rate(id)) {
-            request(
-                service,
-                id,
-                Some(rate),
-                || issued(device::set_rate(id, rate), "native nominal rate rejected"),
-                || device::rate(id) == Some(rate),
-            )?;
-        }
-        for (render, wanted) in [(true, config.render_format), (false, config.capture_format)] {
-            if let Some(wanted) = missing(wanted, current_format(id, render)) {
-                request(
-                    service,
-                    id,
-                    None,
-                    || {
-                        issued(
-                            device::set_format(id, render, wanted),
-                            "native directional ASBD rejected",
-                        )
-                    },
-                    || current_format(id, render) == Some(wanted),
-                )?;
-            }
+/// The installed HAL as seen by a configuration transaction.
+struct Hal<'a>(&'a Service);
+
+impl formats::Native for Hal<'_> {
+    fn rate(&self, id: endpoint_registry::EndpointId) -> Option<u32> {
+        device::rate(id)
+    }
+    fn set_rate(&self, id: endpoint_registry::EndpointId, rate: u32) -> bool {
+        device::set_rate(id, rate)
+    }
+    fn format(
+        &self,
+        id: endpoint_registry::EndpointId,
+        render: bool,
+    ) -> Option<NativeStreamFormat> {
+        let formats = device::native_formats(id);
+        if render {
+            formats.render.current
+        } else {
+            formats.capture.current
         }
     }
-    Ok(())
-}
-
-fn restore_formats(
-    service: &Service,
-    previous: &[PreviousDeviceFormat],
-) -> Result<(), settle::Failure> {
-    for PreviousDeviceFormat { id, formats, rate } in previous {
-        let id = *id;
-        if let Some(rate) = missing(*rate, device::rate(id)) {
-            request(
-                service,
-                id,
-                Some(rate),
-                || issued(device::set_rate(id, rate), "nominal-rate rollback rejected"),
-                || device::rate(id) == Some(rate),
-            )?;
-        }
-        for (render, format) in [
-            (true, formats.render.current),
-            (false, formats.capture.current),
-        ] {
-            if let Some(format) = missing(format, current_format(id, render)) {
-                request(
-                    service,
-                    id,
-                    None,
-                    || {
-                        issued(
-                            device::set_format(id, render, format),
-                            "directional-format rollback rejected",
-                        )
-                    },
-                    || current_format(id, render) == Some(format),
-                )?;
-            }
-        }
+    fn set_format(
+        &self,
+        id: endpoint_registry::EndpointId,
+        render: bool,
+        format: NativeStreamFormat,
+    ) -> bool {
+        device::set_format(id, render, format)
     }
-    Ok(())
-}
-
-/// The wanted value when HAL readback does not already report it.
-fn missing<T: Copy + PartialEq>(wanted: Option<T>, observed: Option<T>) -> Option<T> {
-    wanted.filter(|wanted| observed != Some(*wanted))
-}
-
-fn current_format(id: endpoint_registry::EndpointId, render: bool) -> Option<NativeStreamFormat> {
-    let formats = device::native_formats(id);
-    if render {
-        formats.render.current
-    } else {
-        formats.capture.current
+    fn newest_settlement(&self) -> u64 {
+        self.0.peers.lock().newest_settlement()
     }
-}
-
-/// Issues one rate or format request and waits until the HAL applies or rejects it.
-/// Only settlements reported after the request count, so an older rejection is ignored.
-fn request(
-    service: &Service,
-    id: endpoint_registry::EndpointId,
-    rate: Option<u32>,
-    issue: impl FnOnce() -> Result<(), settle::Failure>,
-    applied: impl Fn() -> bool,
-) -> Result<(), settle::Failure> {
-    let since = service
-        .peers
-        .lock()
-        .configuration(id)
-        .map_or(0, |settled| settled.sequence);
-    issue()?;
-    settle::step(&Polling, || {
-        settle::request_progress(
-            applied(),
-            since,
-            service.peers.lock().configuration(id),
-            rate,
-        )
-    })
-}
-
-fn issued(accepted: bool, reason: &str) -> Result<(), settle::Failure> {
-    if accepted {
-        Ok(())
-    } else {
-        Err(rejected(reason))
+    fn settled(
+        &self,
+        id: endpoint_registry::EndpointId,
+        since: u64,
+        wanted: settlement::Wanted,
+    ) -> Option<settlement::Configured> {
+        self.0.peers.lock().settled(id, since, wanted)
     }
-}
-
-fn rejected(reason: &str) -> settle::Failure {
-    settle::Failure::Rejected(DriverError::Backend(reason.into()))
+    fn incompatible(&self) -> bool {
+        self.0.peers.lock().incompatible()
+    }
 }
 
 #[cfg(test)]

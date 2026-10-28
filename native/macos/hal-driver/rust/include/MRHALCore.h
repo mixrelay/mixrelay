@@ -36,13 +36,16 @@ typedef struct MRHALCoreNativeOps {
     void (*destroy)(void *);
     /* Control, outside the IO freeze: maps a replacement and its client queues. */
     void *(*prepare)(void *, const MRHALCoreGeometry *, int, size_t);
+    /* Control, outside the IO freeze: replacement queues for rings without a spare epoch. */
+    void *(*prepare_rearm)(void *);
     void (*discard)(void *);
     /* Frozen commit of a prepared replacement at a rate; always consumes it. */
     bool (*replace)(void *, void *, uint32_t);
-    bool (*start)(void *, uint64_t);
+    /* Frozen first start and rate commit; each consumes its prepared rearm. */
+    bool (*start)(void *, uint64_t, void *);
     void (*stop)(void *);
     void (*remaining_client)(void *);
-    bool (*set_rate)(void *, uint32_t);
+    bool (*set_rate)(void *, uint32_t, void *);
     bool (*timestamp)(void *, uint64_t, MRHALCoreTimestamp *);
     /* Control, outside the IO freeze: allocates one client's queue. */
     void *(*prepare_client)(void *, uint32_t);

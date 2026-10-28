@@ -3,7 +3,6 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
     ffi::c_void,
     ptr,
 };
@@ -31,17 +30,7 @@ enum Request {
         endpoint: [u8; 16],
         generation: u64,
     },
-    Configured {
-        endpoint: [u8; 16],
-        settled: crate::device::Settled,
-    },
-}
-
-/// Request settlements already sent on one connection, newest sequence per endpoint.
-#[derive(Default)]
-struct Reported {
-    authority: u64,
-    sequences: BTreeMap<[u8; 16], u64>,
+    Configured(crate::device::Settled),
 }
 
 /// The adapter owns queue/timer handles; each connection value owns its socket.
@@ -60,7 +49,8 @@ struct Control<B: Backend> {
     connection: RefCell<Option<B::Connection>>,
     backend: B,
     settled: Cell<Option<(u64, u64, crate::inventory::Settlement)>>,
-    configured: RefCell<Reported>,
+    /// Authority and the newest request settlement sent on it.
+    configured: Cell<(u64, u64)>,
 }
 
 impl<B: Backend> Control<B> {
@@ -71,7 +61,7 @@ impl<B: Backend> Control<B> {
             connection: RefCell::new(None),
             backend,
             settled: Cell::new(None),
-            configured: RefCell::default(),
+            configured: Cell::new((0, 0)),
         }
     }
 
@@ -142,22 +132,18 @@ impl<B: Backend> Control<B> {
         }
     }
 
-    /// Reports each device's newest settled rate/format/mapping request once per
-    /// connection, so the Driver service can tell a rejection from a slow Perform.
+    /// Reports every settled rate/format/mapping request in order, once per connection,
+    /// so the Driver service can tell a rejection from a slow Perform. A new connection
+    /// receives the retained settlements again; the service ignores those it predates.
     fn send_configurations(&self, authority: u64) {
-        let settled = self.registry.settled_configurations();
-        let mut sent = self.configured.borrow_mut();
-        if sent.authority != authority {
-            *sent = Reported {
-                authority,
-                sequences: BTreeMap::new(),
-            };
+        let (sent_authority, sent) = self.configured.get();
+        let after = if sent_authority == authority { sent } else { 0 };
+        let mut newest = after;
+        for settled in self.registry.settled_after(after) {
+            self.send(Request::Configured(settled));
+            newest = settled.sequence;
         }
-        for (endpoint, settled) in settled {
-            if sent.sequences.insert(endpoint, settled.sequence) != Some(settled.sequence) {
-                self.send(Request::Configured { endpoint, settled });
-            }
-        }
+        self.configured.set((authority, newest));
     }
 
     fn send(&self, request: Request) {

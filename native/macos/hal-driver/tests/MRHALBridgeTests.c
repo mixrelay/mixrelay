@@ -191,12 +191,13 @@ static void *prepare_fixture(void *runtime, const MRHALCoreGeometry *geometry, i
     (void)runtime; (void)geometry; (void)fd; (void)size; return NULL;
 }
 static void discard_fixture(void *change) { (void)change; }
+static void *prepare_rearm_fixture(void *runtime) { (void)runtime; return (void *)(uintptr_t)1U; }
 static bool replace_fixture(void *runtime, void *change, uint32_t rate) {
     (void)runtime; (void)change; (void)rate; return false;
 }
-static bool start_fixture(void *runtime, uint64_t time) { (void)runtime; (void)time; return true; }
+static bool start_fixture(void *runtime, uint64_t time, void *change) { (void)runtime; (void)time; (void)change; return true; }
 static void stop_fixture(void *runtime) { (void)runtime; }
-static bool rate_fixture(void *runtime, uint32_t rate) { (void)runtime; (void)rate; return false; }
+static bool rate_fixture(void *runtime, uint32_t rate, void *change) { (void)runtime; (void)rate; (void)change; return false; }
 static uint32_t transport_device;
 static uint32_t transport_value(void) {
     AudioObjectPropertyAddress property = {kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal, 0};
@@ -231,7 +232,7 @@ static bool replacement_fixture(void *runtime) { (void)runtime; return false; }
 static bool same_fixture(void *runtime, int fd, size_t size) { (void)runtime; (void)fd; (void)size; return false; }
 static void transport_identity(void) {
     const MRHALCoreNativeOps native = {inspect_fixture, create_fixture, destroy_fixture, prepare_fixture,
-        discard_fixture, replace_fixture, start_fixture, stop_fixture, stop_fixture, rate_fixture,
+        prepare_rearm_fixture, discard_fixture, replace_fixture, start_fixture, stop_fixture, stop_fixture, rate_fixture,
         timestamp_fixture, prepare_client_fixture, client_fixture, io_fixture, replacement_fixture, same_fixture};
     const MRHALCoreHostOps host = {NULL, fixture_changed, fixture_request};
     gCore = mr_hal_core_create(&native, &host);
@@ -336,7 +337,7 @@ static void transport_identity(void) {
  * content delay while coreaudiod keeps zero scheduling latency. */
 static void input_latency_requester(void) {
     const MRHALCoreNativeOps native = {inspect_fixture, create_fixture, destroy_fixture, prepare_fixture,
-        discard_fixture, replace_fixture, start_fixture, stop_fixture, stop_fixture, rate_fixture,
+        prepare_rearm_fixture, discard_fixture, replace_fixture, start_fixture, stop_fixture, stop_fixture, rate_fixture,
         timestamp_fixture, prepare_client_fixture, client_fixture, io_fixture, replacement_fixture, same_fixture};
     const MRHALCoreHostOps host = {NULL, fixture_changed, fixture_request};
     gCore = mr_hal_core_create(&native, &host);

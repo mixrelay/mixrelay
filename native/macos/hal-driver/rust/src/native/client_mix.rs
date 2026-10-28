@@ -46,6 +46,17 @@ impl PreparedClient {
     }
 }
 
+/// Fresh queues for clients whose ring cannot open another epoch, allocated on control
+/// before the freeze in which a clock publication rearms every queue.
+#[derive(Default)]
+pub(super) struct Rearm(Vec<PreparedClient>);
+
+/// Whether a clock publication opens a new PCM epoch in every client queue.
+pub(super) enum Timeline {
+    Keep,
+    Rearm(Rearm),
+}
+
 pub(super) struct ClientMix {
     clients: Vec<Client>,
     geometry: Geometry,
@@ -130,18 +141,72 @@ impl ClientMix {
         }
     }
 
-    pub(super) fn publish_clock(&mut self, clock: &Clock, rearm: bool) -> bool {
-        self.publish_clock_after(clock, rearm, || true)
+    /// Maps a replacement for every queue that cannot open another epoch. Shared access
+    /// is enough: the caller holds device control, so neither set nor epochs can change.
+    pub(super) fn prepare_rearm(&self) -> Option<Rearm> {
+        let mut replacements = Vec::new();
+        for client in &self.clients {
+            if client
+                .queue
+                .as_ref()
+                .is_some_and(|queue| !queue.can_rearm())
+            {
+                replacements.push(self.prepare(client.id)?);
+            }
+        }
+        Some(Rearm(replacements))
+    }
+
+    pub(super) fn publish_clock(&mut self, clock: &Clock, timeline: Timeline) -> bool {
+        self.publish_clock_after(clock, timeline, || true)
     }
 
     /// Keeps remote readers fenced until client queues and native stream preparation succeed.
+    /// Every precondition is checked before the first queue changes, so a refused rearm
+    /// leaves all queues and the published clock as they were.
     pub(super) fn publish_clock_after(
         &mut self,
         clock: &Clock,
-        rearm: bool,
+        timeline: Timeline,
         prepare: impl FnOnce() -> bool,
     ) -> bool {
-        let config = self.configuration();
+        let (rearm, mut replacements) = match timeline {
+            Timeline::Keep => (false, Vec::new()),
+            Timeline::Rearm(Rearm(replacements)) => (true, replacements),
+        };
+        replacements.retain(|prepared| {
+            self.clients.iter().any(|client| {
+                client.id == prepared.id
+                    && client
+                        .queue
+                        .as_ref()
+                        .is_some_and(|queue| !queue.can_rearm())
+            })
+        });
+        let ready = |client: &Client| {
+            client.queue.as_ref().is_none_or(|queue| {
+                if rearm {
+                    queue.can_rearm()
+                        || replacements.iter().any(|prepared| {
+                            prepared.id == client.id
+                                && prepared.queue.as_ref().is_some_and(|queue| {
+                                    queue.belongs_to(&self.clock) && queue.can_rearm()
+                                })
+                        })
+                } else {
+                    true
+                }
+            })
+        };
+        let Some(revision) = self
+            .revision
+            .checked_add(u64::try_from(replacements.len()).unwrap_or(u64::MAX))
+        else {
+            return false;
+        };
+        if !crate::formats::SAMPLE_RATES.contains(&clock.rate) || !self.clients.iter().all(ready) {
+            return false;
+        }
         let (epoch, anchor) = clock.transport_epoch();
         let Some(publication) = self.clock.begin(ClientPcmTimeline {
             epoch,
@@ -152,27 +217,26 @@ impl ClientMix {
             return false;
         };
         for client in &mut self.clients {
+            if let Some(index) = replacements
+                .iter()
+                .position(|prepared| prepared.id == client.id)
+            {
+                // swap_remove keeps the commit allocation-free; the old queue retires here.
+                client.queue = replacements.swap_remove(index).queue;
+            }
             if let Some(queue) = &mut client.queue
                 && !publication.configure(queue, rearm)
             {
-                if !rearm || self.revision == u64::MAX {
-                    return false;
-                }
-                let Ok(mut replacement) =
-                    Queue::with_clock(config, client.id, Arc::clone(&self.clock))
-                else {
-                    return false;
-                };
-                if !publication.configure(&mut replacement, true) {
-                    return false;
-                }
-                client.queue = Some(replacement);
-                self.revision += 1;
-                self.clock.publish_membership(self.revision);
+                // Only a retired queue refuses here; a rearm excluded that above.
+                return false;
             }
             if rearm {
                 client.rendered.store(false, Ordering::Relaxed);
             }
+        }
+        if revision != self.revision {
+            self.revision = revision;
+            self.clock.publish_membership(self.revision);
         }
         if !prepare() {
             return false;

@@ -19,18 +19,23 @@ const VERSION: u32 = 1;
 pub const MAX_CLIENTS_PER_ENDPOINT: usize = 256;
 /// Existing HAL client-PCM budget, including each frame-tagged ring's header.
 pub const MAX_PCM_BYTES_PER_ENDPOINT: usize = 1 << 30;
-/// Frames in every HAL client render queue. Its readers consume near the device position:
-/// `ReadInput` mixes the device coordinates a writer just published, and the engine pump
-/// drains through the native playhead every 128 frames. A writer may lead its slowest
-/// reader by one playback target plus one maximum IO buffer; twice that keeps the queue
-/// policy's half-capacity headroom. Capture retention lives in the engine's source ring,
-/// never here, so this size does not grow with `retention::RING_FRAMES`.
-pub const QUEUE_FRAMES: u32 = 32_768;
+/// Largest host render span the HAL accepts into a client queue. Core Audio coalesces IO
+/// beyond the selectable buffer size; installed traces and the native host-span regression
+/// cover 8,192-frame requests. Longer render spans are rejected as oversized extents.
+pub const MAX_RENDER_SPAN_FRAMES: u32 = 8_192;
+/// Frames in every HAL client render queue. A writer may lead the device position by one
+/// playback target plus one render span, and `ReadInput` or the engine pump may trail it by
+/// as much again. Twice that sum keeps the queue policy's half-capacity headroom, which is
+/// 32,768 frames (170 ms at 192 kHz) of scheduling slack for the pump. Capture retention
+/// lives in the engine, never here, so this size does not grow with `retention::RING_FRAMES`.
+pub const QUEUE_FRAMES: u32 = 65_536;
 const _: () = assert!(
     QUEUE_FRAMES.is_power_of_two()
+        && MAX_RENDER_SPAN_FRAMES as usize >= mixrelay_audio_io::formats::MAX_BUFFER_FRAMES
         && QUEUE_FRAMES as usize
-            >= 2 * (mixrelay_audio_io::buffer_policy::MAXIMUM_TARGET_FRAMES
-                + mixrelay_audio_io::formats::MAX_BUFFER_FRAMES)
+            >= 2 * 2
+                * (mixrelay_audio_io::buffer_policy::MAXIMUM_TARGET_FRAMES
+                    + MAX_RENDER_SPAN_FRAMES as usize)
 );
 
 #[repr(C)]

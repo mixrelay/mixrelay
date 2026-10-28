@@ -89,6 +89,7 @@ unsafe extern "C" fn destroy(runtime: *mut c_void) {
 enum Change {
     Replacement(Geometry),
     Client(u32),
+    Rearm,
 }
 fn change(change: Change) -> *mut c_void {
     if IO_ENTERED.load(Ordering::Acquire) && !RELEASE_IO.load(Ordering::Acquire) {
@@ -128,7 +129,13 @@ unsafe extern "C" fn replace(runtime: *mut c_void, change: *mut c_void, rate: u3
     REPLACEMENTS.fetch_add(1, Ordering::SeqCst);
     true
 }
-unsafe extern "C" fn start(runtime: *mut c_void, _: u64) -> bool {
+unsafe extern "C" fn prepare_rearm(_: *mut c_void) -> *mut c_void {
+    change(Change::Rearm)
+}
+unsafe extern "C" fn start(runtime: *mut c_void, _: u64, rearm: *mut c_void) -> bool {
+    if !matches!(take(rearm), Some(Change::Rearm)) {
+        return false;
+    }
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     runtime.running = true;
     runtime.epoch += 1;
@@ -144,7 +151,10 @@ unsafe extern "C" fn requires_replacement(_: *mut c_void) -> bool {
 unsafe extern "C" fn same_transport(_: *mut c_void, _: i32, _: usize) -> bool {
     false
 }
-unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32) -> bool {
+unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32, rearm: *mut c_void) -> bool {
+    if !matches!(take(rearm), Some(Change::Rearm)) {
+        return false;
+    }
     unsafe { &mut *runtime.cast::<Runtime>() }.rate = rate;
     true
 }
@@ -351,6 +361,7 @@ impl Fixture {
             create,
             destroy,
             prepare,
+            prepare_rearm,
             discard,
             replace,
             start,
@@ -794,36 +805,45 @@ fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration()
 
 #[test]
 fn rate_requests_report_native_failure_abort_and_success_in_order() {
-    unsafe extern "C" fn reject(_: *mut c_void, _: u32) -> bool {
+    unsafe extern "C" fn reject(_: *mut c_void, _: u32, rearm: *mut c_void) -> bool {
+        take(rearm);
         false
     }
     let mut fixture = Fixture::new();
     let id = fixture.add(1, 48_000);
-    let settled = |fixture: &Fixture| {
-        let configurations = fixture.registry.settled_configurations();
-        assert_eq!(configurations.len(), 1);
-        assert_eq!(configurations[0].0, [1; 16]);
-        configurations[0].1
-    };
-    assert!(fixture.registry.settled_configurations().is_empty());
+    assert!(fixture.registry.settled_after(0).is_empty());
     let accept = fixture.registry.native.set_rate;
     fixture.registry.native.set_rate = reject;
     assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
     assert_eq!(fixture.perform(), NATIVE_ERROR);
-    let failed = settled(&fixture);
-    assert_eq!((failed.rate, failed.applied), (96_000, false));
     fixture.registry.native.set_rate = accept;
     assert_eq!(fixture.registry.set_rate(id, 88_200), OK);
     let (_, generation) = fixture.pending();
     assert_eq!(fixture.registry.abort(id, CONFIG_ACTION, generation), OK);
-    let aborted = settled(&fixture);
-    assert_eq!((aborted.rate, aborted.applied), (88_200, false));
-    assert!(aborted.sequence > failed.sequence);
     assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
     assert_eq!(fixture.perform(), OK);
-    let applied = settled(&fixture);
-    assert_eq!((applied.rate, applied.applied), (96_000, true));
-    assert!(applied.sequence > aborted.sequence);
+    let settled = fixture.registry.settled_after(0);
+    // Every outcome is retained in order, so none hides behind a newer one.
+    assert_eq!(
+        settled
+            .iter()
+            .map(|settled| (settled.endpoint, settled.rate, settled.applied))
+            .collect::<Vec<_>>(),
+        [
+            ([1; 16], 96_000, false),
+            ([1; 16], 88_200, false),
+            ([1; 16], 96_000, true)
+        ]
+    );
+    assert!(
+        settled
+            .windows(2)
+            .all(|pair| pair[0].sequence < pair[1].sequence)
+    );
+    assert_eq!(
+        fixture.registry.settled_after(settled[1].sequence),
+        settled[2..]
+    );
 }
 
 fn eventually(condition: impl Fn() -> bool) {
@@ -904,8 +924,9 @@ fn queue_and_replacement_preparation_run_alongside_in_flight_io() {
         callback.join().unwrap();
         control.join().unwrap();
     });
-    // The membership change prepared the pending replacement again after the freeze.
-    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 4);
+    // The first start prepared its rearm; the membership change prepared the pending
+    // replacement again after the freeze.
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 5);
     drop(device);
     assert_eq!(fixture.perform(), OK);
     assert_eq!(REPLACEMENTS.load(Ordering::SeqCst), 1);

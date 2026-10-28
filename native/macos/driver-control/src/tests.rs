@@ -1,4 +1,4 @@
-use super::{capabilities, identity, missing, native_spec, observed_spec};
+use super::{capabilities, identity, native_spec, observed_spec};
 use mixrelay_audio_io::{
     ChannelLayout, NativeSampleFormat, NativeStreamFormat, StreamSpec, VirtualEndpointSpec,
 };
@@ -148,15 +148,4 @@ fn clearing_latency_for_an_absent_device_forgets_its_cached_value() {
         driver.publish_latency(&publication),
         Err(DriverError::NotFound(_))
     ));
-}
-
-#[test]
-fn rate_and_format_requests_follow_hal_readback_not_cached_intent() {
-    // A Perform reported pending may settle at 96 kHz while the service still caches
-    // 48 kHz; asking for 48 kHz again must reach the HAL.
-    assert_eq!(missing(Some(48_000), Some(96_000)), Some(48_000));
-    assert_eq!(missing(Some(48_000), None), Some(48_000));
-    // An already applied value, or no requested value, needs no Perform.
-    assert_eq!(missing(Some(48_000), Some(48_000)), None);
-    assert_eq!(missing(None, Some(48_000)), None);
 }

@@ -22,8 +22,6 @@ pub(crate) struct Attachment {
     pub descriptor: OwnedFd,
     pub size: usize,
     pub geometry: Geometry,
-    /// Mapping and client queues prepared before any freeze; `None` fails the commit.
-    pub prepared: Option<Prepared>,
 }
 
 /// A native change allocated on control, outside the IO freeze. Dropping it
@@ -63,15 +61,21 @@ pub(crate) struct Pending {
     pub name: String,
     pub rate: u32,
     pub formats: [SampleFormat; 2],
+    /// Native storage prepared before any freeze: the replacement mapping and queues for
+    /// an attachment, otherwise the rearm of every client queue. `None` fails the commit.
+    pub prepared: Option<Prepared>,
 }
 
-/// How the HAL finished the latest configuration request of one device.
+/// How the HAL finished one configuration request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Settled {
+    pub endpoint: [u8; 16],
     /// Registry-wide order of settled requests; never reused within a HAL process.
     pub sequence: u64,
     /// The nominal rate the request asked for.
     pub rate: u32,
+    /// Requested capture and render sample formats, as `SampleFormat` codes.
+    pub formats: [u32; 2],
     /// False when Perform failed natively or coreaudiod aborted the request.
     pub applied: bool,
 }
@@ -84,7 +88,6 @@ pub(crate) struct Control {
     pub pending: Option<Pending>,
     pub next_generation: u64,
     pub attachment_failed: bool,
-    pub settled: Option<Settled>,
 }
 
 pub(crate) struct Device {
@@ -149,7 +152,6 @@ impl Device {
                 pending: None,
                 next_generation: 1,
                 attachment_failed: false,
-                settled: None,
             }),
             native: native_runtime.0,
             runtime: AtomicPtr::new(native_runtime.1),

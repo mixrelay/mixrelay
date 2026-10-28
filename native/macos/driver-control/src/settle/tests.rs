@@ -165,80 +165,22 @@ fn a_rollback_is_failed_only_when_rejected_and_pending_when_still_performing() {
     assert!(matches!(result, Err(DriverError::ConfigurationPending)));
 }
 
-fn configured(sequence: u64, rate: u32, applied: bool) -> Configured {
-    Configured {
-        sequence,
-        rate,
-        applied,
-    }
-}
-
 #[test]
-fn only_a_newer_rejection_of_the_same_request_rejects_it() {
-    let rate = Some(96_000);
-    let progress = |settled, rate| request_progress(false, 4, settled, rate);
-    assert_eq!(
-        request_progress(true, 4, Some(configured(9, 96_000, false)), rate),
-        Progress::Applied
-    );
-    assert_eq!(progress(None, rate), Progress::Performing);
-    // Settled before this request, or a request for another rate.
-    assert_eq!(
-        progress(Some(configured(4, 96_000, false)), rate),
-        Progress::Performing
-    );
-    assert_eq!(
-        progress(Some(configured(5, 48_000, false)), rate),
-        Progress::Performing
-    );
-    // Applied at our rate but not yet visible in readback.
-    assert_eq!(
-        progress(Some(configured(5, 96_000, true)), rate),
-        Progress::Performing
-    );
-    assert_eq!(
-        progress(Some(configured(5, 96_000, false)), rate),
-        Progress::Rejected
-    );
-    // Format requests carry the current rate, so any newer rejection is theirs.
-    assert_eq!(
-        progress(Some(configured(5, 48_000, false)), None),
-        Progress::Rejected
-    );
-}
-
-#[test]
-fn a_native_rate_failure_rolls_back_promptly_with_its_own_error() {
+fn a_hal_on_another_protocol_fails_at_once_with_an_explicit_error() {
     let clock = Manual::new();
-    // The HAL reports the failed Perform 200 ms after the service asks for 96 kHz.
-    let settled = || {
-        (clock.elapsed() >= Duration::from_millis(200)).then_some(Configured {
-            sequence: 8,
-            rate: 96_000,
-            applied: false,
-        })
-    };
-    let restored = Cell::new(false);
+    let published = Cell::new(false);
     let result = transact(
+        || step(&clock, || Progress::Incompatible),
         || {
-            step(&clock, || Progress::Applied)?;
-            step(&clock, || {
-                request_progress(false, 7, settled(), Some(96_000))
-            })
-        },
-        || Ok(clock.elapsed()),
-        |published| {
-            step(&clock, || {
-                Progress::applied(clock.elapsed() >= published + POLL)
-            })?;
-            restored.set(true);
+            published.set(true);
             Ok(())
         },
+        |()| unreachable!("an incompatible HAL cannot confirm a rollback"),
     );
     assert!(
-        matches!(&result, Err(DriverError::Backend(message)) if message == "HAL rejected the configuration"),
+        matches!(&result, Err(DriverError::Unavailable(message)) if message.contains("protocol")),
         "{result:?}"
     );
-    assert!(restored.get());
-    assert!(clock.elapsed() < Duration::from_secs(1));
+    assert!(published.get());
+    assert_eq!(clock.elapsed(), Duration::ZERO);
 }

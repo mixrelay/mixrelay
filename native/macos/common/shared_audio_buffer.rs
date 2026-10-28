@@ -408,6 +408,20 @@ pub unsafe extern "C" fn mr_shared_audio_buffer_retire_busy_producer_after_drain
     true
 }
 
+/// Whether `mr_shared_audio_buffer_try_begin_epoch` would open another epoch now,
+/// without claiming the producer or changing any shared state.
+/// # Safety
+/// A non-null buffer must reference an initialized, attached, live mapping.
+pub unsafe fn can_begin_epoch(buffer: *const SharedAudioBuffer) -> bool {
+    unsafe { buffer.as_ref() }.is_some_and(|buffer| {
+        let epoch = buffer.epoch.load(Ordering::Acquire);
+        let generation = epoch & MAX_EPOCH;
+        buffer.producer_busy.load(Ordering::Acquire) == 0
+            && epoch & !(REQUESTED | MAX_EPOCH) == 0
+            && (1..MAX_EPOCH).contains(&generation)
+    })
+}
+
 /// One producer claim and one epoch CAS, with no retry or storage clearing.
 /// # Safety
 /// Non-null pointers must reference an initialized mapping. One PCM writer owns

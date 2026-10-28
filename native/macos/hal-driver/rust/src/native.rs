@@ -17,7 +17,7 @@ use crate::clock::Clock;
 use crate::io_outcome::IoOutcome;
 use crate::registry::Registry;
 mod client_mix;
-use client_mix::{ClientMix, PreparedClient};
+use client_mix::{ClientMix, PreparedClient, Rearm, Timeline};
 mod pcm_snapshot;
 pub(crate) use pcm_snapshot::client_snapshot;
 
@@ -134,6 +134,7 @@ enum Change {
         clients: ClientMix,
     },
     Client(PreparedClient),
+    Rearm(Rearm),
 }
 
 /// # Safety
@@ -227,6 +228,24 @@ unsafe extern "C" fn prepare_client(runtime: *mut c_void, client: u32) -> *mut c
         .map_or(std::ptr::null_mut(), |client| boxed(Change::Client(client)))
 }
 
+unsafe extern "C" fn prepare_rearm(runtime: *mut c_void) -> *mut c_void {
+    // SAFETY: as in `prepare`; replacement queues stay unpublished until a rearm commits.
+    let runtime = unsafe { &*runtime.cast::<Runtime>() };
+    runtime
+        .clients
+        .prepare_rearm()
+        .map_or(std::ptr::null_mut(), |rearm| boxed(Change::Rearm(rearm)))
+}
+
+/// # Safety
+/// `change` is null or an unconsumed preparation from `prepare_rearm`.
+unsafe fn rearm(change: *mut c_void) -> Option<Rearm> {
+    match unsafe { take(change) } {
+        Some(Change::Rearm(rearm)) => Some(rearm),
+        _ => None,
+    }
+}
+
 unsafe extern "C" fn discard(change: *mut c_void) {
     // SAFETY: the registry releases each unconsumed preparation once, outside IO.
     drop(unsafe { take(change) });
@@ -256,7 +275,8 @@ unsafe extern "C" fn replace(runtime: *mut c_void, change: *mut c_void, rate: u3
     let previous = unsafe { &*runtime.io.context.get() };
     let context = unsafe { &mut *candidate.context.get() };
     context.inherit_lifecycle(previous);
-    if !clients.publish_clock(&clock, true) {
+    // A fresh replacement's queues have used no epoch, so nothing needs substituting.
+    if !clients.publish_clock(&clock, Timeline::Rearm(Rearm::default())) {
         return false;
     }
     if !candidate.bind() {
@@ -275,15 +295,21 @@ unsafe extern "C" fn replace(runtime: *mut c_void, change: *mut c_void, rate: u3
     true
 }
 
-unsafe extern "C" fn start(runtime: *mut c_void, now: u64) -> bool {
+unsafe extern "C" fn start(runtime: *mut c_void, now: u64, change: *mut c_void) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
+    // SAFETY: the registry passes ownership of the rearm it prepared before the freeze.
+    let Some(rearm) = (unsafe { rearm(change) }) else {
+        return false;
+    };
     let mut clock = runtime.clock.clone();
     if !clock.start(now)
-        || !runtime.clients.publish_clock_after(&clock, true, || {
-            // SAFETY: registry control owns this runtime and drained every IO pin.
-            // Keep the shared client clock hidden until native preparation succeeds.
-            unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) }
-        })
+        || !runtime
+            .clients
+            .publish_clock_after(&clock, Timeline::Rearm(rearm), || {
+                // SAFETY: registry control owns this runtime and drained every IO pin.
+                // Keep the shared client clock hidden until native preparation succeeds.
+                unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) }
+            })
     {
         return false;
     }
@@ -295,7 +321,9 @@ unsafe extern "C" fn start(runtime: *mut c_void, now: u64) -> bool {
 unsafe extern "C" fn stop(runtime: *mut c_void) {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     runtime.clock.running = false;
-    let _ = runtime.clients.publish_clock(&runtime.clock, false);
+    let _ = runtime
+        .clients
+        .publish_clock(&runtime.clock, Timeline::Keep);
     unsafe {
         mr_hal_io_clock_state(runtime.io.context.get(), runtime.clock.rate, false);
         mr_hal_io_set_render_activity(runtime.io.context.get(), 1);
@@ -307,18 +335,27 @@ unsafe extern "C" fn remaining(runtime: *mut c_void) {
     unsafe { mr_hal_io_set_render_activity(runtime.io.context.get(), 0) };
 }
 
-unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32) -> bool {
+unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32, change: *mut c_void) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
+    // SAFETY: the registry passes ownership of the rearm it prepared before the freeze.
+    let Some(rearm) = (unsafe { rearm(change) }) else {
+        return false;
+    };
     let mut clock = runtime.clock.clone();
     if !clock.set_rate(rate, unsafe { mach_absolute_time() }) {
         return false;
     }
-    if runtime.clock.running && !unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) } {
-        return false;
-    }
+    let running = runtime.clock.running;
     // Queues keep their mappings and grants. Rearming advances every ring epoch and the
     // shared clock together, so readers discard each frame committed at the old rate.
-    if !runtime.clients.publish_clock(&clock, true) {
+    // The endpoint ring rearms only after every client queue is known to rearm.
+    if !runtime
+        .clients
+        .publish_clock_after(&clock, Timeline::Rearm(rearm), || {
+            // SAFETY: registry control owns this runtime and drained every IO pin.
+            !running || unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) }
+        })
+    {
         return false;
     }
     runtime.clock = clock;
@@ -418,7 +455,10 @@ unsafe extern "C" fn client(
             if prepared.id() != client || !runtime.clients.register(prepared) {
                 return false;
             }
-            if !runtime.clients.publish_clock(&runtime.clock, false) {
+            if !runtime
+                .clients
+                .publish_clock(&runtime.clock, Timeline::Keep)
+            {
                 runtime.clients.remove(client);
                 return false;
             }
@@ -475,6 +515,7 @@ pub(crate) fn native_registry(
         create,
         destroy,
         prepare,
+        prepare_rearm,
         discard,
         replace,
         start,

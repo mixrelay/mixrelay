@@ -17,16 +17,6 @@ pub(crate) const SETTLE_TIMEOUT: Duration = Duration::from_secs(24);
 // Control-only polling interval, never audio pacing or a callback wait.
 const POLL: Duration = Duration::from_millis(10);
 
-/// The HAL's newest settled rate, format or mapping request for one endpoint.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Configured {
-    /// HAL-wide settlement order.
-    pub(crate) sequence: u64,
-    /// The nominal rate the request asked for.
-    pub(crate) rate: u32,
-    pub(crate) applied: bool,
-}
-
 /// What the Driver service observes about one HAL step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Progress {
@@ -34,6 +24,8 @@ pub(crate) enum Progress {
     /// The HAL aborted or failed the step and is idle again.
     Rejected,
     Performing,
+    /// The HAL reports with another protocol version than this service.
+    Incompatible,
 }
 
 impl Progress {
@@ -71,6 +63,8 @@ pub(crate) enum Failure {
     Rejected(DriverError),
     /// Still performing when the settle bound ended.
     Pending,
+    /// The HAL speaks another protocol version; waiting cannot succeed.
+    Incompatible,
 }
 
 /// An error raised before the HAL was asked to perform anything.
@@ -85,27 +79,12 @@ impl From<Failure> for DriverError {
         match failure {
             Failure::Rejected(error) => error,
             Failure::Pending => Self::ConfigurationPending,
+            Failure::Incompatible => Self::Unavailable(
+                "the MixRelay HAL and Driver service use different protocol versions; \
+                 reinstall MixRelay"
+                    .into(),
+            ),
         }
-    }
-}
-
-/// Progress of a rate or format request issued after the HAL had settled `since`.
-/// A rate request is rejected only by a settlement for its own rate, so a concurrent
-/// request for another rate is not taken for it.
-pub(crate) fn request_progress(
-    applied: bool,
-    since: u64,
-    settled: Option<Configured>,
-    rate: Option<u32>,
-) -> Progress {
-    if applied {
-        Progress::Applied
-    } else if settled.is_some_and(|settled| {
-        settled.sequence > since && !settled.applied && rate.is_none_or(|rate| rate == settled.rate)
-    }) {
-        Progress::Rejected
-    } else {
-        Progress::Performing
     }
 }
 
@@ -136,6 +115,7 @@ pub(crate) fn step(
                     "HAL rejected the configuration".into(),
                 )));
             }
+            Progress::Incompatible => return Err(Failure::Incompatible),
             Progress::Performing => {}
         }
         if pacing.now() >= deadline {
@@ -150,8 +130,9 @@ pub(crate) fn step(
 }
 
 /// Runs `forward`; after a settled failure, publishes the previous state and waits for
-/// it with a fresh budget. A step still pending publishes the rollback without waiting,
-/// so the HAL converges to the state the service keeps once it drains.
+/// it with a fresh budget. A step still pending, or a HAL on another protocol version,
+/// gets the rollback published without waiting, so the HAL converges to the state the
+/// service keeps once it can.
 pub(crate) fn transact<T>(
     forward: impl FnOnce() -> Result<(), Failure>,
     publish_rollback: impl FnOnce() -> Result<T, DriverError>,
@@ -161,12 +142,12 @@ pub(crate) fn transact<T>(
         return Ok(());
     };
     let rollback = publish_rollback()?;
-    if matches!(failure, Failure::Pending) {
-        return Err(DriverError::ConfigurationPending);
+    if matches!(failure, Failure::Pending | Failure::Incompatible) {
+        return Err(failure.into());
     }
     match restore(rollback) {
         Ok(()) => Err(failure.into()),
-        Err(Failure::Pending) => Err(DriverError::ConfigurationPending),
+        Err(unsettled @ (Failure::Pending | Failure::Incompatible)) => Err(unsettled.into()),
         Err(Failure::Rejected(rollback)) => Err(DriverError::Backend(format!(
             "{}; rollback failed: {rollback}",
             DriverError::from(failure)

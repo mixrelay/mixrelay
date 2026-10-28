@@ -200,62 +200,34 @@ impl Backend for Native {
             Request::Settled {
                 generation,
                 settlement,
-            } => {
-                // SAFETY: static keys/operation are copied into a new dictionary.
-                unsafe {
-                    let message = xpc_dictionary_create(ptr::null(), ptr::null(), 0);
-                    if !message.is_null() {
-                        xpc_dictionary_set_uint64(message, c"version".as_ptr(), 2);
-                        xpc_dictionary_set_string(
-                            message,
-                            c"operation".as_ptr(),
-                            c"inventory_ack".as_ptr(),
-                        );
-                        xpc_dictionary_set_uint64(message, c"generation".as_ptr(), generation);
-                        xpc_dictionary_set_uint64(
-                            message,
-                            c"applied".as_ptr(),
-                            u64::from(settlement == crate::inventory::Settlement::Applied),
-                        );
-                    }
-                    message
-                }
-            }
-            Request::Configured { endpoint, settled } => {
-                let (high, low) = endpoint.split_at(8);
-                // SAFETY: static keys/operation are copied into a new dictionary.
-                unsafe {
-                    let message = xpc_dictionary_create(ptr::null(), ptr::null(), 0);
-                    if !message.is_null() {
-                        xpc_dictionary_set_uint64(message, c"version".as_ptr(), 1);
-                        xpc_dictionary_set_string(
-                            message,
-                            c"operation".as_ptr(),
-                            c"configuration_settled".as_ptr(),
-                        );
-                        for (key, half) in [(c"endpoint_high", high), (c"endpoint_low", low)] {
-                            let mut bytes = [0; 8];
-                            bytes.copy_from_slice(half);
-                            xpc_dictionary_set_uint64(
-                                message,
-                                key.as_ptr(),
-                                u64::from_be_bytes(bytes),
-                            );
-                        }
-                        xpc_dictionary_set_uint64(message, c"sequence".as_ptr(), settled.sequence);
-                        xpc_dictionary_set_uint64(
-                            message,
-                            c"rate".as_ptr(),
-                            u64::from(settled.rate),
-                        );
-                        xpc_dictionary_set_uint64(
-                            message,
-                            c"applied".as_ptr(),
-                            u64::from(settled.applied),
-                        );
-                    }
-                    message
-                }
+            } => report(
+                c"inventory_ack",
+                &[
+                    (c"generation", generation),
+                    (
+                        c"applied",
+                        u64::from(settlement == crate::inventory::Settlement::Applied),
+                    ),
+                ],
+            ),
+            Request::Configured(settled) => {
+                let half = |range: std::ops::Range<usize>| {
+                    let mut bytes = [0; 8];
+                    bytes.copy_from_slice(&settled.endpoint[range]);
+                    u64::from_be_bytes(bytes)
+                };
+                report(
+                    c"configuration_settled",
+                    &[
+                        (c"endpoint_high", half(0..8)),
+                        (c"endpoint_low", half(8..16)),
+                        (c"sequence", settled.sequence),
+                        (c"rate", u64::from(settled.rate)),
+                        (c"capture_format", u64::from(settled.formats[0])),
+                        (c"render_format", u64::from(settled.formats[1])),
+                        (c"applied", u64::from(settled.applied)),
+                    ],
+                )
             }
             Request::Replacement {
                 endpoint,
@@ -343,6 +315,25 @@ unsafe extern "C" fn event(context: *const c_void, generation: u64, message: Han
     ) || ptr::eq(message, ptr::addr_of!(_xpc_error_connection_invalid).cast())
     {
         owner.disconnected(generation);
+    }
+}
+
+/// HAL report version; the Driver service surfaces any other as a partial install.
+const REPORT_VERSION: u64 = 2;
+
+/// A new report dictionary, or null when XPC cannot allocate one.
+fn report(operation: &std::ffi::CStr, fields: &[(&std::ffi::CStr, u64)]) -> Handle {
+    // SAFETY: static keys and the operation string are copied into a new dictionary.
+    unsafe {
+        let message = xpc_dictionary_create(ptr::null(), ptr::null(), 0);
+        if !message.is_null() {
+            xpc_dictionary_set_uint64(message, c"version".as_ptr(), REPORT_VERSION);
+            xpc_dictionary_set_string(message, c"operation".as_ptr(), operation.as_ptr());
+            for (key, value) in fields {
+                xpc_dictionary_set_uint64(message, key.as_ptr(), *value);
+            }
+        }
+        message
     }
 }
 
