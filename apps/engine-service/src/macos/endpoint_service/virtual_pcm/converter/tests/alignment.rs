@@ -217,7 +217,7 @@ impl AlignedInput {
             *time = 1_000_000_000 + (window.first + offset as u64) * 1_000_000_000 / 48_000;
         }
         self.converter
-            .observe(self.transport.clock().unwrap())
+            .observe(&self.transport, self.transport.clock().unwrap())
             .unwrap();
         self.converter
             .push(

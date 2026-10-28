@@ -9,6 +9,12 @@ use mixrelay_macos_transport::application_source_transport::{
     SourceClockSnapshot, SourceTransport,
 };
 
+/// Correction per frame of phase between a time-addressed consumer's request and the
+/// next frame's timestamp. It holds that phase against a period measurement error of a
+/// few ppm to a small fraction of a frame, while the phase's own half-frame quantization
+/// at a skipped frame moves the ratio by only 10 ppm.
+const PHASE_PPM_PER_FRAME: f64 = 20.0;
+
 pub(super) struct Converter {
     bridge: AsyncClockBridge,
     format: u64,
@@ -67,6 +73,11 @@ impl Converter {
             drain_limit: capacity as usize / 128 + 2,
         }))
     }
+    /// The drift correction now applied, in parts per million.
+    #[cfg(test)]
+    pub(super) fn correction_ppm(&self) -> f64 {
+        self.bridge.correction_ppm()
+    }
     pub(super) fn output_quantum(&self) -> usize {
         self.bridge.processing_quantum().1
     }
@@ -76,10 +87,30 @@ impl Converter {
     pub(super) fn acknowledged(&self, clock: SourceClockSnapshot) -> bool {
         self.format == clock.format_word && self.epoch == clock.epoch
     }
-    pub(super) fn observe(&mut self, clock: SourceClockSnapshot) -> Result<(), Error> {
+    /// Steers the drift correction from the consumer. A consumer that reads in sequence
+    /// drains the queue at its own clock, so the queue occupancy against its target
+    /// carries the drift. One that reads by time keeps the occupancy level whatever the
+    /// ratio, so its measured frame period sets the ratio directly, and a small phase
+    /// term holds its next frame at its requested time. No integrator accumulates while
+    /// a time-addressed consumer cannot respond through the queue.
+    pub(super) fn observe(
+        &mut self,
+        transport: &SourceTransport,
+        clock: SourceClockSnapshot,
+    ) -> Result<(), Error> {
         let elapsed = clock.consumer_ticks.saturating_sub(self.ticks);
         self.ticks = clock.consumer_ticks;
         let rate = self.format & u64::from(u32::MAX);
+        if let Some(timing) = transport.consumer_timing() {
+            #[expect(clippy::cast_precision_loss, reason = "graph rates below 2^24")]
+            let nominal = 1e9 / rate as f64;
+            let phase = timing.phase_ns.map_or(0.0, |phase| {
+                f64::from(phase) / nominal * PHASE_PPM_PER_FRAME
+            });
+            self.bridge
+                .set_clock_correction((nominal / timing.period_ns - 1.0) * 1e6 + phase)?;
+            return Ok(());
+        }
         self.bridge.observe_clock(ClockFeedback {
             queue: FeedbackQueue::Output,
             epoch: self.epoch,

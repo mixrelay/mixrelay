@@ -3,10 +3,7 @@
 //! Old producer mappings stay isolated after replacement and are reclaimed on
 //! control after local readers drain, never on an audio callback.
 use crate::{
-    application_clock::{
-        ApplicationClock, VERSION, mr_application_clock_publish_consumer,
-        mr_application_clock_request_rate,
-    },
+    application_clock::{ApplicationClock, VERSION, mr_application_clock_request_rate},
     application_source_mapping::Mapping,
     shared_audio_buffer::{
         mr_shared_audio_buffer_read, mr_shared_audio_buffer_request_epoch,
@@ -176,18 +173,18 @@ impl Timeline {
 
     fn publish(&self, source: &Source, epoch: u64, frames: u32, running: bool) {
         self.publish_telemetry(source.mapping.clock());
-        // SAFETY: the caller's nonblocking consumer claim owns this timeline;
-        // the read pin retains its mapping through bounded atomic publication.
-        unsafe {
-            mr_application_clock_publish_consumer(
-                source.mapping.clock.as_ptr(),
+        source
+            .mapping
+            .clock()
+            .publish_consumer(crate::application_clock::ConsumerPublication {
                 epoch,
-                self.policy.next,
+                next_frame: self.policy.next,
                 frames,
                 running,
-                self.policy.target,
-            );
-        }
+                target_backlog_frames: self.policy.target,
+                phase_ns: self.policy.timing.phase_ns(),
+                period_ns: self.policy.timing.period_ns(),
+            });
     }
 
     fn publish_telemetry(&self, clock: &ApplicationClock) {
@@ -713,6 +710,7 @@ impl SourceRegistry {
             timeline.policy.started = false;
             timeline.previous_read = None;
             timeline.policy.next = 0;
+            timeline.policy.timing = timestamps::Timing::default();
             timeline.publish(source, stats.epoch, frames, false);
             return Err(ReadMiss::Unavailable);
         }

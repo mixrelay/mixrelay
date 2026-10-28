@@ -271,7 +271,7 @@ impl Pump {
         timebase: Timebase,
     ) -> Result<bool, Error> {
         let converter = self.converter.as_mut().ok_or(Error::Stale)?;
-        converter.observe(clock)?;
+        converter.observe(&self.transport, clock)?;
         if !converter.flush(&mut self.transport)? {
             return Ok(false);
         }

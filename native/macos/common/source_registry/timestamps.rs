@@ -255,15 +255,99 @@ pub(super) fn select(
     policy: &mut super::Latency,
     (rate, frames, requested): (u32, u32, Option<u64>),
 ) -> Result<(), ReadMiss> {
-    let Some(time) = requested else { return Ok(()) };
-    let minimum = if previous.started && previous.epoch == stats.epoch {
-        previous.next
-    } else {
-        0
+    let Some(time) = requested else {
+        policy.timing = Timing::default();
+        return Ok(());
     };
+    let continuing = previous.started && previous.epoch == stats.epoch;
+    let minimum = if continuing { previous.next } else { 0 };
     let next = locate(source, stats, time, rate, (frames, minimum))?;
+    // SAFETY: the caller pins this mapping; a stale coordinate only voids the phase.
+    let unread = continuing
+        .then(|| unsafe {
+            source
+                .mapping
+                .clock()
+                .time_at(source.capacity, stats.epoch, minimum)
+        })
+        .flatten();
+    policy.timing = previous
+        .timing
+        .follow(continuing, (time, frames), unread, rate);
     policy.next = next;
-    policy.target = u32::try_from(stats.published_through_frame.saturating_sub(next))
-        .unwrap_or(source.capacity);
+    // Occupancy once this read consumes its frames, as the producer measures it.
+    policy.target = u32::try_from(
+        stats
+            .published_through_frame
+            .saturating_sub(next + u64::from(frames)),
+    )
+    .unwrap_or(source.capacity);
     Ok(())
+}
+
+/// A time-addressed reader's clock against the frame timestamps. The period is the
+/// reader's requested time per frame read, measured from the start of its continuous
+/// run; the phase is how far the next unread frame lies after the requested time. A
+/// cursor jump, reacquisition or new epoch starts a new run without either.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct Timing {
+    last: Option<(u64, u32)>,
+    start: u64,
+    frames: u64,
+    period_ns: Option<f64>,
+    phase_ns: Option<i32>,
+}
+
+impl Timing {
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        reason = "nanosecond spans and frame counts of one continuous run, phase within one frame"
+    )]
+    fn follow(
+        self,
+        continuing: bool,
+        (time, frames): (u64, u32),
+        unread: Option<u64>,
+        rate: u32,
+    ) -> Self {
+        let nominal = 1e9 / f64::from(rate);
+        // A step outside 1% of the nominal frame period is a cursor jump, not drift.
+        let step = self
+            .last
+            .filter(|_| continuing)
+            .and_then(|(last, last_frames)| {
+                let step = time.checked_sub(last)? as f64 / f64::from(last_frames);
+                (nominal * 0.99..=nominal * 1.01)
+                    .contains(&step)
+                    .then_some(last_frames)
+            });
+        let Some(last_frames) = step else {
+            return Self {
+                last: Some((time, frames)),
+                start: time,
+                ..Self::default()
+            };
+        };
+        let run = self.frames + u64::from(last_frames);
+        let phase = unread
+            .map(|unread| unread as f64 - time as f64)
+            .filter(|phase| phase.abs() <= nominal)
+            .map(|phase| phase.round() as i32);
+        Self {
+            last: Some((time, frames)),
+            start: self.start,
+            frames: run,
+            period_ns: Some((time - self.start) as f64 / run as f64),
+            phase_ns: phase,
+        }
+    }
+
+    pub(super) fn phase_ns(self) -> i32 {
+        self.phase_ns.unwrap_or(crate::application_clock::NO_PHASE)
+    }
+
+    pub(super) fn period_ns(self) -> f64 {
+        self.period_ns.unwrap_or(0.0)
+    }
 }

@@ -42,6 +42,12 @@ impl DriftController {
     pub(super) fn correction(&self) -> f64 {
         self.correction
     }
+    /// Adopts an externally measured correction; occupancy feedback continues from it.
+    pub(super) fn set(&mut self, ppm: f64) -> f64 {
+        self.correction = ppm.clamp(-self.limit, self.limit);
+        self.integral = self.correction;
+        self.correction
+    }
     pub(super) fn observe(
         &mut self,
         feedback: ClockFeedback,

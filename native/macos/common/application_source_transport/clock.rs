@@ -1,7 +1,8 @@
 //! Consumer snapshots, producer epoch acknowledgment and native clock metadata.
 use super::{ProducerClaim, SourceTransport, flush_source_faults};
 use crate::{
-    application_clock::FRAME_MASK, shared_audio_buffer::mr_shared_audio_buffer_try_begin_epoch,
+    application_clock::{FRAME_MASK, NO_PHASE},
+    shared_audio_buffer::mr_shared_audio_buffer_try_begin_epoch,
 };
 use std::sync::atomic::Ordering;
 
@@ -11,6 +12,15 @@ pub enum SourceClockRead {
     Ready(SourceClockSnapshot),
     Deferred,
     Revoked,
+}
+
+/// A time-addressed consumer's clock against this epoch's frame timestamps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConsumerTiming {
+    /// Nanoseconds per graph frame the consumer requests, over its continuous run.
+    pub period_ns: f64,
+    /// Nanoseconds from its requested time to its next unread frame, within one frame.
+    pub phase_ns: Option<i32>,
 }
 
 /// Coherent consumer observation and the local producer position.
@@ -85,6 +95,25 @@ impl SourceTransport {
             overwrite_skips: clock.overwrite_skips.load(Ordering::Acquire),
             insufficient_headroom: clock.insufficient_headroom.load(Ordering::Acquire),
         })
+    }
+
+    /// The timing of a consumer that reads this epoch by time, or `None` for one that
+    /// reads in sequence, has not read this epoch, or is publishing concurrently.
+    #[must_use]
+    pub fn consumer_timing(&self) -> Option<ConsumerTiming> {
+        let clock = self.mapping.clock();
+        let sequence = clock.consumer_sequence.load(Ordering::Acquire);
+        let position = clock.consumer_position.load(Ordering::Acquire);
+        let phase = clock.consumer_phase.load(Ordering::Acquire);
+        let period = f64::from_bits(clock.consumer_period.load(Ordering::Acquire));
+        (sequence & 1 == 0
+            && sequence == clock.consumer_sequence.load(Ordering::Acquire)
+            && position >> 48 == self.owned_epoch
+            && period > 0.0)
+            .then_some(ConsumerTiming {
+                period_ns: period,
+                phase_ns: (phase != NO_PHASE).then_some(phase),
+            })
     }
 
     /// Compatibility projection for the C clock facade, which returns a bool.

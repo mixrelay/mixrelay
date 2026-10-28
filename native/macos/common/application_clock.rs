@@ -4,12 +4,12 @@ use crate::shared_audio_buffer::mr_shared_audio_buffer_required_bytes;
 use std::{
     ffi::c_void,
     mem::size_of,
-    sync::atomic::{AtomicU32, AtomicU64, Ordering},
+    sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering},
 };
 
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 mod timestamps;
-const HEADER_BYTES: u32 = 160;
+const HEADER_BYTES: u32 = 176;
 const _: () = assert!(size_of::<ApplicationClock>() == HEADER_BYTES as usize);
 const MAGIC: u64 = 0x4d52_4150_5043_4c4b;
 pub const FRAME_MASK: u64 = 0x0000_ffff_ffff_ffff;
@@ -44,7 +44,16 @@ pub struct ApplicationClock {
     pub insufficient_headroom: AtomicU32,
     /// Producer-normalized source samples awaiting one graph-side report.
     pub source_sample_faults: mixrelay_audio_io::pcm::SampleFaultCounter,
+    /// Nanoseconds from a time-addressed consumer's requested time to the timestamp of
+    /// its next unread frame, or `NO_PHASE`. Published with the consumer position.
+    pub consumer_phase: AtomicI32,
+    /// That consumer's measured nanoseconds per graph frame as `f64` bits, or 0 for a
+    /// consumer that reads in sequence. Published with the consumer position.
+    pub consumer_period: AtomicU64,
 }
+
+/// `consumer_phase` of a consumer without a continuous time-addressed read.
+pub const NO_PHASE: i32 = i32::MIN;
 
 fn offset(capacity: u32, channels: u32) -> Option<usize> {
     let bytes = mr_shared_audio_buffer_required_bytes(capacity, channels);
@@ -147,6 +156,8 @@ pub unsafe extern "C" fn mr_application_clock_initialize(
             consumer_burst_frames: AtomicU32::new(0),
             insufficient_headroom: AtomicU32::new(0),
             source_sample_faults: mixrelay_audio_io::pcm::SampleFaultCounter::default(),
+            consumer_phase: AtomicI32::new(NO_PHASE),
+            consumer_period: AtomicU64::new(0),
         });
         // SAFETY: required_bytes includes the prepared per-frame atomic sidecar.
         timestamps::initialize(clock, capacity);
@@ -215,23 +226,53 @@ pub unsafe extern "C" fn mr_application_clock_publish_consumer(
     running: bool,
     target_backlog_frames: u32,
 ) {
-    let Some(clock) = (unsafe { clock.as_ref() }) else {
-        return;
-    };
-    clock.consumer_sequence.fetch_add(1, Ordering::AcqRel);
-    clock
-        .consumer_position
-        .store((epoch << 48) | (next_frame & FRAME_MASK), Ordering::Release);
-    clock
-        .consumer_ticks
-        .fetch_add(u64::from(frames), Ordering::Release);
-    clock
-        .consumer_running
-        .store(u32::from(running), Ordering::Release);
-    clock
-        .target_backlog_frames
-        .store(target_backlog_frames, Ordering::Release);
-    clock.consumer_sequence.fetch_add(1, Ordering::Release);
+    if let Some(clock) = unsafe { clock.as_ref() } {
+        clock.publish_consumer(ConsumerPublication {
+            epoch,
+            next_frame,
+            frames,
+            running,
+            target_backlog_frames,
+            phase_ns: NO_PHASE,
+            period_ns: 0.0,
+        });
+    }
+}
+
+/// One consumer read: its position and progress, and for a reader that follows a
+/// clock by time, where that clock stands against the published frame timestamps.
+#[derive(Clone, Copy, Debug)]
+pub struct ConsumerPublication {
+    pub epoch: u64,
+    pub next_frame: u64,
+    pub frames: u32,
+    pub running: bool,
+    pub target_backlog_frames: u32,
+    pub phase_ns: i32,
+    pub period_ns: f64,
+}
+
+impl ApplicationClock {
+    /// Publishes one consumer read under the consumer sequence. The caller is the
+    /// single claimed consumer.
+    pub fn publish_consumer(&self, publication: ConsumerPublication) {
+        self.consumer_sequence.fetch_add(1, Ordering::AcqRel);
+        self.consumer_position.store(
+            (publication.epoch << 48) | (publication.next_frame & FRAME_MASK),
+            Ordering::Release,
+        );
+        self.consumer_ticks
+            .fetch_add(u64::from(publication.frames), Ordering::Release);
+        self.consumer_running
+            .store(u32::from(publication.running), Ordering::Release);
+        self.target_backlog_frames
+            .store(publication.target_backlog_frames, Ordering::Release);
+        self.consumer_phase
+            .store(publication.phase_ns, Ordering::Release);
+        self.consumer_period
+            .store(publication.period_ns.to_bits(), Ordering::Release);
+        self.consumer_sequence.fetch_add(1, Ordering::Release);
+    }
 }
 
 #[cfg(test)]
@@ -260,7 +301,7 @@ mod tests {
 
     #[test]
     fn current_layout_rejects_retired_versions_and_invalid_geometry_without_touching_pcm() {
-        assert_eq!(size_of::<ApplicationClock>(), 160);
+        assert_eq!(size_of::<ApplicationClock>(), 176);
         assert_eq!(
             std::mem::offset_of!(ApplicationClock, target_backlog_frames),
             96

@@ -3,7 +3,7 @@
 
 mod clock;
 mod ffi;
-pub use clock::{SourceClockRead, SourceClockSnapshot};
+pub use clock::{ConsumerTiming, SourceClockRead, SourceClockSnapshot};
 pub use ffi::{
     TransportError, TransportErrorCode, mr_application_source_transport_attach,
     mr_application_source_transport_clock, mr_application_source_transport_connect,

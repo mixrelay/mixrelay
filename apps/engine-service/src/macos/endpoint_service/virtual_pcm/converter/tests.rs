@@ -1,4 +1,5 @@
 mod alignment;
+mod drift;
 mod handoff;
 use super::*;
 use mixrelay_macos_transport::{
@@ -119,7 +120,8 @@ fn shared_client_pcm_preserves_signal_and_silence_across_independent_reader_gaps
             for (index, time) in times.iter_mut().enumerate() {
                 *time = 1_000_000_000 + (frame + index as u64) * 1_000_000_000 / 48_000;
             }
-            converter.observe(transport.clock().unwrap()).unwrap();
+            let clock = transport.clock().unwrap();
+            converter.observe(&transport, clock).unwrap();
             assert!(converter.flush(&mut transport).unwrap());
             converter.push(&mut transport, &mut input, &times).unwrap();
             assert!(converter.flush(&mut transport).unwrap());
