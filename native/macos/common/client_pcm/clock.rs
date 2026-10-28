@@ -217,6 +217,11 @@ impl ClockPublication<'_> {
     pub fn configure(&self, writer: &mut super::ClientPcmWriter, rearm: bool) -> bool {
         writer.configure(self.owner, self.timeline, rearm)
     }
+    /// Ends the transition with the previous timeline still published. Only valid before
+    /// any writer was configured in this publication.
+    pub fn abandon(mut self) {
+        self.committed = true;
+    }
     pub fn commit(mut self) {
         let state = self.owner.mapping.state();
         state.epoch.store(self.timeline.epoch, Ordering::Relaxed);

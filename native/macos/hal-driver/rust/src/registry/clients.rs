@@ -17,12 +17,15 @@ impl Registry {
         } else {
             self.remove_client(&device, &mut control, client)
         };
+        // The freeze has ended: release any queue the change retired.
+        // SAFETY: control retains the live runtime; IO callbacks never read retired storage.
+        if device.alive.load(Ordering::Acquire) {
+            unsafe { (self.native.release)(device.runtime.load(Ordering::Acquire)) };
+        }
         let stopped = match changed {
             Ok(stopped) => stopped,
             Err(status) => return status,
         };
-        // A pending replacement must carry exactly the new client set.
-        Self::prepare_pending(&device, &mut control);
         drop(control);
         drop(device);
         if stopped {
@@ -45,13 +48,16 @@ impl Registry {
             return Err(INVALID);
         }
         let runtime = device.runtime.load(Ordering::Acquire);
-        // SAFETY: control retains this live runtime. Mapping the queue runs alongside IO
-        // callbacks; only its publication below needs the freeze.
-        let prepared = Prepared::new(
-            unsafe { (self.native.prepare_client)(runtime, client) },
-            self.native,
-        )
-        .ok_or(NATIVE_ERROR)?;
+        // A client added while another holds device IO may render before its own StartIO,
+        // so it gets its queue now; otherwise its first StartIO maps one.
+        let prepared = if device.running.load(Ordering::Acquire) == 0 {
+            None
+        } else {
+            // SAFETY: control retains this live runtime. Mapping the queue runs alongside
+            // IO callbacks; only its publication needs the freeze.
+            let change = unsafe { (self.native.prepare_client)(runtime, client) };
+            Some(Prepared::new(change, self.native).ok_or(NATIVE_ERROR)?)
+        };
         let _frozen = device.freeze();
         // SAFETY: control and freeze retain this live runtime and exclude IO readers.
         if !unsafe {
@@ -59,7 +65,7 @@ impl Registry {
                 runtime,
                 client,
                 crate::io_outcome::ClientChange::Register,
-                Some(prepared),
+                prepared,
             )
         } {
             return Err(NATIVE_ERROR);
@@ -75,7 +81,7 @@ impl Registry {
         control: &mut Control,
         client: u32,
     ) -> Result<bool, i32> {
-        let _frozen = device.freeze();
+        let frozen = device.freeze();
         let stopped = match control.clients.get(&client) {
             Some(false) => false,
             Some(true) => {
@@ -110,6 +116,7 @@ impl Registry {
             };
         }
         device.input_latency.remove(client);
+        drop(frozen);
         Ok(stopped)
     }
 
@@ -129,28 +136,34 @@ impl Registry {
             return CAPACITY;
         }
         let runtime = device.runtime.load(Ordering::Acquire);
-        // SAFETY: control retains the live runtime; replacement queues for exhausted rings
-        // are mapped alongside IO callbacks, before the freeze.
-        let rearm = (count == 0)
-            .then(|| Prepared::new(unsafe { (self.native.prepare_rearm)(runtime) }, self.native));
-        if rearm.as_ref().is_some_and(Option::is_none) {
+        // A client without a queue of the current shape, or whose ring has used every
+        // epoch, maps a fresh one here: on control, outside the freeze, and only for a
+        // client that actually starts IO.
+        // SAFETY: control retains the live runtime; mapping runs alongside IO callbacks.
+        let Some(prepared) = Prepared::new(
+            unsafe { (self.native.prepare_client)(runtime, client) },
+            self.native,
+        ) else {
             return NATIVE_ERROR;
-        }
+        };
         let frozen = device.freeze();
-        // SAFETY: control and freeze retain the live runtime before its first start.
-        let started = rearm
-            .flatten()
-            .is_none_or(|rearm| unsafe { (self.native.start)(runtime, now, rearm.into_raw()) });
+        // SAFETY: control and freeze retain the live runtime and exclude IO readers.
+        let started = unsafe {
+            self.native.update_client(
+                runtime,
+                client,
+                crate::io_outcome::ClientChange::Install,
+                Some(prepared),
+            )
+        } && (count != 0 || unsafe { (self.native.start)(runtime, now) });
         if started {
             control.clients.insert(client, true);
             device.input_latency.active(client, true);
             device.running.store(count + 1, Ordering::Release);
         }
         drop(frozen);
-        if count == 0 {
-            // The start consumed an epoch in every queue; a pending rate change prepares again.
-            Self::prepare_pending(&device, &mut control);
-        }
+        // SAFETY: control retains the live runtime; the freeze has ended.
+        unsafe { (self.native.release)(runtime) };
         if !started {
             return NATIVE_ERROR;
         }

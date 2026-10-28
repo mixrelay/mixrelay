@@ -12,7 +12,7 @@ use crate::abi::{
     ALIVE, CAPACITY, Geometry, HostOps, INVALID, LIST, MAX_DEVICES, NAME, NATIVE_ERROR, NOT_FOUND,
     NativeOps, OK, OUTPUT_MUTE, OUTPUT_VOLUME, RUNNING, STREAM_ACTIVE, Snapshot, Timestamp,
 };
-use crate::device::{Attachment, Device, Pending, lock};
+use crate::device::{Attachment, Device, Pending, Prepared, lock};
 
 // The control bridge ticks every 100 ms. A host proxy ACK does not guarantee
 // Perform will arrive; retain the owned attachment and retry after five seconds.
@@ -49,6 +49,9 @@ pub(crate) struct Registry {
     host: HostOps,
     /// Orders every settled configuration request for the Driver service.
     settlements: AtomicU64,
+    /// Random identity of this HAL instance. Settlement sequences restart with it, so
+    /// the Driver service compares sequences only within one incarnation.
+    pub(crate) incarnation: u64,
     /// Settled requests not yet superseded by `SETTLED_RETAINED` newer ones.
     settled: Mutex<std::collections::VecDeque<crate::device::Settled>>,
     // Object generation is shared across slots. Slots are not reused until a
@@ -77,6 +80,18 @@ impl Drop for Pin<'_> {
     }
 }
 
+unsafe extern "C" {
+    fn arc4random_buf(buffer: *mut std::ffi::c_void, length: usize);
+}
+
+/// A nonzero random identity drawn once per HAL load, on control.
+fn incarnation() -> u64 {
+    let mut bytes = [0_u8; 8];
+    // SAFETY: the buffer owns all eight bytes for this call.
+    unsafe { arc4random_buf(bytes.as_mut_ptr().cast(), bytes.len()) };
+    u64::from_ne_bytes(bytes).max(1)
+}
+
 impl Registry {
     pub(crate) fn new(native: NativeOps, host: HostOps) -> Self {
         Self::with_inspection(native, host, crate::transport::ProcessInspection::SYSTEM)
@@ -94,6 +109,7 @@ impl Registry {
             client_identity_gate: Mutex::new(()),
             host,
             settlements: AtomicU64::new(0),
+            incarnation: incarnation(),
             settled: Mutex::new(std::collections::VecDeque::with_capacity(
                 configuration::SETTLED_RETAINED,
             )),
@@ -159,6 +175,7 @@ impl Registry {
             descriptor,
             size,
             geometry,
+            prepared: None,
         };
         let mut generation = lock(&self.generation);
         if let Some(device) = self.endpoint(endpoint) {
@@ -219,7 +236,7 @@ impl Registry {
     fn queue_attachment(
         device: &Device,
         name: &str,
-        attachment: Attachment,
+        mut attachment: Attachment,
     ) -> Result<AttachmentChange, i32> {
         let mut control = lock(&device.control);
         if control.pending.is_none()
@@ -240,6 +257,19 @@ impl Registry {
         }
         let generation = control.next_generation;
         control.next_generation = generation.checked_add(1).ok_or(CAPACITY)?;
+        // Map and validate the endpoint before coreaudiod is asked to perform the change,
+        // so Perform only swaps it in. Client queues are mapped at each client's IO start.
+        // SAFETY: the attachment owns its descriptor and validated geometry.
+        attachment.prepared = Prepared::new(
+            unsafe {
+                (device.native.prepare)(
+                    &raw const attachment.geometry,
+                    attachment.descriptor.as_raw_fd(),
+                    attachment.size,
+                )
+            },
+            device.native,
+        );
         // Reconnection must not overwrite a DAW-owned nominal rate with stale
         // Driver service inventory metadata. A pending explicit rate request is preserved too.
         let rate = control.pending.as_ref().map_or_else(
@@ -264,10 +294,8 @@ impl Registry {
             name: name.into(),
             rate,
             formats,
-            prepared: None,
         });
         control.attachment_failed = false;
-        Self::prepare_pending(device, &mut control);
         Ok(AttachmentChange::Queued)
     }
 
@@ -280,13 +308,12 @@ impl Registry {
         let mut control = lock(&device.control);
         let frozen = device.freeze();
         device.alive.store(false, Ordering::Release);
-        control.pending = None;
+        // Its prepared storage is released with the runtime, after the freeze.
+        let pending = control.pending.take();
         let runtime = device.runtime.swap(std::ptr::null_mut(), Ordering::AcqRel);
-        // SAFETY: control serializes native mutation and freeze drained every
-        // IO reader. Dead devices cannot admit another native runtime access.
+        // SAFETY: control serializes native mutation and freeze drained every IO reader.
         // Client metadata remains valid for late StopIO/RemoveDeviceClient calls.
         unsafe {
-            (self.native.destroy)(runtime);
             device
                 .capture_format
                 .publish(device.capture_format.format(), Box::default());
@@ -294,6 +321,10 @@ impl Registry {
         }
         let running = device.running.load(Ordering::Acquire) != 0;
         drop(frozen);
+        // SAFETY: dead devices cannot admit another native runtime access, so the runtime
+        // and every mapping it owns are released after the freeze, on control.
+        unsafe { (self.native.destroy)(runtime) };
+        drop(pending);
         drop(control);
         drop(device);
         drop(guard);

@@ -5,8 +5,8 @@ use mixrelay_macos_transport::endpoint_transport::{
     mr_endpoint_transport_config, mr_endpoint_transport_incarnation,
 };
 use mixrelay_macos_transport::hal_io::{
-    HalIoContext as IoContext, mr_hal_io_begin_stream, mr_hal_io_bind, mr_hal_io_clock_state,
-    mr_hal_io_requires_replacement, mr_hal_io_set_render_activity,
+    HalIoContext as IoContext, can_begin_stream, mr_hal_io_begin_stream, mr_hal_io_bind,
+    mr_hal_io_clock_state, mr_hal_io_requires_replacement, mr_hal_io_set_render_activity,
 };
 use mixrelay_macos_transport::transport_inspection::inspect_descriptor;
 use std::cell::UnsafeCell;
@@ -17,7 +17,8 @@ use crate::clock::Clock;
 use crate::io_outcome::IoOutcome;
 use crate::registry::Registry;
 mod client_mix;
-use client_mix::{ClientMix, PreparedClient, Rearm, Timeline};
+use client_mix::{ClientMix, PreparedClient, RETIRED_CAPACITY};
+use mixrelay_macos_transport::client_pcm::ClientPcmWriter as Queue;
 mod pcm_snapshot;
 pub(crate) use pcm_snapshot::client_snapshot;
 
@@ -124,17 +125,25 @@ struct Runtime {
     clock: Clock,
     io: Box<AttachedIo>,
     clients: ClientMix,
+    /// Storage a frozen change detached. IO callbacks never touch it; the registry
+    /// releases it with `release` once the freeze has ended, so nothing is unmapped
+    /// while callbacks wait.
+    retired: UnsafeCell<Retired>,
 }
 
-/// Storage for one configuration change, allocated on control before the IO freeze.
-/// The registry owns it until the frozen commit consumes it or `discard` releases it.
+struct Retired {
+    io: Option<Box<AttachedIo>>,
+    /// Reserved at creation, so detaching queues under the freeze never allocates.
+    queues: Vec<Queue>,
+}
+
+/// Storage mapped on control before the IO freeze that publishes it. The registry owns
+/// it until a frozen operation consumes it or `discard` releases it.
 enum Change {
-    Replacement {
-        io: Box<AttachedIo>,
-        clients: ClientMix,
-    },
+    /// A Driver-service endpoint mapping, validated before Perform swaps it in.
+    Mapping(Box<AttachedIo>),
+    /// One client's queue for registration or its next IO start.
     Client(PreparedClient),
-    Rearm(Rearm),
 }
 
 /// # Safety
@@ -191,59 +200,42 @@ unsafe extern "C" fn create(
     let Some(clients) = ClientMix::new(unsafe { *geometry }) else {
         return std::ptr::null_mut();
     };
-    Box::into_raw(Box::new(Runtime { clock, io, clients })).cast()
+    let mut queues = Vec::new();
+    if queues.try_reserve_exact(RETIRED_CAPACITY).is_err() {
+        return std::ptr::null_mut();
+    }
+    Box::into_raw(Box::new(Runtime {
+        clock,
+        io,
+        clients,
+        retired: UnsafeCell::new(Retired { io: None, queues }),
+    }))
+    .cast()
 }
 
 unsafe extern "C" fn destroy(runtime: *mut c_void) {
     drop(unsafe { Box::from_raw(runtime.cast::<Runtime>()) });
 }
 
-unsafe extern "C" fn prepare(
-    runtime: *mut c_void,
-    geometry: *const Geometry,
-    fd: i32,
-    size: usize,
-) -> *mut c_void {
-    // SAFETY: registry control excludes every runtime mutation. IO callbacks share
-    // this runtime concurrently; preparation only reads the registered client set.
-    let runtime = unsafe { &*runtime.cast::<Runtime>() };
-    let geometry = unsafe { *geometry };
-    let Some(io) = AttachedIo::open(geometry, fd, size) else {
-        return std::ptr::null_mut();
-    };
-    runtime
-        .clients
-        .replacement(geometry)
-        .map_or(std::ptr::null_mut(), |clients| {
-            boxed(Change::Replacement { io, clients })
-        })
+unsafe extern "C" fn prepare(geometry: *const Geometry, fd: i32, size: usize) -> *mut c_void {
+    // SAFETY: the registry passes its validated attachment geometry for this call.
+    AttachedIo::open(unsafe { *geometry }, fd, size)
+        .map_or(std::ptr::null_mut(), |io| boxed(Change::Mapping(io)))
 }
 
 unsafe extern "C" fn prepare_client(runtime: *mut c_void, client: u32) -> *mut c_void {
-    // SAFETY: as in `prepare`; the new queue joins the endpoint clock without publication.
+    // SAFETY: registry control excludes every runtime mutation. IO callbacks share this
+    // runtime concurrently; preparation only reads the registered client set.
     let runtime = unsafe { &*runtime.cast::<Runtime>() };
-    runtime
-        .clients
-        .prepare(client)
-        .map_or(std::ptr::null_mut(), |client| boxed(Change::Client(client)))
-}
-
-unsafe extern "C" fn prepare_rearm(runtime: *mut c_void) -> *mut c_void {
-    // SAFETY: as in `prepare`; replacement queues stay unpublished until a rearm commits.
-    let runtime = unsafe { &*runtime.cast::<Runtime>() };
-    runtime
-        .clients
-        .prepare_rearm()
-        .map_or(std::ptr::null_mut(), |rearm| boxed(Change::Rearm(rearm)))
-}
-
-/// # Safety
-/// `change` is null or an unconsumed preparation from `prepare_rearm`.
-unsafe fn rearm(change: *mut c_void) -> Option<Rearm> {
-    match unsafe { take(change) } {
-        Some(Change::Rearm(rearm)) => Some(rearm),
-        _ => None,
-    }
+    let clients = &runtime.clients;
+    let prepared = if clients.needs_queue(client) {
+        clients.prepare(client)
+    } else {
+        Some(PreparedClient::none(client))
+    };
+    prepared.map_or(std::ptr::null_mut(), |prepared| {
+        boxed(Change::Client(prepared))
+    })
 }
 
 unsafe extern "C" fn discard(change: *mut c_void) {
@@ -251,64 +243,100 @@ unsafe extern "C" fn discard(change: *mut c_void) {
     drop(unsafe { take(change) });
 }
 
+unsafe extern "C" fn release(runtime: *mut c_void) {
+    // SAFETY: the registry calls this on control after the freeze ended. IO callbacks
+    // share the runtime but never read `retired`; control serializes its writers.
+    let retired = unsafe { &mut *(*runtime.cast::<Runtime>()).retired.get() };
+    drop(retired.io.take());
+    // Clearing keeps the reservation for the next freeze.
+    retired.queues.clear();
+}
+
+/// Retains `change` for release after the freeze when a frozen operation refused it.
+fn retire(runtime: &mut Runtime, change: Option<Change>) {
+    let retired = runtime.retired.get_mut();
+    match change {
+        Some(Change::Mapping(io)) => retired.io = Some(io),
+        Some(Change::Client(prepared)) => {
+            if let Some(queue) = prepared.into_queue()
+                && retired.queues.len() < retired.queues.capacity()
+            {
+                retired.queues.push(queue);
+            }
+        }
+        None => {}
+    }
+}
+
 unsafe extern "C" fn replace(runtime: *mut c_void, change: *mut c_void, rate: u32) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
-    // SAFETY: the registry passes ownership of its prepared replacement exactly once.
-    let Some(Change::Replacement {
-        io: candidate,
-        mut clients,
-    }) = (unsafe { take(change) })
-    else {
+    // SAFETY: the registry passes ownership of its prepared mapping exactly once.
+    let Some(Change::Mapping(candidate)) = (unsafe { take(change) }) else {
         return false;
     };
-    // Control held the client set fixed since preparation; recheck rather than trust it.
-    if !clients.same_members(&runtime.clients)
-        || !candidate.intact()
-        || !clients.supersede(&runtime.clients)
-    {
-        return false;
-    }
+    let result = swap_mapping(runtime, candidate, rate);
+    let committed = result.is_ok();
+    // The previous mapping, or the refused candidate, is released after the freeze.
+    let (Ok(previous) | Err(previous)) = result;
+    runtime.retired.get_mut().io = Some(previous);
+    committed
+}
+
+/// Swaps a validated endpoint mapping in and adopts its geometry. No client queue is
+/// mapped here: queues of another shape detach, and each client maps a fresh one at its
+/// next IO start. Every fallible step precedes the first change to published state.
+fn swap_mapping(
+    runtime: &mut Runtime,
+    mut candidate: Box<AttachedIo>,
+    rate: u32,
+) -> Result<Box<AttachedIo>, Box<AttachedIo>> {
     let mut clock = runtime.clock.clone();
-    if !clock.set_rate(rate, unsafe { mach_absolute_time() }) {
-        return false;
+    if !candidate.intact() || !clock.set_rate(rate, unsafe { mach_absolute_time() }) {
+        return Err(candidate);
     }
     let previous = unsafe { &*runtime.io.context.get() };
     let context = unsafe { &mut *candidate.context.get() };
     context.inherit_lifecycle(previous);
-    // A fresh replacement's queues have used no epoch, so nothing needs substituting.
-    if !clients.publish_clock(&clock, Timeline::Rearm(Rearm::default())) {
-        return false;
+    let running = runtime.clock.running;
+    // The candidate is not yet published, so binding it changes no live state.
+    if !candidate.bind() || (running && !unsafe { can_begin_stream(candidate.context.get()) }) {
+        return Err(candidate);
     }
-    if !candidate.bind() {
-        return false;
+    let retired = &mut runtime.retired.get_mut().queues;
+    if !runtime
+        .clients
+        .publish_clock_after(&clock, true, retired, || {
+            // SAFETY: control owns the drained candidate, checked above.
+            !running || unsafe { mr_hal_io_begin_stream(candidate.context.get()) }
+        })
+    {
+        return Err(candidate);
     }
-    if runtime.clock.running && !unsafe { mr_hal_io_begin_stream(candidate.context.get()) } {
-        return false;
-    }
+    runtime
+        .clients
+        .reconfigure(candidate.geometry, &mut runtime.retired.get_mut().queues);
     runtime.clock = clock;
     unsafe { mr_hal_io_clock_state(candidate.context.get(), rate, runtime.clock.running) };
     if candidate.mapping.identity != runtime.io.mapping.identity {
         unsafe { mr_hal_io_clock_state(runtime.io.context.get(), rate, false) };
     }
-    runtime.clients = clients;
-    runtime.io = candidate;
-    true
+    std::mem::swap(&mut runtime.io, &mut candidate);
+    Ok(candidate)
 }
 
-unsafe extern "C" fn start(runtime: *mut c_void, now: u64, change: *mut c_void) -> bool {
+unsafe extern "C" fn start(runtime: *mut c_void, now: u64) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
-    // SAFETY: the registry passes ownership of the rearm it prepared before the freeze.
-    let Some(rearm) = (unsafe { rearm(change) }) else {
-        return false;
-    };
     let mut clock = runtime.clock.clone();
+    let retired = &mut runtime.retired.get_mut().queues;
+    // SAFETY: registry control owns this runtime and drained every IO pin. The shared
+    // client clock stays hidden until the endpoint rings rearm, and no client queue
+    // changes before that.
     if !clock.start(now)
+        || !unsafe { can_begin_stream(runtime.io.context.get()) }
         || !runtime
             .clients
-            .publish_clock_after(&clock, Timeline::Rearm(rearm), || {
-                // SAFETY: registry control owns this runtime and drained every IO pin.
-                // Keep the shared client clock hidden until native preparation succeeds.
-                unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) }
+            .publish_clock_after(&clock, true, retired, || unsafe {
+                mr_hal_io_begin_stream(runtime.io.context.get())
             })
     {
         return false;
@@ -321,9 +349,10 @@ unsafe extern "C" fn start(runtime: *mut c_void, now: u64, change: *mut c_void) 
 unsafe extern "C" fn stop(runtime: *mut c_void) {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     runtime.clock.running = false;
+    let retired = &mut runtime.retired.get_mut().queues;
     let _ = runtime
         .clients
-        .publish_clock(&runtime.clock, Timeline::Keep);
+        .publish_clock(&runtime.clock, false, retired);
     unsafe {
         mr_hal_io_clock_state(runtime.io.context.get(), runtime.clock.rate, false);
         mr_hal_io_set_render_activity(runtime.io.context.get(), 1);
@@ -335,26 +364,24 @@ unsafe extern "C" fn remaining(runtime: *mut c_void) {
     unsafe { mr_hal_io_set_render_activity(runtime.io.context.get(), 0) };
 }
 
-unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32, change: *mut c_void) -> bool {
+unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
-    // SAFETY: the registry passes ownership of the rearm it prepared before the freeze.
-    let Some(rearm) = (unsafe { rearm(change) }) else {
-        return false;
-    };
     let mut clock = runtime.clock.clone();
-    if !clock.set_rate(rate, unsafe { mach_absolute_time() }) {
-        return false;
-    }
     let running = runtime.clock.running;
+    let retired = &mut runtime.retired.get_mut().queues;
     // Queues keep their mappings and grants. Rearming advances every ring epoch and the
-    // shared clock together, so readers discard each frame committed at the old rate.
-    // The endpoint ring rearms only after every client queue is known to rearm.
-    if !runtime
-        .clients
-        .publish_clock_after(&clock, Timeline::Rearm(rearm), || {
-            // SAFETY: registry control owns this runtime and drained every IO pin.
-            !running || unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) }
-        })
+    // shared clock together, so readers discard each frame committed at the old rate;
+    // a queue without a spare epoch detaches until its client next starts IO. The
+    // endpoint rings are checked, and rearmed, before any client queue changes.
+    // SAFETY: registry control owns this runtime and drained every IO pin.
+    if !clock.set_rate(rate, unsafe { mach_absolute_time() })
+        || (running && !unsafe { can_begin_stream(runtime.io.context.get()) })
+        || !runtime
+            .clients
+            .publish_clock_after(&clock, true, retired, || {
+                // SAFETY: as above.
+                !running || unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) }
+            })
     {
         return false;
     }
@@ -445,31 +472,52 @@ unsafe extern "C" fn client(
 ) -> bool {
     // SAFETY: registry control holds the device freeze, draining every IO pin.
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
-    // SAFETY: registration passes ownership of its prepared queue; removal passes null.
+    // SAFETY: registration and IO start pass ownership of their prepared queue.
     let change = unsafe { take(change) };
-    match crate::io_outcome::ClientChange::from_raw(action) {
+    let change = match crate::io_outcome::ClientChange::from_raw(action) {
         Some(crate::io_outcome::ClientChange::Register) => {
-            let Some(Change::Client(prepared)) = change else {
+            // Without a preparation the client registers without a queue.
+            let mut prepared = match change {
+                Some(Change::Client(prepared)) => prepared,
+                None => PreparedClient::none(client),
+                Some(change) => {
+                    retire(runtime, Some(change));
+                    return false;
+                }
+            };
+            let registered = prepared.id() == client && runtime.clients.register(&mut prepared);
+            let retired = &mut runtime.retired.get_mut().queues;
+            let published = registered
+                && runtime
+                    .clients
+                    .publish_clock(&runtime.clock, false, retired);
+            if registered && !published {
+                prepared = PreparedClient::detached(client, runtime.clients.remove(client));
+            }
+            retire(runtime, Some(Change::Client(prepared)));
+            return published;
+        }
+        Some(crate::io_outcome::ClientChange::Install) => {
+            let Some(Change::Client(mut prepared)) = change else {
                 return false;
             };
-            if prepared.id() != client || !runtime.clients.register(prepared) {
-                return false;
-            }
-            if !runtime
-                .clients
-                .publish_clock(&runtime.clock, Timeline::Keep)
-            {
-                runtime.clients.remove(client);
-                return false;
-            }
-            true
+            let retired = &mut runtime.retired.get_mut().queues;
+            let installed = prepared.id() == client
+                && runtime.clients.install(&mut prepared, retired)
+                && runtime
+                    .clients
+                    .publish_clock(&runtime.clock, false, retired);
+            retire(runtime, Some(Change::Client(prepared)));
+            return installed;
         }
-        Some(crate::io_outcome::ClientChange::Remove) => {
-            runtime.clients.remove(client);
-            true
-        }
-        _ => false,
-    }
+        Some(crate::io_outcome::ClientChange::Remove) => Change::Client(PreparedClient::detached(
+            client,
+            runtime.clients.remove(client),
+        )),
+        None => return false,
+    };
+    retire(runtime, Some(change));
+    true
 }
 
 unsafe extern "C" fn requires_replacement(runtime: *mut c_void) -> bool {
@@ -515,8 +563,8 @@ pub(crate) fn native_registry(
         create,
         destroy,
         prepare,
-        prepare_rearm,
         discard,
+        release,
         replace,
         start,
         stop,

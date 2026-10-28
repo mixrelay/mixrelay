@@ -71,24 +71,27 @@ pub(crate) struct NativeOps {
     pub inspect: unsafe extern "C" fn(i32, usize, *mut Geometry) -> bool,
     pub create: unsafe extern "C" fn(*const Geometry, u32, i32, usize) -> *mut c_void,
     pub destroy: unsafe extern "C" fn(*mut c_void),
-    /// Control, outside the IO freeze: maps a replacement and its client queues.
-    pub prepare: unsafe extern "C" fn(*mut c_void, *const Geometry, i32, usize) -> *mut c_void,
-    /// Control, outside the IO freeze: replacement queues for rings without a spare epoch.
-    pub prepare_rearm: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-    /// Releases a preparation that no frozen commit consumed.
+    /// Control, outside the IO freeze: maps and validates a Driver-service endpoint
+    /// mapping, so Perform can swap it in without mapping anything.
+    pub prepare: unsafe extern "C" fn(*const Geometry, i32, usize) -> *mut c_void,
+    /// Releases a preparation that no frozen operation consumed.
     pub discard: unsafe extern "C" fn(*mut c_void),
-    /// Frozen commit of a prepared replacement at a rate; always consumes it.
+    /// Control, after a freeze ends: releases storage the frozen operation detached.
+    pub release: unsafe extern "C" fn(*mut c_void),
+    /// Frozen swap to a prepared mapping at a rate; always consumes it. Maps no queue.
     pub replace: unsafe extern "C" fn(*mut c_void, *mut c_void, u32) -> bool,
-    /// Frozen first start; always consumes its prepared rearm.
-    pub start: unsafe extern "C" fn(*mut c_void, u64, *mut c_void) -> bool,
+    /// Frozen first start; rearms every client queue in place.
+    pub start: unsafe extern "C" fn(*mut c_void, u64) -> bool,
     pub stop: unsafe extern "C" fn(*mut c_void),
     pub remaining_client: unsafe extern "C" fn(*mut c_void),
-    /// Frozen rate commit; always consumes its prepared rearm.
-    pub set_rate: unsafe extern "C" fn(*mut c_void, u32, *mut c_void) -> bool,
+    /// Frozen rate change; rearms every client queue in place.
+    pub set_rate: unsafe extern "C" fn(*mut c_void, u32) -> bool,
     pub timestamp: unsafe extern "C" fn(*mut c_void, u64, *mut Timestamp) -> bool,
-    /// Control, outside the IO freeze: allocates one client's queue.
+    /// Control, outside the IO freeze: maps a queue for a client that has none or whose
+    /// ring has no epoch left; otherwise prepares an empty change.
     pub prepare_client: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,
-    /// Frozen registration (consuming its preparation) or removal (null preparation).
+    /// Frozen registration or IO-start install, consuming its preparation, or removal
+    /// with null. Every queue it detaches waits for `release`.
     pub client: unsafe extern "C" fn(*mut c_void, u32, u32, *mut c_void) -> bool,
     pub io: unsafe extern "C" fn(
         *mut c_void,

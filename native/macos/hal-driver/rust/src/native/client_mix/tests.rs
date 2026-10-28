@@ -11,12 +11,12 @@ fn geometry(render: u32, capture: u32) -> Geometry {
 fn add(mixer: &mut ClientMix, id: u32) -> bool {
     mixer
         .prepare(id)
-        .is_some_and(|prepared| mixer.register(prepared))
+        .is_some_and(|mut prepared| mixer.register(&mut prepared))
 }
 
-/// A rearm prepared on control, as the registry does before each freeze.
-fn rearm(mixer: &ClientMix) -> Timeline {
-    Timeline::Rearm(mixer.prepare_rearm().unwrap())
+/// Detached queues, reserved like the native runtime's retired list.
+fn retired() -> Vec<Queue> {
+    Vec::with_capacity(RETIRED_CAPACITY)
 }
 
 fn mixer(render: u32, capture: u32) -> ClientMix {
@@ -47,10 +47,11 @@ fn registration_rejects_a_queue_prepared_for_another_endpoint_clock() {
     let other = mixer(2, 2);
     let foreign = other.prepare(99).unwrap();
     let revision = first.revision();
-    assert!(!first.register(foreign));
+    let mut foreign = foreign;
+    assert!(!first.register(&mut foreign));
     assert_eq!(first.revision(), revision);
     let mut capture_only = ClientMix::new(geometry(0, 2)).unwrap();
-    assert!(!capture_only.register(first.prepare(5).unwrap()));
+    assert!(!capture_only.register(&mut first.prepare(5).unwrap()));
     assert!(add(&mut capture_only, 5));
 }
 
@@ -78,7 +79,7 @@ fn rejected_registration_preserves_existing_pcm_and_membership() {
 fn failed_native_start_cannot_publish_a_running_client_clock() {
     let mut mixer = mixer(2, 2);
     let mut clock = Clock::new(48_000, 1, 1).unwrap();
-    assert!(mixer.publish_clock(&clock, rearm(&mixer)));
+    assert!(mixer.publish_clock(&clock, true, &mut retired()));
     let mut snapshot = ClientPcmSnapshot::new().unwrap();
     assert!(mixer.append_snapshot(&mut snapshot));
     // SAFETY: the test retains the complete snapshot and every immutable grant header.
@@ -89,81 +90,104 @@ fn failed_native_start_cannot_publish_a_running_client_clock() {
             .all(|reader| !reader.clock().unwrap().running)
     );
     assert!(clock.start(100));
-    assert!(!mixer.publish_clock_after(&clock, rearm(&mixer), || {
-        assert!(readers.iter().all(|reader| reader.clock().is_none()));
-        false
-    }));
+    assert!(
+        !mixer.publish_clock_after(&clock, true, &mut retired(), || {
+            assert!(readers.iter().all(|reader| reader.clock().is_none()));
+            false
+        })
+    );
     assert!(
         readers
             .iter()
             .all(|reader| reader.clock().is_none_or(|clock| !clock.running))
     );
-    assert!(mixer.publish_clock(&clock, rearm(&mixer)));
+    assert!(mixer.publish_clock(&clock, true, &mut retired()));
     assert!(readers.iter().all(|reader| reader.clock().unwrap().running));
 }
 
 #[test]
-fn private_queue_epoch_exhaustion_replaces_grants_without_reusing_old_pcm() {
+fn an_exhausted_queue_detaches_without_allocating_until_its_client_installs_a_new_one() {
     let mut mixer = mixer(2, 2);
-    let mut clock = crate::clock::Clock::new(48_000, 1, 1).unwrap();
-    let revision = mixer.revision();
-    for generation in 0..=u64::from(u16::MAX) {
+    let mut clock = Clock::new(48_000, 1, 1).unwrap();
+    let mut detached = retired();
+    while !mixer.needs_queue(42) {
         clock.running = false;
-        assert!(clock.start(generation + 1));
-        assert!(mixer.publish_clock(&clock, rearm(&mixer)));
+        assert!(clock.start(1));
+        assert!(mixer.publish_clock(&clock, true, &mut detached));
     }
+    assert!(mixer.render(42, 0, &[0.375; 256], 128).accepted);
+    let revision = mixer.revision();
+    // The rate rearm cannot open another epoch: the queue leaves the published set and
+    // waits in the reserved retired list, so the freeze neither allocates nor unmaps.
+    let usage = allocation_counter::measure(|| {
+        assert!(mixer.publish_clock(&clock, true, &mut detached));
+    });
+    assert_eq!(usage.count_total, 0);
+    assert_eq!(detached.len(), 3);
     assert!(mixer.revision() > revision);
     let mut output = [9.0; 256];
     assert_eq!(mixer.capture(0, &mut output, 128).available, 0);
-    assert_eq!(output.map(f32::to_bits), [0.0_f32.to_bits(); 256]);
-    assert!(mixer.render(42, 0, &[0.375; 256], 128).accepted);
+    assert!(!mixer.render(42, 0, &[0.25; 256], 128).accepted);
+    // The client's next IO start maps a fresh queue on control and installs it.
+    let mut prepared = mixer.prepare(42).unwrap();
+    assert!(mixer.install(&mut prepared, &mut detached));
+    assert!(mixer.publish_clock(&clock, false, &mut detached));
+    assert!(mixer.render(42, 0, &[0.25; 256], 128).accepted);
     assert_eq!(mixer.capture(0, &mut output, 128).available, 128);
-    assert_eq!(output.map(f32::to_bits), [0.375_f32.to_bits(); 256]);
+    assert_eq!(output.map(f32::to_bits), [0.25_f32.to_bits(); 256]);
+    assert!(mixer.needs_queue(43));
 }
 
 #[test]
-fn an_exhausted_rate_rearm_commits_from_prepared_queues_or_changes_nothing() {
+fn a_writer_in_flight_is_not_mistaken_for_an_exhausted_queue() {
+    let mixer = mixer(2, 2);
+    let queue = mixer.clients[0].queue.as_ref().unwrap();
+    // IO-start preparation runs alongside IO, so a MixOutput callback may hold the claim.
+    let claim = queue.hold_producer().unwrap();
+    assert!(!queue.can_rearm());
+    assert!(!mixer.needs_queue(42));
+    drop(claim);
+    assert!(queue.can_rearm());
+}
+
+#[test]
+fn a_refused_endpoint_rearm_leaves_every_queue_and_the_clock_published() {
     let mut mixer = mixer(2, 2);
     let mut clock = Clock::new(48_000, 1, 1).unwrap();
     assert!(clock.start(1));
-    assert!(mixer.publish_clock(&clock, rearm(&mixer)));
-    // Prepared before exhaustion: nothing to substitute. The commit must refuse it whole.
-    let stale = mixer.prepare_rearm().unwrap();
-    assert!(stale.0.is_empty());
-    while mixer
-        .clients
-        .iter()
-        .all(|client| client.queue.as_ref().is_some_and(Queue::can_rearm))
-    {
-        assert!(mixer.publish_clock(&clock, rearm(&mixer)));
-    }
+    assert!(mixer.publish_clock(&clock, true, &mut retired()));
+    assert!(mixer.render(42, 0, &[0.375; 256], 128).accepted);
     let mut snapshot = ClientPcmSnapshot::new().unwrap();
     assert!(mixer.append_snapshot(&mut snapshot));
     // SAFETY: the test retains the complete snapshot and every immutable grant header.
     let readers = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
-    assert!(mixer.render(42, 0, &[0.375; 256], 128).accepted);
     let before = readers[0].clock().unwrap();
     let revision = mixer.revision();
     let mut faster = clock.clone();
     assert!(faster.set_rate(96_000, 2));
-    assert!(!mixer.publish_clock(&faster, Timeline::Rearm(stale)));
-    // Every queue, its PCM and the published clock are exactly as before the refusal.
+    assert!(!mixer.publish_clock_after(&faster, true, &mut retired(), || false));
     assert_eq!(mixer.revision(), revision);
     assert_eq!(readers[0].clock(), Some(before));
     let mut output = [9.0; 256];
     assert_eq!(mixer.capture(0, &mut output, 128).available, 128);
-    // Replacements are mapped on control; the frozen commit only swaps them in.
-    let prepared = mixer.prepare_rearm().unwrap();
-    assert_eq!(prepared.0.len(), 3);
-    let usage = allocation_counter::measure(|| {
-        assert!(mixer.publish_clock(&faster, Timeline::Rearm(prepared)));
-    });
+}
+
+#[test]
+fn a_new_geometry_detaches_queues_of_the_old_shape_without_mapping() {
+    let mut mixer = mixer(2, 2);
+    let mut detached = retired();
+    let revision = mixer.revision();
+    let usage = allocation_counter::measure(|| mixer.reconfigure(geometry(4, 2), &mut detached));
     assert_eq!(usage.count_total, 0);
+    assert_eq!(detached.len(), 3);
     assert!(mixer.revision() > revision);
-    assert_eq!(mixer.capture(0, &mut output, 128).available, 0);
-    assert!(mixer.render(42, 0, &[0.25; 256], 128).accepted);
-    assert_eq!(mixer.capture(0, &mut output, 128).available, 128);
-    assert_eq!(output.map(f32::to_bits), [0.25_f32.to_bits(); 256]);
+    assert!([42, 43, 44].iter().all(|id| mixer.needs_queue(*id)));
+    let mut snapshot = ClientPcmSnapshot::new().unwrap();
+    assert!(mixer.append_snapshot(&mut snapshot));
+    // SAFETY: the snapshot retains every grant it holds, here none.
+    assert!(
+        !matches!(unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }, Ok(readers) if !readers.is_empty())
+    );
 }
 
 #[test]
@@ -254,32 +278,6 @@ fn a_finished_client_supplies_zero_beyond_its_window_while_its_peer_continues() 
     assert!(!mixer.render(42, 4, &[0.25; 16], 8).accepted);
     assert_eq!(mixer.capture(u64::MAX, &mut output, 8).available, 0);
     assert_eq!(output.map(f32::to_bits), [0; 16]);
-}
-
-#[test]
-fn replacement_preserves_registration_but_starts_an_empty_pcm_timeline() {
-    let mut live = mixer(2, 2);
-    let mixer = mixer(2, 2);
-    assert!(mixer.render(42, 0, &[0.5; 16], 8).accepted);
-    let mut replacement = mixer.replacement(geometry(2, 2)).unwrap();
-    assert!(replacement.same_members(&mixer));
-    // A queue rebuilt for epoch exhaustion advances the live revision past the
-    // prepared one; the commit still orders the replacement after it.
-    let mut clock = Clock::new(48_000, 1, 1).unwrap();
-    for generation in 0..=u64::from(u16::MAX) {
-        clock.running = false;
-        assert!(clock.start(generation + 1));
-        assert!(live.publish_clock(&clock, rearm(&live)));
-    }
-    assert!(live.revision() >= replacement.revision());
-    assert!(replacement.supersede(&live));
-    assert!(replacement.revision() > live.revision());
-    let mut output = [1.0; 16];
-    assert_eq!(replacement.capture(0, &mut output, 8).available, 0);
-    assert_eq!(output.map(f32::to_bits), [0; 16]);
-    assert!(replacement.render(42, 0, &[0.25; 16], 8).accepted);
-    assert_eq!(replacement.capture(0, &mut output, 8).available, 8);
-    assert_eq!(output.map(f32::to_bits), [0.25_f32.to_bits(); 16]);
 }
 
 #[test]

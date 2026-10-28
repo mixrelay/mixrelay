@@ -34,6 +34,8 @@ pub(crate) struct Transfer {
 #[repr(u32)]
 pub(crate) enum ClientChange {
     Register,
+    /// Publishes a queue mapped for the client's IO start.
+    Install = 1,
     Remove = 3,
 }
 
@@ -41,6 +43,7 @@ impl ClientChange {
     pub(crate) const fn from_raw(value: u32) -> Option<Self> {
         match value {
             0 => Some(Self::Register),
+            1 => Some(Self::Install),
             3 => Some(Self::Remove),
             _ => None,
         }

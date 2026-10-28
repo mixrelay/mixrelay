@@ -273,34 +273,21 @@ fn queue(channels: u32) -> ClientPcmWriter {
     writer
 }
 
-/// Resident and total pages of one mapping.
-fn residency(address: *mut std::ffi::c_void, bytes: usize) -> (usize, usize) {
-    unsafe extern "C" {
-        fn mincore(address: *mut std::ffi::c_void, bytes: usize, residency: *mut i8) -> i32;
-        fn getpagesize() -> i32;
-    }
-    // SAFETY: getpagesize has no preconditions.
-    let page = usize::try_from(unsafe { getpagesize() }).unwrap();
-    let mut residency = vec![0_i8; bytes.div_ceil(page)];
-    // SAFETY: the queue retains this page-aligned mapping; residency holds one byte per page.
-    assert_eq!(
-        unsafe { mincore(address, bytes, residency.as_mut_ptr()) },
-        0
-    );
-    // MINCORE_INCORE is bit 0 on Darwin.
-    let resident = residency.iter().filter(|state| **state & 1 != 0).count();
-    (resident, residency.len())
-}
-
 #[test]
 fn a_prepared_queue_is_resident_before_publication_and_reports_every_frame_missing() {
+    unsafe extern "C" {
+        fn getpagesize() -> i32;
+    }
     let writer = queue(64);
-    let (address, bytes) = writer.region();
+    let (_, bytes) = writer.region();
     // Preparation runs on control outside the IO freeze. Leaving pages to kernel zero-fill
-    // moved one fault per page (over 1,000 at 64 channels) onto the HAL IO thread.
-    let (resident, pages) = residency(address, bytes);
-    assert!(pages > 1_000);
-    assert_eq!(resident, pages);
+    // moved one fault per page (over 1,000 at 64 channels) onto the HAL IO thread. The
+    // count comes from the pre-fault itself: residency read back later could change under
+    // memory pressure.
+    // SAFETY: getpagesize has no preconditions.
+    let page = usize::try_from(unsafe { getpagesize() }).unwrap();
+    assert!(bytes.div_ceil(page) > 1_000);
+    assert_eq!(writer.prefaulted(), bytes.div_ceil(page));
     let reader = reader(&writer);
     let clock = reader.clock().unwrap();
     let mut output = vec![9.0; 64 * 128];
@@ -341,12 +328,11 @@ fn reused_slots_never_expose_wrapped_or_previous_epoch_pcm() {
 }
 
 #[test]
-fn the_queue_covers_a_coalesced_render_lead_over_a_pump_170_ms_late_at_192_khz() {
-    use mixrelay_audio_io::buffer_policy::MAXIMUM_TARGET_FRAMES;
+fn the_queue_covers_a_full_render_span_lead_over_a_pump_170_ms_late_at_192_khz() {
     let span = u64::from(MAX_RENDER_SPAN_FRAMES);
-    let target = u64::try_from(MAXIMUM_TARGET_FRAMES).unwrap();
-    // Twice the lead bound: 32,768 frames, 170 ms at 192 kHz.
-    let lag = 2 * (target + span);
+    let target = 0;
+    // Twice the span: 32,768 frames, 170 ms at 192 kHz, beyond ReadInput's own lag.
+    let lag = 2 * span;
     let writer = queue(2);
     let readers = vec![reader(&writer)];
     let word = |frame: u64| f32::from(u16::try_from(frame % 8192).unwrap()) / 8192.0;

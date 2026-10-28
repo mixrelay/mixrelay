@@ -408,6 +408,26 @@ pub unsafe extern "C" fn mr_shared_audio_buffer_retire_busy_producer_after_drain
     true
 }
 
+/// Holds the producer claim as an in-flight writer callback does, for tests of callers
+/// that must not mistake it for exhaustion.
+/// # Safety
+/// A non-null buffer must reference an initialized mapping that outlives the claim.
+#[cfg(any(test, feature = "test-observation"))]
+pub unsafe fn hold_producer<'a>(buffer: *const SharedAudioBuffer) -> Option<impl Drop + 'a> {
+    unsafe { buffer.as_ref::<'a>() }.and_then(SharedAudioBuffer::claim_producer)
+}
+
+/// Whether the ring can never open another epoch: retired, or its last generation used.
+/// A producer claim held by an in-flight writer is transient and does not count.
+/// # Safety
+/// A non-null buffer must reference an initialized, attached, live mapping.
+pub unsafe fn epoch_exhausted(buffer: *const SharedAudioBuffer) -> bool {
+    unsafe { buffer.as_ref() }.is_none_or(|buffer| {
+        let epoch = buffer.epoch.load(Ordering::Acquire);
+        epoch & !(REQUESTED | MAX_EPOCH) != 0 || !(1..MAX_EPOCH).contains(&(epoch & MAX_EPOCH))
+    })
+}
+
 /// Whether `mr_shared_audio_buffer_try_begin_epoch` would open another epoch now,
 /// without claiming the producer or changing any shared state.
 /// # Safety

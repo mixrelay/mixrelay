@@ -69,6 +69,9 @@ pub struct ClientPcmWriter {
     mapping: Mapping,
     grant: NonNull<c_void>,
     clock: Arc<ClientPcmClockOwner>,
+    /// Pages the constructor faulted in, recorded for tests.
+    #[cfg(test)]
+    prefaulted: usize,
 }
 // SAFETY: XPC grants are retained control objects; PCM/clock payloads use shared atomics.
 unsafe impl Send for ClientPcmWriter {}
@@ -139,19 +142,17 @@ impl ClientPcmWriter {
                 retired: AtomicU64::new(0),
             });
             audio::initialize_zeroed(mapping.buffer().cast(), ring_bytes, capacity, channels);
-            // Fault every page in on control, before any freeze, so the HAL IO thread never
-            // takes a zero-fill fault on its first write or read of a page.
-            let page = usize::try_from(getpagesize()).unwrap_or(4096).max(1);
-            let base = address.as_ptr().cast::<u8>();
-            for offset in (0..bytes).step_by(page) {
-                // Rewriting the zero the kernel supplied keeps the initialized cells valid.
-                ptr::write_volatile(base.add(offset), base.add(offset).read());
-            }
         }
+        // SAFETY: the constructor still owns every byte of the unpublished mapping.
+        let prefaulted = unsafe { prefault(address.as_ptr().cast(), bytes) };
+        #[cfg(not(test))]
+        let _ = prefaulted;
         Ok(Self {
             mapping,
             grant,
             clock,
+            #[cfg(test)]
+            prefaulted,
         })
     }
 
@@ -164,6 +165,23 @@ impl ClientPcmWriter {
             && unsafe { audio::can_begin_epoch(self.mapping.buffer()) }
     }
 
+    /// Holds this queue's producer claim as an in-flight `MixOutput` callback does.
+    #[cfg(any(test, feature = "test-observation"))]
+    #[must_use]
+    pub fn hold_producer(&self) -> Option<impl Drop + '_> {
+        // SAFETY: this owner retains the initialized ring for the claim's lifetime.
+        unsafe { audio::hold_producer(self.mapping.buffer()) }
+    }
+
+    /// Whether this queue can never open another epoch and must be replaced. Unlike
+    /// `can_rearm`, a writer callback in flight does not count.
+    #[must_use]
+    pub fn exhausted(&self) -> bool {
+        self.mapping.header().retired.load(Ordering::Acquire) != 0
+            // SAFETY: this owner retains the initialized ring for its whole lifetime.
+            || unsafe { audio::epoch_exhausted(self.mapping.buffer()) }
+    }
+
     /// Whether this queue publishes under `owner`'s endpoint clock.
     #[must_use]
     pub fn belongs_to(&self, owner: &ClientPcmClockOwner) -> bool {
@@ -173,6 +191,10 @@ impl ClientPcmWriter {
     #[cfg(test)]
     pub(super) fn region(&self) -> (*mut c_void, usize) {
         (self.mapping.address.as_ptr().cast(), self.mapping.bytes)
+    }
+    #[cfg(test)]
+    pub(super) fn prefaulted(&self) -> usize {
+        self.prefaulted
     }
 
     pub(super) fn clock_grant(&self) -> Object {
@@ -310,6 +332,25 @@ impl Drop for ClientPcmWriter {
     }
 }
 
+/// Faults every page in on control, before any freeze, so the HAL IO thread never takes
+/// a zero-fill fault on its first write or read of a page. Returns the pages touched.
+/// # Safety
+/// `base` owns `bytes` writable bytes that no other thread accesses during the call.
+unsafe fn prefault(base: *mut u8, bytes: usize) -> usize {
+    // SAFETY: getpagesize has no preconditions.
+    let page = usize::try_from(unsafe { getpagesize() })
+        .unwrap_or(4096)
+        .max(1);
+    let mut pages = 0;
+    for offset in (0..bytes).step_by(page) {
+        // SAFETY: the offset is inside the owned extent. Rewriting the value already
+        // there keeps every initialized cell valid.
+        unsafe { ptr::write_volatile(base.add(offset), base.add(offset).read()) };
+        pages += 1;
+    }
+    pages
+}
+
 /// A remote reader owns its VM mapping independently of the producer's address.
 #[derive(Debug)]
 pub struct ClientPcmReader {
@@ -368,6 +409,12 @@ impl ClientPcmReader {
     #[must_use]
     pub fn endpoint(&self) -> [u8; 16] {
         self.mapping.header().endpoint
+    }
+    /// Whether the producer has released this queue, independent of membership.
+    #[cfg(any(test, feature = "test-observation"))]
+    #[must_use]
+    pub fn producer_retired(&self) -> bool {
+        self.mapping.header().retired.load(Ordering::Acquire) != 0
     }
     #[must_use]
     pub fn client(&self) -> u32 {

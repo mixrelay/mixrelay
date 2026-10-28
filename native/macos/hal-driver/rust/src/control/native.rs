@@ -210,7 +210,17 @@ impl Backend for Native {
                     ),
                 ],
             ),
-            Request::Configured(settled) => {
+            Request::Replayed {
+                incarnation,
+                through,
+            } => report(
+                c"configuration_replayed",
+                &[(c"incarnation", incarnation), (c"through", through)],
+            ),
+            Request::Configured {
+                incarnation,
+                settled,
+            } => {
                 let half = |range: std::ops::Range<usize>| {
                     let mut bytes = [0; 8];
                     bytes.copy_from_slice(&settled.endpoint[range]);
@@ -219,6 +229,7 @@ impl Backend for Native {
                 report(
                     c"configuration_settled",
                     &[
+                        (c"incarnation", incarnation),
                         (c"endpoint_high", half(0..8)),
                         (c"endpoint_low", half(8..16)),
                         (c"sequence", settled.sequence),

@@ -30,7 +30,15 @@ enum Request {
         endpoint: [u8; 16],
         generation: u64,
     },
-    Configured(crate::device::Settled),
+    Configured {
+        incarnation: u64,
+        settled: crate::device::Settled,
+    },
+    /// Every retained settlement was resent on this connection.
+    Replayed {
+        incarnation: u64,
+        through: u64,
+    },
 }
 
 /// The adapter owns queue/timer handles; each connection value owns its socket.
@@ -134,14 +142,29 @@ impl<B: Backend> Control<B> {
 
     /// Reports every settled rate/format/mapping request in order, once per connection,
     /// so the Driver service can tell a rejection from a slow Perform. A new connection
-    /// receives the retained settlements again; the service ignores those it predates.
+    /// receives the retained settlements again, then a replay marker: the service
+    /// attributes nothing to its requests until the replay has completed.
     fn send_configurations(&self, authority: u64) {
+        if authority == 0 {
+            return;
+        }
         let (sent_authority, sent) = self.configured.get();
-        let after = if sent_authority == authority { sent } else { 0 };
+        let replaying = sent_authority != authority;
+        let after = if replaying { 0 } else { sent };
+        let incarnation = self.registry.incarnation;
         let mut newest = after;
         for settled in self.registry.settled_after(after) {
-            self.send(Request::Configured(settled));
+            self.send(Request::Configured {
+                incarnation,
+                settled,
+            });
             newest = settled.sequence;
+        }
+        if replaying {
+            self.send(Request::Replayed {
+                incarnation,
+                through: newest,
+            });
         }
         self.configured.set((authority, newest));
     }

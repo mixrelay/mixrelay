@@ -34,22 +34,22 @@ typedef struct MRHALCoreNativeOps {
     bool (*inspect)(int, size_t, MRHALCoreGeometry *);
     void *(*create)(const MRHALCoreGeometry *, uint32_t, int, size_t);
     void (*destroy)(void *);
-    /* Control, outside the IO freeze: maps a replacement and its client queues. */
-    void *(*prepare)(void *, const MRHALCoreGeometry *, int, size_t);
-    /* Control, outside the IO freeze: replacement queues for rings without a spare epoch. */
-    void *(*prepare_rearm)(void *);
+    /* Control, outside the IO freeze: maps and validates an endpoint mapping. */
+    void *(*prepare)(const MRHALCoreGeometry *, int, size_t);
     void (*discard)(void *);
-    /* Frozen commit of a prepared replacement at a rate; always consumes it. */
+    /* Control, after a freeze ends: releases storage the frozen operation detached. */
+    void (*release)(void *);
+    /* Frozen swap to a prepared mapping at a rate; always consumes it. */
     bool (*replace)(void *, void *, uint32_t);
-    /* Frozen first start and rate commit; each consumes its prepared rearm. */
-    bool (*start)(void *, uint64_t, void *);
+    /* Frozen first start and rate change; each rearms client queues in place. */
+    bool (*start)(void *, uint64_t);
     void (*stop)(void *);
     void (*remaining_client)(void *);
-    bool (*set_rate)(void *, uint32_t, void *);
+    bool (*set_rate)(void *, uint32_t);
     bool (*timestamp)(void *, uint64_t, MRHALCoreTimestamp *);
-    /* Control, outside the IO freeze: allocates one client's queue. */
+    /* Control, outside the IO freeze: a queue for a client that needs one. */
     void *(*prepare_client)(void *, uint32_t);
-    /* Frozen registration consuming its preparation, or removal with NULL. */
+    /* Frozen registration, IO-start install or removal (NULL change). */
     bool (*client)(void *, uint32_t, uint32_t, void *);
     MRHALCoreIoOutcome (*io)(void *, bool, uint32_t, uint64_t, float *, uint32_t);
     bool (*requires_replacement)(void *);

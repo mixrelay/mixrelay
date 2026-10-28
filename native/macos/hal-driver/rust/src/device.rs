@@ -22,6 +22,8 @@ pub(crate) struct Attachment {
     pub descriptor: OwnedFd,
     pub size: usize,
     pub geometry: Geometry,
+    /// The endpoint mapping, mapped and validated before any freeze; `None` fails Perform.
+    pub prepared: Option<Prepared>,
 }
 
 /// A native change allocated on control, outside the IO freeze. Dropping it
@@ -61,9 +63,6 @@ pub(crate) struct Pending {
     pub name: String,
     pub rate: u32,
     pub formats: [SampleFormat; 2],
-    /// Native storage prepared before any freeze: the replacement mapping and queues for
-    /// an attachment, otherwise the rearm of every client queue. `None` fails the commit.
-    pub prepared: Option<Prepared>,
 }
 
 /// How the HAL finished one configuration request.

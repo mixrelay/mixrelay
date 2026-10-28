@@ -1,4 +1,11 @@
 //! Control-owned client PCM queues and capture mixing independent of postmix callbacks.
+//!
+//! A queue exists only for a client that may render: one added while the device runs,
+//! or one that starts IO. Configuration changes never map storage. A geometry change
+//! detaches every queue of the old shape and a rate rearm detaches every queue without
+//! a spare epoch; each client maps a fresh queue at its next `StartIO`, on control and
+//! outside the freeze. Detached queues are handed to the caller, which unmaps them
+//! after the freeze ends.
 use crate::{abi::Geometry, clock::Clock, io_outcome::IoOutcome};
 use mixrelay_macos_transport::{
     client_pcm::{
@@ -18,6 +25,8 @@ use std::sync::{
 // It does not change the device quantum, timeline or queue capacity.
 const COPY_FRAMES: usize = 32;
 const MAX_CHANNELS: usize = 64;
+/// Detached queues one freeze can hand back without growing the retired list.
+pub(super) const RETIRED_CAPACITY: usize = MAX_CLIENTS;
 
 fn client_limit(channels: u32) -> usize {
     if channels == 0 {
@@ -29,32 +38,41 @@ fn client_limit(channels: u32) -> usize {
         .map_or(0, |limit| limit.min(MAX_CLIENTS))
 }
 
+/// Hands a detached queue to the caller's retired list, which is reserved up front so
+/// the freeze never allocates. Past that bound the queue is released in place.
+fn retire(retired: &mut Vec<Queue>, queue: Queue) {
+    if retired.len() < retired.capacity() {
+        retired.push(queue);
+    }
+}
+
 struct Client {
     id: u32,
     rendered: AtomicBool,
     queue: Option<Queue>,
 }
 
-/// One client's queue, allocated on control before the IO freeze that registers it.
+/// One client's queue, mapped and pre-faulted on control before the freeze that
+/// publishes it. `None` when the client needs no new queue.
 pub(super) struct PreparedClient {
     id: u32,
     queue: Option<Queue>,
 }
 impl PreparedClient {
+    /// A client that needs no new queue.
+    pub(super) fn none(id: u32) -> Self {
+        Self { id, queue: None }
+    }
+    /// Holds a queue a frozen change detached, for release after the freeze.
+    pub(super) fn detached(id: u32, queue: Option<Queue>) -> Self {
+        Self { id, queue }
+    }
     pub(super) fn id(&self) -> u32 {
         self.id
     }
-}
-
-/// Fresh queues for clients whose ring cannot open another epoch, allocated on control
-/// before the freeze in which a clock publication rearms every queue.
-#[derive(Default)]
-pub(super) struct Rearm(Vec<PreparedClient>);
-
-/// Whether a clock publication opens a new PCM epoch in every client queue.
-pub(super) enum Timeline {
-    Keep,
-    Rearm(Rearm),
+    pub(super) fn into_queue(self) -> Option<Queue> {
+        self.queue
+    }
 }
 
 pub(super) struct ClientMix {
@@ -81,6 +99,17 @@ impl ClientMix {
         })
     }
 
+    /// Whether `id` lacks a queue the next IO start can use: it has none, or its ring
+    /// has used every epoch. A writer callback in flight is not exhaustion.
+    pub(super) fn needs_queue(&self, id: u32) -> bool {
+        self.geometry.render_channels != 0
+            && self
+                .clients
+                .iter()
+                .find(|client| client.id == id)
+                .is_none_or(|client| client.queue.as_ref().is_none_or(Queue::exhausted))
+    }
+
     /// Maps and grants a queue without touching the published client set. Shared
     /// access is enough: the caller holds device control, so the set cannot change.
     pub(super) fn prepare(&self, id: u32) -> Option<PreparedClient> {
@@ -92,17 +121,18 @@ impl ClientMix {
         Some(PreparedClient { id, queue })
     }
 
-    /// Publishes a prepared queue. The reserved client vector never allocates here.
-    pub(super) fn register(&mut self, prepared: PreparedClient) -> bool {
-        let PreparedClient { id, queue } = prepared;
+    fn admits(&self, queue: Option<&Queue>) -> bool {
+        queue.is_none_or(|queue| queue.belongs_to(&self.clock))
+    }
+
+    /// Registers a client, with a queue when it may render at once. The reserved client
+    /// vector never allocates here; a refused queue stays in `prepared`.
+    pub(super) fn register(&mut self, prepared: &mut PreparedClient) -> bool {
+        let id = prepared.id;
         if self.revision == u64::MAX
             || self.clients.len() >= client_limit(self.geometry.render_channels)
             || self.clients.iter().any(|client| client.id == id)
-            || queue
-                .as_ref()
-                .map_or(self.geometry.render_channels != 0, |queue| {
-                    !queue.belongs_to(&self.clock)
-                })
+            || !self.admits(prepared.queue.as_ref())
         {
             return false;
         }
@@ -111,25 +141,65 @@ impl ClientMix {
         self.clients.push(Client {
             id,
             rendered: AtomicBool::new(false),
-            queue,
+            queue: prepared.queue.take(),
         });
         true
     }
 
-    pub(super) fn remove(&mut self, id: u32) {
-        if let Some(index) = self.clients.iter().position(|client| client.id == id) {
-            self.clients.remove(index);
-            self.revision = self.revision.saturating_add(1);
-            self.clock.publish_membership(self.revision);
+    /// Publishes a queue mapped for a registered client's IO start. Its previous queue,
+    /// if any, is detached into `retired`. A refused queue stays in `prepared`.
+    pub(super) fn install(
+        &mut self,
+        prepared: &mut PreparedClient,
+        retired: &mut Vec<Queue>,
+    ) -> bool {
+        if prepared.queue.is_none() {
+            return true;
         }
+        if self.revision == u64::MAX || !self.admits(prepared.queue.as_ref()) {
+            return false;
+        }
+        let Some(client) = self
+            .clients
+            .iter_mut()
+            .find(|client| client.id == prepared.id)
+        else {
+            return false;
+        };
+        if let Some(previous) = std::mem::replace(&mut client.queue, prepared.queue.take()) {
+            retire(retired, previous);
+        }
+        client.rendered.store(false, Ordering::Relaxed);
+        self.revision += 1;
+        self.clock.publish_membership(self.revision);
+        true
     }
 
-    /// Whether both sets hold the same clients in the same order.
-    pub(super) fn same_members(&self, other: &Self) -> bool {
-        self.clients
-            .iter()
-            .map(|client| client.id)
-            .eq(other.clients.iter().map(|client| client.id))
+    /// Unpublishes one client and returns its queue for release after the freeze.
+    pub(super) fn remove(&mut self, id: u32) -> Option<Queue> {
+        let index = self.clients.iter().position(|client| client.id == id)?;
+        let client = self.clients.remove(index);
+        self.revision = self.revision.saturating_add(1);
+        self.clock.publish_membership(self.revision);
+        client.queue
+    }
+
+    /// Adopts a new device geometry without mapping anything: every queue of the old
+    /// shape is detached into `retired`, and readers drop it with the next grant list.
+    pub(super) fn reconfigure(&mut self, geometry: Geometry, retired: &mut Vec<Queue>) {
+        let shaped = self.geometry.render_channels == geometry.render_channels
+            && self.geometry.capture_channels == geometry.capture_channels;
+        self.geometry = geometry;
+        if shaped {
+            return;
+        }
+        for client in &mut self.clients {
+            if let Some(queue) = client.queue.take() {
+                retire(retired, queue);
+            }
+        }
+        self.revision = self.revision.saturating_add(1);
+        self.clock.publish_membership(self.revision);
     }
 
     fn configuration(&self) -> EndpointTransportConfig {
@@ -141,70 +211,28 @@ impl ClientMix {
         }
     }
 
-    /// Maps a replacement for every queue that cannot open another epoch. Shared access
-    /// is enough: the caller holds device control, so neither set nor epochs can change.
-    pub(super) fn prepare_rearm(&self) -> Option<Rearm> {
-        let mut replacements = Vec::new();
-        for client in &self.clients {
-            if client
-                .queue
-                .as_ref()
-                .is_some_and(|queue| !queue.can_rearm())
-            {
-                replacements.push(self.prepare(client.id)?);
-            }
-        }
-        Some(Rearm(replacements))
+    pub(super) fn publish_clock(
+        &mut self,
+        clock: &Clock,
+        rearm: bool,
+        retired: &mut Vec<Queue>,
+    ) -> bool {
+        self.publish_clock_after(clock, rearm, retired, || true)
     }
 
-    pub(super) fn publish_clock(&mut self, clock: &Clock, timeline: Timeline) -> bool {
-        self.publish_clock_after(clock, timeline, || true)
-    }
-
-    /// Keeps remote readers fenced until client queues and native stream preparation succeed.
-    /// Every precondition is checked before the first queue changes, so a refused rearm
-    /// leaves all queues and the published clock as they were.
+    /// Keeps remote readers fenced until client queues and native stream preparation
+    /// succeed. `prepare` runs while the shared clock is fenced but before any queue
+    /// changes; if it refuses, the previous timeline stays published and every queue is
+    /// untouched. A rearm detaches each queue without a spare epoch into `retired`
+    /// instead of failing; that client maps a fresh queue at its next IO start.
     pub(super) fn publish_clock_after(
         &mut self,
         clock: &Clock,
-        timeline: Timeline,
+        rearm: bool,
+        retired: &mut Vec<Queue>,
         prepare: impl FnOnce() -> bool,
     ) -> bool {
-        let (rearm, mut replacements) = match timeline {
-            Timeline::Keep => (false, Vec::new()),
-            Timeline::Rearm(Rearm(replacements)) => (true, replacements),
-        };
-        replacements.retain(|prepared| {
-            self.clients.iter().any(|client| {
-                client.id == prepared.id
-                    && client
-                        .queue
-                        .as_ref()
-                        .is_some_and(|queue| !queue.can_rearm())
-            })
-        });
-        let ready = |client: &Client| {
-            client.queue.as_ref().is_none_or(|queue| {
-                if rearm {
-                    queue.can_rearm()
-                        || replacements.iter().any(|prepared| {
-                            prepared.id == client.id
-                                && prepared.queue.as_ref().is_some_and(|queue| {
-                                    queue.belongs_to(&self.clock) && queue.can_rearm()
-                                })
-                        })
-                } else {
-                    true
-                }
-            })
-        };
-        let Some(revision) = self
-            .revision
-            .checked_add(u64::try_from(replacements.len()).unwrap_or(u64::MAX))
-        else {
-            return false;
-        };
-        if !crate::formats::SAMPLE_RATES.contains(&clock.rate) || !self.clients.iter().all(ready) {
+        if !crate::formats::SAMPLE_RATES.contains(&clock.rate) || self.revision == u64::MAX {
             return false;
         }
         let (epoch, anchor) = clock.transport_epoch();
@@ -216,30 +244,32 @@ impl ClientMix {
         }) else {
             return false;
         };
+        if !prepare() {
+            publication.abandon();
+            return false;
+        }
+        let mut detached = false;
         for client in &mut self.clients {
-            if let Some(index) = replacements
-                .iter()
-                .position(|prepared| prepared.id == client.id)
-            {
-                // swap_remove keeps the commit allocation-free; the old queue retires here.
-                client.queue = replacements.swap_remove(index).queue;
-            }
-            if let Some(queue) = &mut client.queue
-                && !publication.configure(queue, rearm)
-            {
-                // Only a retired queue refuses here; a rearm excluded that above.
-                return false;
-            }
             if rearm {
                 client.rendered.store(false, Ordering::Relaxed);
+                if client
+                    .queue
+                    .as_ref()
+                    .is_some_and(|queue| !queue.can_rearm())
+                    && let Some(queue) = client.queue.take()
+                {
+                    retire(retired, queue);
+                    detached = true;
+                }
+            }
+            if let Some(queue) = &mut client.queue {
+                // Only a retired ring refuses here, and a rearm detached those above.
+                let _ = publication.configure(queue, rearm);
             }
         }
-        if revision != self.revision {
-            self.revision = revision;
+        if detached {
+            self.revision += 1;
             self.clock.publish_membership(self.revision);
-        }
-        if !prepare() {
-            return false;
         }
         publication.commit();
         true
@@ -255,29 +285,6 @@ impl ClientMix {
                 .as_ref()
                 .is_none_or(|queue| snapshot.push(queue))
         })
-    }
-
-    /// Prepares the same registrations for another geometry, on control before a freeze.
-    pub(super) fn replacement(&self, geometry: Geometry) -> Option<Self> {
-        let mut next = Self::new(geometry)?;
-        for client in &self.clients {
-            let prepared = next.prepare(client.id)?;
-            if !next.register(prepared) {
-                return None;
-            }
-        }
-        Some(next)
-    }
-
-    /// Orders a committed replacement's membership after the set it replaces, so readers
-    /// holding the previous grants request the new list.
-    pub(super) fn supersede(&mut self, previous: &Self) -> bool {
-        let Some(revision) = previous.revision.checked_add(1) else {
-            return false;
-        };
-        self.revision = self.revision.max(revision);
-        self.clock.publish_membership(self.revision);
-        true
     }
 
     pub(super) fn render(

@@ -6,6 +6,7 @@ use mixrelay_macos_transport::shared_audio_buffer::{
 
 use super::{IoOperation, OK, Transport, native_fixture, start};
 use crate::abi::Timestamp;
+use mixrelay_macos_transport::client_pcm::ClientPcmReader;
 
 #[test]
 fn new_engine_inventory_replaces_mapping_with_lower_or_equal_generation() {
@@ -350,55 +351,67 @@ fn rate_only_perform_keeps_client_queue_grants_and_rejects_old_rate_pcm() {
     );
 }
 
-#[test]
-fn perform_commits_prepared_storage_without_allocating() {
-    let fixture = native_fixture();
-    let old = Transport::new(10, 2, 2);
-    let id = old.add(&fixture, "Committed", 48_000);
-    start(&fixture, id);
-    assert_eq!(fixture.registry.client(id, 43, true), OK);
-    // A first Perform initializes each lazily created OS lock and is not measured.
-    assert_eq!(fixture.registry.set_rate(id, 88_200), OK);
-    assert_eq!(fixture.perform(), OK);
-    // Host notifications append to the fixture's own log; reserve it and skip the fixture's
-    // reentrant registry queries, which allocate on the host side of the boundary.
-    crate::device::lock(&fixture.host.changes).reserve(64);
+/// Measures one Perform with the fixture host's own allocations excluded.
+fn measured_perform(fixture: &super::Fixture) -> u64 {
+    // Host notifications append to the fixture's log, reserved here; its reentrant
+    // registry queries allocate on the host side of the boundary and are skipped.
+    crate::device::lock(&fixture.host.changes).reserve(8);
     let registry = fixture
         .host
         .registry
         .swap(std::ptr::null_mut(), std::sync::atomic::Ordering::AcqRel);
-    let wider = Transport::new(10, 4, 2);
-    assert_eq!(wider.add(&fixture, "Committed", 48_000), id);
-    let geometry = allocation_counter::measure(|| assert_eq!(fixture.perform(), OK));
-    assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
-    let rate = allocation_counter::measure(|| assert_eq!(fixture.perform(), OK));
-    // Queues, mappings and rearm replacements were prepared before Perform; Float32
-    // streams need no conversion scratch, so the frozen commits allocate nothing.
-    assert_eq!((geometry.count_total, rate.count_total), (0, 0));
+    let usage = allocation_counter::measure(|| assert_eq!(fixture.perform(), OK));
     fixture
         .host
         .registry
         .store(registry, std::sync::atomic::Ordering::Release);
-    assert_eq!(fixture.registry.snapshot(id).unwrap().sample_rate, 96_000);
+    usage.count_total
 }
 
 #[test]
-fn client_joining_a_pending_replacement_renders_through_the_committed_mapping() {
+fn perform_maps_and_allocates_nothing_even_when_queues_run_out_of_epochs() {
     let fixture = native_fixture();
     let old = Transport::new(10, 2, 2);
-    let id = old.add(&fixture, "Before", 48_000);
+    let id = old.add(&fixture, "Committed", 48_000);
     start(&fixture, id);
-    let wider = Transport::new(10, 4, 2);
-    assert_eq!(wider.add(&fixture, "After", 48_000), id);
-    // Joining after preparation prepares the replacement again for both clients.
-    assert_eq!(fixture.registry.client(id, 43, true), OK);
+    // A first Perform initializes each lazily created OS lock and is not measured.
+    assert_eq!(fixture.registry.set_rate(id, 88_200), OK);
     assert_eq!(fixture.perform(), OK);
-    assert_eq!(fixture.registry.snapshot(id).unwrap().render_channels, 4);
+    let wider = Transport::new(10, 4, 2);
+    assert_eq!(wider.add(&fixture, "Committed", 48_000), id);
+    assert_eq!(measured_perform(&fixture), 0);
+    // The client's IO restart maps its queue in the new shape; then rate changes on a
+    // stopped device use one epoch each until the queue detaches inside a Perform.
+    assert_eq!(fixture.registry.stop(id, 42), OK);
+    assert_eq!(fixture.registry.start(id, 42, 2), OK);
+    assert_eq!(fixture.registry.stop(id, 42), OK);
+    let (signature, _) = crate::native::client_snapshot(&fixture.registry, None).unwrap();
+    let mut detached = false;
+    for rate in [96_000, 48_000]
+        .into_iter()
+        .cycle()
+        .take(usize::from(u16::MAX))
+    {
+        assert_eq!(fixture.registry.set_rate(id, rate), OK);
+        assert_eq!(measured_perform(&fixture), 0, "rate commit allocated");
+        if crate::native::client_snapshot(&fixture.registry, Some(&signature)).is_some() {
+            detached = true;
+            break;
+        }
+    }
+    assert!(detached, "no rate commit detached an exhausted queue");
+    // The endpoint rings ran out of epochs as well; the HAL requests a fresh mapping of
+    // the same shape, and that Perform maps nothing either.
+    let fresh = Transport::new(10, 4, 2);
+    assert_eq!(fresh.add(&fixture, "Committed", 48_000), id);
+    assert_eq!(measured_perform(&fixture), 0);
+    // The exhausted queue is replaced at the client's next IO start, off the freeze.
+    assert_eq!(fixture.registry.start(id, 42, 3), OK);
     let mut samples = [0.5_f32; 128];
     // SAFETY: the client owns 32 four-channel Float32 frames in the committed format.
     assert!(unsafe {
         fixture.registry.io(IoOperation {
-            client: 43,
+            client: 42,
             device: id,
             stream: id + 2,
             render: true,
@@ -407,6 +420,143 @@ fn client_joining_a_pending_replacement_renders_through_the_committed_mapping() 
             frames: 32,
         })
     });
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.5_f32.to_bits(); 64]);
+}
+
+#[test]
+fn a_refused_rate_change_leaves_queues_epochs_revision_and_clock_unchanged() {
+    use mixrelay_macos_transport::{
+        client_pcm::ClientPcmSnapshot, shared_audio_buffer::mr_shared_audio_buffer_try_begin_epoch,
+    };
+
+    let fixture = native_fixture();
+    let transport = Transport::new(10, 2, 2);
+    let id = transport.add(&fixture, "Refused rate", 48_000);
+    start(&fixture, id);
+    pcm(&fixture, id, true, 0, 0.75);
+    let (signature, snapshot) = crate::native::client_snapshot(&fixture.registry, None).unwrap();
+    // SAFETY: this test owns the complete snapshot and its retained immutable grants.
+    let readers = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
+    let before = readers[0].clock().unwrap();
+    // SAFETY: the fixture owns this mapping; no render callback runs during the loop.
+    let render = unsafe { super::mr_endpoint_transport_render_buffer(transport.pointer) };
+    for _ in 0..=u16::MAX {
+        // SAFETY: as above; the test is the sole lifecycle owner of this idle ring.
+        if unsafe { mr_shared_audio_buffer_try_begin_epoch(render) } == 0 {
+            break;
+        }
+    }
+    assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
+    assert_eq!(fixture.perform(), crate::abi::NATIVE_ERROR);
+    // The endpoint ring was checked before any client queue or the shared clock changed.
+    assert!(crate::native::client_snapshot(&fixture.registry, Some(&signature)).is_none());
+    assert_eq!(readers[0].clock(), Some(before));
+    assert_eq!(fixture.registry.snapshot(id).unwrap().sample_rate, 48_000);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.75_f32.to_bits(); 64]);
+}
+
+#[test]
+fn queues_a_frozen_change_retires_are_released_only_after_the_freeze() {
+    use mixrelay_macos_transport::client_pcm::ClientPcmSnapshot;
+
+    let fixture = native_fixture();
+    let transport = Transport::new(10, 2, 2);
+    let id = transport.add(&fixture, "Released", 48_000);
+    start(&fixture, id);
+    assert_eq!(fixture.registry.client(id, 43, true), OK);
+    let (_, snapshot) = crate::native::client_snapshot(&fixture.registry, None).unwrap();
+    // SAFETY: this test owns the complete snapshot and its retained immutable grants.
+    let readers = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
+    let removed = readers.iter().find(|reader| reader.client() == 43).unwrap();
+    let device = fixture.registry.pin(id).unwrap();
+    let runtime = device.runtime.load(std::sync::atomic::Ordering::Acquire);
+    let control = crate::device::lock(&device.control);
+    let frozen = device.freeze();
+    // SAFETY: control and the freeze retain this live runtime and exclude IO readers.
+    assert!(unsafe {
+        fixture.registry.native.update_client(
+            runtime,
+            43,
+            crate::io_outcome::ClientChange::Remove,
+            None,
+        )
+    });
+    // Unmapping inside the freeze would stall every waiting IO callback.
+    assert!(!removed.producer_retired());
+    drop(frozen);
+    // SAFETY: control retains the runtime; the freeze has ended.
+    unsafe { (fixture.registry.native.release)(runtime) };
+    assert!(removed.producer_retired());
+    drop(control);
+    drop(device);
+    // The registry path releases after its own freeze as well.
+    assert_eq!(fixture.registry.client(id, 44, true), OK);
+    let (_, snapshot) = crate::native::client_snapshot(&fixture.registry, None).unwrap();
+    // SAFETY: as above.
+    let readers = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
+    let joined = readers.iter().find(|reader| reader.client() == 44).unwrap();
+    assert_eq!(fixture.registry.client(id, 44, false), OK);
+    assert!(joined.producer_retired());
+}
+
+#[test]
+fn a_geometry_change_detaches_queues_until_each_client_restarts_io() {
+    use mixrelay_macos_transport::client_pcm::ClientPcmSnapshot;
+
+    let fixture = native_fixture();
+    let old = Transport::new(10, 2, 2);
+    let id = old.add(&fixture, "Before", 48_000);
+    start(&fixture, id);
+    // Client 43 joins the running device, so it may render before its own StartIO.
+    assert_eq!(fixture.registry.client(id, 43, true), OK);
+    let (_, snapshot) = crate::native::client_snapshot(&fixture.registry, None).unwrap();
+    // SAFETY: this test owns the complete snapshot and its retained immutable grants.
+    let before = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
+    assert_eq!(before.len(), 2);
+    let wider = Transport::new(10, 4, 2);
+    assert_eq!(wider.add(&fixture, "After", 48_000), id);
+    assert_eq!(fixture.perform(), OK);
+    assert_eq!(fixture.registry.snapshot(id).unwrap().render_channels, 4);
+    // Queues of the old shape left the grant list and were unmapped after the freeze.
+    assert!(before.iter().all(ClientPcmReader::producer_retired));
+    assert!(
+        crate::native::client_snapshot(&fixture.registry, None).is_none_or(|(_, snapshot)| {
+            // SAFETY: as above.
+            unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }
+                .is_ok_and(|readers| readers.is_empty())
+        })
+    );
+    let mut samples = [0.5_f32; 128];
+    let mut render = |client| {
+        // SAFETY: the client owns 32 four-channel Float32 frames in the committed format.
+        unsafe {
+            fixture.registry.io(IoOperation {
+                client,
+                device: id,
+                stream: id + 2,
+                render: true,
+                frame: 0,
+                samples: samples.as_mut_ptr().cast(),
+                frames: 32,
+            })
+        }
+    };
+    assert!(!render(42));
+    // Restarting IO maps exactly one queue, for that client only.
+    assert_eq!(fixture.registry.stop(id, 42), OK);
+    assert_eq!(fixture.registry.start(id, 42, 2), OK);
+    let (_, snapshot) = crate::native::client_snapshot(&fixture.registry, None).unwrap();
+    // SAFETY: as above.
+    let after = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
+    assert_eq!(
+        after
+            .iter()
+            .map(|reader| (reader.client(), reader.channels()))
+            .collect::<Vec<_>>(),
+        [(42, 4)]
+    );
+    assert!(render(42));
+    assert!(!render(43));
     assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.5_f32.to_bits(); 64]);
 }
 

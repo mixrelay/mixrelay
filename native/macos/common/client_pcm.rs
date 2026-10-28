@@ -19,23 +19,24 @@ const VERSION: u32 = 1;
 pub const MAX_CLIENTS_PER_ENDPOINT: usize = 256;
 /// Existing HAL client-PCM budget, including each frame-tagged ring's header.
 pub const MAX_PCM_BYTES_PER_ENDPOINT: usize = 1 << 30;
-/// Largest host render span the HAL accepts into a client queue. Core Audio coalesces IO
-/// beyond the selectable buffer size; installed traces and the native host-span regression
-/// cover 8,192-frame requests. Longer render spans are rejected as oversized extents.
-pub const MAX_RENDER_SPAN_FRAMES: u32 = 8_192;
-/// Frames in every HAL client render queue. A writer may lead the device position by one
-/// playback target plus one render span, and `ReadInput` or the engine pump may trail it by
-/// as much again. Twice that sum keeps the queue policy's half-capacity headroom, which is
-/// 32,768 frames (170 ms at 192 kHz) of scheduling slack for the pump. Capture retention
-/// lives in the engine, never here, so this size does not grow with `retention::RING_FRAMES`.
+/// Largest host render span the HAL accepts into a client queue: the device's zero
+/// timestamp period (`kAudioDevicePropertyZeroTimeStampPeriod`, the HAL's `ring`), the
+/// span of the host's IO ring for the device, so no single IO request can exceed it.
+/// The selectable buffer sizes stop at 2,048 frames; the largest coalesced request the
+/// repository's evidence shows is 8,192 frames. Longer render spans are rejected as
+/// traced oversized extents.
+pub const MAX_RENDER_SPAN_FRAMES: u32 = 16_384;
+/// Frames in every HAL client render queue. A writer leads the device position by at
+/// most one render span, and `ReadInput` trails it by at most one more. Twice that sum
+/// leaves the engine pump 32,768 frames (170 ms at 192 kHz) of scheduling slack. While
+/// the graph has not admitted a format, the pump does not drain, so this is also all the
+/// client PCM retained before admission, which drops preparation PCM anyway. Capture
+/// retention lives in the engine, so this size does not grow with `retention::RING_FRAMES`.
 pub const QUEUE_FRAMES: u32 = 65_536;
 const _: () = assert!(
     QUEUE_FRAMES.is_power_of_two()
         && MAX_RENDER_SPAN_FRAMES as usize >= mixrelay_audio_io::formats::MAX_BUFFER_FRAMES
-        && QUEUE_FRAMES as usize
-            >= 2 * 2
-                * (mixrelay_audio_io::buffer_policy::MAXIMUM_TARGET_FRAMES
-                    + MAX_RENDER_SPAN_FRAMES as usize)
+        && QUEUE_FRAMES >= 2 * 2 * MAX_RENDER_SPAN_FRAMES
 );
 
 #[repr(C)]

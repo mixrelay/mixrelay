@@ -6,10 +6,10 @@ use super::{CONFIG_ACK_TIMEOUT_TICKS, Registry};
 pub(super) const SETTLED_RETAINED: usize = 256;
 use crate::{
     abi::{CAPACITY, CONFIG_ACTION, FORMAT, INVALID, NAME, NATIVE_ERROR, NOT_FOUND, OK},
-    device::{Control, ConversionScratch, Device, Pending, Prepared, Settled, lock},
+    device::{ConversionScratch, Device, Pending, Settled, lock},
 };
 use mixrelay_pcm_ring::SampleFormat;
-use std::{os::fd::AsRawFd, sync::atomic::Ordering};
+use std::sync::atomic::Ordering;
 
 impl Registry {
     pub(crate) fn set_rate(&self, id: u32, rate: u32) -> i32 {
@@ -79,9 +79,7 @@ impl Registry {
             name,
             rate,
             formats,
-            prepared: None,
         });
-        Self::prepare_pending(&device, &mut control);
         drop(control);
         drop(device);
         self.request(id);
@@ -132,36 +130,6 @@ impl Registry {
             self.notify_latency(id);
         }
         self.reclaim();
-    }
-
-    /// Prepares the native storage a pending request commits, before coreaudiod is asked
-    /// to perform it: an attachment's mapping and client queues, or a rate change's rearm.
-    /// Control fixes the client set; membership changes and starts prepare again, so
-    /// Perform only commits under the IO freeze.
-    pub(super) fn prepare_pending(device: &Device, control: &mut Control) {
-        let Some(pending) = control.pending.as_mut() else {
-            return;
-        };
-        // Release the previous preparation before mapping its replacement.
-        pending.prepared = None;
-        if !device.alive.load(Ordering::Acquire) {
-            return;
-        }
-        let runtime = device.runtime.load(Ordering::Acquire);
-        // SAFETY: held device control retains the live runtime and its client set; the
-        // attachment owns its descriptor. Preparation runs alongside IO callbacks.
-        let change = unsafe {
-            match &pending.attachment {
-                Some(attachment) => (device.native.prepare)(
-                    runtime,
-                    &raw const attachment.geometry,
-                    attachment.descriptor.as_raw_fd(),
-                    attachment.size,
-                ),
-                None => (device.native.prepare_rearm)(runtime),
-            }
-        };
-        pending.prepared = Prepared::new(change, device.native);
     }
 
     /// Records how one rate, format or mapping request ended, so the Driver service
@@ -237,32 +205,32 @@ impl Registry {
         };
         let frozen = device.freeze();
         let runtime = device.runtime.load(Ordering::Acquire);
-        let prepared = pending.prepared.take();
-        let success = if pending.attachment.is_some() {
-            prepared.is_some_and(|prepared| {
+        let success = if let Some(attachment) = &mut pending.attachment {
+            attachment.prepared.take().is_some_and(|prepared| {
                 // SAFETY: control and freeze retain the live runtime; replace consumes
-                // the preparation made for exactly this attachment and client set.
+                // the mapping prepared for exactly this attachment and maps nothing.
                 unsafe { (self.native.replace)(runtime, prepared.into_raw(), pending.rate) }
             })
         } else {
             device.rate.load(Ordering::Acquire) == pending.rate
-                || prepared.is_some_and(|prepared| {
-                    // SAFETY: control and freeze exclude callbacks during this rate
-                    // transition; set_rate consumes the rearm prepared for this client set.
-                    unsafe { (self.native.set_rate)(runtime, pending.rate, prepared.into_raw()) }
-                })
+                // SAFETY: control and freeze exclude callbacks during this rate transition.
+                || unsafe { (self.native.set_rate)(runtime, pending.rate) }
         };
+        if success {
+            // SAFETY: control and freeze are held, all IO pins are drained, and the native
+            // rate/mapping transition succeeded. Abort/failure never publishes these buffers.
+            unsafe {
+                device.publish_configuration(&pending, scratch);
+            }
+        }
+        drop(frozen);
+        // SAFETY: control retains the live runtime; the freeze has ended.
+        unsafe { (self.native.release)(runtime) };
         if !success {
             control.attachment_failed = pending.attachment.is_some();
             self.settle(&device, &pending, false);
             return NATIVE_ERROR;
         }
-        // SAFETY: control and freeze are held, all IO pins are drained, and the native
-        // rate/mapping transition succeeded. Abort/failure never publishes these buffers.
-        unsafe {
-            device.publish_configuration(&pending, scratch);
-        }
-        drop(frozen);
         self.settle(&device, &pending, true);
         let renamed = control.name != pending.name;
         control.name = pending.name;

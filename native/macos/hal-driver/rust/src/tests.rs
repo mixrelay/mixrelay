@@ -30,6 +30,7 @@ static LIVE: AtomicUsize = AtomicUsize::new(0);
 static REPLACEMENTS: AtomicUsize = AtomicUsize::new(0);
 static PREPARATIONS: AtomicUsize = AtomicUsize::new(0);
 static PREPARED_DURING_IO: AtomicUsize = AtomicUsize::new(0);
+static RELEASES: AtomicUsize = AtomicUsize::new(0);
 static FAIL_REPLACE: AtomicBool = AtomicBool::new(false);
 static FAIL_CREATE_ENDPOINT: AtomicU8 = AtomicU8::new(0);
 static PAUSE_IO: AtomicBool = AtomicBool::new(false);
@@ -87,9 +88,8 @@ unsafe extern "C" fn destroy(runtime: *mut c_void) {
 }
 /// A fake preparation records when control made it relative to in-flight IO.
 enum Change {
-    Replacement(Geometry),
+    Mapping(Geometry),
     Client(u32),
-    Rearm,
 }
 fn change(change: Change) -> *mut c_void {
     if IO_ENTERED.load(Ordering::Acquire) && !RELEASE_IO.load(Ordering::Acquire) {
@@ -101,22 +101,20 @@ fn change(change: Change) -> *mut c_void {
 fn take(change: *mut c_void) -> Option<Change> {
     (!change.is_null()).then(|| *unsafe { Box::from_raw(change.cast::<Change>()) })
 }
-unsafe extern "C" fn prepare(
-    _: *mut c_void,
-    geometry: *const Geometry,
-    _: i32,
-    _: usize,
-) -> *mut c_void {
-    change(Change::Replacement(unsafe { *geometry }))
+unsafe extern "C" fn prepare(geometry: *const Geometry, _: i32, _: usize) -> *mut c_void {
+    change(Change::Mapping(unsafe { *geometry }))
 }
 unsafe extern "C" fn prepare_client(_: *mut c_void, client: u32) -> *mut c_void {
     change(Change::Client(client))
+}
+unsafe extern "C" fn release(_: *mut c_void) {
+    RELEASES.fetch_add(1, Ordering::SeqCst);
 }
 unsafe extern "C" fn discard(change: *mut c_void) {
     take(change);
 }
 unsafe extern "C" fn replace(runtime: *mut c_void, change: *mut c_void, rate: u32) -> bool {
-    let Some(Change::Replacement(geometry)) = take(change) else {
+    let Some(Change::Mapping(geometry)) = take(change) else {
         return false;
     };
     if FAIL_REPLACE.load(Ordering::SeqCst) {
@@ -129,13 +127,7 @@ unsafe extern "C" fn replace(runtime: *mut c_void, change: *mut c_void, rate: u3
     REPLACEMENTS.fetch_add(1, Ordering::SeqCst);
     true
 }
-unsafe extern "C" fn prepare_rearm(_: *mut c_void) -> *mut c_void {
-    change(Change::Rearm)
-}
-unsafe extern "C" fn start(runtime: *mut c_void, _: u64, rearm: *mut c_void) -> bool {
-    if !matches!(take(rearm), Some(Change::Rearm)) {
-        return false;
-    }
+unsafe extern "C" fn start(runtime: *mut c_void, _: u64) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     runtime.running = true;
     runtime.epoch += 1;
@@ -151,10 +143,7 @@ unsafe extern "C" fn requires_replacement(_: *mut c_void) -> bool {
 unsafe extern "C" fn same_transport(_: *mut c_void, _: i32, _: usize) -> bool {
     false
 }
-unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32, rearm: *mut c_void) -> bool {
-    if !matches!(take(rearm), Some(Change::Rearm)) {
-        return false;
-    }
+unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32) -> bool {
     unsafe { &mut *runtime.cast::<Runtime>() }.rate = rate;
     true
 }
@@ -175,14 +164,12 @@ unsafe extern "C" fn native_client(
     action: u32,
     change: *mut c_void,
 ) -> bool {
-    match (
-        crate::io_outcome::ClientChange::from_raw(action),
-        take(change),
-    ) {
-        (Some(crate::io_outcome::ClientChange::Register), Some(Change::Client(prepared))) => {
+    use crate::io_outcome::ClientChange;
+    match (ClientChange::from_raw(action), take(change)) {
+        (Some(ClientChange::Register | ClientChange::Remove), None) => true,
+        (Some(ClientChange::Register | ClientChange::Install), Some(Change::Client(prepared))) => {
             prepared == client
         }
-        (Some(crate::io_outcome::ClientChange::Remove), None) => true,
         _ => false,
     }
 }
@@ -345,6 +332,7 @@ impl Fixture {
         REPLACEMENTS.store(0, Ordering::SeqCst);
         PREPARATIONS.store(0, Ordering::SeqCst);
         PREPARED_DURING_IO.store(0, Ordering::SeqCst);
+        RELEASES.store(0, Ordering::SeqCst);
         PAUSE_IO.store(false, Ordering::SeqCst);
         IO_ENTERED.store(false, Ordering::SeqCst);
         RELEASE_IO.store(false, Ordering::SeqCst);
@@ -361,8 +349,8 @@ impl Fixture {
             create,
             destroy,
             prepare,
-            prepare_rearm,
             discard,
+            release,
             replace,
             start,
             stop,
@@ -805,8 +793,7 @@ fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration()
 
 #[test]
 fn rate_requests_report_native_failure_abort_and_success_in_order() {
-    unsafe extern "C" fn reject(_: *mut c_void, _: u32, rearm: *mut c_void) -> bool {
-        take(rearm);
+    unsafe extern "C" fn reject(_: *mut c_void, _: u32) -> bool {
         false
     }
     let mut fixture = Fixture::new();
@@ -857,30 +844,48 @@ fn eventually(condition: impl Fn() -> bool) {
 }
 
 #[test]
-fn geometry_replacement_is_prepared_before_perform_and_follows_membership() {
+fn a_geometry_change_maps_only_its_endpoint_and_no_client_queue() {
     let fixture = Fixture::new();
     let id = fixture.add(1, 48_000);
+    // Idle registrations map nothing: a client gets a queue when it starts IO.
     assert_eq!(fixture.registry.client(id, 7, true), OK);
-    let registered = PREPARATIONS.load(Ordering::SeqCst);
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 0);
     fixture
         .registry
         .upsert([1; 16], "Wider", 48_000, (fixture.fd(1, 7, 3), 24))
         .unwrap();
-    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), registered + 1);
-    // A client joining the pending change maps its own queue, then the replacement
-    // is prepared again for the new client set.
     assert_eq!(fixture.registry.client(id, 8, true), OK);
-    let prepared = PREPARATIONS.load(Ordering::SeqCst);
-    assert_eq!(prepared, registered + 3);
+    // Only the endpoint mapping was prepared, before Perform was requested.
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 1);
     assert_eq!(fixture.perform(), OK);
-    // Perform only consumes the preparation under the freeze.
-    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), prepared);
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 1);
     assert_eq!(REPLACEMENTS.load(Ordering::SeqCst), 1);
     let snapshot = fixture.registry.snapshot(id).unwrap();
     assert_eq!(
         (snapshot.render_channels, snapshot.capture_channels),
         (7, 3)
     );
+    // Each client prepares at its own IO start; one that never starts gets nothing.
+    assert_eq!(fixture.registry.start(id, 7, 100), OK);
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_format_only_request_and_idle_clients_prepare_nothing() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 7, true), OK);
+    assert_eq!(
+        fixture
+            .registry
+            .set_format(id + 1, 48_000, mixrelay_pcm_ring::SampleFormat::Signed24),
+        OK
+    );
+    assert_eq!(fixture.perform(), OK);
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 0);
+    // Each frozen client change and the commit released what the freeze detached.
+    assert_eq!(fixture.registry.client(id, 7, false), OK);
+    assert_eq!(RELEASES.load(Ordering::SeqCst), 3);
 }
 
 #[test]
@@ -924,9 +929,9 @@ fn queue_and_replacement_preparation_run_alongside_in_flight_io() {
         callback.join().unwrap();
         control.join().unwrap();
     });
-    // The first start prepared its rearm; the membership change prepared the pending
-    // replacement again after the freeze.
-    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 5);
+    // The first start mapped its client's queue; the endpoint mapping and the client that
+    // joined the running device were each prepared alongside the in-flight callback.
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 3);
     drop(device);
     assert_eq!(fixture.perform(), OK);
     assert_eq!(REPLACEMENTS.load(Ordering::SeqCst), 1);
