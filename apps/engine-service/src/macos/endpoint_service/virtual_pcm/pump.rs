@@ -92,12 +92,12 @@ impl Retry {
 
 /// Control-owned signals shared with one pump.
 pub(super) struct Signals {
-    pub(super) update: Arc<parking_lot::Mutex<Option<Vec<ClientPcmReader>>>>,
+    pub(super) update: Arc<parking_lot::Mutex<Option<super::Update>>>,
     pub(super) updated: Arc<AtomicBool>,
     pub(super) stop: Arc<AtomicBool>,
 }
 
-pub(super) struct Pump {
+pub(in super::super) struct Pump {
     queues: Vec<ClientPcmReader>,
     transport: SourceTransport,
     signals: Signals,
@@ -124,20 +124,37 @@ pub(super) struct Pump {
     report: Report,
 }
 impl Pump {
+    #[cfg(test)]
     pub(super) fn prepare(
         queues: Vec<ClientPcmReader>,
         transport: SourceTransport,
         signals: Signals,
     ) -> Result<Self, Error> {
         let channels = queues.first().ok_or(Error::Geometry)?.capture_channels() as usize;
-        let input =
+        let mut pump = Self::prepare_empty(channels, transport, signals)?;
+        pump.queues = queues;
+        Ok(pump)
+    }
+    pub(super) fn prepare_empty(
+        channels: usize,
+        transport: SourceTransport,
+        signals: Signals,
+    ) -> Result<Self, Error> {
+        let mut input =
             mixrelay_audio_io::pcm_buffer::zeroed(128 * channels).map_err(std::io::Error::other)?;
-        let scratch =
+        let mut scratch =
             mixrelay_audio_io::pcm_buffer::zeroed(128 * 64).map_err(std::io::Error::other)?;
-        let times =
+        let mut times =
             mixrelay_audio_io::pcm_buffer::timestamps(128).map_err(std::io::Error::other)?;
+        mixrelay_pcm_ring::prefault_pcm(&mut input);
+        mixrelay_pcm_ring::prefault_pcm(&mut scratch);
+        for time in &mut times {
+            // SAFETY: each initialized timestamp is exclusively owned on control;
+            // volatile stores commit writable pages before PCM transfer begins.
+            unsafe { std::ptr::write_volatile(time, 0) };
+        }
         Ok(Self {
-            queues,
+            queues: Vec::new(),
             transport,
             signals,
             input,
@@ -160,19 +177,45 @@ impl Pump {
             report: Report::new(host_time()),
         })
     }
-    pub(super) fn run(mut self) -> Result<(), Error> {
+    pub(super) fn preparation(&mut self, started: u64, finished: u64) {
+        self.report.preparation(started, finished);
+    }
+    pub(super) fn update(&mut self) {
+        let update = self.signals.update.lock().take();
+        if let Some(update) = update {
+            self.report.granted(update.received);
+            self.queues = update.queues;
+            if self.queues.is_empty() {
+                self.end_retention();
+            }
+        }
+    }
+    pub(super) fn run(mut self, prepared: impl FnOnce()) -> Result<(), Error> {
         let timebase = Timebase::current();
         let scheduling = Scheduling::new();
+        // Finish thread/scheduling initialization before publishing this pump.
+        // The channel and its first page touches stay off RT.
+        scheduling.outside(prepared);
         let result = (|| {
             while !self.signals.stop.load(Ordering::Acquire) {
                 // AcqRel consumes a control notification; the replacement mutex
                 // is entered only after demotion, outside the PCM transfer.
                 if self.signals.updated.swap(false, Ordering::AcqRel) {
                     scheduling.outside(|| {
-                        if let Some(queues) = self.signals.update.lock().take() {
-                            self.queues = queues;
+                        self.update();
+                    });
+                }
+                if self.queues.is_empty() {
+                    // Unpark tokens survive a notification before this park. Stop and
+                    // queue updates both wake the worker; idle storage needs no polling.
+                    scheduling.outside(|| {
+                        if let Some(wait) = self.idle_wait(host_time(), timebase) {
+                            std::thread::park_timeout(wait);
+                        } else {
+                            std::thread::park();
                         }
                     });
+                    continue;
                 }
                 let wait = self.cycle(host_time(), timebase, &scheduling)?;
                 scheduling::wait_for_period(wait, timebase);
@@ -181,17 +224,40 @@ impl Pump {
         })();
         // Complete demotion before conversion buffers and VM mappings leave scope.
         let demoted = scheduling.finish();
-        self.transport.stop_native();
+        self.end_retention();
         if let Some(losses) = self.report.final_losses(self.losses()) {
             losses.log();
         }
         result.and(demoted)
     }
 
+    /// Ends accepted retention on control retirement, empty membership or native stop.
+    fn end_retention(&mut self) {
+        self.transport.stop_native();
+        let frames = self.backlog.clear();
+        if matches!(
+            self.transport.consumer_route(),
+            ConsumerRoute::Routed { .. }
+        ) {
+            self.report.stopped(frames);
+        }
+        self.stream = None;
+        self.boundary = None;
+    }
+
+    /// Idle storage parks indefinitely once its last wanted loss episode is reported.
+    fn idle_wait(&mut self, now: u64, timebase: Timebase) -> Option<Duration> {
+        let losses = self.losses();
+        if let Some(episode) = self.report.due_losses(now, timebase, losses) {
+            episode.log();
+        }
+        self.report.loss_wait(now, timebase, losses)
+    }
+
     /// One period: native stop, then the plan's route, retention of every readable
     /// client frame, and bounded conversion. Returns the native clock whose next period
     /// ends the wait, or `None` for a control poll during a handshake.
-    fn cycle(
+    pub(super) fn cycle(
         &mut self,
         now: u64,
         timebase: Timebase,
@@ -205,17 +271,10 @@ impl Pump {
         if let Some(native) = native.filter(|native| !native.running) {
             // Stop precedes the format and backlog gates. A stopped virtual source's
             // unpublished PCM is not read, so its retained run ends here as well.
-            self.transport.stop_native();
-            let unconverted = self.backlog.clear();
-            // Only PCM retained for a route was wanted; anything else is not a loss.
-            if matches!(
-                self.transport.consumer_route(),
-                ConsumerRoute::Routed { .. }
-            ) {
-                self.report.stopped(unconverted);
+            self.end_retention();
+            if let Some(losses) = self.report.due_losses(now, timebase, self.losses()) {
+                scheduling.outside(|| losses.log());
             }
-            self.stream = None;
-            self.boundary = None;
             return Ok(Some(native));
         }
         let route = self.transport.consumer_route();
@@ -263,6 +322,14 @@ impl Pump {
     /// Moves every published client frame up to the native playhead into the backlog.
     /// Queue skips count as loss only for a routed source.
     fn drain(&mut self, now: u64, timebase: Timebase, routed: bool) -> Result<(), Error> {
+        if let Some(native) = self
+            .queues
+            .iter()
+            .find_map(ClientPcmReader::clock)
+            .filter(|native| native.running)
+        {
+            self.report.drained(now, native);
+        }
         let channels = self.input.len() / 128;
         let skipped = self.mixer.skipped_frames();
         for _ in 0..DRAIN_WINDOWS {

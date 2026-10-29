@@ -535,3 +535,84 @@ fn clocked_writes_publish_only_committed_pcm_credit_and_stop_preserves_position(
     });
     assert_eq!(measured.count_total, 0);
 }
+
+#[test]
+fn failed_local_attachment_reclaims_its_registry_mapping_and_can_retry() {
+    use crate::{application_clock::ConsumerRoute, source_control::SourceRequest};
+    let registry = local_registry();
+    let mut request = SourceRequest {
+        channels: 2,
+        capacity_frames: 1024,
+        transport_version: crate::application_clock::VERSION,
+        ..SourceRequest::default()
+    };
+    for (slot, byte) in request.source_id.iter_mut().zip(b"local-attachment") {
+        *slot = std::ffi::c_char::from_ne_bytes([*byte]);
+    }
+    // SAFETY: the static string is terminated and readable for the token calculation.
+    let token =
+        unsafe { crate::source_registry::mr_engine_source_id_token(c"local-attachment".as_ptr()) };
+    let failed = SourceTransport::create_attaching(&registry, &request, |raw| {
+        raw.mapped_size = 0;
+        // SAFETY: attach consumes this unique real descriptor even when its extent fails.
+        unsafe { super::ffi::attach(raw, 1024, 2) }
+    });
+    assert!(failed.is_err());
+    assert!(!registry.set_consumer_route(token, ConsumerRoute::Unrouted));
+    let producer = SourceTransport::create(&registry, &request).unwrap();
+    assert!(registry.set_consumer_route(token, ConsumerRoute::Unrouted));
+    drop(producer);
+    registry.collect_retired();
+    assert!(!registry.set_consumer_route(token, ConsumerRoute::Unrouted));
+}
+
+fn local_registry() -> crate::source_registry::SourceRegistry {
+    use crate::source_registry::{SchedulingClock, SourceRegistry};
+    struct Clock(std::time::Instant);
+    impl SchedulingClock for Clock {
+        fn now(&self) -> std::time::Instant {
+            self.0
+        }
+    }
+    fn storage(bytes: usize) -> std::io::Result<std::os::fd::OwnedFd> {
+        let directory = mixrelay_test_support::FixtureDir::new("src-local")?;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(directory.path().join("pcm"))?;
+        file.set_len(u64::try_from(bytes).unwrap())?;
+        Ok(file.into())
+    }
+    SourceRegistry::with_clock_and_storage(Box::new(Clock(std::time::Instant::now())), storage)
+}
+
+#[test]
+fn prepared_producer_detects_terminal_storage_before_the_next_stream() {
+    use crate::source_control::SourceRequest;
+    let registry = local_registry();
+    let mut request = SourceRequest {
+        channels: 2,
+        capacity_frames: 1024,
+        transport_version: crate::application_clock::VERSION,
+        ..SourceRequest::default()
+    };
+    for (slot, byte) in request.source_id.iter_mut().zip(b"terminal-local") {
+        *slot = std::ffi::c_char::from_ne_bytes([*byte]);
+    }
+    // SAFETY: the static source ID is terminated and readable throughout the call.
+    let token =
+        unsafe { crate::source_registry::mr_engine_source_id_token(c"terminal-local".as_ptr()) };
+    let producer = SourceTransport::create(&registry, &request).unwrap();
+    assert!(registry.producer_can_rearm(token));
+    producer
+        .mapping
+        .clock()
+        .format_word
+        .store(u64::MAX, Ordering::Release);
+    assert!(!registry.producer_can_rearm(token));
+    let replacement = SourceTransport::create(&registry, &request).unwrap();
+    assert!(registry.producer_can_rearm(token));
+    assert_eq!(producer.observe_clock(), SourceClockRead::Revoked);
+    assert_ne!(replacement.observe_clock(), SourceClockRead::Revoked);
+}

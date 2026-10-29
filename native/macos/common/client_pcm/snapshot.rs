@@ -1,4 +1,5 @@
 //! All-or-nothing control snapshots of VM grants; no parsing occurs on callbacks.
+mod endpoints;
 use super::{ClientPcmReader, ClientPcmWriter, mapping::Object};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -7,6 +8,7 @@ use std::{
 };
 
 unsafe extern "C" {
+    fn mach_absolute_time() -> u64;
     static _xpc_type_dictionary: c_char;
     static _xpc_type_array: c_char;
     static _xpc_type_shmem: c_char;
@@ -42,6 +44,7 @@ impl ClientPcmSnapshot {
                 return None;
             }
             let snapshot = Self(object);
+            xpc_dictionary_set_uint64(object, c"observed_at".as_ptr(), mach_absolute_time());
             let array = xpc_array_create(ptr::null(), 0);
             if array.is_null() {
                 return None;
@@ -51,17 +54,36 @@ impl ClientPcmSnapshot {
                 c"operation".as_ptr(),
                 c"virtual_pcm_snapshot".as_ptr(),
             );
-            xpc_dictionary_set_uint64(object, c"version".as_ptr(), 1);
+            xpc_dictionary_set_uint64(object, c"version".as_ptr(), 2);
             xpc_dictionary_set_value(object, c"queues".as_ptr(), array);
             xpc_release(array);
+            let endpoints = xpc_array_create(ptr::null(), 0);
+            if endpoints.is_null() {
+                return None;
+            }
+            xpc_dictionary_set_value(object, c"endpoints".as_ptr(), endpoints);
+            xpc_release(endpoints);
             Some(snapshot)
         }
+    }
+    /// # Safety
+    /// A live snapshot dictionary validated by `decode`.
+    pub unsafe fn observed_at(message: Object) -> u64 {
+        // SAFETY: the caller retains the decoded dictionary.
+        unsafe { xpc_dictionary_get_uint64(message, c"observed_at".as_ptr()) }
     }
     #[must_use]
     pub fn as_raw(&self) -> Object {
         self.0
     }
     pub fn push(&mut self, writer: &ClientPcmWriter) -> bool {
+        if !self.push_endpoint(super::EndpointGeometry {
+            id: writer.geometry().id,
+            render_channels: writer.geometry().render_channels,
+            capture_channels: writer.geometry().capture_channels,
+        }) {
+            return false;
+        }
         // SAFETY: this exclusive snapshot owns the array and writer retains its grant.
         unsafe {
             let array = xpc_dictionary_get_value(self.0, c"queues".as_ptr());
@@ -99,7 +121,7 @@ impl ClientPcmSnapshot {
             let operation = xpc_dictionary_get_string(message, c"operation".as_ptr());
             if operation.is_null()
                 || CStr::from_ptr(operation) != c"virtual_pcm_snapshot"
-                || xpc_dictionary_get_uint64(message, c"version".as_ptr()) != 1
+                || xpc_dictionary_get_uint64(message, c"version".as_ptr()) != 2
             {
                 return Err(SnapshotError::Invalid);
             }
@@ -107,7 +129,18 @@ impl ClientPcmSnapshot {
             if array.is_null() || xpc_get_type(array) != (&raw const _xpc_type_array).cast() {
                 return Err(SnapshotError::Invalid);
             }
-            Self::decode_queues(array)
+            let endpoints = Self::endpoints(message)?;
+            let queues = Self::decode_queues(array)?;
+            if queues.iter().any(|queue| {
+                !endpoints.iter().any(|shape| {
+                    shape.id == queue.endpoint()
+                        && shape.render_channels == queue.channels()
+                        && shape.capture_channels == queue.capture_channels()
+                })
+            }) {
+                return Err(SnapshotError::Invalid);
+            }
+            Ok(queues)
         }
     }
     unsafe fn decode_queues(array: Object) -> Result<Vec<ClientPcmReader>, SnapshotError> {

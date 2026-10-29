@@ -897,3 +897,59 @@ fn loopback_stays_continuous_while_other_clients_attach_run_and_detach() {
         "the first client's stream was restarted"
     );
 }
+
+#[test]
+fn pcm_inventory_includes_geometry_before_any_client_grant_exists() {
+    use mixrelay_macos_transport::client_pcm::{ClientPcmSnapshot, EndpointGeometry};
+    let fixture = native_fixture();
+    let transport = Transport::new(33, 2, 4);
+    transport.add(&fixture, "Idle capture", 48_000);
+    let (_, snapshot) = crate::native::client_snapshot(&fixture.registry, None).unwrap();
+    // SAFETY: the owned snapshot retains its complete geometry and grants.
+    assert!(
+        unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }
+            .unwrap()
+            .is_empty()
+    );
+    // SAFETY: the same retained snapshot supplies its checked geometry array.
+    assert_eq!(
+        unsafe { ClientPcmSnapshot::endpoints(snapshot.as_raw()) }.unwrap(),
+        vec![EndpointGeometry {
+            id: transport.endpoint,
+            render_channels: 2,
+            capture_channels: 4,
+        }]
+    );
+}
+
+#[test]
+fn start_io_and_running_client_add_succeed_without_an_engine_connection() {
+    let fixture = native_fixture();
+    let transport = Transport::new(34, 2, 2);
+    let id = transport.add(&fixture, "Independent IO", 192_000);
+    // This native registry has no engine peer or source preparation callback.
+    start(&fixture, id);
+    assert_eq!(fixture.registry.client(id, 43, true), OK);
+    assert_eq!(fixture.registry.start(id, 43, 1), OK);
+    pcm(&fixture, id, true, 0, 0.625);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.625_f32.to_bits(); 64]);
+    assert_eq!(grants(&fixture).len(), 2);
+}
+
+#[test]
+fn start_io_succeeds_with_an_unanswered_engine_publication() {
+    let fixture = native_fixture();
+    let transport = Transport::new(35, 2, 2);
+    let id = transport.add(&fixture, "Unanswered publication", 48_000);
+    // Retain the publication without delivering it or producing any engine reply.
+    let (_signature, _publication) =
+        crate::native::client_snapshot(&fixture.registry, None).unwrap();
+    assert_eq!(fixture.registry.client(id, 42, true), OK);
+    assert_eq!(fixture.registry.start(id, 42, 100), OK);
+    let mut timestamp = Timestamp::default();
+    assert!(fixture.registry.timestamp(id, 100, &mut timestamp));
+    assert_eq!(timestamp.host_time, 100);
+    assert_eq!(timestamp.sample_time, 0);
+    pcm(&fixture, id, true, 0, 0.5);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.5_f32.to_bits(); 64]);
+}

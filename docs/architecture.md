@@ -207,9 +207,41 @@ head로 시작한 stream도 매 변환 전에 route를 다시 읽어, head를 �
 unrouted source는 meter와 pacing을 위해 계속 게시하되 한 주기에 변환할 만큼만 남겨 live edge에 머문다. 이때
 버린 프레임과 큐에서 덮어쓰인 프레임은 손실로 세지 않는다. routed source는 포맷 승인·변환기 준비와 관계없이
 endpoint별 backlog에 native rate와 native 좌표 그대로 보존한다. backlog는 `retention::RING_FRAMES` ×
-endpoint 캡처 채널 수의 Float32(채널당 4MiB, 64채널에서 256MiB)다. endpoint를 시작할 때 endpoint 잠금 밖의
-제어 경로에서 확보하고 미리 fault한다. 같은 timeline의 공백과 timeline 변경은 앞선 run을 유지한다. 가득 차면
-가장 오래된 프레임을 버린다. 새 변환 stream은 원래 좌표의 시각으로 순서대로 변환한다. 보존한 head 전체는 head
+endpoint 캡처 채널 수의 Float32(채널당 4MiB, 64채널에서 256MiB)다. HAL이 게시한 장치 geometry를
+엔진이 받으면 endpoint 잠금 밖의 제어 경로에서 source 매핑과 backlog를 확보하고 미리 fault한다.
+클라이언트가 없는 장치도 geometry 목록에 포함된다.
+geometry 준비는 전용 제어 worker 한 개가 처리하며 대기 중인 전체 snapshot은 최신 한 개로
+합친다. 이미 준비된 endpoint의 큐는 이 worker를 기다리지 않고 바로 전달한다. 준비 중·대기
+중인 목록은 geometry와 아직 pump가 없는 큐의 VM 매핑만 유지하며 PCM을 복사하지 않는다.
+이미 pump에 전달한 큐 매핑은 준비 목록에 보관하지 않는다. 준비 중인 snapshot보다
+새로운 큐 membership을 이전 준비 결과가 덮지 못하게 한다. geometry 시각과 큐 membership
+시각은 따로 비교하므로, 같은 geometry의 grant는 더 늦게 끝난 geometry 준비 뒤에도 사용할 수 있다.
+예약 실패는 새 HAL snapshot 없이 10ms부터 최대 1초 간격으로 다시 시도한다. HAL의
+StartIO·실행 중 클라이언트 추가·geometry 변경 후 큐 재준비는 엔진의 응답이나 준비 상태를
+기다리지 않는다. 엔진으로 보내는 geometry·grant snapshot은 비동기 단방향 메시지다.
+엔진이 없거나 응답하지 않거나 저장소 준비에 실패해도 HAL은 자체 큐와 native IO를 시작한다.
+이미 준비된 pump는 grant snapshot에서 큐만 넘겨받으므로 source·backlog의 할당이나 첫
+page touch를 기다리지 않는다. publication을 받지 못했거나 엔진 재시작·준비 실패로 pump가
+없는 endpoint의 첫 grant는 같은 제어 worker에서 저장소를 준비한 뒤 전달한다. 이 fallback의
+준비가 HAL 큐 보존 시간을 넘기면 덮어쓴 프레임을 기존 손실 보고에 포함한다.
+클라이언트가 모두 사라지면 pump는 native 정지와 남은 backlog 손실을 게시하고 저장소를 유지한다.
+같은 geometry의 다음 세션은 이 저장소를 재사용한다. 재사용 전에 producer lease와 terminal
+상태를 확인하고, epoch를 소진한 저장소는 다시 준비한다. 장치 삭제·geometry 변경·clear는 worker를
+멈추고 join한 뒤 저장소를 회수한다. 준비 중 clear가 오면 준비 결과를 게시하지 않는다.
+준비 실패는 부분 저장소를 회수하고 제어 worker에서 재시도한다. HAL의 geometry 관찰 host
+tick으로 오래된 snapshot이 새 geometry를 덮거나 새 endpoint를 회수하지 못하게 한다.
+endpoint 하나의 큰 저장소는 backlog와 source PCM 각각 채널당 4MiB, source frame tag·시각
+sidecar 24MiB다. 합계는 캡처 채널 수 C에 대해 (8C + 24)MiB이며, stereo는 40MiB,
+64채널은 536MiB다. 여기에 고정 scratch·run metadata, 변환기 저장소와 worker 한 개의 stack이
+더해진다. 큐가 없으면 worker는 비실시간 상태에서 park한다. grant·종료 신호 또는 남은 손실
+보고의 quiet 기한이 worker를 깨운다. 준비된
+endpoint는 최대 64개라 큰 저장소의 합은 최대 33.5GiB다. 전용 준비 worker는 한 개다.
+준비 경로는 endpoint마다 HAL 큐를 최대 두 세대 더 유지할 수 있으며, 각 세대는 기존
+`MAX_PCM_BYTES_PER_ENDPOINT`(1GiB) 한도를 따른다. 같은 큐의 VM 매핑은 물리 PCM을 공유한다.
+이전 source 매핑은 graph pin이 남아 있는 동안 기존 registry의 최대 128개 owner 한도 안에서 유지되며, pin 해제 후 제어 경로에서
+회수한다. 저장소와 큐 세대 수는 세션 수에 따라 늘어나지 않는다.
+같은 timeline의 공백과 timeline 변경은 앞선 run을 유지한다. 가득 차면 가장 오래된 프레임을
+버린다. 새 변환 stream은 원래 좌표의 시각으로 순서대로 변환한다. 보존한 head 전체는 head
 source에만 전달한다. 다른 source에는 첫 게시 전에 가장 새 run의 가장 새 한 주기만 남겨, 합류한 source가 공유
 획득 좌표나 다른 입력을 보존된 head로 되돌리지 않게 한다. head stream의 run 경계에서는 그 주기의 변환을 멈춘다.
 소비자가 현재 epoch를 다 읽거나 읽기를 멈추거나 200ms가 지난 뒤에만 새 epoch를 시작한다. 한 주기의 변환은 최대
@@ -223,8 +255,9 @@ source에만 전달한다. 다른 source에는 첫 게시 전에 가장 새 run�
 멈추면 포맷·backlog 상태와 관계없이 먼저 native 정지를 게시하고, 그 timeline의 남은 backlog와 변환 stream을
 끝낸다. 끝난 stream의 변환 출력은 다시 쓰지 않는다. routed source의 큐에서 덮어쓰인 프레임
 (`ClientPcmMixer::skipped_frames`), backlog에서 버린 프레임, 정지 때 routed였던 source가 게시하지 못한 프레임은 손실이 1초
-동안 멈춘 뒤 손실 구간마다 한 번 제어 경로 경고로 남긴다. grant 수신과 source 승인(변환기 준비·첫 게시)의
-시각은 native sample 0 기준으로 기록한다. 물리 입력의 `HardwarePacer`는 첫 그래프 승인 때 준비 중 PCM을
+동안 멈춘 뒤 손실 구간마다 한 번 제어 경로 경고로 남긴다. grant 수신, source 저장소 준비 시작·완료, backlog 준비 완료, worker의 첫 drain,
+source 승인(변환기 준비·첫 게시)의 시각은 native sample 0 기준으로 기록한다. IO 시작 전에
+완료된 준비 시각은 음수다. 로그는 제어 경로에서만 쓴다. 물리 입력의 `HardwarePacer`는 첫 그래프 승인 때 준비 중 PCM을
 버린다. 앱이 가상 장치에 게시한 PCM은 위의 `ApplicationPacer` 계약대로 head source의 첫 프레임부터 보존한다.
 HAL 클라이언트 렌더 큐와 endpoint 매핑 링은 `client_pcm::QUEUE_FRAMES`
 (65,536프레임)로 준비한다. 쓰는 쪽은 최대 렌더 span(`MAX_RENDER_SPAN_FRAMES`, 장치의 zero timestamp

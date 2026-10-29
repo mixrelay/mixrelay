@@ -43,7 +43,13 @@ pub(crate) fn client_snapshot(
                 .cast::<Runtime>()
                 .as_ref()
         }?;
-        if runtime.clients.revision() != revision || !runtime.clients.append_snapshot(&mut snapshot)
+        if runtime.clients.revision() != revision
+            || !snapshot.push_endpoint(mixrelay_macos_transport::client_pcm::EndpointGeometry {
+                id: runtime.io.geometry.endpoint_id,
+                render_channels: runtime.io.geometry.render_channels,
+                capture_channels: runtime.io.geometry.capture_channels,
+            })
+            || !runtime.clients.append_snapshot(&mut snapshot)
         {
             return None;
         }

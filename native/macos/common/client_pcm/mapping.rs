@@ -77,6 +77,14 @@ pub struct ClientPcmWriter {
 unsafe impl Send for ClientPcmWriter {}
 unsafe impl Sync for ClientPcmWriter {}
 impl ClientPcmWriter {
+    pub(super) fn geometry(&self) -> super::EndpointGeometry {
+        let header = self.mapping.header();
+        super::EndpointGeometry {
+            id: header.endpoint,
+            render_channels: header.channels,
+            capture_channels: header.capture_channels,
+        }
+    }
     /// Creates a file-free shared VM region before exposing any initialized cells.
     /// # Errors
     /// Rejects invalid identity/geometry and failed VM or XPC allocation.

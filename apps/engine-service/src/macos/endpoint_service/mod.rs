@@ -1,5 +1,6 @@
 //! Graph source registries and authenticated attachments behind the dispatch/XPC ABI adapter.
 mod dispatch;
+mod inventory;
 mod source;
 #[cfg(test)]
 mod tests;
@@ -14,7 +15,8 @@ static SERVICE: OnceLock<Service> = OnceLock::new();
 static START_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 struct Service {
     sources: SourceRegistry,
-    virtual_pcm: virtual_pcm::VirtualPcm,
+    virtual_pcm: std::sync::Arc<virtual_pcm::VirtualPcm>,
+    inventory: inventory::Inventory,
     peers: parking_lot::Mutex<xpc::Peers>,
     dispatch: parking_lot::Mutex<Option<Dispatch>>,
 }
@@ -34,6 +36,7 @@ pub fn virtual_source_registry() -> Option<&'static SourceRegistry> {
 /// Drains virtual input workers on engine shutdown, outside the graph's realtime owner.
 pub fn stop_virtual_sources() {
     if let Some(service) = SERVICE.get() {
+        service.inventory.stop();
         service.virtual_pcm.clear();
     }
 }
@@ -47,7 +50,8 @@ pub extern "C" fn mr_engine_service_start() -> i32 {
         && SERVICE
             .set(Service {
                 sources: SourceRegistry::new(),
-                virtual_pcm: virtual_pcm::VirtualPcm::new(),
+                virtual_pcm: std::sync::Arc::new(virtual_pcm::VirtualPcm::new()),
+                inventory: inventory::Inventory::new(),
                 peers: parking_lot::Mutex::new(xpc::Peers::default()),
                 dispatch: parking_lot::Mutex::new(None),
             })

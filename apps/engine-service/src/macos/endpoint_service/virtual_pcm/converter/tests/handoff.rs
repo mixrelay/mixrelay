@@ -23,7 +23,7 @@ impl Drop for ConsumerMapping {
 }
 
 fn source() -> (SourceRegistry, SourceTransport, ConsumerMapping) {
-    let registry = SourceRegistry::with_clock(Box::new(Clock {
+    let registry = crate::endpoint_service::virtual_pcm::test_storage::registry(Box::new(Clock {
         origin: Instant::now(),
         nanos: Arc::new(AtomicU64::new(0)),
     }));

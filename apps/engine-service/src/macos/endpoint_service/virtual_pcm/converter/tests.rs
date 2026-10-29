@@ -69,7 +69,7 @@ fn client_grants_with_capacity(capacity: u32) -> (ClientPcmWriter, Vec<ClientPcm
 #[test]
 fn shared_client_pcm_preserves_signal_and_silence_across_independent_reader_gaps() {
     let nanos = Arc::new(AtomicU64::new(0));
-    let registry = SourceRegistry::with_clock(Box::new(Clock {
+    let registry = crate::endpoint_service::virtual_pcm::test_storage::registry(Box::new(Clock {
         origin: Instant::now(),
         nanos: nanos.clone(),
     }));

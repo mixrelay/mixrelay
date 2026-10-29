@@ -448,6 +448,43 @@ impl SourceRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+    /// Whether a prepared producer still has a lease and storage for another stream.
+    /// Control checks this before handing queues to a pump, including idle epoch exhaustion.
+    pub fn producer_can_rearm(&self, token: u64) -> bool {
+        let read = self.read(token);
+        read.source().is_some_and(|source| {
+            !source.terminal()
+                && source
+                    .mapping
+                    .clock()
+                    .producer_lease
+                    .load(Ordering::Acquire)
+                    != 0
+        })
+    }
+    /// Closes only the local grant whose attachment failed; a later lease survives.
+    pub(crate) fn cancel_attachment(&self, lease: u64) {
+        let mut control = self.control();
+        for slot in &self.slots {
+            // SAFETY: control owns every slot until collection below, and its mutex
+            // excludes grant replacement while this failed local attachment closes.
+            if let Some(source) = unsafe { slot.load(Ordering::SeqCst).as_ref() } {
+                // AcqRel revokes exactly the failed lease; it cannot close a newer producer.
+                let _ = source.mapping.clock().producer_lease.compare_exchange(
+                    lease,
+                    0,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                );
+            }
+        }
+        self.collect(&mut control);
+    }
+    /// Reclaims closed producers on control after their endpoint workers have joined.
+    /// Existing graph pins retain mappings until a later collection observes no readers.
+    pub fn collect_retired(&self) {
+        self.collect(&mut self.control());
+    }
     fn collect(&self, control: &mut Control) {
         // Attach and collection share the control mutex. A zero lease means its
         // unique producer closed, not that an active producer is merely paused.
