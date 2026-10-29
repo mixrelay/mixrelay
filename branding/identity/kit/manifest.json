@@ -13,8 +13,8 @@
     "muted": "#5c594f",
     "white": "#ffffff"
   },
-  "approval": "graphic symbol only",
-  "wordmarkStatus": "on hold; excluded from production and kit",
+  "approval": "Optical Grid symbol and frozen Optical wordmark",
+  "wordmarkStatus": "frozen 2026-10-12; wordmark/manifest.json; product screens currently symbol-only",
   "canvas": 96,
   "bounds": [
     10,
