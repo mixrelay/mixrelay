@@ -33,10 +33,11 @@ struct Producer {
 impl Producer {
     fn new() -> Self {
         let nanos = Arc::new(AtomicU64::new(0));
-        let registry = SourceRegistry::with_clock(Box::new(Clock {
-            origin: Instant::now(),
-            nanos: nanos.clone(),
-        }));
+        let registry =
+            crate::endpoint_service::virtual_pcm::test_storage::registry(Box::new(Clock {
+                origin: Instant::now(),
+                nanos: nanos.clone(),
+            }));
         let mut request = SourceRequest {
             capacity_frames: 16_384,
             channels: 2,

@@ -5,8 +5,10 @@
 mod clock;
 mod mapping;
 pub use clock::{ClientPcmClockOwner, ClientPcmTimeline, ClockPublication};
+mod geometry;
 mod mixer;
 mod snapshot;
+pub use geometry::EndpointGeometry;
 pub use mapping::{ClientPcmReader, ClientPcmWriter};
 pub use mixer::{ClientPcmMixer, MixError, MixWindow};
 pub use snapshot::{ClientPcmSnapshot, SnapshotError};

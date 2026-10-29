@@ -80,10 +80,11 @@ impl Fixture {
         // SAFETY: the snapshot retains the producer-created grants throughout decoding.
         let queues = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
         let graph_nanos = Arc::new(AtomicU64::new(0));
-        let registry = SourceRegistry::with_clock(Box::new(GraphClock {
-            origin: Instant::now(),
-            nanos: graph_nanos.clone(),
-        }));
+        let registry =
+            crate::endpoint_service::virtual_pcm::test_storage::registry(Box::new(GraphClock {
+                origin: Instant::now(),
+                nanos: graph_nanos.clone(),
+            }));
         let mut request = SourceRequest {
             channels: 2,
             capacity_frames: mixrelay_audio_io::retention::RING_FRAMES,
@@ -803,4 +804,33 @@ fn a_head_stream_whose_route_loses_the_head_joins_the_live_edge() {
         published <= 256,
         "{published} frames of the old head followed"
     );
+}
+
+#[test]
+fn an_idle_cached_endpoint_reports_its_unpublished_loss_once_after_the_quiet_period() {
+    let mut fixture = Fixture::new(48_000);
+    fixture.route(ConsumerRoute::Routed { head: true });
+    for _ in 0..8 {
+        fixture.period();
+    }
+    *fixture.pump.signals.update.lock() = Some(super::super::Update {
+        queues: Vec::new(),
+        received: 0,
+        end_retention: true,
+    });
+    fixture.pump.update();
+    let losses = fixture.pump.losses();
+    assert_eq!(
+        fixture.pump.report.final_losses(losses).unwrap().stopped,
+        1_024
+    );
+    let now = fixture.anchor + fixture.timebase.ticks(Duration::from_secs(1));
+    assert_eq!(
+        fixture.pump.idle_wait(now, fixture.timebase),
+        Some(Duration::from_secs(1))
+    );
+    let quiet = now + fixture.timebase.ticks(Duration::from_secs(1));
+    assert_eq!(fixture.pump.idle_wait(quiet, fixture.timebase), None);
+    assert!(fixture.pump.report.final_losses(losses).is_none());
+    assert_eq!(fixture.pump.idle_wait(quiet, fixture.timebase), None);
 }

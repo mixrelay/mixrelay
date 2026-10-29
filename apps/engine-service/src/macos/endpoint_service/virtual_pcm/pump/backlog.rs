@@ -70,6 +70,28 @@ impl Backlog {
         let mut runs = VecDeque::new();
         runs.try_reserve_exact(MAX_RUNS)
             .map_err(std::io::Error::other)?;
+        // Run metadata must also have writable pages before the first RT push.
+        let empty = Run {
+            clock: ClientPcmClock {
+                incarnation: [0; 16],
+                epoch: 0,
+                anchor: 0,
+                rate: 0,
+                running: false,
+                first: None,
+                through: 0,
+            },
+            first: 0,
+            start: 0,
+            restart: false,
+        };
+        runs.resize(MAX_RUNS, empty);
+        for run in &mut runs {
+            // SAFETY: every reserved run is initialized and exclusively owned;
+            // volatile stores prevent removing these pre-fault writes before clear.
+            unsafe { std::ptr::write_volatile(run, empty) };
+        }
+        runs.clear();
         Ok(Self {
             samples,
             channels,

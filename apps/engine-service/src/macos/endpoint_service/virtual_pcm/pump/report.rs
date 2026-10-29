@@ -12,6 +12,8 @@ const LOSS_QUIET: Duration = Duration::from_secs(1);
 #[derive(Default)]
 struct Admission {
     first_pcm: Option<u64>,
+    native: Option<([u8; 16], u64, u64)>,
+    first_drain: Option<u64>,
     format: Option<u64>,
     deferrals: u32,
     converter: Option<(u64, ClientPcmClock, u64, u64)>,
@@ -49,6 +51,9 @@ impl Losses {
 
 pub(super) struct Report {
     prepared: u64,
+    source_started: u64,
+    source_finished: u64,
+    granted: Option<u64>,
     admission: Admission,
     stopped: u64,
     /// Totals when the last episode was reported, and as last observed.
@@ -62,12 +67,32 @@ impl Report {
     pub(super) fn new(prepared: u64) -> Self {
         Self {
             prepared,
+            source_started: prepared,
+            source_finished: prepared,
+            granted: None,
             admission: Admission::default(),
             stopped: 0,
             reported: Losses::default(),
             seen: Losses::default(),
             changed_at: 0,
         }
+    }
+    pub(super) fn preparation(&mut self, started: u64, finished: u64) {
+        self.source_started = started;
+        self.source_finished = finished;
+    }
+    pub(super) fn granted(&mut self, received: u64) {
+        self.granted = Some(received);
+    }
+    pub(super) fn drained(&mut self, now: u64, native: ClientPcmClock) {
+        let identity = (native.incarnation, native.epoch, native.anchor);
+        if self.admission.native != Some(identity) {
+            self.admission = Admission {
+                native: Some(identity),
+                ..Admission::default()
+            };
+        }
+        self.admission.first_drain.get_or_insert(now);
     }
     pub(super) fn retained(&mut self, now: u64) {
         self.admission.first_pcm.get_or_insert(now);
@@ -118,6 +143,11 @@ impl Report {
             native_rate = native.rate,
             graph_rate,
             endpoint_ms = since(self.prepared),
+            grants_ms = ?self.granted.map(since),
+            source_prepare_started_ms = since(self.source_started),
+            source_prepare_finished_ms = since(self.source_finished),
+            backlog_prepared_ms = since(self.prepared),
+            first_drain_ms = ?admission.first_drain.map(since),
             first_pcm_ms = ?admission.first_pcm.map(since),
             format_ms = ?admission.format.map(since),
             converter_ms = since(ready),
@@ -154,6 +184,20 @@ impl Report {
         let episode = losses.since(self.reported);
         self.reported = losses;
         Some(episode)
+    }
+
+    /// Remaining quiet time while an idle endpoint still owes a loss report.
+    pub(super) fn loss_wait(
+        &self,
+        now: u64,
+        timebase: Timebase,
+        losses: (u64, u64),
+    ) -> Option<Duration> {
+        self.final_losses(losses).map(|_| {
+            LOSS_QUIET.saturating_sub(Duration::from_nanos(
+                timebase.nanoseconds(now.saturating_sub(self.changed_at)),
+            ))
+        })
     }
 
     /// The frames of an episode still open when the pump ends.
