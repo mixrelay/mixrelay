@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { canonicalIcns } from './canonical-icns.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.dirname(root);
@@ -28,6 +29,7 @@ try {
   const result = spawnSync('pnpm', ['--filter', '@mixrelay/desktop', 'tauri', 'icon', source, '--output', path.join(work, 'icons')],
     { cwd: repository, stdio: 'pipe' });
   if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr.toString());
+  canonicalIcns(path.join(work, 'icons/icon.icns'));
   fs.copyFileSync(path.join(work, 'icons/icon.icns'), path.join(repository, 'apps/desktop/src-tauri/icons/uninstaller.icns'));
 } finally {
   fs.rmSync(work, { recursive: true, force: true });

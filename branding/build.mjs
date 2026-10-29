@@ -24,6 +24,20 @@ const text = (x, y, value, size = 15, color = c.muted) =>
 const rect = (x, y, width, height, color) => `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${color}"/>`;
 const line = (x1, y1, x2, y2) => `<path d="M${x1} ${y1}L${x2} ${y2}" fill="none" stroke="${c.muted}" stroke-width="1"/>`;
 const knockout = color => `<path fill="${color}" fill-rule="evenodd" d="M0 0H96V96H0Z ${symbol.path}"/>`;
+// macOS app icon template: an 824-unit continuous-corner tile centred on a 1024 canvas with
+// the template's drop shadow. macOS 14/15 draw the file as is; later releases mask it again.
+const squircle = (centre, half, exponent = 5, steps = 256) => {
+  const points = [];
+  for (let i = 0; i < steps; i++) {
+    const angle = 2 * Math.PI * i / steps;
+    const axis = value => Math.sign(value) * Math.abs(value) ** (2 / exponent);
+    points.push(`${n(centre + half * axis(Math.cos(angle)))} ${n(centre + half * axis(Math.sin(angle)))}`);
+  }
+  return `M${points.join('L')}Z`;
+};
+const appTile = color => '<defs><filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">'
+  + '<feDropShadow dx="0" dy="10" stdDeviation="5" flood-color="#000" flood-opacity="0.3"/></filter></defs>'
+  + `<path filter="url(#shadow)" fill="${color}" d="${squircle(512, 412)}"/>`;
 
 // SVG is the portable master. Tauri's existing renderer owns raster exports.
 for (const [name, color] of Object.entries({ red: c.primary, mono: c.ink, inverse: c.inverse, white: c.white })) {
@@ -35,11 +49,14 @@ for (const [name, color] of Object.entries({ red: c.primary, mono: c.ink, invers
 for (const [name, color] of Object.entries({ red: c.primary, mono: c.ink, inverse: c.inverse })) {
   write(`identity/symbols/mixrelay-knockout-${name}.svg`, svg(knockout(color), 96, 96, `MixRelay ${name} negative symbol`));
 }
-write('identity/app-icon.svg', svg(rect(0, 0, 1024, 1024, c.paper) + mark(184, 184, 656, c.primary), 1024, 1024, 'MixRelay app icon'));
+// The symbol keeps its share of the tile: 528 of 824, as 656 of the former full-bleed 1024.
+write('identity/app-icon.svg', svg(appTile(c.paper) + mark(248, 248, 528, c.primary), 1024, 1024, 'MixRelay app icon'));
 write('tray-white.svg', svg(`<path fill="${c.white}" d="${symbol.path}"/>`, 76, 76, 'MixRelay tray template', '10 10 76 76'));
 write('../apps/control-ui/public/favicon.svg', svg(`<path fill="${c.primary}" d="${symbol.path}"/>`, 96, 96, 'MixRelay'));
-write('../apps/website/assets/mixrelay-symbol.svg', fs.readFileSync(path.join(identity, 'symbols/mixrelay-red.svg'), 'utf8'));
-write('../apps/website/assets/favicon.svg', fs.readFileSync(path.join(identity, 'symbols/mixrelay-red.svg'), 'utf8'));
+// The website shows the symbol cropped to its silhouette, like the tray.
+const websiteSymbol = svg(`<path fill="${c.primary}" d="${symbol.path}"/>`, 76, 76, 'MixRelay red symbol', '10 10 76 76');
+write('../apps/website/assets/mixrelay-symbol.svg', websiteSymbol);
+write('../apps/website/assets/favicon.svg', websiteSymbol);
 
 // Approved symbol-only kit: vector marks and editable document labels.
 let board = rect(0, 0, 1200, 1960, c.paper);
