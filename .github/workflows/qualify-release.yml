@@ -212,6 +212,8 @@ jobs:
       - name: Require every environment, scenario and exact artifact
         run: node scripts/qualification.mjs gate --directory qualification/qualification-candidate --candidate qualification/qualification-candidate/mix-relay.candidate.json --reports qualification
       - name: Prepare publication receipt and manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: node scripts/qualification-ci.mjs seal --directory qualification/qualification-candidate --reports qualification --output publication
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
