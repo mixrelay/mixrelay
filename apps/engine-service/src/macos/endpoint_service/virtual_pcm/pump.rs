@@ -184,10 +184,10 @@ impl Pump {
         let update = self.signals.update.lock().take();
         if let Some(update) = update {
             self.report.granted(update.received);
-            self.queues = update.queues;
-            if self.queues.is_empty() {
+            if update.end_retention {
                 self.end_retention();
             }
+            self.queues = update.queues;
         }
     }
     pub(super) fn run(mut self, prepared: impl FnOnce()) -> Result<(), Error> {

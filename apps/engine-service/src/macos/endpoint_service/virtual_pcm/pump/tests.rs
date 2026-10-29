@@ -816,6 +816,7 @@ fn an_idle_cached_endpoint_reports_its_unpublished_loss_once_after_the_quiet_per
     *fixture.pump.signals.update.lock() = Some(super::super::Update {
         queues: Vec::new(),
         received: 0,
+        end_retention: true,
     });
     fixture.pump.update();
     let losses = fixture.pump.losses();

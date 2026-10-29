@@ -127,8 +127,18 @@ fn run<W: Worker>(pcm: &VirtualPcm<W>, shared: &Shared) {
     }
 }
 fn prepare<W: Worker>(pcm: &VirtualPcm<W>, job: &mut Job) -> Result<(), super::virtual_pcm::Error> {
-    pcm.configure_pending(&job.geometry, &job.pending, job.observed)?;
-    pcm.replace_pending(&mut job.pending, job.observed, job.received)
+    let configured =
+        pcm.configure_pending(&job.geometry, &mut job.pending, job.observed, job.received);
+    pcm.replace_pending(&mut job.pending, job.observed, job.received)?;
+    configured
+}
+
+#[cfg(test)]
+pub(super) fn prepare_for_test<W: Worker>(
+    pcm: &VirtualPcm<W>,
+    job: &mut Job,
+) -> Result<(), super::virtual_pcm::Error> {
+    prepare(pcm, job)
 }
 
 #[cfg(test)]

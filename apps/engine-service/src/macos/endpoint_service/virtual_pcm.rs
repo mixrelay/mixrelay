@@ -53,6 +53,8 @@ impl Error {
 struct Update {
     queues: Vec<ClientPcmReader>,
     received: u64,
+    /// Any empty membership since the pump last consumed an update ends retention.
+    end_retention: bool,
 }
 /// Worker lifetime boundary; tests drive the same pump with a synthetic clock.
 pub(super) trait Worker: Sized + Send + 'static {
@@ -152,7 +154,15 @@ impl<W: Worker> Endpoint<W> {
             && sources.producer_can_rearm(self.source_token)
     }
     fn replace(&self, queues: Vec<ClientPcmReader>, received: u64) {
-        *self.update.lock() = Some(Update { queues, received });
+        let mut update = self.update.lock();
+        let end_retention =
+            queues.is_empty() || update.as_ref().is_some_and(|update| update.end_retention);
+        *update = Some(Update {
+            queues,
+            received,
+            end_retention,
+        });
+        drop(update);
         // Release publishes the replacement; the pump consumes it only on control.
         self.updated.store(true, Ordering::Release);
         if let Some(worker) = &self.worker {
@@ -220,21 +230,23 @@ impl<W: Worker> VirtualPcm<W> {
     /// Prepares published geometry before clients normally start native IO.
     #[cfg(test)]
     fn configure(&self, geometry: &[EndpointGeometry], observed: u64) -> Result<(), Error> {
-        self.configure_inner(geometry, observed, None)
+        self.configure_inner(geometry, observed, None, 0)
     }
     pub(super) fn configure_pending(
         &self,
         geometry: &[EndpointGeometry],
-        pending: &PendingGrants,
+        pending: &mut PendingGrants,
         observed: u64,
+        received: u64,
     ) -> Result<(), Error> {
-        self.configure_inner(geometry, observed, Some(pending.generation))
+        self.configure_inner(geometry, observed, Some(pending), received)
     }
     fn configure_inner(
         &self,
         geometry: &[EndpointGeometry],
         observed: u64,
-        expected: Option<u64>,
+        mut pending: Option<&mut PendingGrants>,
+        received: u64,
     ) -> Result<(), Error> {
         validate_geometry(geometry)?;
         let _preparing = Preparation {
@@ -242,7 +254,10 @@ impl<W: Worker> VirtualPcm<W> {
             sources: &self.sources,
         };
         let generation = self.cleared.load(Ordering::Acquire);
-        if expected.is_some_and(|expected| expected != generation) {
+        if pending
+            .as_ref()
+            .is_some_and(|pending| pending.generation != generation)
+        {
             return Err(Error::Stale);
         }
         if observed < self.inventory_at.load(Ordering::Acquire) {
@@ -264,6 +279,7 @@ impl<W: Worker> VirtualPcm<W> {
         drop(endpoints);
         drop(retired);
         self.sources.collect_retired();
+        let mut failure = None;
         for &shape in geometry
             .iter()
             .filter(|shape| shape.capture_channels != 0 && shape.render_channels != 0)
@@ -286,11 +302,15 @@ impl<W: Worker> VirtualPcm<W> {
             match endpoint {
                 Ok(endpoint) => {
                     endpoints.insert(shape.id, endpoint);
+                    drop(endpoints);
+                    if let Some(pending) = pending.as_deref_mut() {
+                        self.replace_pending(pending, observed, received)?;
+                    }
                 }
                 Err(error) => {
                     drop(endpoints);
                     self.sources.collect_retired();
-                    return Err(error);
+                    failure.get_or_insert(error);
                 }
             }
         }
@@ -299,6 +319,9 @@ impl<W: Worker> VirtualPcm<W> {
             drop(endpoints);
             self.sources.collect_retired();
             return Err(Error::Stale);
+        }
+        if let Some(error) = failure {
+            return Err(error);
         }
         self.inventory_at.fetch_max(observed, Ordering::Release);
         drop(endpoints);
@@ -355,12 +378,18 @@ impl<W: Worker> VirtualPcm<W> {
         {
             return Err(Error::Stale);
         }
-        self.replace_members(
-            std::mem::take(&mut pending.queues),
-            Some(&pending.members),
-            observed,
-            received,
-        )
+        let endpoints = self.endpoints.lock();
+        let (ready, deferred) =
+            std::mem::take(&mut pending.queues)
+                .into_iter()
+                .partition(|queue| {
+                    endpoints
+                        .get(&queue.endpoint())
+                        .is_some_and(|endpoint| endpoint.ready(endpoint.geometry, &self.sources))
+                });
+        pending.queues = deferred;
+        drop(endpoints);
+        self.replace_members(ready, Some(&pending.members), observed, received)
     }
     /// Hands queues to prepared pumps; unprepared grants use the inventory worker.
     pub(super) fn replace(
