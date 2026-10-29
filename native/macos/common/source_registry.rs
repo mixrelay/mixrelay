@@ -4,8 +4,7 @@
 //! control after local readers drain, never on an audio callback.
 use crate::{
     application_clock::{
-        ApplicationClock, VERSION, mr_application_clock_publish_consumer,
-        mr_application_clock_request_rate,
+        ApplicationClock, ConsumerRoute, VERSION, mr_application_clock_request_rate,
     },
     application_source_mapping::Mapping,
     shared_audio_buffer::{
@@ -176,18 +175,18 @@ impl Timeline {
 
     fn publish(&self, source: &Source, epoch: u64, frames: u32, running: bool) {
         self.publish_telemetry(source.mapping.clock());
-        // SAFETY: the caller's nonblocking consumer claim owns this timeline;
-        // the read pin retains its mapping through bounded atomic publication.
-        unsafe {
-            mr_application_clock_publish_consumer(
-                source.mapping.clock.as_ptr(),
+        source
+            .mapping
+            .clock()
+            .publish_consumer(crate::application_clock::ConsumerPublication {
                 epoch,
-                self.policy.next,
+                next_frame: self.policy.next,
                 frames,
                 running,
-                self.policy.target,
-            );
-        }
+                target_backlog_frames: self.policy.target,
+                phase_ns: self.policy.timing.phase_ns(),
+                period_ns: self.policy.timing.period_ns(),
+            });
     }
 
     fn publish_telemetry(&self, clock: &ApplicationClock) {
@@ -369,6 +368,21 @@ impl Default for SourceRegistry {
     }
 }
 impl SourceRegistry {
+    /// Publishes how the graph's active plan uses a source to its producer. Returns
+    /// false when the identified source is absent.
+    pub fn set_consumer_route(&self, token: u64, route: ConsumerRoute) -> bool {
+        let read = self.read(token);
+        let Some(source) = read.source() else {
+            return false;
+        };
+        // Release publishes the route to the producer's next retention decision.
+        source
+            .mapping
+            .clock()
+            .consumer_route
+            .store(route.word(), Ordering::Release);
+        true
+    }
     /// Selects pacing authority without changing PCM, format, or producer ownership.
     pub fn set_clock_master(&self, token: u64, master: bool) -> bool {
         let read = self.read(token);
@@ -713,6 +727,8 @@ impl SourceRegistry {
             timeline.policy.started = false;
             timeline.previous_read = None;
             timeline.policy.next = 0;
+            // The reader's clock survives an unavailable source; its next read restarts
+            // the measured run, so it is never taken for a sequential reader meanwhile.
             timeline.publish(source, stats.epoch, frames, false);
             return Err(ReadMiss::Unavailable);
         }

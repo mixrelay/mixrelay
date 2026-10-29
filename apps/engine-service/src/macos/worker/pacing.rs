@@ -3,6 +3,7 @@ use super::super::external_io::{binding_sources, binding_token};
 use crate::macos_pacing::{ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, Pace};
 use mixrelay_audio_engine::{BlockProcessor, ExternalBinding, RenderPlan};
 use mixrelay_engine_service::endpoint_service;
+use mixrelay_macos_transport::{application_clock::ConsumerRoute, source_registry::SourceRegistry};
 
 pub(in crate::macos) struct RouteClock {
     pub(in crate::macos) maximum_frames: u32,
@@ -46,7 +47,7 @@ impl RouteClock {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SourceKind {
     Application,
     Virtual,
@@ -59,6 +60,14 @@ pub(in crate::macos) struct NativePacers {
     selected_application: Option<(u64, SourceKind)>,
 }
 impl NativePacers {
+    /// The shared source this pacing consumes from its first credit, if any. The graph
+    /// publishes it as the head route, so only that source's producer delivers PCM it
+    /// retained before admission.
+    pub(in crate::macos) fn head(&self) -> Option<u64> {
+        // A device clock resets the application pacer, which then has no head.
+        self.application.head()
+    }
+
     fn select_application_master(&mut self, token: Option<(u64, SourceKind)>) {
         if token.is_none() {
             self.application = ApplicationPacer::default();
@@ -77,6 +86,48 @@ impl NativePacers {
 impl Drop for NativePacers {
     fn drop(&mut self) {
         self.select_application_master(None);
+    }
+}
+
+/// Virtual sources of the active plan. Graph cycles publish each one's route; a source
+/// the next plan drops, or every source when the worker ends, is published unrouted.
+/// The set lives for the worker, so checkpoints and gated rendering keep every route.
+pub(in crate::macos) struct PlanRoutes {
+    sources: Option<&'static SourceRegistry>,
+    tokens: Vec<u64>,
+}
+impl PlanRoutes {
+    pub(in crate::macos) fn new(sources: Option<&'static SourceRegistry>) -> Self {
+        Self {
+            sources,
+            tokens: Vec::new(),
+        }
+    }
+
+    /// Adopts a newly activated plan. Allocates; call outside realtime.
+    pub(in crate::macos) fn activate(&mut self, plan: &RenderPlan) {
+        let tokens: Vec<_> = plan
+            .source_bindings()
+            .iter()
+            .filter(|binding| binding.virtual_endpoint_id().is_some())
+            .map(binding_token)
+            .collect();
+        for token in self.tokens.iter().filter(|token| !tokens.contains(token)) {
+            self.unroute(*token);
+        }
+        self.tokens = tokens;
+    }
+    fn unroute(&self, token: u64) {
+        if let Some(sources) = self.sources {
+            sources.set_consumer_route(token, ConsumerRoute::Unrouted);
+        }
+    }
+}
+impl Drop for PlanRoutes {
+    fn drop(&mut self) {
+        for token in &self.tokens {
+            self.unroute(*token);
+        }
     }
 }
 
@@ -116,6 +167,16 @@ fn application_identity(binding: &ExternalBinding) -> Option<(u64, SourceKind)> 
     Some((binding_token(binding), kind))
 }
 
+/// A shared source may pace the graph only while its node is on and the plan carries it
+/// to an output: an Off or metered-only source must never hold the graph on its credit.
+fn paces(plan: &RenderPlan, binding: &ExternalBinding) -> Option<(u64, SourceKind)> {
+    let enabled = plan
+        .controls()
+        .snapshot(binding.node_id())
+        .is_some_and(|(control, _)| control.enabled);
+    application_identity(binding).filter(|_| enabled && binding.is_routed_source())
+}
+
 pub(in crate::macos) fn next_native_pace(
     pacers: &mut NativePacers,
     devices: &crate::macos_devices::DeviceSet,
@@ -145,45 +206,68 @@ pub(in crate::macos) fn next_native_pace(
             2,
         );
     }
-    let format = plan.format();
     devices.set_clock_master(None);
-    devices.set_graph_quantum(format.block_frames);
-    for binding in plan.source_bindings() {
-        if let Some(clock) = binding_clock(binding)
-            && clock.running != 0
-        {
-            pacers.select_application_master(Some((
-                binding_token(binding),
-                if binding.virtual_endpoint_id().is_some() {
-                    SourceKind::Virtual
-                } else {
-                    SourceKind::Application
-                },
-            )));
-            return (
-                pacers.application.next(
-                    (binding_token(binding), clock),
-                    (
-                        format.sample_rate,
-                        format.block_frames,
-                        clock.capacity_frames,
-                    ),
+    devices.set_graph_quantum(plan.format().block_frames);
+    next_application_pace(pacers, plan, binding_clock)
+}
+
+/// Paces the graph from its current master while it runs and may still pace, else from
+/// the first running pacing source in plan order, or awaits the first one when none
+/// runs. Keeping a running master avoids a new pacer generation and a reacquired capture
+/// cursor when an earlier-listed source starts or comes back on. `clock` observes a
+/// binding's producer.
+fn next_application_pace(
+    pacers: &mut NativePacers,
+    plan: &RenderPlan,
+    clock: impl Fn(&ExternalBinding) -> Option<ApplicationClockSnapshot>,
+) -> (Pace, u64) {
+    let format = plan.format();
+    let running = |binding: &ExternalBinding| {
+        let identity = paces(plan, binding)?;
+        clock(binding)
+            .filter(|clock| clock.running != 0)
+            .map(|clock| (identity, clock))
+    };
+    let current = pacers.selected_application.and_then(|selected| {
+        plan.source_bindings()
+            .iter()
+            .find(|binding| paces(plan, binding) == Some(selected))
+            .and_then(running)
+    });
+    if let Some((identity, clock)) =
+        current.or_else(|| plan.source_bindings().iter().find_map(running))
+    {
+        pacers.select_application_master(Some(identity));
+        return (
+            pacers.application.next(
+                (identity.0, clock),
+                (
+                    format.sample_rate,
+                    format.block_frames,
+                    clock.capacity_frames,
                 ),
-                3,
-            );
-        }
+            ),
+            3,
+        );
     }
     // Master selection follows graph identity. A producer format rearm can
     // temporarily hide native running state without removing the selected source.
-    let retained = pacers.selected_application.filter(|(token, kind)| {
+    let retained = pacers.selected_application.filter(|selected| {
         plan.source_bindings()
             .iter()
-            .any(|binding| application_identity(binding) == Some((*token, *kind)))
+            .any(|binding| paces(plan, binding) == Some(*selected))
     });
-    let waiting = retained.or_else(|| plan.source_bindings().iter().find_map(application_identity));
+    let waiting = retained.or_else(|| {
+        plan.source_bindings()
+            .iter()
+            .find_map(|binding| paces(plan, binding))
+    });
     if let Some((token, _)) = waiting {
         pacers.application.await_source(token);
     }
     pacers.select_application_master(waiting);
     (Pace::Unknown, 0)
 }
+
+#[cfg(test)]
+mod tests;

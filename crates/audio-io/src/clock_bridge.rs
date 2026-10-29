@@ -333,6 +333,29 @@ impl AsyncClockBridge {
         Ok(self.correction_ppm())
     }
 
+    /// Sets the drift correction from a direct measurement of the consumer clock, for
+    /// a consumer that reads by time and so keeps the FIFO occupancy level whatever the
+    /// ratio. The configured limit bounds it; occupancy feedback continues from it.
+    ///
+    /// # Errors
+    /// Rejects a non-finite correction, and [`BridgeError::Resampler`] if the converter
+    /// rejects the ratio.
+    pub fn set_clock_correction(&mut self, ppm: f64) -> Result<f64, BridgeError> {
+        if !ppm.is_finite() {
+            return Err(BridgeError::InvalidFeedback);
+        }
+        let correction = self.controller.set(ppm);
+        if self.config.clock_relation == ClockRelation::Independent
+            && let Some(resampler) = &mut self.resampler
+        {
+            resampler
+                .set_resample_ratio_relative(1.0 + correction * 1e-6, true)
+                .map_err(|_| BridgeError::Resampler)?;
+            self.time.ratio(correction);
+        }
+        Ok(self.correction_ppm())
+    }
+
     /// Restarts clock feedback without interrupting the current PCM timeline.
     ///
     /// Use when clock authority changes but the native stream remains connected.

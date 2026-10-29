@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <sys/mman.h>
 #include <unistd.h>
-_Static_assert(sizeof(MRApplicationClock) == 160U, "v5 clock header ABI; PCM coordinates follow it");
+_Static_assert(sizeof(MRApplicationClock) == 176U, "v7 clock header ABI; PCM coordinates follow it");
 _Static_assert(offsetof(MRApplicationClock, target_backlog_frames) == 96U, "target offset");
 _Static_assert(sizeof(MRApplicationSourceClockSnapshot) == 96U, "source snapshot ABI");
 _Static_assert(offsetof(MRApplicationSourceClockSnapshot, starvation_episodes) == 56U, "telemetry offset");

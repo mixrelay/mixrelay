@@ -40,6 +40,14 @@ impl Scheduling {
             failed_transitions: Cell::new(0),
         }
     }
+    /// Keeps standard scheduling, for tests that drive cycles on their own thread.
+    #[cfg(test)]
+    pub(super) fn standard() -> Self {
+        Self {
+            realtime: None,
+            failed_transitions: Cell::new(0),
+        }
+    }
     pub(super) fn retune(&self, rate: u32) {
         if let Some(realtime) = &self.realtime {
             let period =

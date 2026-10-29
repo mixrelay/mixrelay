@@ -372,3 +372,37 @@ fn the_queue_covers_a_full_render_span_lead_over_a_pump_170_ms_late_at_192_khz()
         assert_eq!(consumed, playhead);
     }
 }
+
+#[test]
+fn the_mixer_counts_published_frames_it_skips_after_an_overrun_or_a_late_join() {
+    let writer = queue(2);
+    let readers = vec![reader(&writer)];
+    let capacity = u64::from(QUEUE_FRAMES);
+    let mut written = 0;
+    let mut write_through = |end: u64| {
+        while written < end {
+            assert!(writer.write(written, &[0.25; 256], 128));
+            written += 128;
+        }
+    };
+    let mut output = [0.0; 256];
+    let mut scratch = [0.0; 256];
+    write_through(512);
+    let mut mixer = ClientPcmMixer::default();
+    let window = mixer.window(&readers, |_| Some(512)).unwrap();
+    assert_eq!((window.first, window.discontinuity), (0, true));
+    ClientPcmMixer::mix(&readers, window, &mut output, &mut scratch).unwrap();
+    mixer.commit(window);
+    assert_eq!(mixer.skipped_frames(), 0);
+    // The cursor stalls at 128 while the writer overruns it by 1,024 frames.
+    let end = 128 + capacity + 1_024;
+    write_through(end);
+    let window = mixer.window(&readers, |_| Some(end)).unwrap();
+    assert_eq!((window.first, window.discontinuity), (end - capacity, true));
+    assert_eq!(mixer.skipped_frames(), 1_024);
+    // A reader that first observes this timeline now has never seen its first frames.
+    let mut late = ClientPcmMixer::default();
+    let window = late.window(&readers, |_| Some(end)).unwrap();
+    assert_eq!(window.first, end - capacity);
+    assert_eq!(late.skipped_frames(), end - capacity);
+}

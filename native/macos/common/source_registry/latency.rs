@@ -15,6 +15,8 @@ pub(super) struct Latency {
     pub rebuffer_frames: u64,
     pub overwrite_skips: u64,
     pub insufficient_headroom: bool,
+    /// How a time-addressed reader's clock stands against the frame timestamps.
+    pub timing: super::timestamps::Timing,
 }
 
 impl Latency {
