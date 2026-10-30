@@ -41,9 +41,9 @@ function resolveLocalReference(page, reference) {
 }
 function checkAnchor(page, reference) {
   if (!externalReference.test(reference)) return resolveLocalReference(page, reference);
-  // Stream Deck release downloads are available independently of Marketplace approval.
+  // Stream Deck downloads come from the product page, independently of Marketplace approval.
   assert.ok(reference === 'mailto:support@rawsector.com' ||
-    (page.startsWith('manual/') && page.endsWith('/stream-deck.html') && reference === 'https://github.com/mixrelay/mixrelay/releases') ||
+    (page.startsWith('manual/') && page.endsWith('/stream-deck.html') && reference === 'https://rawsector.com/products/mixrelay') ||
     (page.startsWith('legal/') && legalReferences.has(reference.replaceAll('&amp;', '&'))) ||
     (reference.startsWith('https://support.apple.com/') && new URL(reference).hostname === 'support.apple.com'),
   `${page}: external destination is an approved support or legal reference: ${reference}`);
@@ -215,7 +215,7 @@ for (const language of manualLanguages) {
   assert.match(html, /Stream Deck 7\.1/, `${page}: SDK 3.x host minimum`);
   assert.doesNotMatch(html, /Stream Deck 6\.6/, `${page}: no obsolete host requirement`);
   assert.match(html, /MixRelay-StreamDeck-0\.1\.0\.streamDeckPlugin/, `${page}: release package installation`);
-  assert.match(html, /href="https:\/\/github\.com\/mixrelay\/mixrelay\/releases"/, `${page}: official release downloads`);
+  assert.match(html, /href="https:\/\/rawsector\.com\/products\/mixrelay"/, `${page}: official release downloads`);
   assert.match(html, /Elgato Marketplace/, `${page}: conditional Marketplace installation`);
 }
 console.log(`Static website checks passed for ${pages.length} pages (links/assets, languages, headings, translation parity, accessibility structure and prerelease policy).`);

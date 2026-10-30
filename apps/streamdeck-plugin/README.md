@@ -23,7 +23,7 @@ archive again and reports its size and SHA-256. It refuses to overwrite an exist
 The package uses the Cargo product version, with a fourth manifest component of `0`.
 `validate` checks the built directory; `run pack` rebuilds, validates and packs in one command.
 
-Download the package from [MixRelay releases](https://github.com/mixrelay/mixrelay/releases)
+Download the package from the [MixRelay product page](https://rawsector.com/products/mixrelay)
 and open it with Stream Deck. Once the Elgato Marketplace listing is published, you
 can also search for MixRelay in Marketplace and install it from the product page. MixRelay offers
 **Power, Mute, Volume, and Recording** actions (localised to Korean when selected
