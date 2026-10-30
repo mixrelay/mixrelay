@@ -178,3 +178,86 @@ fn removal_finalizes_recording_and_late_recorder_command_cannot_target_replaceme
     assert!(metadata.frames > 0);
     assert_eq!(metadata.data_bytes, metadata.frames * 2 * 3);
 }
+
+#[test]
+fn undo_redo_graph_deletion_restores_original_graph_nodes_and_layout_and_persists_them() {
+    let fixture = Fixture::new();
+    let engine =
+        controller(default_duplex_document(9, None)).with_graph_catalog_path(fixture.path());
+    let original = engine.read_catalog().unwrap();
+    let id = original.active_id.clone();
+    let authored = mixrelay_control_protocol::GraphLayout {
+        positions: [
+            (
+                "default-virtual-io:input".into(),
+                mixrelay_control_protocol::GraphNodePosition { x: 137.0, y: 83.0 },
+            ),
+            (
+                "default-virtual-io:output".into(),
+                mixrelay_control_protocol::GraphNodePosition { x: 593.0, y: 271.0 },
+            ),
+        ]
+        .into(),
+        sizes: [(
+            "default-virtual-io:input".into(),
+            mixrelay_control_protocol::GraphNodeSize {
+                width: 327.0,
+                height: 219.0,
+            },
+        )]
+        .into(),
+        node_labels: [
+            ("default-virtual-io:input".into(), "Programme input".into()),
+            ("default-virtual-io:output".into(), "Monitor output".into()),
+        ]
+        .into(),
+        viewport: Some(mixrelay_control_protocol::GraphViewport {
+            x: -143.0,
+            y: 67.0,
+            zoom: 0.73,
+        }),
+    };
+    let layout = engine
+        .update_graph_layout(
+            &id,
+            mixrelay_control_protocol::GraphLayoutRequest {
+                expected_layout_revision: 0,
+                layout: authored.clone(),
+            },
+        )
+        .unwrap();
+    assert_eq!(layout.layout, authored);
+    remove(&engine, &id).unwrap();
+    settle(&engine);
+    assert!(engine.read_node_controls(&id).is_err());
+    for _ in 0..2 {
+        let restored = engine
+            .mutate_graph_catalog(request(&engine, GraphCatalogAction::UndoDelete))
+            .unwrap();
+        settle(&engine);
+        assert_eq!(restored.active_id, id);
+        assert_eq!(restored.graphs, original.graphs);
+        assert_eq!(restored.document.nodes, original.document.nodes);
+        assert_eq!(engine.read_graph_layout(&id).unwrap().layout, layout.layout);
+        assert!(engine.read_node_controls(&id).is_ok());
+        engine
+            .mutate_graph_catalog(request(&engine, GraphCatalogAction::RedoDelete))
+            .unwrap();
+        settle(&engine);
+        assert!(engine.read_node_controls(&id).is_err());
+    }
+    engine
+        .mutate_graph_catalog(request(&engine, GraphCatalogAction::UndoDelete))
+        .unwrap();
+    settle(&engine);
+    let restarted =
+        controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
+    assert_eq!(restarted.read_catalog().unwrap().active_id, id);
+    let persisted = restarted.read_graph_layout(&id).unwrap();
+    assert_eq!(persisted.layout, authored);
+    assert_eq!(persisted.layout_revision, layout.layout_revision);
+    assert_eq!(
+        restarted.read_catalog().unwrap().document.nodes,
+        original.document.nodes
+    );
+}

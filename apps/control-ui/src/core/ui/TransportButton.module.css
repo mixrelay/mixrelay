@@ -64,3 +64,8 @@
   width: var(--control-height-compact);
   height: var(--control-height-compact);
 }
+
+.root[data-midi-selected] {
+  background: var(--midi-map-surface);
+  color: var(--midi-map-colour);
+}

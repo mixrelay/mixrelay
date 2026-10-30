@@ -1,3 +1,4 @@
+import { MidiContext, MidiNodeContext } from '../midi/MidiPort';
 import '@xyflow/react/dist/base.css';
 
 import {
@@ -104,7 +105,11 @@ import {
 } from './reactFlowAdapter';
 import { graphNodeFaceMode, useAudioNodeLayout } from './useAudioNodeLayout';
 import { type SelectedAudioPort, useAudioPortSelection } from './useAudioPortSelection';
-import { type GraphContextMenuLabels, useGraphContextMenu } from './useGraphContextMenu';
+import {
+  type GraphContextMenuLabels,
+  type NodeContextAction,
+  useGraphContextMenu,
+} from './useGraphContextMenu';
 import { useNodeInsertion } from './useNodeInsertion';
 
 const nodeTypes = { audio: memo(AudioFlowNodeView) };
@@ -171,6 +176,7 @@ const AudioPortSelectionContext = createContext<AudioPortSelectionContextValue |
 const NodeDisclosureHeightsContext = createContext<Map<string, number> | null>(null);
 
 export interface AudioGraphCanvasProps {
+  nodeContextActions?: (nodeId: string) => readonly NodeContextAction[];
   renderNodeControls?: (node: AudioGraphNode) => AudioNodeControlSlots | null;
   renderNodeContent?: (node: AudioGraphNode) => ReactNode;
   contextMenuLabels?: GraphContextMenuLabels;
@@ -744,7 +750,8 @@ function AddNodePanel({
 }) {
   const { t } = useTranslation();
   const actionLabel = label?.trim() || t('routing.addNode');
-  if (nodeMenuItems.length === 0) return null;
+  const mapping = useContext(MidiContext)?.active ?? false;
+  if (nodeMenuItems.length === 0 || mapping) return null;
   return (
     <ReactFlowPanel className={`${styles.nodeToolbar} nodrag nopan nowheel`} position="top-left">
       <HierarchicalMenuButton
@@ -849,31 +856,34 @@ function GraphContextSurface({
   captureProps: ReturnType<typeof useAudioPortSelection>['captureProps'];
   renameNode?: (nodeId: string) => void;
 }) {
+  const mapping = useContext(MidiContext)?.active ?? false;
   return (
     <HierarchicalContextMenu
       getAnchor={graphContextMenuAnchor}
-      items={contextMenu.items}
+      items={mapping ? [] : contextMenu.items}
       onOpenedChange={nodeMenu.setContextOpened}
       onSelect={(id) => {
         nodeMenu.close();
         if (!contextMenu.execute(id)) addNode(id);
       }}
-      opened={nodeMenu.contextOpened}
+      opened={nodeMenu.contextOpened && !mapping}
     >
       <section
         {...captureProps}
         onKeyDownCapture={(event) =>
+          !mapping &&
           handleGraphKeyDown(event, captureProps, contextMenu.clearSelection, renameNode)
         }
         onPointerDownCapture={(event) => {
           // The whole canvas is the context trigger, so the menu's outside-click
           // handler cannot dismiss clicks on other nodes or ports inside it.
           if (event.button !== 2) nodeMenu.setContextOpened(false);
-          captureProps.onPointerDownCapture(event);
+          if (!mapping) captureProps.onPointerDownCapture(event);
         }}
         aria-label={ariaLabel}
         tabIndex={-1}
         className={styles.root}
+        data-midi-mode={mapping || undefined}
         ref={nodeMenu.rootRef}
         onContextMenu={(event) => {
           contextMenu.prepare(event);
@@ -974,12 +984,13 @@ function GraphFlowSurface({
   ...props
 }: ReactFlowProps<AudioFlowNode, AudioFlowEdge> & { focusRoot: RefObject<HTMLElement | null> }) {
   const ariaLabelConfig = useGraphAriaLabels();
+  const mapping = useContext(MidiContext)?.active ?? false;
   // React Flow's deletion keys listen on the whole document. Keeping the listener mounted
   // preserves its key tracking; deletion itself proceeds only while focus is in the graph,
   // so Delete in a dialog or elsewhere never removes the selection behind it.
   const onBeforeDelete = useCallback(
-    () => Promise.resolve(Boolean(focusRoot.current?.contains(document.activeElement))),
-    [focusRoot],
+    () => Promise.resolve(Boolean(!mapping && focusRoot.current?.contains(document.activeElement))),
+    [focusRoot, mapping],
   );
   return (
     <ReactFlow<AudioFlowNode, AudioFlowEdge>
@@ -992,17 +1003,28 @@ function GraphFlowSurface({
       zIndexMode="manual"
       deleteKeyCode={deleteKeyCode}
       onBeforeDelete={onBeforeDelete}
-      edgesReconnectable
+      onNodeClick={mapping ? (event) => event.stopPropagation() : props.onNodeClick}
+      onNodeDoubleClick={mapping ? undefined : props.onNodeDoubleClick}
+      nodesDraggable={!mapping}
+      nodesConnectable={!mapping}
+      nodesFocusable={!mapping}
+      edgesFocusable={!mapping}
+      elementsSelectable={!mapping}
+      disableKeyboardA11y={mapping}
+      edgesReconnectable={!mapping}
       fitViewOptions={fitViewOptions}
       // Match the persisted layout contract; React Flow's defaults would clamp restored views.
       minZoom={0.05}
       maxZoom={8}
       multiSelectionKeyCode="Shift"
       nodeTypes={nodeTypes}
-      panActivationKeyCode={platformModifier()}
-      panOnDrag={panMouseButtons}
+      panActivationKeyCode={mapping ? null : platformModifier()}
+      panOnDrag={mapping ? false : panMouseButtons}
+      zoomOnScroll={!mapping}
+      zoomOnPinch={!mapping}
+      zoomOnDoubleClick={!mapping}
       reconnectRadius={18}
-      selectionOnDrag
+      selectionOnDrag={!mapping}
       snapGrid={snapGrid}
       snapToGrid
     />
@@ -1013,11 +1035,12 @@ function useGraphCommit(
   model: AudioGraphModel,
   onModelChange: AudioGraphCanvasProps['onModelChange'],
 ) {
+  const mapping = useContext(MidiContext)?.active ?? false;
   return useCallback(
     (nextModel: AudioGraphModel, kind: AudioGraphChangeKind) => {
-      if (nextModel !== model) onModelChange(nextModel, kind);
+      if (!mapping && nextModel !== model) onModelChange(nextModel, kind);
     },
-    [model, onModelChange],
+    [model, onModelChange, mapping],
   );
 }
 
@@ -1037,6 +1060,7 @@ export function AudioGraphCanvas({
   onModelChange,
   onNodeMenuOpenedChange,
   onNodeRenameRequest,
+  nodeContextActions,
   onProcessorEditorRetry,
   processorEditorLabels,
   processorEditorStatuses = emptyProcessorEditorStatuses,
@@ -1077,6 +1101,7 @@ export function AudioGraphCanvas({
     addItems: nodeMenuItems,
     labels: contextMenuLabels,
     renameNode: renaming.request,
+    nodeActions: nodeContextActions,
     connectChannels: connecting.request,
     commit,
     clearPorts: portSelection.clear,
@@ -1231,74 +1256,92 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
     };
   }, [disclosureHeights, graphNode.id, layout.disclosureHeight]);
   return (
-    <NodeOptionsIdContext.Provider value={graphNode.id}>
-      <div
-        className={styles.node}
-        data-node-type={graphNode.runtime?.type}
-        data-equalizer={Boolean(graphNode.appearance.equalizer) || undefined}
-        data-dynamics={Boolean(graphNode.appearance.dynamics) || undefined}
-        style={{
-          width:
-            normalizeAudioGraphNodeSize(graphNode, graphNode.size)?.width ??
-            (editorWidth ? Math.min(1600, Math.max(240, editorWidth)) : undefined),
-          height: layout.height,
-          minHeight: layout.minHeight,
-        }}
-      >
-        <NodePortHandles node={graphNode} geometry={layout.ports} side="input" />
-        <AudioNodeCard
-          {...graphNode.appearance}
-          title={audioGraphNodeTitle(graphNode)}
-          optionsLabel={graphNode.appearance.optionsLabel ?? t('routing.nodes.options')}
-          content={renderNodeContent?.(graphNode)}
-          headerActions={controls?.power}
-          muteControl={controls?.mute}
-          poweredOff={graphNode.runtime?.control?.enabled === false}
-          faceHeight={layout.faceHeight}
-          faceMode={graphNodeFaceMode(graphNode)}
-          onFaceHeightChange={layout.onFaceHeightChange}
-          onContentHeightChange={layout.onContentHeightChange}
-          inputCount={graphNode.inputPorts.length}
-          onGainChange={
-            onNodeGainChange ? (gainDb) => onNodeGainChange(graphNode.id, gainDb) : undefined
-          }
-          onChannelLayoutChange={
-            settings.channelLayout
-              ? (value) => settings.channelLayout?.(graphNode.id, value)
-              : undefined
-          }
-          onEndpointChange={
-            settings.endpoint ? (value) => settings.endpoint?.(graphNode.id, value) : undefined
-          }
-          onLayoutChange={() => updateNodeInternals(graphNode.id)}
-          onParameterChange={
-            onNodeParameterChange
-              ? (parameterId, value) => onNodeParameterChange(graphNode.id, parameterId, value)
-              : undefined
-          }
-          onParametersChange={
-            onNodeParametersChange
-              ? (updates) => onNodeParametersChange(graphNode.id, updates)
-              : undefined
-          }
-          onProcessorEditorRetry={
-            graphNode.appearance.hasProcessorEditor && processorEditors
-              ? () => processorEditors.onRetry(graphNode.id)
-              : undefined
-          }
-          outputCount={graphNode.outputPorts.length}
-          processorEditor={processorEditorProps(
-            graphNode.id,
-            graphNode.appearance.hasProcessorEditor,
-            processorEditors,
-          )}
-          selected={selected}
-          showPorts={false}
-        />
-        <NodePortHandles node={graphNode} geometry={layout.ports} side="output" />
-        <NodeResizeGrip minHeight={layout.minHeight} minWidth={graphNodeMinimumWidth(graphNode)} />
-      </div>
-    </NodeOptionsIdContext.Provider>
+    <MidiNodeScope node={graphNode}>
+      <NodeOptionsIdContext.Provider value={graphNode.id}>
+        <div
+          className={styles.node}
+          data-node-type={graphNode.runtime?.type}
+          data-equalizer={Boolean(graphNode.appearance.equalizer) || undefined}
+          data-dynamics={Boolean(graphNode.appearance.dynamics) || undefined}
+          style={{
+            width:
+              normalizeAudioGraphNodeSize(graphNode, graphNode.size)?.width ??
+              (editorWidth ? Math.min(1600, Math.max(240, editorWidth)) : undefined),
+            height: layout.height,
+            minHeight: layout.minHeight,
+          }}
+        >
+          <NodePortHandles node={graphNode} geometry={layout.ports} side="input" />
+          <AudioNodeCard
+            {...graphNode.appearance}
+            title={audioGraphNodeTitle(graphNode)}
+            optionsLabel={graphNode.appearance.optionsLabel ?? t('routing.nodes.options')}
+            content={renderNodeContent?.(graphNode)}
+            headerActions={controls?.power}
+            muteControl={controls?.mute}
+            poweredOff={graphNode.runtime?.control?.enabled === false}
+            faceHeight={layout.faceHeight}
+            faceMode={graphNodeFaceMode(graphNode)}
+            onFaceHeightChange={layout.onFaceHeightChange}
+            onContentHeightChange={layout.onContentHeightChange}
+            inputCount={graphNode.inputPorts.length}
+            onGainChange={
+              onNodeGainChange ? (gainDb) => onNodeGainChange(graphNode.id, gainDb) : undefined
+            }
+            onChannelLayoutChange={
+              settings.channelLayout
+                ? (value) => settings.channelLayout?.(graphNode.id, value)
+                : undefined
+            }
+            onEndpointChange={
+              settings.endpoint ? (value) => settings.endpoint?.(graphNode.id, value) : undefined
+            }
+            onLayoutChange={() => updateNodeInternals(graphNode.id)}
+            onParameterChange={
+              onNodeParameterChange
+                ? (parameterId, value) => onNodeParameterChange(graphNode.id, parameterId, value)
+                : undefined
+            }
+            onParametersChange={
+              onNodeParametersChange
+                ? (updates) => onNodeParametersChange(graphNode.id, updates)
+                : undefined
+            }
+            onProcessorEditorRetry={
+              graphNode.appearance.hasProcessorEditor && processorEditors
+                ? () => processorEditors.onRetry(graphNode.id)
+                : undefined
+            }
+            outputCount={graphNode.outputPorts.length}
+            processorEditor={processorEditorProps(
+              graphNode.id,
+              graphNode.appearance.hasProcessorEditor,
+              processorEditors,
+            )}
+            selected={selected}
+            showPorts={false}
+          />
+          <NodePortHandles node={graphNode} geometry={layout.ports} side="output" />
+          <NodeResizeGrip
+            minHeight={layout.minHeight}
+            minWidth={graphNodeMinimumWidth(graphNode)}
+          />
+        </div>
+      </NodeOptionsIdContext.Provider>
+    </MidiNodeScope>
+  );
+}
+
+function MidiNodeScope({ node, children }: { node: AudioGraphNode; children: ReactNode }) {
+  return (
+    <MidiNodeContext.Provider
+      value={{
+        nodeId: node.runtime?.binding?.nodeId ?? node.id,
+        nodeName: audioGraphNodeTitle(node),
+      }}
+    >
+      {children}
+    </MidiNodeContext.Provider>
   );
 }
 

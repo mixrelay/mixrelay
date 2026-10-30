@@ -52,6 +52,19 @@ impl TelemetrySource for super::LocalControl {
     }
 }
 
+impl TelemetrySource for Arc<super::LocalControl> {
+    type Chunks = reqwest::Response;
+    fn open(&self) -> impl Future<Output = Result<Self::Chunks, String>> + Send {
+        self.meter_stream()
+    }
+    fn observe(
+        &self,
+        window: &mut ControlTelemetry,
+    ) -> impl Future<Output = Result<(), String>> + Send {
+        self.observe_telemetry(window)
+    }
+}
+
 impl TelemetryChunks for reqwest::Response {
     fn incarnation(&self) -> Option<String> {
         self.headers()

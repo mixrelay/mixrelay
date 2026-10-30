@@ -1,5 +1,47 @@
 import { effectTranslations } from '../effects';
 export const it = {
+  midi: {
+    mapMode: 'Modalità mappatura MIDI',
+    mapTarget: 'Assegna {{name}}: {{action}}',
+    selectTarget:
+      'Seleziona un controllo evidenziato, poi muovi un fader o premi un pulsante MIDI.',
+    waitingTarget: '{{name}} · {{action}} — muovi un controllo MIDI per assegnarlo o sostituirlo.',
+    done: 'Termina mappatura',
+    selectMapping: 'Seleziona {{name}} · {{action}}',
+    recorderAction: 'Azione del registratore',
+    min: 'Minimo',
+    max: 'Massimo',
+    empty: 'Nessuna mappatura MIDI. Seleziona un controllo evidenziato per aggiungerne una.',
+    targetUnavailable: 'Stato delle destinazioni non disponibile',
+    title: 'Controlli MIDI',
+    disconnected: 'Dispositivo scollegato',
+    targetMissing: 'Destinazione mancante',
+    unavailable: 'MIDI non disponibile',
+    mode: 'Modalità volume',
+    pickup: 'Porta il fader al livello attuale per assumere il controllo.',
+    step: 'Passo',
+    remove: 'Rimuovi',
+    removeTarget: 'Rimuovi controllo MIDI di {{name}}',
+    failed: 'Impossibile modificare i controlli MIDI. Riprova.',
+    control: '{{device}} · Canale {{channel}} · {{kind}} {{number}}',
+    modes: {
+      absolute: 'Assoluta (aggancio)',
+      twos_complement: 'Relativa: complemento a due',
+      offset64: 'Relativa: offset 64',
+    },
+    kinds: {
+      note: 'Nota',
+      cc: 'CC',
+    },
+    actions: {
+      power: 'Accensione',
+      mute: 'Silenzia',
+      volume: 'Volume',
+      record: 'Registra / riprendi',
+      pause: 'Pausa',
+      stop: 'Ferma',
+    },
+  },
   effects: effectTranslations.it,
   theme: {
     label: 'Aspetto',
@@ -279,7 +321,7 @@ export const it = {
     audioPaused: 'Audio in pausa',
     deleteGraph: 'Elimina grafo',
     deleteGraphNotice:
-      'Eliminare “{{name}}”? L’elaborazione audio e le registrazioni si fermeranno. L’operazione non può essere annullata. I file degli spazi di lavoro salvati non vengono eliminati.',
+      'Eliminare “{{name}}”? Audio e registrazioni si fermeranno. Nell’elenco dei grafi, Command+Z su macOS o Ctrl+Z su Linux annulla; aggiungi Shift per ripetere. I file salvati rimangono.',
     catalogUnavailable:
       'I grafi salvati non sono disponibili. Il grafo esistente non è stato sostituito.',
     reloadGraphs: 'Ricarica grafi',

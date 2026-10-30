@@ -40,7 +40,14 @@ type Scope = { nodes: string[]; edges: string[] } & (
   | { kind: 'port'; ports: readonly PortTarget[] }
 );
 
+export interface NodeContextAction {
+  id: string;
+  label: string;
+  onAction: () => void;
+}
+
 interface ContextOptions {
+  nodeActions?: (nodeId: string) => readonly NodeContextAction[];
   model: AudioGraphModel;
   nodes: AudioFlowNode[];
   edges: AudioFlowEdge[];
@@ -161,6 +168,13 @@ function connectItems(scope: Scope, options: ContextOptions): HierarchicalMenuIt
   ];
 }
 
+function extraNodeActions(scope: Scope, options: ContextOptions): readonly NodeContextAction[] {
+  const nodeId = scope.nodes[0];
+  return scope.kind === 'node' && scope.nodes.length === 1 && nodeId
+    ? (options.nodeActions?.(nodeId) ?? [])
+    : [];
+}
+
 function contextItems(scope: Scope, options: ContextOptions): HierarchicalMenuItem[] {
   const labels = options.labels ?? defaultLabels;
   const count = scope.nodes.length + scope.edges.length;
@@ -173,7 +187,11 @@ function contextItems(scope: Scope, options: ContextOptions): HierarchicalMenuIt
         disabled: connectedEdges(options.model, scope).length === 0,
       },
     ];
-  const actions = [...renameItems(scope, options), ...connectItems(scope, options)];
+  const actions = [
+    ...renameItems(scope, options),
+    ...connectItems(scope, options),
+    ...extraNodeActions(scope, options),
+  ];
   if (scope.nodes.length)
     actions.push({
       id: 'context:disconnect',
@@ -246,6 +264,11 @@ export function useGraphContextMenu(options: ContextOptions) {
     }
   };
   const execute = (id: string): boolean => {
+    const action = extraNodeActions(scope, options).find((action) => action.id === id);
+    if (action) {
+      action.onAction();
+      return true;
+    }
     if (!id.startsWith('context:')) return false;
     const item = contextItems(scope, options).find((item) => item.id === id);
     if (!item || item.disabled) return true;

@@ -152,10 +152,12 @@ export function checkGenerated(contract, root = fileURLToPath(new URL('..', impo
   const tauri = JSON.parse(readFileSync(resolve(root, 'apps/desktop/src-tauri/tauri.conf.json')));
   if (tauri.bundle.macOS.minimumSystemVersion !== contract.minimums.macos) throw new Error('macOS deployment minimum differs from support contract');
   const linux = JSON.parse(readFileSync(resolve(root, 'apps/desktop/src-tauri/tauri.linux.conf.json'))).bundle.linux;
+  if (linux.deb.depends.includes(contract.runtimeLibraries.linux.midi.arch)) throw new Error('DEB MIDI dependency uses an Arch package name');
   for (const dependency of [`libc6 (>= ${contract.minimums.linux.glibc})`,
-    `pipewire (>= ${contract.minimums.linux.pipewire})`, `wireplumber (>= ${contract.minimums.linux.wireplumber})`]) {
+    `pipewire (>= ${contract.minimums.linux.pipewire})`, `wireplumber (>= ${contract.minimums.linux.wireplumber})`, contract.runtimeLibraries.linux.midi.deb]) {
     if (!linux.deb.depends.includes(dependency)) throw new Error(`Linux dependency differs from support contract: ${dependency}`);
   }
+  if (!readFileSync(resolve(root, 'packaging/linux/arch/PKGBUILD.in'), 'utf8').includes(`'${contract.runtimeLibraries.linux.midi.arch}'`)) throw new Error('Arch MIDI library differs from support contract');
   if (!readFileSync(resolve(root, 'native/linux/pipewire/build.rs'), 'utf8')
     .includes(`.atleast_version("${contract.minimums.linux.pipewire}")`)) throw new Error('PipeWire build floor differs from support contract');
 }

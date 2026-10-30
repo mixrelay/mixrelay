@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { expect, it, vi } from 'vitest';
 import { MixRelayProvider } from '../theme/MixRelayProvider';
+import { mixrelayVariables, themeRoles } from '../theme/tokens';
 import { ActionButton } from './ActionButton';
 import { CheckboxField } from './CheckboxField';
 import { CollectionItem } from './CollectionItem';
@@ -173,4 +175,40 @@ it('rejects styling hidden in typed spreads for public controls', () => {
   expect(command).toBe(override);
   expect(field).toHaveProperty('classNames');
   expect(state).toHaveProperty('className');
+});
+
+it('persistent MIDI toggle fill is visually distinct from mappable target overlays', () => {
+  const style = document.createElement('style');
+  const variables: Record<string, string> = { ...mixrelayVariables, ...themeRoles.light };
+  // jsdom does not resolve custom properties in background shorthands.
+  let resolvedCss = readFileSync('src/core/theme/ComponentTheme.module.css', 'utf8');
+  for (let depth = 0; depth < 4; depth++) {
+    resolvedCss = resolvedCss.replace(
+      /var\((--[\w-]+)\)/g,
+      (original, key: string) => variables[key] ?? original,
+    );
+  }
+  style.textContent = resolvedCss;
+  document.head.append(style);
+  try {
+    render(
+      <MixRelayProvider>
+        <ActionButton data-midi-toggle aria-pressed="true">
+          MIDI
+        </ActionButton>
+        <ActionButton data-midi-map aria-pressed="false">
+          Map volume
+        </ActionButton>
+      </MixRelayProvider>,
+    );
+    // CSS modules rename this class in tests; use the source selector for the stylesheet fixture.
+    for (const button of screen.getAllByRole('button')) button.classList.add('command');
+    const toggle = getComputedStyle(screen.getByRole('button', { name: 'MIDI' }));
+    const target = getComputedStyle(screen.getByRole('button', { name: 'Map volume' }));
+    expect(toggle.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+    expect(toggle.backgroundColor).not.toBe(target.backgroundColor);
+    expect(toggle.color).not.toBe(target.color);
+  } finally {
+    style.remove();
+  }
 });

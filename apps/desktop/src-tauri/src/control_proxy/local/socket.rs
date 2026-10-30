@@ -45,12 +45,21 @@ impl Dispatch for LocalControl {
     }
 }
 
+impl Dispatch for Arc<LocalControl> {
+    async fn dispatch(&self, request: Request) -> serde_json::Value {
+        self.as_ref().dispatch(request).await
+    }
+    fn operation_liveness(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.client.operation_liveness)
+    }
+}
+
 impl LocalSocket {
     /// Binds only within an owner-only directory. Existing live sockets are never replaced.
     pub(crate) async fn start(
         directory: &Path,
         owner_uid: u32,
-        control: LocalControl,
+        control: Arc<LocalControl>,
     ) -> io::Result<Self> {
         Self::start_with_dispatch(directory, owner_uid, control).await
     }
@@ -446,7 +455,7 @@ mod tests {
             Arc::default(),
         )
         .expect("control");
-        let service = LocalSocket::start(&directory, uid, control)
+        let service = LocalSocket::start(&directory, uid, Arc::new(control))
             .await
             .expect("service");
         let mut client = UnixStream::connect(directory.join("control.sock"))
@@ -528,7 +537,7 @@ mod tests {
             Arc::default(),
         )
         .expect("control");
-        let service = LocalSocket::start(&directory, uid, control)
+        let service = LocalSocket::start(&directory, uid, Arc::new(control))
             .await
             .expect("service");
         let stream = UnixStream::connect(directory.join("control.sock"))
@@ -581,7 +590,7 @@ mod tests {
             Arc::default(),
         )
         .expect("control");
-        let service = LocalSocket::start(&directory, uid, control)
+        let service = LocalSocket::start(&directory, uid, Arc::new(control))
             .await
             .expect("service");
         let stream = UnixStream::connect(directory.join("control.sock"))

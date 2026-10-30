@@ -72,6 +72,7 @@
           "/usr/share/doc/mix-relay-driver/LICENSE-Driver.ru.txt": "../../../LICENSE-Driver.ru.txt"
         },
         "depends": [
+          "libasound2t64",
           "libpipewire-0.3-0t64 (>= 1.2.0)",
           "liblilv-0-0",
           "libgcc-s1",
@@ -155,6 +156,7 @@
           "/usr/share/doc/mix-relay-driver/LICENSE-Driver.ru.txt": "../../../LICENSE-Driver.ru.txt"
         },
         "depends": [
+          "alsa-lib",
           "pipewire-libs",
           "lilv-libs",
           "libgcc",

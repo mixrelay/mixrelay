@@ -78,7 +78,7 @@ it.each(['virtual_input', 'virtual_output'] as const)(
     const restored = audioGraphToRuntimeGraph(both, serialized);
     expect(restored.nodes).toHaveLength(1);
     expect(restored.nodes[0]).toMatchObject({
-      id: 'virtual-1',
+      id: serialized.nodes[0]?.id,
       config: spec,
     });
     expect(both.nodes.find((node) => node.outputPorts.length)?.outputPorts).toHaveLength(16);

@@ -464,3 +464,35 @@
 .option [data-selected]::after {
   content: "✓";
 }
+
+/* Persistent toggle/selection state uses the neutral Core button fill. */
+.command[aria-pressed="true"]:not([data-midi-map]) {
+  border-color: var(--button-strong-background);
+  background: var(--button-strong-background);
+  color: var(--button-strong-text);
+}
+.command[aria-pressed="true"]:not([data-midi-map]):hover:not(:disabled) {
+  background: var(--button-strong-hover);
+  color: var(--button-strong-text);
+}
+
+.command[data-midi-map] {
+  pointer-events: auto;
+}
+.command[data-midi-map] {
+  border-color: var(--midi-map-colour);
+  background: var(--midi-map-surface);
+  color: var(--midi-map-colour);
+}
+.command[data-midi-map][aria-pressed="true"] {
+  background: var(--midi-map-colour);
+  color: var(--surface);
+  text-decoration: underline;
+}
+
+.command[data-midi-map] svg {
+  width: var(--command-icon-size);
+  height: var(--command-icon-size);
+  fill: none;
+  stroke: currentColor;
+}

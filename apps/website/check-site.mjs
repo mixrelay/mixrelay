@@ -52,8 +52,8 @@ function checkAnchor(page, reference) {
 const manualLanguages = readdirSync(resolve(directory, 'manual'), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
 assert.ok(manualLanguages.includes('en') && manualLanguages.includes('ko'), 'English and Korean manual sources exist');
 const englishChapters = pages.filter((page) => page.startsWith('manual/en/')).map((page) => basename(page));
-const requiredChapters = ['index', 'installation', 'first-launch', 'workspace', 'devices', 'app-capture', 'recording', 'effects', 'plugins', 'stream-deck', 'licensing', 'updates', 'uninstall', 'troubleshooting', 'support'].map((slug) => `${slug}.html`).sort();
-assert.deepEqual(englishChapters, requiredChapters, 'all requested manual chapters exist');
+const requiredChapters = ['index', 'installation', 'first-launch', 'workspace', 'devices', 'app-capture', 'recording', 'effects', 'plugins', 'stream-deck', 'midi', 'licensing', 'updates', 'uninstall', 'troubleshooting', 'support'].map((slug) => `${slug}.html`);
+assert.deepEqual(englishChapters, [...requiredChapters].sort(), 'all requested manual chapters exist');
 for (const language of manualLanguages) {
   assert.deepEqual(pages.filter((page) => page.startsWith(`manual/${language}/`)).map((page) => basename(page)), englishChapters, `${language}: translated chapter paths match English`);
 }
@@ -122,6 +122,9 @@ for (const [page, html] of sources) {
     const englishIds = [...idsByPage.get(`manual/en/${chapter}`)].sort();
     assert.deepEqual([...idsByPage.get(page)].sort(), englishIds, `${page}: section IDs match English`);
     assert.match(html, /class="guide-nav"/, `${page}: chapter navigation`);
+    const chapterNav = html.match(/<nav class="guide-nav"[^>]*>([\s\S]*?)<\/nav>/)?.[1];
+    assert.deepEqual([...chapterNav.matchAll(/href="([^"]+)"/g)].map((link) => link[1]), requiredChapters, `${page}: chapter navigation includes every chapter once in reading order`);
+    assert.match(chapterNav, new RegExp(`href="${chapter}" aria-current="page"`), `${page}: chapter navigation marks its own page`);
     assert.match(html, /aria-current="page"/, `${page}: current chapter identified`);
     for (const target of manualLanguages) {
       assert.ok(html.includes(`hreflang="${target}" href="../${target}/${chapter}"`), `${page}: alternate metadata for ${target}`);
@@ -139,6 +142,11 @@ const styles = readFileSync(resolve(directory, 'styles.css'), 'utf8');
 for (const reference of styles.matchAll(/url\((?:\s*["']?)([^)"']+)(?:["']?\s*)\)/gi)) resolveLocalReference('styles.css', reference[1].trim());
 assert.ok(!/@import\s+(?:url\()?\s*["']?https?:/i.test(styles), 'no remote stylesheet imports');
 const home = sources.get('index.html');
+const features = [...home.matchAll(/<article class="feature-card">([\s\S]*?)<\/article>/g)].map((entry) => entry[1]);
+assert.equal(features.length, 5, 'home: five product features');
+assert.match(features[3], /STREAM DECK/, 'home: Stream Deck precedes MIDI');
+assert.match(features[4], /MIDI/, 'home: MIDI feature follows Stream Deck');
+assert.match(features[4], /href="manual\/ko\/midi.html"/, 'home: MIDI feature opens its manual');
 assert.match(home, /id="business-info-title"/, 'home: business-information block exists');
 for (const detail of ['에코 비전 랩', '111-42-04359', '505-S80', '+82 10-6380-9646', 'support@rawsector.com', '배승현']) {
   assert.ok(home.includes(detail), `home: business information includes ${detail}`);
@@ -218,4 +226,12 @@ for (const language of manualLanguages) {
   assert.match(html, /href="https:\/\/rawsector\.com\/products\/mixrelay"/, `${page}: official release downloads`);
   assert.match(html, /Elgato Marketplace/, `${page}: conditional Marketplace installation`);
 }
+
+for (const [page, source] of sources) {
+  if (!/^manual\/[^/]+\/midi\.html$/.test(page)) continue;
+  for (const behaviour of ['Command+M', 'Ctrl+M', 'Escape', 'Min/Max', 'Delete/Backspace', 'Command+Z', 'Ctrl+Z']) {
+    assert.ok(source.includes(behaviour), `${page}: documents MIDI map mode and identity recovery (${behaviour})`);
+  }
+}
+
 console.log(`Static website checks passed for ${pages.length} pages (links/assets, languages, headings, translation parity, accessibility structure and prerelease policy).`);

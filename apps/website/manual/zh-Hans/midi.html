@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="在 macOS 和 Linux 上通过 MIDI 控制节点。">
+    <title>MIDI 控制器 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/midi.html">
+    <link rel="alternate" hreflang="ko" href="../ko/midi.html">
+    <link rel="alternate" hreflang="ja" href="../ja/midi.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/midi.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/midi.html">
+    <link rel="alternate" hreflang="de" href="../de/midi.html">
+    <link rel="alternate" hreflang="fr" href="../fr/midi.html">
+    <link rel="alternate" hreflang="it" href="../it/midi.html">
+    <link rel="alternate" hreflang="es" href="../es/midi.html">
+    <link rel="alternate" hreflang="pt" href="../pt/midi.html">
+    <link rel="alternate" hreflang="ru" href="../ru/midi.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="产品首页"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="语言"><a href="../en/midi.html" lang="en" hreflang="en">English</a> <a href="../ko/midi.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/midi.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/midi.html" lang="zh-Hans" hreflang="zh-Hans" aria-current="page">简体中文</a> <a href="../zh-Hant/midi.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/midi.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/midi.html" lang="fr" hreflang="fr">Français</a> <a href="../it/midi.html" lang="it" hreflang="it">Italiano</a> <a href="../es/midi.html" lang="es" hreflang="es">Español</a> <a href="../pt/midi.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/midi.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 发布前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手册章节">
+        <a class="back-link" href="../../index.html">← 产品首页</a>
+        <a class="manual-mobile-index" href="index.html">所有章节</a>
+        <nav class="guide-nav" aria-label="手册章节"><a href="index.html">手册概览</a>
+<a href="installation.html">系统要求与安装</a>
+<a href="first-launch.html">首次启动与权限</a>
+<a href="workspace.html">路由工作区</a>
+<a href="devices.html">设备与虚拟端点</a>
+<a href="app-capture.html">应用音频采集</a>
+<a href="recording.html">录音</a>
+<a href="effects.html">内置效果与预设</a>
+<a href="plugins.html">外部插件</a>
+<a href="stream-deck.html">Stream Deck 插件</a>
+<a href="midi.html" aria-current="page">MIDI 控制器</a>
+<a href="licensing.html">免费版与许可</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html">卸载</a>
+<a href="troubleshooting.html">故障排查与诊断</a>
+<a href="support.html">联系支持</a></nav>
+      </aside>
+      <article class="guide-content">
+<header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>MIDI 控制器</h1><p>在 macOS 和 Linux 上通过 MIDI 控制节点。</p><p class="guide-draft-note">发布前草稿。目前尚不提供公开下载或购买。本手册介绍当前源代码构建版本的行为；在下文所列环境中，仍需验证安装后的实际行为。</p></header>
+<nav class="manual-toc"><ul><li><a href="#assign">分配控制</a></li><li><a href="#controls">音量与按钮</a></li><li><a href="#devices">设备与保存的分配</a></li></ul></nav>
+<section class="guide-section" id="assign" aria-labelledby="assign-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="assign-title">分配控制</h2><p>使用编辑器标题栏右端的小MIDI按钮、macOS的Command+M或Linux的Ctrl+M切换MIDI映射模式。Escape也可退出。节点上突出显示的电源、静音、音量及录音/继续、暂停、停止均可映射。点击控件，或用Tab聚焦并按Enter/Space选择，再操作MIDI控件即可立即保存。在同一次选择中操作另一硬件控件会替换刚捕获的映射。选择另一个目标并使用同一硬件控件即可添加第二个映射。完全重复的映射保留原选项。模式期间暂停图形编辑，传入的MIDI不会执行操作。</p></div></section>
+<section class="guide-section" id="controls" aria-labelledby="controls-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="controls-title">音量与按钮</h2><p>非零力度的Note On或从低于64升至64及以上的CC会执行每个匹配的按钮操作一次。每个电源或静音目标按自身状态切换。绝对音量使用CC 0–127，默认范围为−60至+12 dB，可为每个映射设置Min/Max或反向范围。Pick-up等待推子到达各目标当前值，外部修改或重新连接后也会重新等待。相对编码器使用二进制补码或offset 64，每个映射分别设置0.5、1、2或3 dB步长。音量更新按目标合并为每秒约30次。</p></div></section>
+<section class="guide-section" id="devices" aria-labelledby="devices-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="devices-title">设备与保存的分配</h2><p>映射模式下，映射面板会替换左侧栏中的图形列表。退出模式后，图形列表恢复。列表显示图形和节点名称、操作、设备、通道、Note/CC编号及状态。选择一行以打开所属图形、突出显示目标并修改音量选项或录音器操作。在行或已映射控件上按Delete/Backspace，或使用移除按钮，只会删除一个映射。目标缺失时保留最后名称。撤销节点删除会自动恢复原ID和映射。在图形列表中，macOS的Command+Z或Linux的Ctrl+Z撤销图形删除，加Shift可重做。删除历史保留至后台进程重启；已保存映射及已恢复图形ID在重启后仍保留。设备自动重新连接。关闭编辑器会退出映射模式并恢复MIDI控制。</p><p>MixRelay 后台进程必须保持运行，编辑器窗口可以关闭。macOS 使用 CoreMIDI，Linux 使用 ALSA 序列器，包括 PipeWire 提供的端口。Linux 需要 ALSA 库和序列器访问权限，MIDI 不可用时会显示原因。仅支持输入，不提供 MIDI 输出、LED 或电动推子反馈、时钟或 BPM 控制。</p></div></section>
+        <nav class="manual-pagination" aria-label="手册章节"><a rel="prev" href="stream-deck.html">← Stream Deck 插件</a><a rel="next" href="licensing.html">下一章：免费版与许可 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>发布前草稿 · MixRelay 0.1.0</p><a href="../../index.html">产品首页</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

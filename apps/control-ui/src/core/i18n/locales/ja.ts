@@ -1,5 +1,46 @@
 import { effectTranslations } from '../effects';
 export const ja = {
+  midi: {
+    mapMode: 'MIDIマップモード',
+    mapTarget: '{{name}}を割り当て: {{action}}',
+    selectTarget: '強調された操作を選び、MIDIフェーダーを動かすかボタンを押してください。',
+    waitingTarget: '{{name}} · {{action}} — MIDI操作を動かして割り当て、または置き換えてください。',
+    done: 'マッピングを終了',
+    selectMapping: '{{name}} · {{action}}を選択',
+    recorderAction: 'レコーダー操作',
+    min: '最小値',
+    max: '最大値',
+    empty: 'MIDI割り当てはありません。強調表示された操作を選択して追加します。',
+    targetUnavailable: '対象の状態を確認できません',
+    title: 'MIDIコントロール',
+    disconnected: 'デバイス未接続',
+    targetMissing: '対象が見つかりません',
+    unavailable: 'MIDIを使用できません',
+    mode: '音量モード',
+    pickup: 'フェーダーを現在の音量まで動かすと操作が有効になります。',
+    step: '変更幅',
+    remove: '削除',
+    removeTarget: '{{name}}のMIDI割り当てを削除',
+    failed: 'MIDI設定を変更できませんでした。再試行してください。',
+    control: '{{device}} · チャンネル{{channel}} · {{kind}} {{number}}',
+    modes: {
+      absolute: '絶対値（ピックアップ）',
+      twos_complement: '相対値: 2の補数',
+      offset64: '相対値: オフセット64',
+    },
+    kinds: {
+      note: 'ノート',
+      cc: 'CC',
+    },
+    actions: {
+      power: '電源',
+      mute: 'ミュート',
+      volume: '音量',
+      record: '録音 / 再開',
+      pause: '一時停止',
+      stop: '停止',
+    },
+  },
   effects: effectTranslations.ja,
   theme: {
     label: '外観',
@@ -283,7 +324,7 @@ export const ja = {
     audioPaused: 'オーディオ一時停止中',
     deleteGraph: 'グラフを削除',
     deleteGraphNotice:
-      '「{{name}}」を削除しますか？このグラフのオーディオ処理と録音が停止します。この操作は取り消せません。保存済みのワークスペースファイルは削除されません。',
+      '「{{name}}」を削除しますか？音声処理と録音が停止します。グラフ一覧でmacOSのCommand+Z、LinuxのCtrl+Zで取り消し、Shiftを加えるとやり直せます。保存済みファイルは残ります。',
     catalogUnavailable: '保存済みのグラフを利用できません。既存のグラフは置き換えられていません。',
     reloadGraphs: 'グラフを再読み込み',
     graphSaveFailed:

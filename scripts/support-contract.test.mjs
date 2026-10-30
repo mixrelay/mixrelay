@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { loadContract, validateContract, ciMatrices, checkGenerated, requiredScenarios, releaseInstallers } from './support-contract.mjs';
 
 test('support registry drives native multi-architecture CI and checked-in generated consumers', () => {
@@ -41,4 +42,20 @@ test('duplicate environments, unknown artifacts and floating distro images fail 
     const contract = structuredClone(loadContract().contract); mutate(contract);
     assert.throws(() => validateContract(contract));
   }
+});
+
+test('MIDI requires the declared ALSA runtime library in both Linux package formats', () => {
+  for (const format of ['deb', 'arch']) {
+    const contract = structuredClone(loadContract().contract);
+    contract.runtimeLibraries.linux.midi[format] = 'missing-midi-runtime';
+    assert.throws(() => checkGenerated(contract), /dependency differs|MIDI library differs/);
+  }
+});
+
+test('DEB MIDI dependencies use Debian names and Arch retains its own ALSA package', () => {
+  const linux = JSON.parse(readFileSync(new URL('../apps/desktop/src-tauri/tauri.linux.conf.json', import.meta.url))).bundle.linux;
+  assert.ok(linux.deb.depends.includes('libasound2t64'));
+  assert.ok(!linux.deb.depends.includes('alsa-lib'), 'Arch/RPM package names cannot be installed by APT');
+  const arch = readFileSync(new URL('../packaging/linux/arch/PKGBUILD.in', import.meta.url), 'utf8');
+  assert.match(arch, /depends=\([\s\S]*?'alsa-lib'/);
 });

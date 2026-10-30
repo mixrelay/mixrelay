@@ -338,7 +338,9 @@
       "id": "AUDIO-12",
       "scope": "native-audio",
       "required": true,
-      "os": ["macos"],
+      "os": [
+        "macos"
+      ],
       "title": "Preserve received silence and audible PCM in both source orders"
     },
     {
@@ -443,5 +445,13 @@
       "artifact": "macos-universal-streamdeck",
       "kind": "streamdeck"
     }
-  ]
+  ],
+  "runtimeLibraries": {
+    "linux": {
+      "midi": {
+        "deb": "libasound2t64",
+        "arch": "alsa-lib"
+      }
+    }
+  }
 }

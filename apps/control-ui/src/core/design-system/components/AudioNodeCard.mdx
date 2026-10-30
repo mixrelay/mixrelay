@@ -3,6 +3,7 @@ import { DocsLayout } from '../DocsLayout';
 import { ComponentContract } from '../ComponentsReference';
 import * as Example from '../../ui/NodeFrame.stories';
 import * as Activity from '../../ui/AudioNodeCard.stories';
+import * as Midi from '../../../app/MidiControls.stories';
 
 import * as Api from "../playgrounds/AudioNodeCard.stories";
 
@@ -67,6 +68,12 @@ compact 노드의 `detail`은 헤더 아래 controls 영역에 표시한다. `st
 ### Fallback
 
 <Canvas of={Api.Fallback} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+## MIDI 매핑 상태
+
+매핑 모드에서는 파란 조작을 선택해 입력을 지정합니다. 선택 상태와 실제 오디오 상태는 별개이며, 모드 종료 후 오디오 제어를 재개합니다.
+
+<Canvas of={Midi.MappedControls} story={{ inline: false, height: 560 }} />
 
 <a href="/?path=/docs/design-system-components--docs" target="_top">전체 컴포넌트와 사용 구분</a>
 

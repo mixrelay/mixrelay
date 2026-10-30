@@ -4,6 +4,7 @@ import {
   type FocusEvent,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -12,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import type { ControlPort, RuntimeGraphDocument } from '../core/control-port/types';
 import type { DiagnosticsPort } from '../core/diagnostics/DiagnosticsPort';
 import { usePaidFeatures } from '../core/licensing/FeatureAccess';
+import { MidiContext, MidiPanelContext } from '../core/midi/MidiPort';
 import { useNativeGraphListCommand } from '../core/shell/useNativeGraphListCommand';
 import { shellBreakpoints } from '../core/theme/tokens';
 import { ActionButton } from '../core/ui/ActionButton';
@@ -35,6 +37,8 @@ import { GraphCreateDialog } from '../features/graphs/GraphCreateDialog';
 import { GraphList } from '../features/graphs/GraphList';
 import { useCatalogTitle, useGraphCatalog } from '../features/graphs/useGraphCatalog';
 import { WorkspaceFileMenu } from '../features/graphs/WorkspaceFileMenu';
+import { MidiSettingsButton } from '../features/midi/MidiAccess';
+import { useMidiGraphSelection } from '../features/midi/useMidiGraphSelection';
 import { RoutingWorkspace } from '../features/routing-workspace/RoutingWorkspace';
 import { useProcessorCatalog } from '../features/routing-workspace/useProcessorCatalog';
 import {
@@ -110,11 +114,12 @@ function workspaceSessionDocument(
     : fallback;
 }
 
-function routingWorkspaceRuntimeProps(
+function routingWorkspaceProps(
   status: ReturnType<typeof useAudioStatus>,
   catalog: ReturnType<typeof useGraphCatalog>['catalog'],
 ) {
   return {
+    headerEnd: <MidiSettingsButton />,
     audioSession: status?.audioSession,
     processorTimings: status?.processorTimings,
     failedProcessors: status?.failedProcessors,
@@ -166,7 +171,9 @@ export function StudioScreen({
 }: StudioScreenProps) {
   const { t } = useTranslation();
   const paid = usePaidFeatures();
+  const mapping = useContext(MidiContext)?.active ?? false;
   const collection = useGraphCatalog(controlPort);
+  useMidiGraphSelection(collection);
   const processorCatalog = useProcessorCatalog(controlPort);
   const problems = useProblemChannel();
   const catalogErrorText = useCatalogError(collection.error);
@@ -178,12 +185,12 @@ export function StudioScreen({
   const { status, onSessionApplied } = useAppliedStatus(controlPort, setSessionDocument);
   const { isCreatingGraph, setIsCreatingGraph, openNewGraph } = useGraphCreation(
     catalog?.activeId,
-    paid || !catalog?.graphs.length,
+    !mapping && (paid || !catalog?.graphs.length),
   );
   const busy = catalogBusy || sessionBusy || workspaceBusy || catalogUncertain;
   const title = useCatalogTitle(collection, busy, t('studio.untitledGraph'));
-  const controlsDisabled = busy || title.unsaved;
-  const mutateCatalog = busy ? () => undefined : collection.mutate;
+  const controlsDisabled = busy || title.unsaved || mapping;
+  const mutateCatalog = busy || mapping ? () => undefined : collection.mutate;
   const documentForWorkspace = workspaceSessionDocument(
     sessionDocument,
     catalog?.document.revision,
@@ -219,8 +226,8 @@ export function StudioScreen({
           deviceDriverAction={driverRoutingActions(driverSession)}
           key={`${catalog?.activeId ?? 'engine'}:${collection.documentGeneration}`}
           graphId={catalog?.activeId}
-          interactionDisabled={catalogBusy || catalogUncertain || sessionBusy}
-          {...routingWorkspaceRuntimeProps(status, catalog)}
+          interactionDisabled={catalogBusy || catalogUncertain || sessionBusy || mapping}
+          {...routingWorkspaceProps(status, catalog)}
           sessionDocument={documentForWorkspace}
           controlPort={controlPort}
           onBusyChange={setWorkspaceBusy}
@@ -278,8 +285,9 @@ function StudioFrame({
   children: ReactNode;
   applicationActions?: ReactNode;
 }) {
-  const { t } = useTranslation();
   const overlay = useOverlaySidebar();
+  const midiPanel = useContext(MidiPanelContext);
+  const mapping = useContext(MidiContext)?.active ?? false;
   // Carbon UI shell: wide windows keep the list fixed (View menu may hide it); narrow
   // windows collapse it behind the header menu button and open it over the canvas.
   const [fixedVisible, setFixedVisible] = useState(true);
@@ -287,14 +295,10 @@ function StudioFrame({
   const sidebarOpen = overlay ? overlayOpen : fixedVisible;
   const shell = useRef<HTMLElement>(null);
   const pendingSelection = useRef<string | null>(null);
-  // The list control or menu button that last held focus. When a visibility or breakpoint
-  // change hides or removes it, focus moves to the control that survives.
+  // A removed or newly inactive control hands focus to the surviving shell control.
   const focusOwner = useRef<HTMLElement | null>(null);
   const trackFocus = (event: FocusEvent<HTMLElement>) => {
-    const target = event.target;
-    focusOwner.current = target.closest('#graph-sidebar, [aria-controls="graph-sidebar"]')
-      ? target
-      : null;
+    focusOwner.current = event.target;
   };
   // Focus that moves elsewhere (a dialog, another control) is no longer the shell's. A
   // plain blur of a control that stays visible is the user leaving it, not a hide.
@@ -316,9 +320,10 @@ function StudioFrame({
     if (overlay) closeOverlay();
   }, [overlay, closeOverlay]);
   const toggleSidebar = useCallback(() => {
+    if (mapping) return;
     if (overlay) setOverlayOpen((open) => !open);
     else setFixedVisible((visible) => !visible);
-  }, [overlay]);
+  }, [overlay, mapping]);
   useNativeGraphListCommand(sidebarOpen, toggleSidebar);
   // An overlay closes only once the chosen graph is active. A request that settles without
   // activating it (failure, or another graph became active) ends the intent, so the
@@ -346,50 +351,52 @@ function StudioFrame({
     // A still-visible owner means the user left it on purpose; only a hidden or removed
     // owner hands focus to the surviving control.
     if (shown(owner)) return;
-    surviving(shell.current)?.focus();
-  }, [sidebarOpen, overlay]);
+    const next = mapping
+      ? shell.current?.querySelector<HTMLElement>('[data-midi-toggle]')
+      : surviving(shell.current);
+    next?.focus();
+  }, [sidebarOpen, overlay, mapping]);
   return (
     <main
       ref={shell}
       className={styles.shell}
-      data-sidebar-open={sidebarOpen}
+      data-sidebar-open={mapping || sidebarOpen}
       onFocus={trackFocus}
       onBlur={leaveFocus}
     >
-      <header className={styles.applicationHeader}>
-        <span className={styles.applicationLead}>
-          {overlay ? (
-            <SidebarToggle
-              label={t('studio.graphs')}
-              opened={sidebarOpen}
-              controls="graph-sidebar"
-              onToggle={toggleSidebar}
-            />
-          ) : null}
-          <ProductHeading />
-        </span>
-        <span className={styles.applicationActions}>
-          <ThemePicker />
-          {applicationActions}
-        </span>
-      </header>
-      <GraphSidebar
-        hidden={!sidebarOpen}
-        {...sidebar}
-        onSelect={(id) => {
-          pendingSelection.current = id;
-          sidebar.onSelect(id);
-        }}
-      />
+      <StudioApplicationHeader
+        overlay={overlay}
+        mapping={mapping}
+        sidebarOpen={sidebarOpen}
+        toggleSidebar={toggleSidebar}
+      >
+        {applicationActions}
+      </StudioApplicationHeader>
+      {mapping ? (
+        <div className={styles.sidebar}>{midiPanel}</div>
+      ) : (
+        <GraphSidebar
+          hidden={!sidebarOpen}
+          {...sidebar}
+          onSelect={(id) => {
+            pendingSelection.current = id;
+            sidebar.onSelect(id);
+          }}
+        />
+      )}
       {children}
     </main>
   );
 }
 
-/** Whether an element is focused-capable on screen: connected, not the body, not hidden. */
+/** Whether a connected control can still hold focus in the current shell state. */
 function shown(element: Element | null): boolean {
   return Boolean(
-    element && element !== document.body && element.isConnected && !element.closest('[hidden]'),
+    element &&
+      element !== document.body &&
+      element.isConnected &&
+      !element.closest('[hidden], [inert]') &&
+      !element.matches(':disabled'),
   );
 }
 
@@ -426,7 +433,7 @@ function StudioStatusBar({
   }) {
   const { t } = useTranslation();
   return (
-    <div className={styles.statusBar}>
+    <div className={styles.statusBar} inert={useContext(MidiContext)?.active} data-midi-inactive>
       <ApplicationStatusBar
         information={applicationInfo}
         announcement={diagnosticsAnnouncement(t, diagnosticsCount(problems, processorCatalog))}
@@ -469,6 +476,19 @@ function GraphSidebar({
   const limited = Boolean(catalog && !paid && catalog.graphs.length >= 1);
   return (
     <aside
+      onKeyDown={(event) => {
+        if (
+          disabled ||
+          !hasPlatformModifier(event) ||
+          event.altKey ||
+          isNativeTextEntryTarget(event.target) ||
+          event.key.toLowerCase() !== 'z'
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        void collection.mutate({ action: event.shiftKey ? 'redo_delete' : 'undo_delete' });
+      }}
       id="graph-sidebar"
       className={styles.sidebar}
       aria-label={t('studio.graphs')}
@@ -571,4 +591,43 @@ function useOverlaySidebar() {
     return () => query.removeEventListener('change', update);
   }, []);
   return overlay;
+}
+
+function StudioApplicationHeader({
+  overlay,
+  mapping,
+  sidebarOpen,
+  toggleSidebar,
+  children,
+}: {
+  overlay: boolean;
+  mapping: boolean;
+  sidebarOpen: boolean;
+  toggleSidebar: () => void;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <header
+      className={styles.applicationHeader}
+      inert={mapping}
+      data-midi-inactive={mapping || undefined}
+    >
+      <span className={styles.applicationLead}>
+        {overlay && !mapping ? (
+          <SidebarToggle
+            label={t('studio.graphs')}
+            opened={sidebarOpen}
+            controls="graph-sidebar"
+            onToggle={toggleSidebar}
+          />
+        ) : null}
+        <ProductHeading />
+      </span>
+      <span key={String(mapping)} className={styles.applicationActions}>
+        <ThemePicker />
+        {children}
+      </span>
+    </header>
+  );
 }

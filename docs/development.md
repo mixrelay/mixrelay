@@ -61,3 +61,22 @@ Linux의 장치 입력·출력 경계는 일반 사용자 VM의 격리된 복사
 원시는 출력된 `isolated_lab` 아래 `device-evidence/`에 보존한다. 실제 64채널 하드웨어 검증과는 구분한다.
 랩의 엔진 제어는 `scripts/lab/engine-operations.mjs`로 비동기 결과를 확인하고 영수증을 회수한다.
 HTTP 202를 완료로 처리하거나 새 요청 ID로 변경을 재시도하지 않는다.
+
+## MIDI 컨트롤 랩
+
+`RUSTC_WRAPPER= pnpm lab:midi`는 macOS CoreMIDI virtual source 또는 Linux ALSA sequencer
+출력 포트 `MixRelay MIDI Lab`을 만든다. 제품은 입력만 열며 출력 포트는 이 개발 도구에만 있다.
+`-- --help`로 입력 번호를 확인한다. ALSA 개발 환경에는 `libasound2-dev`와 sequencer 접근 권한이 필요하다.
+
+격리된 `MIXRELAY_IPC_DIR`로 dev 실행부와 에디터를 실행하고 편집기 헤더 오른쪽 끝의 MIDI 버튼으로 매핑 모드를 켠다.
+노드의 강조된 조작을 고른 뒤 랩 터미널에서 `n60`·`n61`(전원·음소거), `n62`·`n63`·`n64`(시작/재개·일시정지·정지),
+`c7`(절대 볼륨), `c10`·`c11`(two’s complement·offset 64)을 보낸다. 모두 MIDI 채널 1이다.
+같은 선택에서 다른 입력을 보내 직전 매핑 교체를, 다른 대상에서 같은 입력을 보내 다중 대상을 확인한다.
+
+Enter마다 Note와 velocity 0 release, 2ms 간격의 CC 7 왕복, 상대 CC 묶음을 보낸다.
+각 대상의 pick-up·Min/Max·상대 단위와 대상별 초당 약 30회 발행 상한을 관찰한다.
+모드 안에서는 어떤 MIDI 액션도 실행하지 않아야 한다. MIDI 버튼·단축키·Escape·창 닫기로 종료하고
+제어 재개, 장치 재연결, 노드·그래프 삭제 후 이름 보존, 실행 취소·다시 실행 후 같은 ID의 매핑 재개,
+재시작 뒤 여러 대상의 복원을 확인한다. `q`로 source를 종료하면 목록의 연결 해제를 확인할 수 있다.
+CoreMIDI 가상 source를 새로 만들면 새 unique ID가 배정될 수 있으므로 물리 장치 재연결 검증과 구분한다.
+랩은 자신이 연 source만 정리하며 설치된 실행부·Driver·키체인에 접근하지 않는다.

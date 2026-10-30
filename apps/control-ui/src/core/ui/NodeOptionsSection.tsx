@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useContext, useId, useLayoutEffect } from 'react';
 import { Button } from 'react-aria-components';
 import { createPortal } from 'react-dom';
+import { MidiContext } from '../midi/MidiPort';
 import styles from './AudioNodeCard.module.css';
 import { Tooltip } from './Tooltip';
 import { useElementBounds } from './useElementBounds';
@@ -24,6 +25,7 @@ export function NodeOptionsSection({
   description?: ReactNode;
   disabled?: boolean;
 }) {
+  const mapping = useContext(MidiContext)?.active ?? false;
   const measureDisclosure = useContext(NodeDisclosureMeasureContext);
   const headerTarget = useContext(NodeHeaderOptionsContext);
   const panelId = useId();
@@ -38,6 +40,7 @@ export function NodeOptionsSection({
   const trigger = (
     <Tooltip label={label}>
       <Button
+        isDisabled={mapping}
         aria-label={label}
         aria-expanded={opened}
         aria-controls={opened ? panelId : undefined}
@@ -66,7 +69,7 @@ export function NodeOptionsSection({
           id={panelId}
           data-node-disclosure=""
           className={`${styles.optionsPanel} nodrag nopan nowheel`}
-          inert={disabled}
+          inert={disabled || mapping}
         >
           {description ? <small className={styles.settingsDescription}>{description}</small> : null}
           {children}

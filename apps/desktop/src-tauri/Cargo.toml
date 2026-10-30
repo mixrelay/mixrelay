@@ -15,6 +15,8 @@ cc = "1.2.57"
 tauri-build = { version = "=2.6.3", features = [] }
 
 [dependencies]
+mixrelay-midi-control = { path = "../../../crates/midi-control" }
+midir = "=0.11.1"
 mixrelay-control-protocol = { path = "../../../crates/control-protocol" }
 mixrelay-driver-control = { path = "../../../crates/driver-control" }
 mixrelay-engine-process = { path = "../../../crates/engine-process" }
@@ -42,7 +44,11 @@ tempfile = "3.27.0"
 mixrelay-audio-io = { path = "../../../crates/audio-io" }
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = "=0.11.0"
+
 [target.'cfg(target_os = "macos")'.dependencies]
+coremidi-sys = "=3.2.1"
 # Typed AppKit termination hook; the existing Tauri delegate remains the owner.
 objc2 = "0.6.4"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSProcessInfo", "NSObjCRuntime"] }

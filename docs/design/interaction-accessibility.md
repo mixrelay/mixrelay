@@ -53,3 +53,10 @@ Core 변경은 역할·이름·상태·Tab 대상 여부를 회귀 검사한다.
 근거: [WAI-ARIA APG 키보드 인터페이스](https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/), [APG 미터 패턴](https://www.w3.org/WAI/ARIA/apg/patterns/meter/), [WCAG 2.2 키보드 기능](https://www.w3.org/WAI/WCAG22/Understanding/keyboard.html). 위 요소 배분과 그래프 키 계약은 MixRelay의 제품 결정이다.
 
 장치 설정의 포커스 순서는 이름 → 공통 채널 수 → 샘플레이트 → 비트 심도다. 지원값이 하나뿐이고 현재 값과 같으면 변경 선택기는 disabled다. 불일치에서 공통 값을 선택할 수 있는 경우는 활성 상태로 유지한다. 키보드 선택·오류 설명도 노드와 드라이버 설정이 같은 Core 계약을 따른다. 그래프 목록은 끝에서도 앱 바깥으로 스크롤을 전달하지 않는다.
+
+MIDI 매핑 모드의 진입점은 편집기 헤더 오른쪽 끝의 compact 토글이다. 토글·패널·매핑 대상만 조작할 수 있다.
+테마·일반 헤더·하단 조작은 inert, 그래프 제목·Options는 disabled로 Tab 대상에서 제외한다.
+진입 전에 그 조작에 있던 포커스는 MIDI 토글로 옮기며 body로 유실하지 않는다.
+입력 그룹의 제목은 Tab 대상이 아니며 각 매핑의 제목 버튼이 완전한 그래프·노드·동작 이름과 선택 상태를 제공한다.
+Tab은 제목 → 선택한 옵션 → 제거 → 다음 매핑 순서로 이동하고 역방향도 같은 순서를 따른다.
+그룹의 입력 정보와 행의 상태는 읽을 수 있으나 추가 포커스를 만들지 않는다. Escape와 MIDI 단축키는 모드를 종료한다.

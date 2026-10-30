@@ -9,7 +9,11 @@ import {
   reconcileAudioFlowEdges,
   reconcileAudioFlowNodes,
 } from './reactFlowAdapter';
-import { type GraphContextMenuLabels, useGraphContextMenu } from './useGraphContextMenu';
+import {
+  type GraphContextMenuLabels,
+  type NodeContextAction,
+  useGraphContextMenu,
+} from './useGraphContextMenu';
 
 const model: AudioGraphModel = {
   revision: 1,
@@ -49,7 +53,11 @@ function setup(
   selectedNodes: string[] = [],
   selectedEdges: string[] = [],
   ports: Port[] = [],
-  renaming: { renameNode?: (id: string) => void; labels?: GraphContextMenuLabels } = {},
+  renaming: {
+    renameNode?: (id: string) => void;
+    labels?: GraphContextMenuLabels;
+    nodeActions?: (nodeId: string) => readonly NodeContextAction[];
+  } = {},
 ) {
   const committed = vi.fn();
   const fitView = vi.fn();
@@ -289,4 +297,20 @@ it('offers rename only for one node and delegates without editing the audio grap
   });
   act(() => named.result.current.menu.prepare(target('node', 'b')));
   expect(named.result.current.menu.items[0]?.label).toBe('표시 이름 변경');
+});
+
+it('node-specific control actions are available only for one node and dispatch without graph edits', () => {
+  const assign = vi.fn();
+  const f = setup([], [], [], {
+    nodeActions: (nodeId) => [
+      { id: 'midi:mute', label: `Assign MIDI: ${nodeId}`, onAction: assign },
+    ],
+  });
+  act(() => f.result.current.menu.prepare(target('node', 'a')));
+  expect(f.result.current.menu.items.some((item) => item.id === 'midi:mute')).toBe(true);
+  act(() => expect(f.result.current.menu.execute('midi:mute')).toBe(true));
+  expect(assign).toHaveBeenCalledTimes(1);
+  expect(f.committed).not.toHaveBeenCalled();
+  act(() => f.result.current.menu.prepare(target('canvas')));
+  expect(f.result.current.menu.items.some((item) => item.id === 'midi:mute')).toBe(false);
 });

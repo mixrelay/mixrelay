@@ -114,7 +114,7 @@ it.each(['virtual_input', 'virtual_output'] as const)(
     const serialized = audioGraphToRuntimeGraph(model, empty);
     expect(serialized.nodes).toEqual([
       {
-        id: 'virtual-1',
+        id: expect.stringMatching(/^virtual-[0-9a-f-]{36}$/),
         label: spec.displayName,
         type: 'virtual_endpoint',
         config: {
@@ -240,7 +240,7 @@ it('materializes an external processor and persists normalized parameter changes
     {
       channels: 2,
       label: 'Main · Main Output',
-      nodeId: 'provider-1',
+      nodeId: node?.id,
       portId: 'audio',
     },
   ]);
@@ -534,3 +534,34 @@ it('names runtime ports from the translated presentation instead of fixed Englis
     gain?.inputPorts.map((port) => port.id),
   );
 });
+
+it.each(['virtual_input', 'virtual_output'] as const)(
+  'new %s identities survive deletion without being reassigned to another device',
+  (kind) => {
+    const empty: AudioGraphModel = { nodes: [], edges: [], revision: 1 };
+    const first = addRoutingNode(empty, { kind, spec }, { x: 0, y: 0 });
+    const firstId = first.nodes[0]?.runtime?.binding?.nodeId;
+    const deleted = { ...first, nodes: [] };
+    const replacement = addRoutingNode(
+      deleted,
+      { kind, spec: { ...spec, id: 'device-b' } },
+      { x: 0, y: 0 },
+    );
+    const replacementId = replacement.nodes[0]?.runtime?.binding?.nodeId;
+    expect(replacementId).not.toBe(firstId);
+    expect(replacementId).toMatch(/^virtual-[0-9a-f-]{36}$/);
+    const both = addRoutingNode(
+      replacement,
+      {
+        kind: kind === 'virtual_input' ? 'virtual_output' : 'virtual_input',
+        spec: { ...spec, id: 'device-b' },
+      },
+      { x: 400, y: 0 },
+    );
+    expect(both.nodes).toHaveLength(2);
+    expect(both.nodes.map((node) => node.runtime?.binding?.nodeId)).toEqual([
+      replacementId,
+      replacementId,
+    ]);
+  },
+);

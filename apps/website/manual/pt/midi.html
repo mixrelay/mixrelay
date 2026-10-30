@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Controle os nós por MIDI no macOS e Linux.">
+    <title>Controladores MIDI — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/midi.html">
+    <link rel="alternate" hreflang="ko" href="../ko/midi.html">
+    <link rel="alternate" hreflang="ja" href="../ja/midi.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/midi.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/midi.html">
+    <link rel="alternate" hreflang="de" href="../de/midi.html">
+    <link rel="alternate" hreflang="fr" href="../fr/midi.html">
+    <link rel="alternate" hreflang="it" href="../it/midi.html">
+    <link rel="alternate" hreflang="es" href="../es/midi.html">
+    <link rel="alternate" hreflang="pt" href="../pt/midi.html">
+    <link rel="alternate" hreflang="ru" href="../ru/midi.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Pular para o conteúdo</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Página do produto"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Idioma"><a href="../en/midi.html" lang="en" hreflang="en">English</a> <a href="../ko/midi.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/midi.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/midi.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/midi.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/midi.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/midi.html" lang="fr" hreflang="fr">Français</a> <a href="../it/midi.html" lang="it" hreflang="it">Italiano</a> <a href="../es/midi.html" lang="es" hreflang="es">Español</a> <a href="../pt/midi.html" lang="pt" hreflang="pt" aria-current="page">Português</a> <a href="../ru/midi.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Rascunho de pré-lançamento</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Capítulos do manual">
+        <a class="back-link" href="../../index.html">← Página do produto</a>
+        <a class="manual-mobile-index" href="index.html">Todos os capítulos</a>
+        <nav class="guide-nav" aria-label="Capítulos do manual"><a href="index.html">Visão geral do manual</a>
+<a href="installation.html">Requisitos do sistema e instalação</a>
+<a href="first-launch.html">Primeira execução e permissões</a>
+<a href="workspace.html">Espaço de trabalho de roteamento</a>
+<a href="devices.html">Dispositivos e conexões virtuais</a>
+<a href="app-capture.html">Captura de áudio de aplicativos</a>
+<a href="recording.html">Gravação</a>
+<a href="effects.html">Efeitos integrados e predefinições</a>
+<a href="plugins.html">Plug-ins externos</a>
+<a href="stream-deck.html">Plug-in do Stream Deck</a>
+<a href="midi.html" aria-current="page">Controladores MIDI</a>
+<a href="licensing.html">Versão gratuita e licenciamento</a>
+<a href="updates.html">Atualizações</a>
+<a href="uninstall.html">Desinstalação</a>
+<a href="troubleshooting.html">Solução de problemas e diagnóstico</a>
+<a href="support.html">Contato com o suporte</a></nav>
+      </aside>
+      <article class="guide-content">
+<header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Controladores MIDI</h1><p>Controle os nós por MIDI no macOS e Linux.</p><p class="guide-draft-note">Rascunho de pré-lançamento. Os downloads e as compras públicas ainda não estão disponíveis. Estas instruções descrevem a compilação atual do código-fonte; o comportamento após a instalação ainda precisa ser verificado nos ambientes indicados abaixo.</p></header>
+<nav class="manual-toc"><ul><li><a href="#assign">Atribuir um controlo</a></li><li><a href="#controls">Volume e botões</a></li><li><a href="#devices">Dispositivos e atribuições guardadas</a></li></ul></nav>
+<section class="guide-section" id="assign" aria-labelledby="assign-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="assign-title">Atribuir um controlo</h2><p>O pequeno botão MIDI na extremidade direita do cabeçalho do editor, Command+M no macOS ou Ctrl+M no Linux ativa ou desativa o modo de mapeamento MIDI. Escape também o fecha. Os controlos realçados dos nós são destinos: alimentação, silêncio, volume e gravar/retomar, pausa e parar. Clique num controlo, ou use Tab e Enter/Espaço, e acione um controlo MIDI. O mapeamento é guardado imediatamente. Outro controlo substitui o mapeamento capturado durante a mesma seleção. Selecione outro destino e use o mesmo controlo para adicionar um segundo mapeamento. Duplicados exatos mantêm as opções. Neste modo, a edição do grafo e as ações MIDI ficam suspensas.</p></div></section>
+<section class="guide-section" id="controls" aria-labelledby="controls-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="controls-title">Volume e botões</h2><p>Um Note On com velocidade superior a zero ou um CC que sobe de menos de 64 para pelo menos 64 aciona uma vez cada ação correspondente. Alimentação e silêncio alternam o estado próprio de cada destino. O volume absoluto usa CC 0–127, com intervalo predefinido de −60 a +12 dB. Defina Min/Max por mapeamento, incluindo intervalos invertidos. O pick-up espera que o fader alcance o nível de cada destino, também após alterações externas ou reconexão. Os codificadores relativos usam complemento de dois ou offset 64 e um passo próprio de 0,5, 1, 2 ou 3 dB. As atualizações são agrupadas por destino a cerca de 30 por segundo.</p></div></section>
+<section class="guide-section" id="devices" aria-labelledby="devices-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="devices-title">Dispositivos e atribuições guardadas</h2><p>No modo de mapeamento, o painel substitui a lista de grafos na barra lateral esquerda. Ao sair do modo, a lista de grafos regressa. Apresenta nomes do grafo e nó, ação, dispositivo, canal, número Note/CC e estado. Selecione uma linha para abrir o grafo, realçar o destino e editar volume ou ação do gravador. Delete/Backspace numa linha ou controlo atribuído, ou Remover, elimina apenas um mapeamento. Destinos em falta mantêm os últimos nomes. Anular a eliminação de um nó restaura o ID e os mapeamentos. Na lista de grafos, Command+Z no macOS ou Ctrl+Z no Linux anula uma eliminação de grafo; acrescente Shift para refazer. O histórico dura até reiniciar o processo residente. Mapeamentos guardados e IDs restaurados permanecem após reiniciar. Os dispositivos voltam a ligar-se automaticamente. Fechar o editor termina o modo e retoma o controlo MIDI.</p><p>Mantenha o processo de fundo do MixRelay em execução; pode fechar o editor. O macOS usa CoreMIDI e o Linux usa o sequenciador ALSA, incluindo portas expostas pelo PipeWire. O Linux requer a biblioteca ALSA e acesso ao sequenciador. MIDI indisponível apresenta o motivo da falha. Apenas entrada MIDI: sem saída, resposta LED ou de fader motorizado, relógio ou controlo de BPM.</p></div></section>
+        <nav class="manual-pagination" aria-label="Capítulos do manual"><a rel="prev" href="stream-deck.html">← Plug-in do Stream Deck</a><a rel="next" href="licensing.html">Próximo: Versão gratuita e licenciamento →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Rascunho de pré-lançamento · MixRelay 0.1.0</p><a href="../../index.html">Página do produto</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

@@ -15,6 +15,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 | 기반 | `mixrelay-licensing`(crates/licensing) | 라이선스 확인·저장 | 없음 |
 | 기반 | `mixrelay-processor-state`(crates/processor-state) | 플러그인 상태 저장 형식 | 없음 |
 | 기반 | `mixrelay-engine-process`(crates/engine-process) | 엔진 프로세스 수명·소유권 | 없음 |
+| 기반 | `mixrelay-midi-control`(crates/midi-control) | MIDI 바인딩·학습 입력 mailbox·pick-up·볼륨 발행 주기 정책 | 없음 |
 | 모델 | `mixrelay-audio-graph` | 그래프 문서, 검증, 실행 계획 컴파일 | 기반 |
 | 모델 | `mixrelay-audio-recorder` | 녹음 파일·작업자 | 기반 |
 | 모델 | `mixrelay-audio-engine` | 블록 처리, 렌더 계획, 지연 보상·측정 | 기반, `audio-graph`, `audio-recorder` |

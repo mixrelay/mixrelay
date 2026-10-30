@@ -43,6 +43,7 @@ pub(super) use restore::CatalogRecall;
 #[path = "device_catalog.rs"]
 mod devices;
 
+mod deletion_history;
 mod saved_graphs;
 mod state_assets;
 mod storage;
@@ -58,6 +59,8 @@ pub(super) struct Catalog {
     version: u32,
     revision: u64,
     graphs: SavedGraphs,
+    deleted: Vec<deletion_history::Deletion>,
+    restored: Vec<deletion_history::Deletion>,
 }
 
 /// Saved catalog shape: the selection is stored by graph identity.
@@ -89,6 +92,8 @@ impl TryFrom<CatalogFile> for Catalog {
             version: file.version,
             revision: file.revision,
             graphs,
+            deleted: Vec::new(),
+            restored: Vec::new(),
         })
     }
 }
@@ -169,16 +174,25 @@ impl Catalog {
             .map(|graph| (graph.id.as_str(), &graph.document))
     }
 
-    pub(super) fn control_documents(&self) -> impl Iterator<Item = (&str, &str, &GraphDocument)> {
-        self.graphs
-            .iter()
-            .map(|graph| (graph.id.as_str(), graph.name.as_str(), &graph.document))
+    pub(super) fn control_documents(
+        &self,
+    ) -> impl Iterator<Item = (&str, &str, &GraphDocument, &GraphLayout)> {
+        self.graphs.iter().map(|graph| {
+            (
+                graph.id.as_str(),
+                graph.name.as_str(),
+                &graph.document,
+                &graph.layout,
+            )
+        })
     }
 
     fn imported(document: GraphDocument) -> Self {
         Self {
             version: 1,
             revision: 1,
+            deleted: Vec::new(),
+            restored: Vec::new(),
             graphs: SavedGraphs::single(SavedGraph::new(
                 "graph-1".into(),
                 UNTITLED.into(),
@@ -487,12 +501,24 @@ impl EngineGraphController {
         {
             return self.current_catalog_response();
         }
+        if match &request.action {
+            GraphCatalogAction::UndoDelete => value.deleted.is_empty(),
+            GraphCatalogAction::RedoDelete => value.restored.is_empty(),
+            _ => false,
+        } {
+            return self.current_catalog_response();
+        }
         let next_catalog_revision = value
             .revision
             .checked_add(1)
             .ok_or_else(|| invalid("catalog revision overflow"))?;
         value.update_document(self.graph.read().clone());
-        let removes_execution = matches!(request.action, GraphCatalogAction::Delete { .. });
+        let removes_execution = matches!(
+            request.action,
+            GraphCatalogAction::Delete { .. }
+                | GraphCatalogAction::UndoDelete
+                | GraphCatalogAction::RedoDelete
+        );
         value.apply_action(request.action, revisions.submitted, next_catalog_revision)?;
         value.revision = next_catalog_revision;
         if removes_execution {
@@ -588,17 +614,16 @@ impl Catalog {
                 switch = false;
             }
             GraphCatalogAction::Delete { id } => {
-                // Removing the last graph leaves a new empty one, so the catalog is never empty.
-                let replacement = || {
-                    SavedGraph::new(
-                        format!("graph-{next_catalog_revision}"),
-                        UNTITLED.into(),
-                        GraphDocument::new(next_revision, vec![], vec![]),
-                    )
-                };
-                if !self.graphs.remove(&id, replacement) {
-                    return Err(invalid("graph does not exist"));
-                }
+                self.delete_graph(&id, next_revision, next_catalog_revision)?;
+                self.restored.clear();
+            }
+            GraphCatalogAction::UndoDelete => self.undo_deletion()?,
+            GraphCatalogAction::RedoDelete => {
+                let deletion = self
+                    .restored
+                    .pop()
+                    .ok_or_else(|| invalid("no graph deletion to redo"))?;
+                self.delete_graph(&deletion.graph.id, next_revision, next_catalog_revision)?;
             }
         }
         Ok(switch)

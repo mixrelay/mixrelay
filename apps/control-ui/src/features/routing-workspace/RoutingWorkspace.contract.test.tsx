@@ -618,6 +618,9 @@ it('adopts a playback revision update without discarding authored node positions
 it('refreshes changed session documents while preserving existing node geometry and sizing', async () => {
   const first = document({ kind: 'compressor' }),
     next = document({ kind: 'compressor' }, { kind: 'limiter' });
+  const unchanged = next.nodes[0];
+  if (!unchanged || !first.nodes[0]) throw new Error('shared node required');
+  unchanged.id = first.nodes[0].id;
   const native = port(first);
   const rendered = render(view(native, { sessionDocument: first }));
   await ready();
@@ -666,6 +669,10 @@ it('retains a conflicted draft after a failed restore and retries with new autho
   expect(canvas().model.nodes).toHaveLength(1);
   drain.mockRestore();
   const restored = document({ kind: 'compressor' }, { kind: 'limiter' });
+  const recovered = restored.nodes[0];
+  const draft = canvas().model.nodes[0];
+  if (!recovered || !draft) throw new Error('same conflicted node required');
+  recovered.id = draft.id;
   read.mockResolvedValue(restored);
   vi.spyOn(native, 'getGraphStatus').mockResolvedValue({
     protocolVersion: 1,

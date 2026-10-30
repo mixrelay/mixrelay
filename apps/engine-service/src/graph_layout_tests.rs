@@ -458,3 +458,30 @@ fn display_labels_validate_without_changing_audio_identity_or_revision() {
         "회의용"
     );
 }
+
+#[test]
+fn control_snapshots_follow_display_names_without_changing_the_authored_node_id() {
+    let fixture = Fixture::new();
+    let engine =
+        controller(default_duplex_document(9, None)).with_graph_catalog_path(fixture.path());
+    let catalog = engine.read_catalog().unwrap();
+    let node_id = catalog.document.nodes[0].id.as_str().to_owned();
+    let request = GraphLayoutRequest {
+        expected_layout_revision: 0,
+        layout: GraphLayout {
+            node_labels: [(node_id.clone(), "Microphone".into())].into(),
+            ..GraphLayout::default()
+        },
+    };
+    engine
+        .write_graph_layout(&catalog.active_id, request)
+        .unwrap();
+    let controls = engine.read_node_controls(&catalog.active_id).unwrap();
+    let renamed = controls
+        .nodes
+        .iter()
+        .find(|node| node.node_id == node_id)
+        .unwrap();
+    assert_eq!(renamed.label.as_deref(), Some("Microphone"));
+    assert_eq!(engine.graph().revision, catalog.document.revision);
+}
