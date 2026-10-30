@@ -5,3 +5,7 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - react-i18next@17.0.13
   - '@types/node@26.4.1'
+  - '@elgato/schemas@0.6.0'
+  - '@elgato/streamdeck@3.0.4'
+  - '@elgato/utils@0.6.2'
+  - '@elgato/cli@1.10.4'

@@ -69,7 +69,7 @@ test('publication rechecks environment reports from the Actions bundle without p
   mkdirSync(join(bundle, 'publication'));
   writeFileSync(join(bundle, 'publication/mix-relay.qualification.json'), JSON.stringify({ schemaVersion: 1, runId: '42' }));
   const reports = readWorkflowReports(bundle);
-  assert.equal(reports.length, f.loaded.contract.qualificationTargets.length);
+  assert.equal(reports.length, f.loaded.contract.qualificationTargets.length + f.loaded.contract.artifactChecks.length);
   assert.ok(evaluateQualification(f.candidate, reports).passed);
   writeFileSync(join(bundle, 'qualification', reports[0].targetId, 'unit-evidence.txt'), 'tampered');
   assert.throws(() => readWorkflowReports(bundle), /changed raw evidence/);

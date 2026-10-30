@@ -36,6 +36,12 @@
       "os": "linux",
       "arch": "x64",
       "format": "arch"
+    },
+    {
+      "id": "macos-universal-streamdeck",
+      "os": "macos",
+      "arch": "universal",
+      "format": "streamDeckPlugin"
     }
   ],
   "codeChecks": {
@@ -361,6 +367,13 @@
       "scope": "artifact",
       "required": true,
       "title": "Remove the installed product while preserving saved session documents"
+    },
+    {
+      "id": "STREAMDECK-01",
+      "scope": "artifact",
+      "required": true,
+      "artifact": "macos-universal-streamdeck",
+      "title": "Validate packed Stream Deck bytes, identity, DRM and runtime without running Stream Deck"
     }
   ],
   "macosArchitectures": {
@@ -423,5 +436,12 @@
       "digest": "08754e28d91b1680086c6211ef4df13559e766fff7cdb4006489b14b5d281f08",
       "format": "qcow2"
     }
-  }
+  },
+  "artifactChecks": [
+    {
+      "id": "streamdeck-plugin",
+      "artifact": "macos-universal-streamdeck",
+      "kind": "streamdeck"
+    }
+  ]
 }

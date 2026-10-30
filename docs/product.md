@@ -222,7 +222,16 @@ Linux는 정확한 캡처의 native 건강 상태와 실제 PCM 진행이 모두
 제어 작업자가 기존 소유 경로를 복원한다. 유효한 무음 PCM은 정상 진행이며 새 PCM 뒤에만 다시 승인한다.
 제어 작업의 완료 시간까지 고정 상한으로 약속하지 않는다. Off인 앱·물리 입력의 큐는
 미사용 블록과 첫 재활성화 읽기에서 정리해 Off 기간의 과거 PCM을 재생하지 않는다.
-UI·API·Stream Deck은 같은 제어 경로를 사용한다. Stream Deck은 그래프·노드별 전원·음소거·볼륨·녹음을 제어한다.
+UI·API·Stream Deck은 같은 제어 경로를 사용한다. macOS Stream Deck 플러그인은 그래프·노드별 전원·음소거·볼륨·녹음을 제어한다.
+macOS 14.2+와 Stream Deck 7.1+가 필요하다. DRM의 하한은 6.9지만 최신 Node.js SDK 3.x의 지원 하한은 7.1이다.
+플러그인 신원은 `com.rawsector.mixrelay`, 동작은 `.power`·`.mute`·`.volume`·`.recording`, 제작자는 `rawsector`다.
+SDKVersion 3·Node.js 24를 사용하며 플러그인 코드는 실행 중 매니페스트를 읽거나 배포 자원을 수정하지 않는다.
+설정은 변경 즉시 저장하고 실패한 키·다이얼 조작은 `showAlert`로 알린다. 확인된 상태의 표시 갱신은 초당 10회 이하로 합친다.
+v0.1.0부터 `MixRelay-StreamDeck-<제품 버전>.streamDeckPlugin`을 PKG와 별도 다운로드로 배포하고 Stream Deck에서 연다.
+패키지를 후보 명세에 필수로 넣어 크기·SHA-256을 고정하며, 후보 CI가 실제 압축 해제한 파일의 공식 CLI·SDK·최소 버전·UUID를 검사한다.
+이 증거와 파일은 설치기와 같은 자격 검증·공개 단계에서 재확인한다. 앱 업데이트 명세에는 앱 설치기만 넣고 Stream Deck 패키지는 제외한다.
+Marketplace 등록 공개 뒤에는 제품 페이지에서 설치할 수도 있다. 등록 자료와 소유자 제출 절차는 [제출 키트](streamdeck-marketplace.md)에 둔다.
+실제 Stream Deck 설치·키·다이얼과 Maker Console이 암호화한 배포본 검증은 자동 검사와 구분한다.
 
 ### 녹음
 

@@ -2,7 +2,7 @@
 
 macOS adapter for the existing MixRelay node controls. No public HTTP service,
 account, network configuration, or duplicate audio engine is required.
-Requires macOS 14.2+, MixRelay running, and Stream Deck 6.6+.
+Requires macOS 14.2+, MixRelay running, and Stream Deck 7.1+ (Node.js SDK 3.x requires 7.1; the DRM baseline is 6.9).
 
 ## Build and install
 
@@ -12,14 +12,23 @@ From the repository root:
 pnpm install
 pnpm --filter @mixrelay/streamdeck-plugin build
 pnpm --filter @mixrelay/streamdeck-plugin test
-pnpm --package=@elgato/cli dlx streamdeck validate apps/streamdeck-plugin/dist/io.mixrelay.streamdeck.sdPlugin
-pnpm --package=@elgato/cli dlx streamdeck pack apps/streamdeck-plugin/dist/io.mixrelay.streamdeck.sdPlugin --output apps/streamdeck-plugin/dist
+pnpm --filter @mixrelay/streamdeck-plugin validate
+pnpm --filter @mixrelay/streamdeck-plugin run pack
+node scripts/streamdeck-artifact.mjs build --output /absolute/empty-output-directory
 ```
 
-Open the resulting `.streamDeckPlugin` package with Stream Deck. MixRelay offers
-**Power, Mute, Volume, and Recording** actions (localized to Korean when selected
-in Stream Deck). Choose the graph and a supported node for each action. Configured
-power keys retain their targets through the stable Power action identity.
+The last command builds, validates and packs
+`MixRelay-StreamDeck-<product version>.streamDeckPlugin`, then checks the unpacked
+archive again and reports its size and SHA-256. It refuses to overwrite an existing file.
+The package uses the Cargo product version, with a fourth manifest component of `0`.
+`validate` checks the built directory; `run pack` rebuilds, validates and packs in one command.
+
+Download the package from [MixRelay releases](https://github.com/mixrelay/mixrelay/releases)
+and open it with Stream Deck. Once the Elgato Marketplace listing is published, you
+can also search for MixRelay in Marketplace and install it from the product page. MixRelay offers
+**Power, Mute, Volume, and Recording** actions (localised to Korean when selected
+in Stream Deck). Choose the graph and a supported node for each action. The plugin UUID is `com.rawsector.mixrelay`; action UUIDs end in `.power`, `.mute`,
+`.volume` and `.recording`. These identities are fixed before first publication.
 Recording only lists recorder nodes, with Record/Resume, Pause, and Stop choices.
 Recording uses the folder and format selected in MixRelay's recorder settings.
 The property inspector shows these linked settings read-only; no folder typing or
@@ -28,9 +37,34 @@ sample rate and uses PCM16. MixRelay creates each take's filename. Resume retain
 the original take and its format.
 
 Volume works on buttons and Stream Deck + dials. Choose an increase/decrease button
-and a 0.5, 1, 2, or 3 dB step; the key displays its direction, step, and current gain.
+and a 0.5, 1, 2, or 3 dB step; the key displays its direction and current gain.
 Dial rotation uses the same step and all ticks in each event; pressing the dial mutes
 when the target supports mute. Output nodes without gain are not listed as volume targets.
+
+## Release and Marketplace
+
+`pnpm release:macos` builds this separate companion download alongside the macOS PKG.
+The plugin is not installed by the PKG: Stream Deck owns its installation.
+`support/environments.json` requires the package in `mix-relay.candidate.json` with
+its size and SHA-256. Both candidate workflows validate the actual unpacked archive
+with the pinned Elgato CLI, check identity, SDK 3, Stream Deck 7.1, Node.js 24 and
+product version, and preserve hash-bound evidence. Publication verifies the same
+candidate files and evidence. Attach all five candidate artefacts to both releases.
+
+The app's `mix-relay.release.json` contains only desktop installers. Stream Deck
+updates and installs its own plugin; the app updater must never select the companion
+package as an app installer. The candidate still requires and verifies the plugin.
+See the Korean [Marketplace listing kit](../../docs/streamdeck-marketplace.md).
+
+`icons.mjs` renders 256/512 px plugin PNGs from `branding/identity/app-icon.svg`
+and derives the 28 px white category SVG from the approved symbol. Action list
+icons are transparent white 20 px SVGs; keys use 72 px SVGs and dynamic 144 px SVGs.
+The volume dial uses Stream Deck's built-in `$B1` layout within its 200 × 100 area.
+Display changes coalesce at 100 ms intervals and unchanged key/dial feedback is
+not resent. Failures show an alert on both keys and dials. Settings save on change.
+Plugin code uses embedded action identities and never reads manifest metadata at
+runtime. The SDK handles its own protected manifest support; distributed resources
+are immutable. Runtime logs are excluded from the package through `.sdignore`.
 
 ## Control contract
 
@@ -93,8 +127,10 @@ conflicts require explicit recovery instead of silently discarding edits.
 ## Validation boundary
 
 Automated tests exercise protocol failures, OFF/deleted targets, take fences and
-the real bundled SDK against a simulated Stream Deck host. These do not prove
-physical key/dial behavior. Real Stream Deck installation and hardware validation
+the real bundled SDK against a simulated Stream Deck host with a protected,
+unreadable manifest. They also check failure alerts, automatic settings persistence,
+display throttling, generated icon sizes and archive validation. These do not prove
+physical key/dial behaviour. Real Stream Deck installation and hardware validation
 remain required before release.
 
 Built with the [official Elgato SDK](https://docs.elgato.com/streamdeck/sdk/introduction/plugin-environment/)

@@ -33,7 +33,7 @@ test("one product produces the exact publisher schema and preserve installer inp
   }
   assert.deepEqual(readFileSync(join(directory, file)), original);
   assert.equal(readFileSync(join(directory, "Uninstall MixRelay.pkg"), "utf8"), "Uninstaller is not selected\n");
-  assert.equal(readdirSync(directory).length, 8);
+  assert.equal(readdirSync(directory).length, 9);
 });
 
 test("the CLI publishes the complete qualified artifact selection and an explicit public notes URL", t => {
@@ -55,6 +55,14 @@ test('qualification cannot be omitted or used to release a subset of tested arti
   const { args, artifactArgs } = fixture(t);
   assert.throws(() => prepareReleaseManifest([...args.slice(0, 10), ...artifactArgs]), /--candidate and --reports/);
   assert.throws(() => prepareReleaseManifest([...args, ...artifactArgs.slice(0, 2)]), /exactly/);
+});
+
+test('the update manifest excludes the plugin but publication requires its exact candidate bytes and evidence', t => {
+  const f = fixture(t);
+  const plugin = f.candidate.artifacts.find(a => a.id === 'macos-universal-streamdeck');
+  writeFileSync(join(f.directory, plugin.file), 'changed plugin after qualification');
+  assert.throws(() => prepareReleaseManifest([...f.args, ...f.artifactArgs]), /bytes changed/);
+  assert.throws(() => prepareReleaseManifest([...f.args, ...f.artifactArgs, '--artifact', `macos:universal:${plugin.file}`]), /PKG/);
 });
 
 test("invalid options and artifact declarations cannot write a manifest", t => {

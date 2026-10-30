@@ -13,7 +13,7 @@ export function qualificationFixture(t) {
   const loaded = loadContract();
   const selections = loaded.contract.artifacts.map(artifact => {
     const names = { 'macos-universal-pkg': 'MixRelay Install.pkg', 'linux-x64-deb': 'MixRelay-x64.deb',
-      'linux-arm64-deb': 'MixRelay-arm64.deb', 'linux-x64-arch': 'MixRelay-x64.pkg.tar.zst' };
+      'linux-arm64-deb': 'MixRelay-arm64.deb', 'linux-x64-arch': 'MixRelay-x64.pkg.tar.zst', 'macos-universal-streamdeck': 'MixRelay-StreamDeck-1.2.3.streamDeckPlugin' };
     const file = names[artifact.id];
     writeFileSync(join(directory, file), `Synthetic installer fixture: ${artifact.id}`);
     return `${artifact.id}:${file}`;
@@ -23,7 +23,7 @@ export function qualificationFixture(t) {
   writeFileSync(candidatePath, JSON.stringify(candidate));
   const reportsPath = join(directory, 'reports');
   mkdirSync(reportsPath);
-  const reports = loaded.contract.qualificationTargets.map(target => {
+  const reports = [...loaded.contract.qualificationTargets, ...loaded.contract.artifactChecks].map(target => {
     const dir = join(reportsPath, target.id); mkdirSync(dir);
     const bytes = Buffer.from('Synthetic scenario evidence\n');
     writeFileSync(join(dir, 'unit-evidence.txt'), bytes);
@@ -41,7 +41,7 @@ export function qualificationFixture(t) {
     writeFileSync(join(dir, `${target.id}.qualification.json`), JSON.stringify(report));
     return report;
   });
-  const artifacts = candidate.artifacts.map(artifact => {
+  const artifacts = candidate.artifacts.filter(artifact => artifact.id !== 'macos-universal-streamdeck').map(artifact => {
     const definition = loaded.contract.artifacts.find(item => item.id === artifact.id);
     return { os: definition.os, arch: definition.arch, file: artifact.file };
   });

@@ -78,13 +78,26 @@ jobs:
           mkdir -p inputs/linux inputs/macos candidate
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN" > inputs/build-run.json
           gh release view "$MACOS_TAG" --json isDraft,isPrerelease | jq -e '.isDraft or .isPrerelease'
-          gh release download "$MACOS_TAG" --dir inputs/macos --pattern '*.pkg' --pattern source-revision.txt
+          gh release download "$MACOS_TAG" --dir inputs/macos --pattern '*.pkg' --pattern '*.streamDeckPlugin' --pattern source-revision.txt
           gh run download "$BUILD_RUN" --pattern 'candidate-*' --dir inputs/linux
       - name: Pin source, contract and every installer byte
         id: selection
         env:
           TARGET_IDS: ${{ inputs.targets }}
         run: node scripts/e2e/select-candidate.mjs --inputs inputs --output candidate
+      - name: Install Stream Deck validation tools
+        run: |
+          npm install --global pnpm@11.9.0
+          pnpm install --frozen-lockfile
+      - name: Qualify the packed Stream Deck bytes without running Stream Deck
+        run: node scripts/streamdeck-artifact.mjs qualify --directory candidate --output streamdeck-evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          overwrite: true
+          name: installed-target-streamdeck-plugin
+          path: streamdeck-evidence/
+          retention-days: 90
+          if-no-files-found: error
       - name: Verify suite changes preserve the installed product source
         env:
           GH_TOKEN: ${{ github.token }}

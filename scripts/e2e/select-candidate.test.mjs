@@ -17,6 +17,7 @@ function fixture(t) {
   writeFileSync(join(inputs, 'build-run.json'), JSON.stringify(run));
   writeFileSync(join(inputs, 'macos/source-revision.txt'), source);
   writeFileSync(join(inputs, 'macos/MixRelay.pkg'), 'signed package fixture');
+  writeFileSync(join(inputs, 'macos/MixRelay-StreamDeck-0.1.0.streamDeckPlugin'), 'plugin fixture');
   for (const [id, file] of [['linux-x64-deb', 'x64.deb'], ['linux-arm64-deb', 'arm64.deb'], ['linux-x64-arch', 'x64.pkg.tar.zst']]) {
     const dir = join(inputs, 'linux', `candidate-${id}`); mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, file), `${id} final payload`);
@@ -30,7 +31,7 @@ test('selects the same final bytes and source for every hosted target', t => {
   const matrix = selectCandidate(inputs, output);
   const candidate = JSON.parse(readFileSync(join(output, 'mix-relay.candidate.json')));
   assert.equal(candidate.sourceRevision, source);
-  assert.equal(candidate.artifacts.length, 4);
+  assert.equal(candidate.artifacts.length, 5);
   validateCandidate(candidate, output);
   assert.equal(matrix.include.length, 13);
   writeFileSync(join(output, 'x64.deb'), 'modified after build');
@@ -41,6 +42,12 @@ test('rejects an installer built from a different macOS source', t => {
   const { inputs, output } = fixture(t);
   writeFileSync(join(inputs, 'macos/source-revision.txt'), 'b'.repeat(40));
   assert.throws(() => selectCandidate(inputs, output), /same source commit/);
+});
+
+test('selection cannot omit the Stream Deck package from the macOS release', t => {
+  const { inputs, output } = fixture(t);
+  rmSync(join(inputs, 'macos/MixRelay-StreamDeck-0.1.0.streamDeckPlugin'));
+  assert.throws(() => selectCandidate(inputs, output), /Expected exactly one macos-universal-streamdeck/);
 });
 
 test('rejects a Linux artifact with a different recorded source', t => {

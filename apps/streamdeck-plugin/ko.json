@@ -1,12 +1,12 @@
 {
   "Description": "MixRelay의 전원, 음소거, 볼륨과 녹음을 제어합니다.",
-  "io.mixrelay.streamdeck.node": { "Name": "전원", "Tooltip": "선택한 노드의 처리를 켜거나 끕니다." },
-  "io.mixrelay.streamdeck.mute": { "Name": "음소거", "Tooltip": "선택한 노드의 소리를 켜거나 끕니다." },
-  "io.mixrelay.streamdeck.volume": {
+  "com.rawsector.mixrelay.power": { "Name": "전원", "Tooltip": "선택한 노드의 처리를 켜거나 끕니다." },
+  "com.rawsector.mixrelay.mute": { "Name": "음소거", "Tooltip": "선택한 노드의 소리를 켜거나 끕니다." },
+  "com.rawsector.mixrelay.volume": {
     "Name": "볼륨", "Tooltip": "버튼이나 다이얼로 볼륨을 조절합니다.",
     "Encoder": { "TriggerDescription": { "Rotate": "볼륨 조절", "Push": "음소거" } }
   },
-  "io.mixrelay.streamdeck.recorder": { "Name": "녹음", "Tooltip": "녹음기의 녹음, 일시정지, 정지를 제어합니다." },
+  "com.rawsector.mixrelay.recording": { "Name": "녹음", "Tooltip": "녹음기의 녹음, 일시정지, 정지를 제어합니다." },
   "Localization": {
     "Power": "전원", "Mute": "음소거", "Volume": "볼륨", "Recording": "녹음",
     "Graph": "그래프", "Node": "노드", "Control": "동작",

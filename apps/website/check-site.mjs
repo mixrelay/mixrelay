@@ -41,8 +41,9 @@ function resolveLocalReference(page, reference) {
 }
 function checkAnchor(page, reference) {
   if (!externalReference.test(reference)) return resolveLocalReference(page, reference);
-  // The prerelease site has no public store or download destination yet.
+  // Stream Deck release downloads are available independently of Marketplace approval.
   assert.ok(reference === 'mailto:support@rawsector.com' ||
+    (page.startsWith('manual/') && page.endsWith('/stream-deck.html') && reference === 'https://github.com/mixrelay/mixrelay/releases') ||
     (page.startsWith('legal/') && legalReferences.has(reference.replaceAll('&amp;', '&'))) ||
     (reference.startsWith('https://support.apple.com/') && new URL(reference).hostname === 'support.apple.com'),
   `${page}: external destination is an approved support or legal reference: ${reference}`);
@@ -206,5 +207,15 @@ for (const [language, phrases] of Object.entries(translatedPricing)) {
   for (const page of [`manual/${language}/licensing.html`, ...(language === 'en' || language === 'ko' ? [`legal/${language}/terms.html`] : []), ...(language === 'ko' ? ['index.html'] : [])]) {
     for (const phrase of phrases) assert.ok(sources.get(page).includes(phrase), `${page}: confirmed pricing policy includes ${phrase}`);
   }
+}
+for (const language of manualLanguages) {
+  const page = `manual/${language}/stream-deck.html`;
+  const html = sources.get(page);
+  assert.match(html, /macOS 14\.2/, `${page}: supported macOS minimum`);
+  assert.match(html, /Stream Deck 7\.1/, `${page}: SDK 3.x host minimum`);
+  assert.doesNotMatch(html, /Stream Deck 6\.6/, `${page}: no obsolete host requirement`);
+  assert.match(html, /MixRelay-StreamDeck-0\.1\.0\.streamDeckPlugin/, `${page}: release package installation`);
+  assert.match(html, /href="https:\/\/github\.com\/mixrelay\/mixrelay\/releases"/, `${page}: official release downloads`);
+  assert.match(html, /Elgato Marketplace/, `${page}: conditional Marketplace installation`);
 }
 console.log(`Static website checks passed for ${pages.length} pages (links/assets, languages, headings, translation parity, accessibility structure and prerelease policy).`);

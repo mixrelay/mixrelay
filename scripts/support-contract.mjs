@@ -31,10 +31,20 @@ export function validateContract(value) {
     if (!Array.isArray(items) || items.length === 0) throw new Error(`Missing ${label} definitions`);
     unique(items, label);
   }
+  if (!Array.isArray(value.artifactChecks)) throw new Error('Missing artifact checks');
+  unique(value.artifactChecks, 'artifact check');
+  unique([...value.qualificationTargets, ...value.artifactChecks], 'qualification');
+  for (const check of value.artifactChecks) {
+    if (check.kind !== 'streamdeck' || !value.artifacts.some(a => a.id === check.artifact && a.format === 'streamDeckPlugin')) {
+      throw new Error(`Invalid artifact check: ${check.id}`);
+    }
+  }
   for (const artifact of value.artifacts) {
     if (!(artifact.os === 'macos' && artifact.arch === 'universal' && artifact.format === 'pkg')
+      && !(artifact.os === 'macos' && artifact.arch === 'universal' && artifact.format === 'streamDeckPlugin')
       && !(artifact.os === 'linux' && ['x64', 'arm64'].includes(artifact.arch) && ['deb', 'arch'].includes(artifact.format))) throw new Error(`Invalid artifact definition: ${artifact.id}`);
-    if (!value.qualificationTargets.some(t => t.artifact === artifact.id)) throw new Error(`Artifact has no qualification target: ${artifact.id}`);
+    if (!(artifact.format === 'streamDeckPlugin' ? value.artifactChecks : value.qualificationTargets)
+      .some(t => t.artifact === artifact.id)) throw new Error(`Artifact has no qualification target: ${artifact.id}`);
   }
   for (const target of value.qualificationTargets) {
     const artifact = value.artifacts.find(item => item.id === target.artifact);
@@ -72,6 +82,11 @@ export function validateContract(value) {
   for (const scenario of value.scenarios) {
     if (!['artifact', 'installed-api', 'installed-ui', 'native-audio'].includes(scenario.scope)
       || typeof scenario.required !== 'boolean') throw new Error(`Invalid scenario: ${scenario.id}`);
+    if (scenario.artifact && (scenario.scope !== 'artifact'
+      || !value.artifactChecks.some(check => check.artifact === scenario.artifact))) throw new Error(`Invalid artifact scenario: ${scenario.id}`);
+  }
+  for (const check of value.artifactChecks) {
+    if (!value.scenarios.some(s => s.required && s.artifact === check.artifact)) throw new Error(`Artifact check has no required scenario: ${check.id}`);
   }
 }
 
@@ -103,8 +118,13 @@ export function composeDocument(contract) {
 }
 
 export function requiredScenarios(contract, target) {
-  return contract.scenarios.filter(item => item.required && (!item.os || item.os.includes(target.os)));
+  return contract.scenarios.filter(item => item.required && (item.artifact
+    ? item.artifact === target.artifact
+    : !target.kind && (!item.os || item.os.includes(target.os))));
 }
+
+export const releaseInstallers = (candidate, contract) => candidate.artifacts.filter(artifact =>
+  contract.artifacts.find(definition => definition.id === artifact.id)?.format !== 'streamDeckPlugin');
 
 export function matchesVersion(actual, target) {
   if (target.versionMatch === 'rolling') return typeof actual === 'string' && actual.length > 0;

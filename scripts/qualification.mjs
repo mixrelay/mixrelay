@@ -24,6 +24,9 @@ export function createCandidate(directory, selected, sourceRevision, productVers
     const definition = loaded.contract.artifacts.find(a => a.id === id);
     const file = parts.join(':');
     if (!definition || !validArtifactName(file, definition.format)) throw new Error(`Unsupported artifact: ${item}`);
+    if (definition.format === 'streamDeckPlugin' && file !== `MixRelay-StreamDeck-${productVersion}.streamDeckPlugin`) {
+      throw new Error('Stream Deck artifact filename must match product version');
+    }
     return { id, file, ...artifactBytes(directory, { file }) };
   });
   if (new Set(artifacts.map(a => a.id)).size !== artifacts.length
@@ -49,17 +52,18 @@ export function validateCandidate(candidate, directory, loaded = loadContract())
 
 export function evaluateQualification(candidate, reports, loaded = loadContract()) {
   const failures = [];
+  const targets = [...loaded.contract.qualificationTargets, ...loaded.contract.artifactChecks];
   const runId = reports[0]?.provenance?.runId;
   const runAttempt = reports[0]?.provenance?.runAttempt;
   const seen = new Set();
   for (const report of reports) {
     if (seen.has(report.targetId)) throw new Error(`Duplicate qualification report: ${report.targetId}`);
     seen.add(report.targetId);
-    if (!loaded.contract.qualificationTargets.some(t => t.id === report.targetId)) throw new Error(`Unknown qualification target: ${report.targetId}`);
+    if (!targets.some(t => t.id === report.targetId)) throw new Error(`Unknown qualification target: ${report.targetId}`);
   }
-  for (const target of loaded.contract.qualificationTargets) {
+  for (const target of targets) {
     const report = reports.find(r => r.targetId === target.id);
-    if (!report) { failures.push(`${target.id}: missing report${target.execution.kind === 'unavailable' ? `; ${target.execution.reason}` : ''}`); continue; }
+    if (!report) { failures.push(`${target.id}: missing report${target.execution?.kind === 'unavailable' ? `; ${target.execution.reason}` : ''}`); continue; }
     try {
       const artifact = candidate.artifacts.find(a => a.id === target.artifact);
       if (!/^[1-9]\d*$/.test(runId ?? '') || report.provenance?.runId !== runId
@@ -68,7 +72,7 @@ export function evaluateQualification(candidate, reports, loaded = loadContract(
       if (report.schemaVersion !== 1 || report.sourceRevision !== candidate.sourceRevision
         || report.contractSha256 !== loaded.sha256 || report.artifactSha256 !== artifact?.sha256
         || report.candidateSha256 !== digest(JSON.stringify(candidate))) throw new Error('Wrong candidate, source or artifact');
-      validateEnvironment(report.environment, target, loaded.contract);
+      if (!target.kind) validateEnvironment(report.environment, target, loaded.contract);
       if (!Number.isFinite(Date.parse(report.startedAt)) || !Number.isFinite(Date.parse(report.endedAt))
         || Date.parse(report.endedAt) < Date.parse(report.startedAt)) throw new Error('Missing execution timestamps');
       if (!Array.isArray(report.scenarios) || new Set(report.scenarios.map(s => s.id)).size !== report.scenarios.length) throw new Error('Invalid scenario results');
@@ -119,7 +123,7 @@ export function qualificationInventory(candidate, reports, loaded = loadContract
   const cell = value => String(value ?? 'not observed').replaceAll('|', '/').replaceAll('\n', ' ').trim();
   const summary = `# Candidate qualification\n\nSource: ${candidate.sourceRevision}\n\nContract: ${loaded.sha256}\n\n`
     + '| Environment | Artifact SHA-256 | Result |\n| --- | --- | --- |\n'
-    + loaded.contract.qualificationTargets.map(t => {
+    + [...loaded.contract.qualificationTargets, ...loaded.contract.artifactChecks].map(t => {
       const failure = result.failures.find(f => f.startsWith(`${t.id}:`));
       return `| ${t.id} | ${candidate.artifacts.find(a => a.id === t.artifact)?.sha256 ?? 'missing'} | ${failure ? failure.replaceAll('|', '/') : 'passed'} |`;
     }).join('\n') + '\n';
@@ -156,7 +160,7 @@ export function qualificationInventory(candidate, reports, loaded = loadContract
           && report.sourceRevision === candidate.sourceRevision && report.contractSha256 === loaded.sha256;
       } catch {}
       const cells = loaded.contract.scenarios.map(scenario => {
-        if (scenario.os && !scenario.os.includes(target.os)) return 'not applicable';
+        if (!requiredScenarios(loaded.contract, target).some(s => s.id === scenario.id)) return 'not applicable';
         if (!report) return 'not run';
         if (!identityMatches) return 'invalid report';
         const observed = report.scenarios?.find(s => s.id === scenario.id);

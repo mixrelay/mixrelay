@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { resolve, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { constants, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { dirname, resolve, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { checkVersion } from './product-version.mjs';
 import { checkMacosSigning, readMacosSigningConfig, withMacosSigning } from './macos-signing.mjs';
 import { checkPackageOutput } from './build-macos-installer-pkgs.mjs';
 import { checkNotarizationCredentials, notarizationArguments } from './macos-notarization.mjs';
 import { loadContract, checkGenerated } from './support-contract.mjs';
+import { streamDeckFilename } from './streamdeck-artifact.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 /** A failure whose message the owned child already printed. */
@@ -18,10 +19,21 @@ async function run(owned, program, args, env) {
   const result = await owned(program, args, { cwd: root, env, stdio: 'inherit' });
   if (result.error || result.status !== 0) throw new Error(`${program} failed (${result.signal ?? result.status ?? result.error?.message})`);
 }
+export async function packageReleaseArtifacts(owned, stage, env) {
+  const streamdeck = join(dirname(stage.payload.output), 'streamdeck');
+  await run(owned, process.execPath, [join(root, 'scripts/streamdeck-artifact.mjs'), 'build', '--output', streamdeck], env);
+  const packaged = await owned(process.execPath, [join(root, 'scripts/package-macos-release.mjs'), JSON.stringify(stage)], { cwd: root, env, stdio: 'inherit' });
+  if (packaged.status === 1) throw new ReportedFailure();
+  if (packaged.error || packaged.status !== 0) throw new Error(`packaging failed (${packaged.signal ?? packaged.status ?? packaged.error?.message})`);
+  const file = streamDeckFilename(stage.packages.version);
+  copyFileSync(join(streamdeck, file), join(stage.packages.output, file), constants.COPYFILE_EXCL);
+}
+
+async function main() {
 try {
   const { values } = parseArgs({ options: { help: { type: 'boolean' }, output: { type: 'string' }, 'from-keychain': { type: 'boolean' }, 'package-only': { type: 'boolean' }, 'skip-notarization': { type: 'boolean' } } });
   if (values.help) {
-    console.log('pnpm release:macos --output EMPTY_DIRECTORY [--from-keychain] [--package-only] [--skip-notarization]\nUnlocks the restored private build keychain, verifies signing, builds the universal app, HAL and one signed MixRelay PKG, then notarizes, staples and validates the PKG.\n--package-only reuses compiled signed artifacts and prepares a fresh payload. --skip-notarization produces a signed local test build marked not notarized. Does not install or publish.\nMIXRELAY_SIGNING_CONFIG selects another private restored signing configuration, including notarization credential references.');
+    console.log('pnpm release:macos --output EMPTY_DIRECTORY [--from-keychain] [--package-only] [--skip-notarization]\nUnlocks the restored private build keychain, verifies signing, builds the universal app, HAL and one signed MixRelay PKG, then notarizes, staples and validates the PKG. Also builds and validates MixRelay-StreamDeck-VERSION.streamDeckPlugin alongside the PKG.\n--package-only reuses compiled signed artifacts and prepares a fresh payload and Stream Deck package. --skip-notarization produces a signed local test build marked not notarized. Does not install or publish.\nMIXRELAY_SIGNING_CONFIG selects another private restored signing configuration, including notarization credential references.');
   } else {
     if (process.platform !== 'darwin' || !values.output) throw new Error('macOS and --output are required');
     checkGenerated(loadContract().contract);
@@ -64,9 +76,7 @@ try {
         payload: { manager: join(bundles, 'MixRelay.app'), hal: join(release, 'hal/MixRelayHAL.driver'), driver: join(release, 'mixrelay-driver-service'), engine: join(release, 'mixrelay-engine-service'), uninstaller: join(bundles, 'Uninstall MixRelay.app'), output: payload },
         packages: { payload, installerCli: join(release, 'mixrelay-macos-installer'), payloadChecker: join(release, 'mixrelay-macos-payload-check'), teamId, version, signingIdentity: installer, output, notarization, skipNotarization },
       };
-      const packaged = await owned(process.execPath, [join(root, 'scripts/package-macos-release.mjs'), JSON.stringify(stage)], { cwd: root, env: process.env, stdio: 'inherit' });
-      if (packaged.status === 1) throw new ReportedFailure();
-      if (packaged.error || packaged.status !== 0) throw new Error(`packaging failed (${packaged.signal ?? packaged.status ?? packaged.error?.message})`);
+      await packageReleaseArtifacts(owned, stage, process.env);
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }
@@ -76,3 +86,5 @@ try {
   if (!(error instanceof ReportedFailure)) console.error(error.message);
   process.exitCode = 1;
 }
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();
