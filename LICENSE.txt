@@ -1,7 +1,7 @@
 MixRelay App
 Software Licence Agreement
 Licensor and copyright holder: Echo Vision Lab
-Version: 2026-10-10
+Version: 2026-10-30
 
 1. Using the app
 These terms govern the free and paid MixRelay app and its graph engine on
@@ -36,11 +36,13 @@ the feature information for the version you use. A purchase covers the
 features described in its offer; these terms do not authorize undisclosed
 limits or a reduction of purchased features.
 
-A paid licence covers the purchased major version. Any activation limit is
-stated in the offer before payment. Updates made available within that major
-version are included. If another major version is offered, purchasing it is
-optional. Not purchasing another version does not cancel the purchased-version
-entitlement.
+A paid licence purchased before version 1.0 is released covers all 0.x and
+1.x versions and the updates made available for them. A paid licence
+purchased from the 1.0 release covers the purchased major version and the
+updates made available for it. Any activation limit is stated in the offer
+before payment. If a later major version is offered, purchasing it is
+optional. Not purchasing a later major version does not cancel your right to
+use the versions already covered by your licence.
 
 This is not a monthly subscription. Installing an update does not by itself
 cancel your purchased-major-version entitlement.

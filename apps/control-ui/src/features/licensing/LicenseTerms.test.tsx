@@ -47,7 +47,11 @@ describe('localized App license presentation', () => {
     expect(displayed?.textContent).toBe(source);
     expect(displayed).toHaveAttribute('lang', locale);
     expect(source.match(/^\d+\. /gm)).toHaveLength(10);
-    expect(source).toContain('2026-10-10');
+    const purchases = source.split(/^2\. /m)[1]?.split(/^3\. /m)[0];
+    for (const version of ['1.0', '0.x', '1.x']) {
+      expect(purchases).toContain(version);
+    }
+    expect(source).toContain('2026-10-30');
     expect(source).toContain('111-42-04359');
     expect(source).toContain('https://appserver.rawsector.com');
     expect(source).toContain('https://www.lemonsqueezy.com/privacy');

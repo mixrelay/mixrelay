@@ -15,13 +15,92 @@ test("every App contract states the approved 30-day offline authorization separa
   }
 });
 
+test("every App contract states update rights before and from the 1.0 release and retains covered versions", () => {
+  const updateRights = {
+    en: [
+      "A paid licence purchased before version 1.0 is released covers all 0.x and 1.x versions and the updates made available for them.",
+      "A paid licence purchased from the 1.0 release covers the purchased major version and the updates made available for it.",
+      "If a later major version is offered, purchasing it is optional.",
+      "Not purchasing a later major version does not cancel your right to use the versions already covered by your licence.",
+    ],
+    ko: [
+      "1.0 출시 전에 구매한 유료 사용권은 모든 0.x 및 1.x 버전과 해당 버전에 제공되는 업데이트에 적용됩니다.",
+      "1.0 출시일부터 구매한 유료 사용권은 구매한 메이저 버전과 해당 버전에 제공되는 업데이트에 적용됩니다.",
+      "차기 메이저 버전을 제공하는 경우 그 구매는 선택 사항입니다.",
+      "차기 메이저 버전을 구매하지 않아도 사용권에 이미 포함된 버전을 사용할 권리는 유지됩니다.",
+    ],
+    ja: [
+      "1.0のリリース前に購入した有料ライセンスは、すべての0.xおよび1.xバージョンと、それらのバージョン向けに提供される更新を対象とします。",
+      "1.0のリリース日以降に購入した有料ライセンスは、購入したメジャーバージョンと、そのバージョン向けに提供される更新を対象とします。",
+      "後のメジャーバージョンが提供される場合、その購入は任意です。",
+      "後のメジャーバージョンを購入しなくても、ライセンスの対象にすでに含まれるバージョンの利用権は維持されます。",
+    ],
+    "zh-Hans": [
+      "在 1.0 发布前购买的付费许可涵盖所有 0.x 和 1.x 版本及为这些版本提供的更新。",
+      "自 1.0 发布之日起购买的付费许可涵盖所购买的主要版本及为该版本提供的更新。",
+      "若提供后续主要版本，是否购买由您决定。",
+      "不购买后续主要版本不会取消您使用许可已涵盖版本的权利。",
+    ],
+    "zh-Hant": [
+      "在 1.0 發布前購買的付費授權涵蓋所有 0.x 和 1.x 版本及為這些版本提供的更新。",
+      "自 1.0 發布之日起購買的付費授權涵蓋所購買的主要版本及為該版本提供的更新。",
+      "若提供後續主要版本，是否購買由您決定。",
+      "不購買後續主要版本不會取消您使用授權已涵蓋版本的權利。",
+    ],
+    fr: [
+      "Une licence payante achetée avant la sortie de la version 1.0 couvre toutes les versions 0.x et 1.x ainsi que les mises à jour proposées pour ces versions.",
+      "Une licence payante achetée à compter de la sortie de la version 1.0 couvre la version majeure achetée ainsi que les mises à jour proposées pour celle-ci.",
+      "Si une version majeure ultérieure est proposée, son achat est facultatif.",
+      "Ne pas acheter une version majeure ultérieure ne supprime pas votre droit d’utiliser les versions déjà couvertes par votre licence.",
+    ],
+    de: [
+      "Eine vor der Veröffentlichung von Version 1.0 erworbene kostenpflichtige Lizenz gilt für alle Versionen 0.x und 1.x sowie die dafür bereitgestellten Updates.",
+      "Eine ab der Veröffentlichung von Version 1.0 erworbene kostenpflichtige Lizenz gilt für die erworbene Hauptversion sowie die dafür bereitgestellten Updates.",
+      "Wird eine spätere Hauptversion angeboten, ist ihr Kauf freiwillig.",
+      "Der Verzicht auf den Kauf einer späteren Hauptversion hebt Ihr Recht zur Nutzung der bereits von Ihrer Lizenz abgedeckten Versionen nicht auf.",
+    ],
+    es: [
+      "Una licencia de pago comprada antes del lanzamiento de la versión 1.0 cubre todas las versiones 0.x y 1.x y las actualizaciones ofrecidas para ellas.",
+      "Una licencia de pago comprada a partir del lanzamiento de la versión 1.0 cubre la versión principal comprada y las actualizaciones ofrecidas para ella.",
+      "Si se ofrece una versión principal posterior, comprarla es opcional.",
+      "No comprar una versión principal posterior no cancela su derecho a utilizar las versiones ya cubiertas por su licencia.",
+    ],
+    pt: [
+      "Uma licença paga comprada antes do lançamento da versão 1.0 cobre todas as versões 0.x e 1.x e as atualizações oferecidas para elas.",
+      "Uma licença paga comprada a partir do lançamento da versão 1.0 cobre a versão principal comprada e as atualizações oferecidas para ela.",
+      "Se uma versão principal posterior for oferecida, sua compra será opcional.",
+      "Não comprar uma versão principal posterior não cancela o seu direito de utilizar as versões já cobertas pela sua licença.",
+    ],
+    it: [
+      "Una licenza a pagamento acquistata prima del rilascio della versione 1.0 copre tutte le versioni 0.x e 1.x e gli aggiornamenti offerti per tali versioni.",
+      "Una licenza a pagamento acquistata a partire dal rilascio della versione 1.0 copre la versione principale acquistata e gli aggiornamenti offerti per tale versione.",
+      "Se viene offerta una versione principale successiva, il suo acquisto è facoltativo.",
+      "Non acquistare una versione principale successiva non annulla il diritto di utilizzare le versioni già coperte dalla propria licenza.",
+    ],
+    ru: [
+      "Платная лицензия, приобретённая до выхода версии 1.0, распространяется на все версии 0.x и 1.x и предоставляемые для них обновления.",
+      "Платная лицензия, приобретённая со дня выхода версии 1.0, распространяется на приобретённую основную версию и предоставляемые для неё обновления.",
+      "Если предлагается последующая основная версия, её покупка добровольна.",
+      "Отказ от покупки последующей основной версии не отменяет право использовать версии, уже охватываемые вашей лицензией.",
+    ],
+  };
+  assert.deepEqual(Object.keys(updateRights).sort(), languages.map(entry => entry.language).sort());
+  for (const entry of languages) {
+    const terms = readFileSync(new URL(`../${entry.appTerms}`, import.meta.url), "utf8");
+    const purchases = terms.split(/^2\. /m)[1]?.split(/^3\. /m)[0]?.replace(/\s+/g, " ");
+    assert.ok(purchases, `${entry.appTerms}: purchases and updates section`);
+    for (const clause of updateRights[entry.language]) assert.ok(purchases.includes(clause), `${entry.appTerms}: ${clause}`);
+    assert.doesNotMatch(purchases, /US\$\d+/, `${entry.appTerms}: agreement does not state prices`);
+  }
+});
+
 test("required languages have complete distinct App and Driver contracts", () => {
   assert.deepEqual(languages.map(entry => entry.language).sort(), ["de", "en", "es", "fr", "it", "ja", "ko", "pt", "ru", "zh-Hans", "zh-Hant"]);
   for (const entry of languages) {
-    for (const [key, sections] of [["appTerms", 10], ["driverTerms", 8]]) {
+    for (const [key, sections, version] of [["appTerms", 10, "2026-10-30"], ["driverTerms", 8, "2026-10-10"]]) {
       const terms = readFileSync(new URL(`../${entry[key]}`, import.meta.url), "utf8");
       assert.deepEqual([...terms.matchAll(/^(\d+)\. /gm)].map(match => Number(match[1])), Array.from({ length: sections }, (_, i) => i + 1));
-      for (const value of ["2026-10-10", "111-42-04359", "support@rawsector.com", "privacy@dsub.io", "legal@dsub.io", "+82 10-6380-9646", "Asia/Seoul"]) assert.ok(terms.includes(value), `${entry[key]}: ${value}`);
+      for (const value of [version, "111-42-04359", "support@rawsector.com", "privacy@dsub.io", "legal@dsub.io", "+82 10-6380-9646", "Asia/Seoul"]) assert.ok(terms.includes(value), `${entry[key]}: ${value}`);
       assert.doesNotMatch(terms, /Professional legal review|review not completed|검토 미완료|Seunghyun Bae|배승현/);
     }
     const driver = readFileSync(new URL(`../${entry.driverTerms}`, import.meta.url), "utf8");

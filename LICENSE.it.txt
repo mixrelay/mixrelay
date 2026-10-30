@@ -1,7 +1,7 @@
 App MixRelay
 Contratto di licenza software
 Licenziante e titolare del diritto d’autore: Echo Vision Lab
-Versione: 2026-10-10
+Versione: 2026-10-30
 
 1. Uso dell’app
 Il presente contratto disciplina l’app MixRelay gratuita e a pagamento e il suo motore a grafo su macOS e Linux. MixRelay Driver è disciplinato separatamente da LICENSE-Driver.txt, anche se fornito nello stesso programma di installazione.
@@ -15,7 +15,7 @@ L’app gratuita offre una valutazione con funzionalità limitate e senza limiti
 
 Il Driver gratuito offre un dispositivo virtuale di base predefinito con impostazioni gratuite di numero di canali, frequenza di campionamento e formato PCM. Rinominare un dispositivo richiede l’app a pagamento. La creazione o rimozione di più identità di dispositivi virtuali (Create/Remove) richiede l’app a pagamento; né l’app gratuita né il Driver autonomo forniscono queste operazioni. I dispositivi virtuali già creati tramite l’app a pagamento rimangono disponibili dopo la chiusura di tale app. Eventuali limiti di grafi, nodi, canali di elaborazione o registrazione sono indicati nelle informazioni sulle funzionalità della versione utilizzata. L’acquisto copre le funzionalità descritte nella relativa offerta; queste condizioni non autorizzano limiti non comunicati o riduzioni delle funzionalità acquistate.
 
-La licenza a pagamento copre la versione principale acquistata. Ogni limite di attivazione è indicato nell’offerta prima del pagamento. Sono inclusi gli aggiornamenti offerti per tale versione principale. Se viene offerta un’altra versione principale, il suo acquisto è facoltativo. Non acquistare un’altra versione non annulla i diritti sulla versione acquistata.
+Una licenza a pagamento acquistata prima del rilascio della versione 1.0 copre tutte le versioni 0.x e 1.x e gli aggiornamenti offerti per tali versioni. Una licenza a pagamento acquistata a partire dal rilascio della versione 1.0 copre la versione principale acquistata e gli aggiornamenti offerti per tale versione. Ogni limite di attivazione è indicato nell’offerta prima del pagamento. Se viene offerta una versione principale successiva, il suo acquisto è facoltativo. Non acquistare una versione principale successiva non annulla il diritto di utilizzare le versioni già coperte dalla propria licenza.
 
 Non si tratta di un abbonamento mensile. L’installazione di un aggiornamento non annulla di per sé i diritti sulla versione principale acquistata.
 

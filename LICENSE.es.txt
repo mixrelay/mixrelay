@@ -1,7 +1,7 @@
 MixRelay App
 Acuerdo de licencia de software
 Licenciante y titular de los derechos de autor: Echo Vision Lab
-Versión: 2026-10-10
+Versión: 2026-10-30
 
 1. Uso de la aplicación
 Estas condiciones regulan la aplicación MixRelay gratuita y de pago y su motor de grafos en macOS y Linux. MixRelay Driver se rige por separado por LICENSE-Driver.txt, incluso cuando se suministra en el mismo instalador.
@@ -15,7 +15,7 @@ La aplicación gratuita ofrece una evaluación con funciones limitadas y sin lí
 
 El Driver gratuito proporciona un dispositivo virtual básico predeterminado cuyos ajustes de número de canales, frecuencia de muestreo y formato PCM son gratuitos. Cambiar el nombre de un dispositivo requiere la aplicación de pago. Crear o eliminar varias identidades de dispositivos virtuales (Create/Remove) requiere la aplicación de pago; ni la aplicación gratuita ni el Driver independiente ofrecen estas operaciones. Los dispositivos virtuales ya creados mediante la aplicación de pago siguen disponibles después de cerrar esa aplicación. Cualquier límite de grafos, nodos, canales de procesamiento o grabación se indica en la información de funciones de la versión utilizada. La compra cubre las funciones descritas en su oferta; estas condiciones no autorizan límites no comunicados ni la reducción de funciones adquiridas.
 
-La licencia de pago cubre la versión principal comprada. Cualquier límite de activaciones se indica en la oferta antes del pago. Se incluyen las actualizaciones ofrecidas para esa versión principal. Si se ofrece otra versión principal, comprarla es opcional. No comprar otra versión no cancela los derechos de la versión comprada.
+Una licencia de pago comprada antes del lanzamiento de la versión 1.0 cubre todas las versiones 0.x y 1.x y las actualizaciones ofrecidas para ellas. Una licencia de pago comprada a partir del lanzamiento de la versión 1.0 cubre la versión principal comprada y las actualizaciones ofrecidas para ella. Cualquier límite de activaciones se indica en la oferta antes del pago. Si se ofrece una versión principal posterior, comprarla es opcional. No comprar una versión principal posterior no cancela su derecho a utilizar las versiones ya cubiertas por su licencia.
 
 No se trata de una suscripción mensual. La instalación de una actualización no cancela por sí sola sus derechos sobre la versión principal adquirida.
 

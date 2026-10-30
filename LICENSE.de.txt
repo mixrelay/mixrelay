@@ -1,7 +1,7 @@
 MixRelay App
 Software-Lizenzvertrag
 Lizenzgeber und Urheberrechtsinhaber: Echo Vision Lab
-Version: 2026-10-10
+Version: 2026-10-30
 
 1. Nutzung der App
 Dieser Vertrag gilt für die kostenlose und kostenpflichtige MixRelay App und ihre Graph-Engine unter macOS und Linux. Für MixRelay Driver gilt gesondert LICENSE-Driver.txt, auch wenn er mit demselben Installationsprogramm bereitgestellt wird.
@@ -15,7 +15,7 @@ Die kostenlose App ermöglicht eine zeitlich unbeschränkte Erprobung mit einges
 
 Der kostenlose Driver stellt standardmäßig ein grundlegendes virtuelles Gerät bereit, dessen Kanalzahl, Abtastrate und PCM-Format kostenlos eingestellt werden können. Das Umbenennen eines Geräts erfordert die kostenpflichtige App. Das Erstellen oder Entfernen mehrerer virtueller Geräteidentitäten (Create/Remove) erfordert die kostenpflichtige App; weder die kostenlose App noch der eigenständige Driver bieten diese Vorgänge an. Bereits mit der kostenpflichtigen App erstellte virtuelle Geräte bleiben nach dem Beenden dieser App verfügbar. Etwaige Beschränkungen für Graphen, Knoten, Verarbeitungskanäle oder Aufnahmen werden in den Funktionsinformationen der verwendeten Version angegeben. Ein Kauf umfasst die in seinem Angebot beschriebenen Funktionen; diese Bedingungen erlauben keine unangekündigten Beschränkungen oder Kürzungen erworbener Funktionen.
 
-Die kostenpflichtige Lizenz gilt für die erworbene Hauptversion. Eine etwaige Aktivierungsgrenze wird vor der Zahlung im Angebot angegeben. Für diese Hauptversion bereitgestellte Updates sind enthalten. Wird eine andere Hauptversion angeboten, ist ihr Kauf freiwillig. Der Verzicht auf den Kauf einer anderen Version hebt die Nutzungsrechte an der erworbenen Version nicht auf.
+Eine vor der Veröffentlichung von Version 1.0 erworbene kostenpflichtige Lizenz gilt für alle Versionen 0.x und 1.x sowie die dafür bereitgestellten Updates. Eine ab der Veröffentlichung von Version 1.0 erworbene kostenpflichtige Lizenz gilt für die erworbene Hauptversion sowie die dafür bereitgestellten Updates. Eine etwaige Aktivierungsgrenze wird vor der Zahlung im Angebot angegeben. Wird eine spätere Hauptversion angeboten, ist ihr Kauf freiwillig. Der Verzicht auf den Kauf einer späteren Hauptversion hebt Ihr Recht zur Nutzung der bereits von Ihrer Lizenz abgedeckten Versionen nicht auf.
 
 Es handelt sich nicht um ein monatliches Abonnement. Die Installation eines Updates hebt Ihre Rechte an der erworbenen Hauptversion nicht für sich genommen auf.
 

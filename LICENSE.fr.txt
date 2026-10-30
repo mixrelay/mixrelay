@@ -1,7 +1,7 @@
 Application MixRelay
 Contrat de licence du logiciel
 Concédant et titulaire des droits d’auteur : Echo Vision Lab
-Version : 2026-10-10
+Version : 2026-10-30
 
 1. Utilisation de l’application
 Ce contrat régit l’application MixRelay gratuite et payante et son moteur de graphe sur macOS et Linux. MixRelay Driver est régi séparément par LICENSE-Driver.txt, même lorsqu’il est fourni dans le même programme d’installation.
@@ -15,7 +15,7 @@ L’application gratuite propose une évaluation sans limite de durée, avec des
 
 Le Driver gratuit fournit un périphérique virtuel de base par défaut, avec des réglages gratuits du nombre de canaux, de la fréquence d’échantillonnage et du format PCM. Renommer un périphérique nécessite l’application payante. La création ou la suppression de plusieurs identités de périphériques virtuels (Create/Remove) nécessite l’application payante ; ni l’application gratuite ni le Driver autonome ne proposent ces opérations. Les périphériques virtuels déjà créés par l’application payante restent disponibles après sa fermeture. Les éventuelles limites de graphes, de nœuds, de canaux de traitement ou d’enregistrement figurent dans les informations sur les fonctionnalités de la version utilisée. L’achat couvre les fonctionnalités décrites dans son offre ; ces conditions n’autorisent ni des limites non annoncées ni une réduction des fonctionnalités achetées.
 
-La licence payante couvre la version majeure achetée. Toute limite d’activations est indiquée dans l’offre avant paiement. Les mises à jour proposées pour cette version majeure sont incluses. Si une autre version majeure est proposée, son achat est facultatif. Ne pas acheter une autre version ne supprime pas les droits sur la version achetée.
+Une licence payante achetée avant la sortie de la version 1.0 couvre toutes les versions 0.x et 1.x ainsi que les mises à jour proposées pour ces versions. Une licence payante achetée à compter de la sortie de la version 1.0 couvre la version majeure achetée ainsi que les mises à jour proposées pour celle-ci. Toute limite d’activations est indiquée dans l’offre avant paiement. Si une version majeure ultérieure est proposée, son achat est facultatif. Ne pas acheter une version majeure ultérieure ne supprime pas votre droit d’utiliser les versions déjà couvertes par votre licence.
 
 Il ne s’agit pas d’un abonnement mensuel. L’installation d’une mise à jour n’annule pas à elle seule vos droits sur la version majeure achetée.
 

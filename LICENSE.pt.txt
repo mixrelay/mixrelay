@@ -1,7 +1,7 @@
 MixRelay App
 Contrato de licença de software
 Licenciante e titular dos direitos autorais: Echo Vision Lab
-Versão: 2026-10-10
+Versão: 2026-10-30
 
 1. Uso da aplicação
 Estes termos regem a aplicação MixRelay gratuita e paga e o seu motor de grafos no macOS e no Linux. O MixRelay Driver é regido separadamente por LICENSE-Driver.txt, mesmo quando fornecido no mesmo instalador.
@@ -15,7 +15,7 @@ A aplicação gratuita oferece uma avaliação com funcionalidades limitadas e s
 
 O Driver gratuito fornece um dispositivo virtual básico padrão, com configurações gratuitas de número de canais, taxa de amostragem e formato PCM. Renomear um dispositivo exige a aplicação paga. Criar ou remover várias identidades de dispositivos virtuais (Create/Remove) exige a aplicação paga; nem a aplicação gratuita nem o Driver independente oferecem essas operações. Os dispositivos virtuais já criados pela aplicação paga permanecem disponíveis após o encerramento dessa aplicação. Quaisquer limites de grafos, nós, canais de processamento ou gravação são indicados nas informações de funcionalidades da versão utilizada. Uma compra abrange as funcionalidades descritas na sua oferta; estes termos não autorizam limites não divulgados nem a redução de funcionalidades adquiridas.
 
-A licença paga cobre a versão principal comprada. Qualquer limite de ativações é informado na oferta antes do pagamento. As atualizações oferecidas para essa versão principal estão incluídas. Se outra versão principal for oferecida, sua compra será opcional. Não comprar outra versão não cancela os direitos da versão comprada.
+Uma licença paga comprada antes do lançamento da versão 1.0 cobre todas as versões 0.x e 1.x e as atualizações oferecidas para elas. Uma licença paga comprada a partir do lançamento da versão 1.0 cobre a versão principal comprada e as atualizações oferecidas para ela. Qualquer limite de ativações é informado na oferta antes do pagamento. Se uma versão principal posterior for oferecida, sua compra será opcional. Não comprar uma versão principal posterior não cancela o seu direito de utilizar as versões já cobertas pela sua licença.
 
 Não se trata de uma assinatura mensal. A instalação de uma atualização não cancela, por si só, os seus direitos sobre a versão principal adquirida.
 
