@@ -16,22 +16,21 @@ import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
 import { NodeMuteButton, NodePowerButton } from '../../core/ui/NodeSignalControls';
 import { TransportButton } from '../../core/ui/TransportButton';
-import { advance, eventually, find } from '../../test-support/fakeTimerQueries';
+import { advance, find, finishFakeTimerTest } from '../../test-support/fakeTimerQueries';
 import { MidiAccess, MidiSettingsButton } from './MidiAccess';
 import { MidiBindingOptions } from './MidiBindingOptions';
 import { MidiBindingsList } from './MidiBindingsList';
 import { midiBinding, midiFixture, midiPortFixture } from './midiFixtures';
 
+let user: ReturnType<typeof userEvent.setup>;
+
 beforeEach(async () => {
+  vi.clearAllMocks();
   vi.useFakeTimers();
+  user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync });
   await i18n.changeLanguage('en');
 });
-afterEach(async () => {
-  await advance();
-  vi.clearAllTimers();
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-});
+afterEach(() => finishFakeTimerTest());
 function view(children: ReactNode) {
   return render(
     <MixRelayProvider>
@@ -39,23 +38,9 @@ function view(children: ReactNode) {
     </MixRelayProvider>,
   );
 }
-async function input(action: Promise<void>) {
-  let settled = false;
-  await Promise.all([
-    action.finally(() => {
-      settled = true;
-    }),
-    eventually(() => expect(settled).toBe(true)),
-  ]);
-}
-const keyboard = (keys: string) =>
-  input(userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).keyboard(keys));
-const click = (name: string | RegExp) =>
-  input(
-    userEvent
-      .setup({ advanceTimers: vi.advanceTimersByTime })
-      .click(screen.getByRole('button', { name })),
-  );
+
+const keyboard = (keys: string) => user.keyboard(keys);
+const click = (name: string | RegExp) => user.click(screen.getByRole('button', { name }));
 const audio = vi.fn();
 function controls() {
   return (
@@ -124,9 +109,7 @@ it('one MIDI toggle enters mapping, replaces audio controls, selects with keyboa
   await click('Map Microphone: Pause');
   await click('Map Microphone: Stop');
   const records = screen.getAllByRole('button', { name: 'Map Microphone: Record / resume' });
-  await input(
-    userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(records[0] as HTMLElement),
-  );
+  await user.click(records[0] as HTMLElement);
   expect(audio).not.toHaveBeenCalled();
   await keyboard('{Escape}');
   expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -213,19 +196,20 @@ function ListOptions({ binding = midiBinding }: { binding?: MidiBinding }) {
   );
 }
 const changed = vi.fn();
-it('edits absolute ranges and per-mapping relative encoding and steps through Core selects', async () => {
-  view(<ListOptions />);
-  await click('Select Programme / Microphone · Volume');
-  screen.getByRole('button', { name: /Minimum/ }).focus();
-  await keyboard(' {End}{Enter}');
-  expect(changed).toHaveBeenLastCalledWith(midiBinding, { ...midiBinding, minDb: 12 });
-  screen.getByRole('button', { name: /Maximum/ }).focus();
-  await keyboard(' {Home}{Enter}');
-  expect(changed).toHaveBeenLastCalledWith(midiBinding, { ...midiBinding, maxDb: -60 });
-  screen.getByRole('button', { name: /Volume mode/ }).focus();
-  await keyboard(' {End}{Enter}');
-  expect(changed).toHaveBeenLastCalledWith(midiBinding, { ...midiBinding, mode: 'offset64' });
-});
+it.each([
+  ['Minimum', '{End}', { minDb: 12 }],
+  ['Maximum', '{Home}', { maxDb: -60 }],
+  ['Volume mode', '{End}', { mode: 'offset64' }],
+] as const)(
+  'edits %s only on its selected mapping through the Core select',
+  async (label, key, update) => {
+    view(<ListOptions />);
+    await click('Select Programme / Microphone · Volume');
+    screen.getByRole('button', { name: new RegExp(label) }).focus();
+    await keyboard(` ${key}{Enter}`);
+    expect(changed).toHaveBeenLastCalledWith(midiBinding, { ...midiBinding, ...update });
+  },
+);
 it('relative steps and recorder choices update only their selected mapping', async () => {
   const relative = { ...midiBinding, mode: 'twos_complement' as const };
   const first = view(<ListOptions binding={relative} />);
@@ -564,14 +548,13 @@ it('groups a shared hardware control once and uses each mapping title as its onl
   expect(
     screen.queryByRole('heading', { name: 'Programme / Microphone · Volume' }),
   ).not.toBeInTheDocument();
-  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
   for (const name of [
     'Select Programme / Microphone · Volume',
     'Remove MIDI control for Programme / Microphone',
     'Select Programme / Programme output · Volume',
     'Remove MIDI control for Programme / Programme output',
   ]) {
-    await input(user.tab());
+    await user.tab();
     expect(screen.getByRole('button', { name })).toHaveFocus();
   }
 });

@@ -6,7 +6,7 @@ import { processorReportState } from '../../.storybook/fixtures/processorReport'
 import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
 import { I18nProvider, i18n } from '../core/i18n';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
-import { advance, eventually, find } from '../test-support/fakeTimerQueries';
+import { advance, eventually, find, finishFakeTimerTest } from '../test-support/fakeTimerQueries';
 import { StudioScreen } from './StudioScreen';
 
 beforeEach(() => {
@@ -38,22 +38,7 @@ beforeEach(() => {
   );
 });
 
-afterEach(async () => {
-  await act(async () => vi.runOnlyPendingTimersAsync());
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
-
-async function input(action: Promise<void>) {
-  let settled = false;
-  await Promise.all([
-    action.finally(() => {
-      settled = true;
-    }),
-    eventually(() => expect(settled).toBe(true)),
-  ]);
-}
+afterEach(() => finishFakeTimerTest(() => act(async () => vi.runOnlyPendingTimersAsync())));
 
 it('shares one scan session between the bottom-right diagnostics and processor menu without stopping audio', async () => {
   vi.useFakeTimers();
@@ -80,24 +65,24 @@ it('shares one scan session between the bottom-right diagnostics and processor m
   await advance();
   expect(lookup).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  await input(user.click(diagnostics));
+  await user.click(diagnostics);
   const dialog = await find('dialog', { name: 'Diagnostics' });
   expect(dialog).toHaveTextContent('Unavailable Effect 19');
   expect(scan).not.toHaveBeenCalled();
   expect(controlPort.setEnginePower).not.toHaveBeenCalled();
-  await input(user.click(within(dialog).getByRole('button', { name: 'Rescan audio effects' })));
+  await user.click(within(dialog).getByRole('button', { name: 'Rescan audio effects' }));
   await eventually(() =>
     expect(dialog).toHaveTextContent('Effect search completed without issues.'),
   );
   expect(scan).toHaveBeenCalledExactlyOnceWith([]);
-  await input(user.keyboard('{Escape}'));
+  await user.keyboard('{Escape}');
   await eventually(() => expect(diagnostics).toHaveFocus());
   expect(diagnostics).toHaveAccessibleName('Diagnostics');
-  await input(user.click(screen.getByRole('button', { name: 'Add node' })));
+  await user.click(screen.getByRole('button', { name: 'Add node' }));
   const processor = await find('menuitem', { name: 'Processor' });
   processor.focus();
-  await input(user.keyboard('{ArrowRight}'));
-  await input(user.click(await find('menuitem', { name: 'View search report…' })));
+  await user.keyboard('{ArrowRight}');
+  await user.click(await find('menuitem', { name: 'View search report…' }));
   const menuReport = await find('dialog', { name: 'Effect search report' });
   expect(menuReport).toHaveTextContent('Effect search completed without issues.');
   expect(within(menuReport).queryByText('Unavailable Effect 19')).not.toBeInTheDocument();
@@ -128,17 +113,17 @@ it('moves workspace failures into diagnostics and keeps focus there after recove
   expect(
     screen.getByRole('img', { name: 'Diagnostics: current problems (1)' }),
   ).toBeInTheDocument();
-  await input(user.click(diagnostics));
+  await user.click(diagnostics);
   const dialog = await find('dialog', { name: 'Diagnostics' });
   const problems = within(dialog).getByRole('region', { name: 'Current problems' });
   await eventually(() =>
     expect(within(problems).getByRole('button', { name: 'Retry' })).toBeInTheDocument(),
   );
   const retry = within(problems).getByRole('button', { name: 'Retry' });
-  await input(user.click(retry));
+  await user.click(retry);
   await eventually(() => expect(within(dialog).queryByText('Current problems')).toBeNull());
   await eventually(() => expect(dialog.contains(document.activeElement)).toBe(true));
-  await input(user.keyboard('{Escape}'));
+  await user.keyboard('{Escape}');
   await eventually(() => expect(diagnostics).toHaveFocus());
   expect(diagnostics).toHaveAccessibleName('Diagnostics · 19');
   expect(screen.getByText('Diagnostics: items to check (19)')).toHaveAttribute('role', 'status');

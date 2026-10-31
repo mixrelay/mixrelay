@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 
 /** Under fake timers, runs timers due within `ms` (0 settles pending promises and
@@ -8,13 +8,34 @@ export async function advance(ms = 0) {
   else await act(async () => Promise.resolve());
 }
 
+/** Test teardown for fake-timer tests: drains timers, then always unmounts and restores
+ * real timers and mocks, even when draining rejects. Vitest skips later afterEach hooks
+ * after one throws, so the global cleanup cannot be relied on here. */
+export async function finishFakeTimerTest(
+  drain: () => Promise<unknown> = advance,
+  restore: () => void = () => {},
+) {
+  try {
+    await drain();
+  } finally {
+    try {
+      cleanup();
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+      restore();
+    }
+  }
+}
+
 // Captured at load, before any test fakes timers, so these keep reading the real clock.
 const realNow = performance.now.bind(performance);
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 const realWaitStep = 20;
 
-/** Under fake timers Testing Library's async utilities wait on a faked setTimeout and
- * never settle. These helpers instead step the fake clock 250 ms at a time until the
+/** These helpers step the fake clock 250 ms at a time until the
  * query or assertion holds — like waitFor, but without wall-clock waits such as the
  * one-second node-control readback. Once `options.timeout` of fake time is used up
  * (2000 ms by default) they keep checking on the real clock for `options.realTimeout`
@@ -36,7 +57,7 @@ export interface EventuallyOptions {
   realTimeout?: number;
 }
 
-export async function eventually(assertion: () => void, options: EventuallyOptions = {}) {
+export async function eventually<T>(assertion: () => T, options: EventuallyOptions = {}) {
   const { timeout, realTimeout = 2000 } = options;
   if (!vi.isFakeTimers()) return waitFor(assertion, timeout === undefined ? {} : { timeout });
   const limit = timeout ?? 2000;
@@ -45,8 +66,7 @@ export async function eventually(assertion: () => void, options: EventuallyOptio
   let realStart: number | undefined;
   for (;;) {
     try {
-      assertion();
-      return;
+      return assertion();
     } catch (error) {
       if (fakeElapsed < limit) {
         fakeElapsed += fakeStep;
@@ -75,8 +95,7 @@ export async function findIn(
       options,
       wait.timeout === undefined ? {} : { timeout: wait.timeout },
     );
-  await eventually(() => scope.getByRole(role, options), wait);
-  return scope.getByRole(role, options);
+  return eventually(() => scope.getByRole(role, options), wait);
 }
 
 export function find(role: RoleQuery[0], options?: RoleQuery[1], wait?: EventuallyOptions) {
