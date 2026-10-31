@@ -19,11 +19,29 @@ use crate::{
 
 mod native;
 
+use mixrelay_macos_transport::control_inventory::report::{Report, Settled};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Request {
     Inventory,
-    Acknowledged { generation: u64 },
     Replacement { endpoint: [u8; 16], generation: u64 },
+    Report(Report),
+}
+
+/// Endpoints with running clients that hold no queue, and how many.
+type Unprovisioned = Vec<([u8; 16], u32)>;
+
+/// Counts that differ from those `sent`; an endpoint that left the list reports 0.
+fn unprovisioned_changes(sent: &Unprovisioned, current: &Unprovisioned) -> Unprovisioned {
+    let recovered = sent
+        .iter()
+        .filter(|(endpoint, _)| current.iter().all(|(other, _)| other != endpoint))
+        .map(|&(endpoint, _)| (endpoint, 0));
+    let changed = current
+        .iter()
+        .copied()
+        .filter(|entry| !sent.contains(entry));
+    recovered.chain(changed).collect()
 }
 
 /// The adapter owns queue/timer handles; each connection value owns its socket.
@@ -41,7 +59,11 @@ struct Control<B: Backend> {
     session: RefCell<ControlSession>,
     connection: RefCell<Option<B::Connection>>,
     backend: B,
-    acknowledged: Cell<(u64, u64)>,
+    settled: Cell<Option<(u64, u64, crate::inventory::Settlement)>>,
+    /// Authority and the newest request settlement sent on it.
+    configured: Cell<(u64, u64)>,
+    /// Authority and the unprovisioned client counts last sent on it.
+    unprovisioned: RefCell<(u64, Unprovisioned)>,
 }
 
 impl<B: Backend> Control<B> {
@@ -51,7 +73,9 @@ impl<B: Backend> Control<B> {
             session: RefCell::new(ControlSession::default()),
             connection: RefCell::new(None),
             backend,
-            acknowledged: Cell::new((0, 0)),
+            settled: Cell::new(None),
+            configured: Cell::new((0, 0)),
+            unprovisioned: RefCell::new((0, Vec::new())),
         }
     }
 
@@ -103,17 +127,77 @@ impl<B: Backend> Control<B> {
         let action = self.session.borrow_mut().tick();
         self.request_replacement();
         let authority = self.session.borrow().authority();
-        if let Some(generation) = crate::inventory::acknowledged(&self.registry, authority)
-            && self.acknowledged.get() != (authority, generation)
+        // A rejected generation is reported too, so the Driver service rolls back
+        // without waiting out its timeout. A later retry may still report Applied.
+        if let Some((generation, settlement)) = crate::inventory::settled(&self.registry, authority)
+            && self.settled.get() != Some((authority, generation, settlement))
         {
-            self.send(Request::Acknowledged { generation });
-            self.acknowledged.set((authority, generation));
+            self.send(Request::Report(Report::Inventory {
+                generation,
+                applied: settlement == crate::inventory::Settlement::Applied,
+            }));
+            self.settled.set(Some((authority, generation, settlement)));
         }
+        self.send_configurations(authority);
+        self.send_unprovisioned(authority);
         match action {
             TickAction::Maintain => {}
             TickAction::Reconnect => self.open(),
             TickAction::RefreshInventory => self.send(Request::Inventory),
         }
+    }
+
+    /// Reports every settled rate/format/mapping request in order, once per connection,
+    /// so the Driver service can tell a rejection from a slow Perform. A new connection
+    /// receives the retained settlements again, then a replay marker: the service
+    /// attributes nothing to its requests until the replay has completed.
+    fn send_configurations(&self, authority: u64) {
+        if authority == 0 {
+            return;
+        }
+        let (sent_authority, sent) = self.configured.get();
+        let replaying = sent_authority != authority;
+        let after = if replaying { 0 } else { sent };
+        let incarnation = self.registry.incarnation;
+        let mut newest = after;
+        for settled in self.registry.settled_after(after) {
+            self.send(Request::Report(Report::Settled(Settled {
+                incarnation,
+                endpoint: settled.endpoint,
+                sequence: settled.sequence,
+                rate: settled.rate,
+                formats: settled.formats,
+                applied: settled.applied,
+            })));
+            // The queue is ordered; the maximum still guards the cursor.
+            newest = newest.max(settled.sequence);
+        }
+        if replaying {
+            self.send(Request::Report(Report::Replayed {
+                incarnation,
+                through: newest,
+            }));
+        }
+        self.configured.set((authority, newest));
+    }
+
+    /// Reports each change in the number of clients holding IO without a queue, so a
+    /// failed re-provisioning is logged by the Driver service rather than left silent.
+    fn send_unprovisioned(&self, authority: u64) {
+        if authority == 0 {
+            return;
+        }
+        let current = self.registry.unprovisioned();
+        let (sent_authority, sent) = self.unprovisioned.replace((authority, Vec::new()));
+        let sent = if sent_authority == authority {
+            sent
+        } else {
+            Vec::new()
+        };
+        for (endpoint, clients) in unprovisioned_changes(&sent, &current) {
+            self.send(Request::Report(Report::Unprovisioned { endpoint, clients }));
+        }
+        self.unprovisioned.replace((authority, current));
     }
 
     fn send(&self, request: Request) {

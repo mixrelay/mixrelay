@@ -82,8 +82,10 @@ test('fragmented and coalesced frames are parsed independently', async () => {
 
 test('a fragmented frame cannot exceed the per-frame response limit', async () => {
   await fixture(
+    // The size limit, not the response timeout, must end this exchange; 4 MiB in 1 KiB
+    // writes can take longer than a short timeout on a loaded machine.
     async (path) =>
-      await assert.rejects(exchange({ type: 'snapshot' }, path, 100), /Response too large/),
+      await assert.rejects(exchange({ type: 'snapshot' }, path, 30000), /Response too large/),
     (socket) => {
       const bytes = Buffer.from(
         `{"id":1,"status":200,"body":{"data":"${'x'.repeat(4 * 1024 * 1024)}"}}\n`,

@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { getConfig, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useEffect, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { advance, eventually, find, findIn } from './fakeTimerQueries';
+import { advance, eventually, find, findIn, finishFakeTimerTest } from './fakeTimerQueries';
 
 function Delayed({ ms }: { ms: number }) {
   const [shown, setShown] = useState(false);
@@ -13,6 +14,58 @@ function Delayed({ ms }: { ms: number }) {
 }
 
 afterEach(() => vi.useRealTimers());
+
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+
+it('awaits pointer and keyboard input without advancing background polling', async () => {
+  vi.useFakeTimers();
+  const click = vi.fn();
+  const poll = vi.fn();
+  const interval = setInterval(poll, 250);
+  render(
+    <button type="button" onClick={click}>
+      Map control
+    </button>,
+  );
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  const input = user.click(screen.getByRole('button', { name: 'Map control' }));
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // Bound the regression without leaving RTL's async wrapper pending on failure.
+    const completed = await Promise.race([
+      input.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeout = realSetTimeout(() => resolve(false), 1000);
+      }),
+    ]);
+    expect(completed).toBe(true);
+    await user.keyboard('{Enter}');
+    expect(click).toHaveBeenCalledTimes(2);
+    expect(poll).not.toHaveBeenCalled();
+  } finally {
+    realClearTimeout(timeout);
+    clearInterval(interval);
+    await advance();
+    await input;
+  }
+});
+
+it('restores the async environment after a rejected operation so the next render works', async () => {
+  vi.useFakeTimers();
+  await expect(
+    getConfig().asyncWrapper(() => Promise.reject(new Error('input failed'))),
+  ).rejects.toThrow('input failed');
+  const click = vi.fn();
+  render(
+    <button type="button" onClick={click}>
+      Retry
+    </button>,
+  );
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  await user.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(click).toHaveBeenCalledOnce();
+});
 
 it('steps the fake clock until a timer-driven element appears, without wall-clock waiting', async () => {
   vi.useFakeTimers();
@@ -58,4 +111,19 @@ it('defers to Testing Library under real timers', async () => {
   await eventually(() => expect(screen.getByRole('button', { name: 'Ready' })).toBeVisible(), {
     timeout: 1000,
   });
+});
+
+it('teardown unmounts and restores real timers and mocks even when draining rejects', async () => {
+  vi.useFakeTimers();
+  const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
+  const restored = vi.fn();
+  render(<button type="button">Mounted</button>);
+  await expect(
+    finishFakeTimerTest(() => Promise.reject(new Error('drain failed')), restored),
+  ).rejects.toThrow('drain failed');
+  expect(screen.queryByRole('button', { name: 'Mounted' })).not.toBeInTheDocument();
+  expect(vi.isFakeTimers()).toBe(false);
+  expect(vi.isMockFunction(console.info)).toBe(false);
+  expect(spy).not.toHaveBeenCalled();
+  expect(restored).toHaveBeenCalledOnce();
 });

@@ -56,13 +56,17 @@ jobs:
           fi
           echo "products=${products[*]}" >> "$GITHUB_OUTPUT"
 
+      - name: Install archive inspection tools
+        if: steps.manifests.outputs.products != ''
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
+
       - name: Verify final bytes against successful native qualification
         if: steps.manifests.outputs.products != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir release-assets
-          gh release download "$RELEASE_TAG" --dir release-assets --pattern '*.pkg' --pattern '*.deb' --pattern '*.pkg.tar.zst' --pattern 'mix-relay.*.json'
+          gh release download "$RELEASE_TAG" --dir release-assets --pattern '*.pkg' --pattern '*.deb' --pattern '*.pkg.tar.zst' --pattern '*.streamDeckPlugin' --pattern 'mix-relay.*.json'
           node scripts/qualification-ci.mjs verify-published --directory release-assets --tag "$RELEASE_TAG" --output qualification-proof
 
       - name: Request central catalog publication

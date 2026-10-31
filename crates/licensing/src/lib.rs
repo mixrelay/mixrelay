@@ -16,38 +16,37 @@ pub use credentials::{
 pub use entitlement::{AccessSnapshot, AccessStatus, EntitlementRecord};
 pub use secrecy::SecretString;
 
-/// Immutable store/product/variant binding supplied by the publisher, not by the UI.
+/// Publisher-controlled organisation and licence benefit; both IDs are public metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProductIdentity {
-    store: u64,
-    product: u64,
-    variant: u64,
+    organization: uuid::Uuid,
+    benefit: uuid::Uuid,
 }
 
 impl ProductIdentity {
-    /// Bind a client to one paid variant.
-    ///
-    /// IDs are public product metadata, not merchant credentials.
+    /// Bind a client to one paid licence benefit.
     ///
     /// # Errors
-    /// Returns `InvalidConfiguration` if any identifier is zero.
-    pub fn new(store: u64, product: u64, variant: u64) -> Result<Self, LicenseError> {
-        if store == 0 || product == 0 || variant == 0 {
-            return Err(LicenseError::InvalidConfiguration);
-        }
+    /// Returns `InvalidConfiguration` unless both identifiers are non-nil UUIDs.
+    pub fn new(organization: &str, benefit: &str) -> Result<Self, LicenseError> {
+        let parse = |value: &str| {
+            uuid::Uuid::parse_str(value)
+                .ok()
+                .filter(|id| !id.is_nil() && id.hyphenated().to_string() == value)
+                .ok_or(LicenseError::InvalidConfiguration)
+        };
         Ok(Self {
-            store,
-            product,
-            variant,
+            organization: parse(organization)?,
+            benefit: parse(benefit)?,
         })
     }
 }
 
-/// Remote activation identity. Keep the instance ID to validate or release this seat.
+/// Verified device identity, either a Polar activation UUID or a local device label.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Activation {
-    license_id: u64,
+    license_id: String,
     instance_id: String,
     purchased_major: u64,
 }
@@ -55,17 +54,23 @@ pub struct Activation {
 impl Activation {
     /// The provider's license record ID; this is not the secret license key.
     #[must_use]
-    pub const fn license_id(&self) -> u64 {
-        self.license_id
+    pub fn license_id(&self) -> &str {
+        &self.license_id
     }
 
-    /// The purchased major bound to the publisher's configured variant.
+    /// The purchased major bound to the publisher's configured benefit.
     #[must_use]
     pub const fn purchased_major(&self) -> u64 {
         self.purchased_major
     }
 
-    /// The seat identifier returned by the activation request.
+    /// Whether this purchase covers a major version, including the early-adopter 0.x/1.x grant.
+    #[must_use]
+    pub const fn covers_major(&self, major: u64) -> bool {
+        self.purchased_major == major || (self.purchased_major == 0 && major == 1)
+    }
+
+    /// Polar activation UUID, or `local:` followed by the label for an unlimited key.
     #[must_use]
     pub fn instance_id(&self) -> &str {
         &self.instance_id
@@ -76,13 +81,13 @@ impl Activation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LicenseError {
-    /// The publisher has not supplied positive product identifiers.
+    /// The publisher has not supplied valid organisation and benefit identifiers.
     #[error("invalid licensing configuration")]
     InvalidConfiguration,
     /// A required argument is empty, oversized or contains control characters.
     #[error("invalid license request")]
     InvalidInput,
-    /// The remote result belongs to a different store, product or variant.
+    /// The remote result belongs to a different organisation or licence benefit.
     #[error("license belongs to another product")]
     WrongProduct,
     /// The provider rejected the key, instance, or activation limit.

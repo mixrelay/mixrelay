@@ -105,25 +105,110 @@ fn inventory_ack_waits_for_perform_and_newer_publication_can_restore_older_mappi
     let initial = Message::new(&[1], 90);
     assert!(initial.apply(&fixture));
     assert_eq!(
-        crate::inventory::acknowledged(&fixture.registry, 1),
-        Some(90)
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((90, crate::inventory::Settlement::Applied))
     );
-    assert_eq!(crate::inventory::acknowledged(&fixture.registry, 2), None);
+    assert_eq!(crate::inventory::settled(&fixture.registry, 2), None);
     let candidate = Message::new(&[1], 91);
     assert!(candidate.apply(&fixture));
-    assert_eq!(crate::inventory::acknowledged(&fixture.registry, 1), None);
+    assert_eq!(crate::inventory::settled(&fixture.registry, 1), None);
     assert_eq!(fixture.perform(), crate::abi::OK);
     assert_eq!(
-        crate::inventory::acknowledged(&fixture.registry, 1),
-        Some(91)
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((91, crate::inventory::Settlement::Applied))
     );
     let rollback = Message::with_entry_generation(&[1], 92, 90);
     assert!(rollback.apply(&fixture));
-    assert_eq!(crate::inventory::acknowledged(&fixture.registry, 1), None);
+    assert_eq!(crate::inventory::settled(&fixture.registry, 1), None);
     assert_eq!(fixture.perform(), crate::abi::OK);
     assert_eq!(
-        crate::inventory::acknowledged(&fixture.registry, 1),
-        Some(92)
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((92, crate::inventory::Settlement::Applied))
+    );
+}
+
+#[test]
+fn failed_inventory_apply_settles_as_rejected_until_a_newer_snapshot_applies() {
+    let fixture = inventory_fixture();
+    assert!(Message::new(&[1], 90).apply(&fixture));
+    // A native create failure used to leave the generation unsettled, so the Driver
+    // service waited out its whole budget before reporting the change pending.
+    FAIL_CREATE_ENDPOINT.store(2, Ordering::SeqCst);
+    assert!(!Message::new(&[1, 2], 91).apply(&fixture));
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((91, crate::inventory::Settlement::Rejected))
+    );
+    FAIL_CREATE_ENDPOINT.store(0, Ordering::SeqCst);
+    assert!(Message::with_entry_generation(&[1], 92, 90).apply(&fixture));
+    // The failed snapshot already queued endpoint 1's newer mapping; restoring needs a Perform.
+    assert_eq!(fixture.perform(), crate::abi::OK);
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((92, crate::inventory::Settlement::Applied))
+    );
+}
+
+#[test]
+fn aborted_attachment_settles_as_rejected_until_a_newer_publication_applies() {
+    let fixture = inventory_fixture();
+    assert!(Message::new(&[1], 90).apply(&fixture));
+    assert!(Message::new(&[1], 91).apply(&fixture));
+    let (id, generation) = fixture.pending();
+    assert_eq!(crate::inventory::settled(&fixture.registry, 1), None);
+    // The Driver service learns of the abort instead of waiting for an ACK that never comes.
+    assert_eq!(
+        fixture
+            .registry
+            .abort(id, crate::abi::CONFIG_ACTION, generation),
+        crate::abi::OK
+    );
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((91, crate::inventory::Settlement::Rejected))
+    );
+    assert!(Message::with_entry_generation(&[1], 92, 90).apply(&fixture));
+    assert_eq!(fixture.perform(), crate::abi::OK);
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((92, crate::inventory::Settlement::Applied))
+    );
+}
+
+#[test]
+fn a_failed_rate_request_keeps_an_earlier_mapping_failure_rejected_and_retried() {
+    let fixture = inventory_fixture();
+    assert!(Message::new(&[1], 90).apply(&fixture));
+    assert!(Message::new(&[1], 91).apply(&fixture));
+    let (id, generation) = fixture.pending();
+    assert_eq!(
+        fixture
+            .registry
+            .abort(id, crate::abi::CONFIG_ACTION, generation),
+        crate::abi::OK
+    );
+    // A later rate-only request that also fails must not clear the mapping failure:
+    // it used to report generation 91 as Applied and stop every retry.
+    assert_eq!(fixture.registry.set_rate(id, 96_000), crate::abi::OK);
+    let (_, rate_generation) = fixture.pending();
+    assert_eq!(
+        fixture
+            .registry
+            .abort(id, crate::abi::CONFIG_ACTION, rate_generation),
+        crate::abi::OK
+    );
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((91, crate::inventory::Settlement::Rejected))
+    );
+    // The same publication maps the endpoint again.
+    assert!(Message::new(&[1], 91).apply(&fixture));
+    let (_, retry) = fixture.pending();
+    assert!(retry > rate_generation);
+    assert_eq!(fixture.perform(), crate::abi::OK);
+    assert_eq!(
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((91, crate::inventory::Settlement::Applied))
     );
 }
 
@@ -265,8 +350,8 @@ fn transport_policy_obeys_authority_generation_and_last_valid_snapshot() {
     }
     assert!(!message.apply(&fixture));
     assert_eq!(
-        crate::inventory::acknowledged(&fixture.registry, 1),
-        Some(10)
+        crate::inventory::settled(&fixture.registry, 1),
+        Some((10, crate::inventory::Settlement::Applied))
     );
     assert_eq!(
         fixture.registry.transport.get(16, pid),

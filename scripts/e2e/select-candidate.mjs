@@ -3,10 +3,12 @@ import { appendFileSync, copyFileSync, readFileSync, readdirSync, writeFileSync 
 import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { validateLicensingBuildEnvironment } from '../polar-configuration.mjs';
 import { createCandidate } from '../qualification.mjs';
 import { loadContract, qualificationMatrix } from '../support-contract.mjs';
 
-export function selectCandidate(inputs, output, targetIds = []) {
+export function selectCandidate(inputs, output, targetIds = [], env = process.env) {
+  validateLicensingBuildEnvironment(env, { required:true, release:true });
   const run = JSON.parse(readFileSync(join(inputs, 'build-run.json')));
   assert.equal(run.repository?.full_name, 'mixrelay/mixrelay');
   assert.equal(run.path, '.github/workflows/build-linux-release.yml');
@@ -33,7 +35,7 @@ export function selectCandidate(inputs, output, targetIds = []) {
     return `${definition.id}:${file}`;
   });
   const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
-  const candidate = createCandidate(output, selected, source, version);
+  const candidate = createCandidate(output, selected, source, version, undefined, env);
   writeFileSync(join(output, 'mix-relay.candidate.json'), JSON.stringify(candidate, null, 2) + '\n', { flag: 'wx' });
   writeFileSync(join(output, 'selection.json'), JSON.stringify({ linuxBuildRun: run.id, sourceRevision: source,
     suiteRevision: process.env.GITHUB_SHA, targets: matrix.include.map(target => target.id),

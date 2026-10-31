@@ -39,10 +39,14 @@ jobs:
       - run: docker compose -f infra/lab/compose.yaml build ${{ matrix.distro }}
       - name: Build the final DEB once on its native CPU
         env:
+          MIXRELAY_POLAR_ORGANIZATION_ID: ${{ vars.MIXRELAY_POLAR_ORGANIZATION_ID }}
+          MIXRELAY_POLAR_BENEFIT_ID: ${{ vars.MIXRELAY_POLAR_BENEFIT_ID }}
+          MIXRELAY_POLAR_CHECKOUT_URL: ${{ vars.MIXRELAY_POLAR_CHECKOUT_URL }}
           RELEASE_ARCH: ${{ matrix.arch }}
         run: >-
           docker compose -f infra/lab/compose.yaml run --name mixrelay-release-build
-          -e RELEASE_ARCH="$RELEASE_ARCH" --entrypoint bash ${{ matrix.distro }}
+          -e RELEASE_ARCH="$RELEASE_ARCH"
+          -e MIXRELAY_POLAR_ORGANIZATION_ID -e MIXRELAY_POLAR_BENEFIT_ID -e MIXRELAY_POLAR_CHECKOUT_URL --entrypoint bash ${{ matrix.distro }}
           -c 'set -e; pnpm desktop:build --bundles deb;
           if [ "$RELEASE_ARCH" = x64 ]; then
           node scripts/prepare-arch-driver-package.mjs target/release/bundle/deb/*.deb target/arch-recipe;

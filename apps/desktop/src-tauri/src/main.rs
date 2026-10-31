@@ -11,6 +11,7 @@ mod driver_control;
 mod engine_supervision;
 mod licensing;
 mod logging;
+mod midi;
 mod native_text;
 mod processor_dialog;
 mod recording_dialog;
@@ -166,6 +167,9 @@ fn install_local_controls(app: &tauri::AppHandle) -> Result<(), Box<dyn std::err
         ),
     )?
     .with_app(app.clone());
+    let control = std::sync::Arc::new(control);
+    let midi = midi::Midi::start(app, std::sync::Arc::clone(&control))?;
+    app.manage(midi);
     let socket = tauri::async_runtime::block_on(control_proxy::local::socket::LocalSocket::start(
         &directory, uid, control,
     ))?;
@@ -337,16 +341,19 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
     if let WindowEvent::CloseRequested { api, .. } = event
         && window.label() == "main"
     {
-        #[cfg(target_os = "linux")]
-        if *window.app_handle().state::<app_mode::AppMode>() == app_mode::AppMode::Graph {
-            api.prevent_close();
-            window.app_handle().exit(0);
-            return;
-        }
         api.prevent_close();
-        if let Err(error) = app_menu::hide_main_window(window.app_handle()) {
-            tracing::error!(%error, "could not hide main window");
-        }
+        let app = window.app_handle().clone();
+        tauri::async_runtime::spawn(async move {
+            midi::cancel_editor_learn(&app).await;
+            #[cfg(target_os = "linux")]
+            if *app.state::<app_mode::AppMode>() == app_mode::AppMode::Graph {
+                app.exit(0);
+                return;
+            }
+            if let Err(error) = app_menu::hide_main_window(&app) {
+                tracing::error!(%error, "could not hide main window");
+            }
+        });
     }
 }
 

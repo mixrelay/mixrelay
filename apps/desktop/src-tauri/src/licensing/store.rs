@@ -32,7 +32,7 @@ impl CredentialStore for NativeCredentials {
 #[derive(Clone)]
 pub(super) struct SalvagedSeat {
     pub(super) key: SecretString,
-    pub(super) license_id: u64,
+    pub(super) license_id: String,
     pub(super) instance_id: String,
 }
 
@@ -43,11 +43,11 @@ impl SalvagedSeat {
         let record: serde_json::Value = serde_json::from_str(value.expose_secret()).ok()?;
         let key = record.get("key")?.as_str()?.trim();
         let activation = record.get("record")?.get("activation")?;
-        let license_id = activation.get("licenseId")?.as_u64()?;
+        let license_id = activation.get("licenseId")?.as_str()?;
         let instance_id = activation.get("instanceId")?.as_str()?.trim();
-        (!key.is_empty() && license_id != 0 && !instance_id.is_empty()).then(|| Self {
+        (!key.is_empty() && !license_id.is_empty() && !instance_id.is_empty()).then(|| Self {
             key: SecretString::from(key.to_owned()),
-            license_id,
+            license_id: license_id.to_owned(),
             instance_id: instance_id.to_owned(),
         })
     }

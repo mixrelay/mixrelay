@@ -1,5 +1,47 @@
 import { effectTranslations } from '../effects';
 export const de = {
+  midi: {
+    mapMode: 'MIDI-Zuweisungsmodus',
+    mapTarget: '{{name}} zuweisen: {{action}}',
+    selectTarget:
+      'Ein hervorgehobenes Bedienelement wählen, dann einen MIDI-Regler oder eine Taste betätigen.',
+    waitingTarget: '{{name}} · {{action}} — MIDI-Regler zum Zuweisen oder Ersetzen bewegen.',
+    done: 'Zuweisung beenden',
+    selectMapping: '{{name}} · {{action}} auswählen',
+    recorderAction: 'Aufnahmeaktion',
+    min: 'Minimum',
+    max: 'Maximum',
+    empty: 'Keine MIDI-Zuweisungen. Zum Hinzufügen ein hervorgehobenes Bedienelement auswählen.',
+    targetUnavailable: 'Zielstatus nicht verfügbar',
+    title: 'MIDI-Steuerung',
+    disconnected: 'Gerät getrennt',
+    targetMissing: 'Ziel fehlt',
+    unavailable: 'MIDI nicht verfügbar',
+    mode: 'Lautstärkemodus',
+    pickup: 'Bewegen Sie den Regler zum aktuellen Pegel, um die Steuerung zu übernehmen.',
+    step: 'Schrittweite',
+    remove: 'Entfernen',
+    removeTarget: 'MIDI-Zuweisung für {{name}} entfernen',
+    failed: 'MIDI-Einstellungen konnten nicht geändert werden. Versuchen Sie es erneut.',
+    control: '{{device}} · Kanal {{channel}} · {{kind}} {{number}}',
+    modes: {
+      absolute: 'Absolut (Abholen)',
+      twos_complement: 'Relativ: Zweierkomplement',
+      offset64: 'Relativ: Offset 64',
+    },
+    kinds: {
+      note: 'Note',
+      cc: 'CC',
+    },
+    actions: {
+      power: 'Ein/Aus',
+      mute: 'Stummschalten',
+      volume: 'Lautstärke',
+      record: 'Aufnehmen / Fortsetzen',
+      pause: 'Pause',
+      stop: 'Stopp',
+    },
+  },
   effects: effectTranslations.de,
   theme: {
     label: 'Darstellung',
@@ -288,7 +330,7 @@ export const de = {
     audioPaused: 'Audio pausiert',
     deleteGraph: 'Graph löschen',
     deleteGraphNotice:
-      '„{{name}}“ löschen? Die Audioverarbeitung und Aufnahmen dieses Graphen werden gestoppt. Dies kann nicht rückgängig gemacht werden. Gespeicherte Arbeitsbereichsdateien werden nicht gelöscht.',
+      '„{{name}}“ löschen? Audioverarbeitung und Aufnahmen stoppen. In der Graphliste mit Command+Z unter macOS oder Ctrl+Z unter Linux rückgängig machen; mit Shift wiederholen. Gespeicherte Arbeitsbereichsdateien bleiben erhalten.',
     catalogUnavailable:
       'Gespeicherte Graphen sind nicht verfügbar. Ihr vorhandener Graph wurde nicht ersetzt.',
     reloadGraphs: 'Graphen neu laden',

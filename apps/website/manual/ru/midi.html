@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Управляйте узлами по MIDI в macOS и Linux.">
+    <title>MIDI-контроллеры — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/midi.html">
+    <link rel="alternate" hreflang="ko" href="../ko/midi.html">
+    <link rel="alternate" hreflang="ja" href="../ja/midi.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/midi.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/midi.html">
+    <link rel="alternate" hreflang="de" href="../de/midi.html">
+    <link rel="alternate" hreflang="fr" href="../fr/midi.html">
+    <link rel="alternate" hreflang="it" href="../it/midi.html">
+    <link rel="alternate" hreflang="es" href="../es/midi.html">
+    <link rel="alternate" hreflang="pt" href="../pt/midi.html">
+    <link rel="alternate" hreflang="ru" href="../ru/midi.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Перейти к содержимому</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Страница продукта"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Язык"><a href="../en/midi.html" lang="en" hreflang="en">English</a> <a href="../ko/midi.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/midi.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/midi.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/midi.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/midi.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/midi.html" lang="fr" hreflang="fr">Français</a> <a href="../it/midi.html" lang="it" hreflang="it">Italiano</a> <a href="../es/midi.html" lang="es" hreflang="es">Español</a> <a href="../pt/midi.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/midi.html" lang="ru" hreflang="ru" aria-current="page">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Предрелизный черновик</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Главы руководства">
+        <a class="back-link" href="../../index.html">← Страница продукта</a>
+        <a class="manual-mobile-index" href="index.html">Все главы</a>
+        <nav class="guide-nav" aria-label="Главы руководства"><a href="index.html">Обзор руководства</a>
+<a href="installation.html">Системные требования и установка</a>
+<a href="first-launch.html">Первый запуск и разрешения</a>
+<a href="workspace.html">Рабочее пространство маршрутизации</a>
+<a href="devices.html">Устройства и виртуальные подключения</a>
+<a href="app-capture.html">Захват аудио приложений</a>
+<a href="recording.html">Запись</a>
+<a href="effects.html">Встроенные эффекты и пресеты</a>
+<a href="plugins.html">Внешние плагины</a>
+<a href="stream-deck.html">Плагин Stream Deck</a>
+<a href="midi.html" aria-current="page">MIDI-контроллеры</a>
+<a href="licensing.html">Бесплатная версия и лицензирование</a>
+<a href="updates.html">Обновления</a>
+<a href="uninstall.html">Удаление</a>
+<a href="troubleshooting.html">Устранение неполадок и диагностика</a>
+<a href="support.html">Связь с поддержкой</a></nav>
+      </aside>
+      <article class="guide-content">
+<header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>MIDI-контроллеры</h1><p>Управляйте узлами по MIDI в macOS и Linux.</p><p class="guide-draft-note">Предрелизный черновик. Публичные загрузки и покупки пока недоступны. Эти инструкции описывают текущую сборку из исходного кода; поведение установленного продукта ещё предстоит проверить в указанных ниже средах.</p></header>
+<nav class="manual-toc"><ul><li><a href="#assign">Назначение элемента управления</a></li><li><a href="#controls">Громкость и кнопки</a></li><li><a href="#devices">Устройства и сохранённые назначения</a></li></ul></nav>
+<section class="guide-section" id="assign" aria-labelledby="assign-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="assign-title">Назначение элемента управления</h2><p>Небольшая кнопка MIDI справа в заголовке редактора, Command+M в macOS или Ctrl+M в Linux включает и выключает режим MIDI-назначений. Escape также выходит из него. Выделенные элементы узлов служат целями: питание, заглушение, громкость и запись/продолжение, пауза, стоп. Нажмите элемент или выберите его через Tab и Enter/Space, затем поверните MIDI-регулятор. Назначение сохраняется сразу. Другой регулятор заменяет назначение, созданное при том же выборе. Выберите другую цель и используйте тот же регулятор, чтобы добавить ещё одно назначение. Точные дубликаты сохраняют настройки. В режиме приостановлены редактирование графа и выполнение MIDI-действий.</p></div></section>
+<section class="guide-section" id="controls" aria-labelledby="controls-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="controls-title">Громкость и кнопки</h2><p>Note On с ненулевой velocity или CC, переходящий с уровня ниже 64 на 64 и выше, однократно запускает каждое совпадающее действие. Питание и заглушение переключаются по собственному состоянию каждой цели. Абсолютная громкость использует CC 0–127 с диапазоном по умолчанию от −60 до +12 dB. Min/Max задаются отдельно, возможен обратный диапазон. Pick-up ждёт достижения текущего уровня каждой цели, в том числе после внешнего изменения или переподключения. Относительные энкодеры используют дополнительный код или offset 64 с отдельным шагом 0,5, 1, 2 или 3 dB. Обновления объединяются по целям примерно до 30 в секунду.</p></div></section>
+<section class="guide-section" id="devices" aria-labelledby="devices-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="devices-title">Устройства и сохранённые назначения</h2><p>В режиме назначения панель заменяет список графов на левой боковой панели. При выходе из режима список графов возвращается. Она показывает имена графа и узла, действие, устройство, канал, номер Note/CC и состояние. Выберите строку, чтобы открыть её граф, выделить цель и изменить громкость или действие рекордера. Delete/Backspace на строке или назначенном элементе либо кнопка удаления убирает только одно назначение. Отсутствующие цели сохраняют последние имена. Отмена удаления узла восстанавливает ID и назначения. В списке графов Command+Z в macOS или Ctrl+Z в Linux отменяет удаление графа; Shift повторяет его. История действует до перезапуска фонового процесса. Сохранённые назначения и восстановленные ID переживают перезапуск. Устройства подключаются автоматически. Закрытие редактора завершает режим и возобновляет MIDI-управление.</p><p>Фоновый процесс MixRelay должен работать; окно редактора можно закрыть. macOS использует CoreMIDI, Linux — секвенсор ALSA, включая порты PipeWire. В Linux нужны библиотека ALSA и доступ к секвенсору. При недоступности MIDI отображается причина. Поддерживается только вход: без MIDI-выхода, обратной связи для светодиодов или моторных фейдеров, часов и управления BPM.</p></div></section>
+        <nav class="manual-pagination" aria-label="Главы руководства"><a rel="prev" href="stream-deck.html">← Плагин Stream Deck</a><a rel="next" href="licensing.html">Далее: Бесплатная версия и лицензирование →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Предрелизный черновик · MixRelay 0.1.0</p><a href="../../index.html">Страница продукта</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

@@ -6,10 +6,12 @@ import { ControlSession } from './control-session.mjs';
 import { presentation } from './controls.mjs';
 import { keyImage } from './key-image.mjs';
 import { VolumeGesture } from './volume-gesture.mjs';
+import { Feedback } from './feedback.mjs';
 
 const actions = new Map();
 const session = new ControlSession(exchange, publish);
 const volume = new VolumeGesture(session);
+const feedback = new Feedback((entry) => render(entry).catch((error) => streamDeck.logger.warn(String(error))));
 const icons = new Map(
   Object.entries(actionIds).map(([name, id]) => [
     id,
@@ -20,19 +22,22 @@ const icons = new Map(
 async function render(entry) {
   const view = presentation(session.snapshot, entry.settings);
   view.value = streamDeck.i18n.translate(view.value);
-  if (entry.action.isDial())
-    await entry.action.setFeedback({ title: view.title, value: view.value });
-  else {
+  if (entry.action.isDial()) {
+    const value = { title: view.title, value: view.value };
+    const image = JSON.stringify(value);
+    if (image === entry.image) return;
+    await entry.action.setFeedback(value);
+    entry.image = image;
+  } else {
     const image = keyImage(view, entry.settings.operation, icons.get(entry.action.manifestId));
     if (image === entry.image) return;
-    await entry.action.setTitle('');
     await entry.action.setImage(image);
     entry.image = image;
   }
 }
 
 async function publish() {
-  await Promise.allSettled([...actions.values()].map(render));
+  for (const entry of actions.values()) feedback.update(entry);
   await streamDeck.ui.sendToPropertyInspector({
     type: 'snapshot',
     snapshot: session.snapshot ?? null,
@@ -61,6 +66,7 @@ async function control(event, operation, ticks) {
 function update(event) {
   volume.cancel(event.action.id);
   actions.set(event.action.id, {
+    ...actions.get(event.action.id),
     action: event.action,
     settings: actionSettings(
       event.action.manifestId,
@@ -68,13 +74,14 @@ function update(event) {
       event.action.isDial(),
     ),
   });
-  void render(actions.get(event.action.id)).catch((error) => streamDeck.logger.warn(String(error)));
+  feedback.update(actions.get(event.action.id));
 }
 
 streamDeck.actions.onWillAppear(update);
 streamDeck.settings.onDidReceiveSettings(update);
 streamDeck.actions.onWillDisappear((event) => {
   volume.cancel(event.action.id);
+  feedback.remove(event.action.id);
   actions.delete(event.action.id);
 });
 streamDeck.actions.onKeyDown((event) => {

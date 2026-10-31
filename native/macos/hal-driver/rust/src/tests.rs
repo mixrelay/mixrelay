@@ -28,7 +28,11 @@ static SERIAL: Mutex<()> = Mutex::new(());
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static REPLACEMENTS: AtomicUsize = AtomicUsize::new(0);
+static PREPARATIONS: AtomicUsize = AtomicUsize::new(0);
+static PREPARED_DURING_IO: AtomicUsize = AtomicUsize::new(0);
+static RELEASES: AtomicUsize = AtomicUsize::new(0);
 static FAIL_REPLACE: AtomicBool = AtomicBool::new(false);
+static FAIL_PREPARE_CLIENT: AtomicBool = AtomicBool::new(false);
 static FAIL_CREATE_ENDPOINT: AtomicU8 = AtomicU8::new(0);
 static PAUSE_IO: AtomicBool = AtomicBool::new(false);
 static IO_ENTERED: AtomicBool = AtomicBool::new(false);
@@ -83,18 +87,50 @@ unsafe extern "C" fn destroy(runtime: *mut c_void) {
     drop(unsafe { Box::from_raw(runtime.cast::<Runtime>()) });
     LIVE.fetch_sub(1, Ordering::SeqCst);
 }
-unsafe extern "C" fn replace(
-    runtime: *mut c_void,
-    geometry: *const Geometry,
-    rate: u32,
-    _: i32,
-    _: usize,
+/// A fake preparation records when control made it relative to in-flight IO.
+enum Change {
+    Mapping(Geometry),
+    Client(u32),
+}
+fn change(change: Change) -> *mut c_void {
+    if IO_ENTERED.load(Ordering::Acquire) && !RELEASE_IO.load(Ordering::Acquire) {
+        PREPARED_DURING_IO.fetch_add(1, Ordering::SeqCst);
+    }
+    PREPARATIONS.fetch_add(1, Ordering::SeqCst);
+    Box::into_raw(Box::new(change)).cast()
+}
+fn take(change: *mut c_void) -> Option<Change> {
+    (!change.is_null()).then(|| *unsafe { Box::from_raw(change.cast::<Change>()) })
+}
+unsafe extern "C" fn prepare(geometry: *const Geometry, _: i32, _: usize) -> *mut c_void {
+    change(Change::Mapping(unsafe { *geometry }))
+}
+unsafe extern "C" fn prepare_client(
+    _: *mut c_void,
+    client: u32,
+    prepared: *mut *mut c_void,
 ) -> bool {
+    if FAIL_PREPARE_CLIENT.load(Ordering::SeqCst) {
+        return false;
+    }
+    unsafe { prepared.write(change(Change::Client(client))) };
+    true
+}
+unsafe extern "C" fn release(_: *mut c_void) {
+    RELEASES.fetch_add(1, Ordering::SeqCst);
+}
+unsafe extern "C" fn discard(change: *mut c_void) {
+    take(change);
+}
+unsafe extern "C" fn replace(runtime: *mut c_void, change: *mut c_void, rate: u32) -> bool {
+    let Some(Change::Mapping(geometry)) = take(change) else {
+        return false;
+    };
     if FAIL_REPLACE.load(Ordering::SeqCst) {
         return false;
     }
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
-    runtime.geometry = unsafe { *geometry };
+    runtime.geometry = geometry;
     runtime.rate = rate;
     runtime.epoch += 1;
     REPLACEMENTS.fetch_add(1, Ordering::SeqCst);
@@ -131,8 +167,20 @@ unsafe extern "C" fn timestamp(runtime: *mut c_void, now: u64, output: *mut Time
     };
     runtime.running
 }
-unsafe extern "C" fn native_client(_: *mut c_void, _: u32, _: u32) -> bool {
-    true
+unsafe extern "C" fn native_client(
+    _: *mut c_void,
+    client: u32,
+    action: u32,
+    change: *mut c_void,
+) -> bool {
+    use crate::io_outcome::ClientChange;
+    match (ClientChange::from_raw(action), take(change)) {
+        (Some(ClientChange::Register | ClientChange::Remove), None) => true,
+        (Some(ClientChange::Register | ClientChange::Install), Some(Change::Client(prepared))) => {
+            prepared == client
+        }
+        _ => false,
+    }
 }
 unsafe extern "C" fn io(
     runtime: *mut c_void,
@@ -289,8 +337,12 @@ impl Fixture {
         let serial = lock(&SERIAL);
         assert_eq!(LIVE.load(Ordering::SeqCst), 0);
         FAIL_REPLACE.store(false, Ordering::SeqCst);
+        FAIL_PREPARE_CLIENT.store(false, Ordering::SeqCst);
         FAIL_CREATE_ENDPOINT.store(0, Ordering::SeqCst);
         REPLACEMENTS.store(0, Ordering::SeqCst);
+        PREPARATIONS.store(0, Ordering::SeqCst);
+        PREPARED_DURING_IO.store(0, Ordering::SeqCst);
+        RELEASES.store(0, Ordering::SeqCst);
         PAUSE_IO.store(false, Ordering::SeqCst);
         IO_ENTERED.store(false, Ordering::SeqCst);
         RELEASE_IO.store(false, Ordering::SeqCst);
@@ -306,12 +358,16 @@ impl Fixture {
             inspect,
             create,
             destroy,
+            prepare,
+            discard,
+            release,
             replace,
             start,
             stop,
             remaining_client: remaining,
             set_rate,
             timestamp,
+            prepare_client,
             client: native_client,
             io,
             requires_replacement,
@@ -746,6 +802,267 @@ fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration()
 }
 
 #[test]
+fn rate_requests_report_native_failure_abort_and_success_in_order() {
+    unsafe extern "C" fn reject(_: *mut c_void, _: u32) -> bool {
+        false
+    }
+    let mut fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert!(fixture.registry.settled_after(0).is_empty());
+    let accept = fixture.registry.native.set_rate;
+    fixture.registry.native.set_rate = reject;
+    assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
+    assert_eq!(fixture.perform(), NATIVE_ERROR);
+    fixture.registry.native.set_rate = accept;
+    assert_eq!(fixture.registry.set_rate(id, 88_200), OK);
+    let (_, generation) = fixture.pending();
+    assert_eq!(fixture.registry.abort(id, CONFIG_ACTION, generation), OK);
+    assert_eq!(fixture.registry.set_rate(id, 96_000), OK);
+    assert_eq!(fixture.perform(), OK);
+    let settled = fixture.registry.settled_after(0);
+    // Every outcome is retained in order, so none hides behind a newer one.
+    assert_eq!(
+        settled
+            .iter()
+            .map(|settled| (settled.endpoint, settled.rate, settled.applied))
+            .collect::<Vec<_>>(),
+        [
+            ([1; 16], 96_000, false),
+            ([1; 16], 88_200, false),
+            ([1; 16], 96_000, true)
+        ]
+    );
+    assert!(
+        settled
+            .windows(2)
+            .all(|pair| pair[0].sequence < pair[1].sequence)
+    );
+    assert_eq!(
+        fixture.registry.settled_after(settled[1].sequence),
+        settled[2..]
+    );
+}
+
+fn eventually(condition: impl Fn() -> bool) {
+    for _ in 0..10_000 {
+        if condition() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    panic!("condition did not hold within 10,000 polls");
+}
+
+#[test]
+fn a_geometry_change_maps_only_its_endpoint_and_no_client_queue() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    // Idle registrations map nothing: a client gets a queue when it starts IO.
+    assert_eq!(fixture.registry.client(id, 7, true), OK);
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 0);
+    fixture
+        .registry
+        .upsert([1; 16], "Wider", 48_000, (fixture.fd(1, 7, 3), 24))
+        .unwrap();
+    assert_eq!(fixture.registry.client(id, 8, true), OK);
+    // Only the endpoint mapping was prepared, before Perform was requested.
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.perform(), OK);
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 1);
+    assert_eq!(REPLACEMENTS.load(Ordering::SeqCst), 1);
+    let snapshot = fixture.registry.snapshot(id).unwrap();
+    assert_eq!(
+        (snapshot.render_channels, snapshot.capture_channels),
+        (7, 3)
+    );
+    // Each client prepares at its own IO start; one that never starts gets nothing.
+    assert_eq!(fixture.registry.start(id, 7, 100), OK);
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_running_client_left_without_a_queue_is_counted_and_retried_by_the_control_tick() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 7, true), OK);
+    assert_eq!(fixture.registry.start(id, 7, 100), OK);
+    assert_eq!(fixture.registry.client(id, 8, true), OK);
+    fixture
+        .registry
+        .upsert([1; 16], "Wider", 48_000, (fixture.fd(1, 7, 3), 24))
+        .unwrap();
+    let prepared = PREPARATIONS.load(Ordering::SeqCst);
+    FAIL_PREPARE_CLIENT.store(true, Ordering::SeqCst);
+    // The configuration has committed; the running client's missing queue is reported
+    // instead of leaving it silent.
+    assert_eq!(fixture.perform(), OK);
+    assert_eq!(fixture.registry.unprovisioned(), [([1; 16], 1)]);
+    fixture.registry.tick();
+    assert_eq!(fixture.registry.unprovisioned(), [([1; 16], 1)]);
+    FAIL_PREPARE_CLIENT.store(false, Ordering::SeqCst);
+    fixture.registry.tick();
+    assert!(fixture.registry.unprovisioned().is_empty());
+    // Only the client holding IO was retried; the idle one waits for its StartIO.
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), prepared + 1);
+    fixture.registry.tick();
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), prepared + 1);
+}
+
+#[test]
+fn running_clients_are_reprovisioned_off_the_freeze_while_io_is_in_flight() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 1, true), OK);
+    assert_eq!(fixture.registry.start(id, 1, 100), OK);
+    let prepared = PREPARATIONS.load(Ordering::SeqCst);
+    PAUSE_IO.store(true, Ordering::Release);
+    let registry = fixture.registry.as_ref();
+    let device = registry.pin(id).unwrap();
+    std::thread::scope(|scope| {
+        let callback = scope.spawn(|| {
+            let mut samples = [0.5_f32; 64];
+            // SAFETY: this callback exclusively owns its aligned 32-frame stereo buffer.
+            assert!(unsafe {
+                registry.io(IoOperation {
+                    client: 1,
+                    device: id,
+                    stream: id + 2,
+                    render: true,
+                    frame: 0,
+                    samples: samples.as_mut_ptr().cast(),
+                    frames: 32,
+                })
+            });
+        });
+        eventually(|| IO_ENTERED.load(Ordering::Acquire));
+        let control = scope.spawn(|| registry.reprovision(id));
+        // The queue is mapped while the callback still holds its pin; only the install
+        // then waits for the freeze to drain it.
+        eventually(|| device.io_pin().is_none());
+        assert_eq!(PREPARED_DURING_IO.load(Ordering::SeqCst), 1);
+        RELEASE_IO.store(true, Ordering::Release);
+        callback.join().unwrap();
+        control.join().unwrap();
+    });
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), prepared + 1);
+}
+
+#[test]
+fn settlements_on_two_devices_at_once_enter_the_queue_in_sequence_order() {
+    let fixture = Fixture::new();
+    let ids = [fixture.add(1, 48_000), fixture.add(2, 48_000)];
+    let registry = fixture.registry.as_ref();
+    let start = std::sync::Barrier::new(2);
+    let ordered = |registry: &Registry| {
+        let sequences: Vec<_> = registry
+            .settled_after(0)
+            .iter()
+            .map(|settled| settled.sequence)
+            .collect();
+        sequences.windows(2).all(|pair| pair[0] < pair[1])
+    };
+    // Taking the sequence before the queue lock let [6, 5] enter it; the Driver service
+    // then dropped 5 as already seen, losing a prompt rejection.
+    let inverted = std::thread::scope(|scope| {
+        let writers = ids.map(|id| {
+            let start = &start;
+            scope.spawn(move || {
+                let device = registry.pin(id).unwrap();
+                let pending = crate::device::Pending {
+                    generation: 1,
+                    requested: false,
+                    retry_after: 0,
+                    failures: 0,
+                    attachment: None,
+                    name: String::new(),
+                    rate: 48_000,
+                    formats: [mixrelay_pcm_ring::SampleFormat::Float32; 2],
+                };
+                start.wait();
+                let mut inverted = 0;
+                for round in 0..100_000 {
+                    registry.settle(&device, &pending, true);
+                    if round % 64 == 0 && !ordered(registry) {
+                        inverted += 1;
+                    }
+                }
+                inverted
+            })
+        });
+        writers.map(|writer| writer.join().unwrap())
+    });
+    assert_eq!(inverted, [0, 0]);
+    assert!(ordered(registry));
+}
+
+#[test]
+fn a_format_only_request_and_idle_clients_prepare_nothing() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 7, true), OK);
+    assert_eq!(
+        fixture
+            .registry
+            .set_format(id + 1, 48_000, mixrelay_pcm_ring::SampleFormat::Signed24),
+        OK
+    );
+    assert_eq!(fixture.perform(), OK);
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 0);
+    // Each frozen client change and the commit released what the freeze detached.
+    assert_eq!(fixture.registry.client(id, 7, false), OK);
+    assert_eq!(RELEASES.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn queue_and_replacement_preparation_run_alongside_in_flight_io() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 1, true), OK);
+    assert_eq!(fixture.registry.start(id, 1, 100), OK);
+    let descriptor = fixture.fd(1, 7, 3);
+    PAUSE_IO.store(true, Ordering::Release);
+    let registry = fixture.registry.as_ref();
+    let device = registry.pin(id).unwrap();
+    std::thread::scope(|scope| {
+        let callback = scope.spawn(|| {
+            let mut samples = [0.5_f32; 64];
+            // SAFETY: this callback exclusively owns its aligned 32-frame stereo buffer.
+            assert!(unsafe {
+                registry.io(IoOperation {
+                    client: 1,
+                    device: id,
+                    stream: id + 2,
+                    render: true,
+                    frame: 0,
+                    samples: samples.as_mut_ptr().cast(),
+                    frames: 32,
+                })
+            });
+        });
+        eventually(|| IO_ENTERED.load(Ordering::Acquire));
+        let control = scope.spawn(|| {
+            registry
+                .upsert([1; 16], "Wider", 48_000, (descriptor, 24))
+                .unwrap();
+            assert_eq!(registry.client(id, 2, true), OK);
+        });
+        // Both allocations finish while the callback still holds its pin; only the
+        // client's publication then waits for the freeze to drain it.
+        eventually(|| device.io_pin().is_none());
+        assert_eq!(PREPARED_DURING_IO.load(Ordering::SeqCst), 2);
+        RELEASE_IO.store(true, Ordering::Release);
+        callback.join().unwrap();
+        control.join().unwrap();
+    });
+    // The first start mapped its client's queue; the endpoint mapping and the client that
+    // joined the running device were each prepared alongside the in-flight callback.
+    assert_eq!(PREPARATIONS.load(Ordering::SeqCst), 3);
+    drop(device);
+    assert_eq!(fixture.perform(), OK);
+    assert_eq!(REPLACEMENTS.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn active_callback_drains_before_removal_releases_its_runtime() {
     let fixture = Fixture::new();
     let id = fixture.add(1, 48_000);
@@ -879,7 +1196,7 @@ fn failed_pcm_reservation_preserves_live_format_mapping_clock_and_audio() {
     assert_eq!(
         fixture
             .registry
-            .perform_with_scratch(id, CONFIG_ACTION, generation, |device, pending| {
+            .commit(id, CONFIG_ACTION, generation, |device, pending| {
                 device.prepare_scratch_with(pending, |_| {
                     mixrelay_audio_io::pcm_buffer::zeroed(usize::MAX)
                 })

@@ -1,12 +1,14 @@
 //! Authenticated HAL inventory transport; no graph or application-capture API.
+use super::settlement::{Configured, Log, Since, Wanted};
 use super::{MacDriver, SERVICE, Service};
 use mixrelay_macos_transport::control_inventory::{
     mr_hal_control_create_inventory_snapshot, mr_hal_control_parse_inventory_request,
     mr_hal_control_parse_transport_replacement_request,
+    report::{Incompatible, Report},
 };
 use std::{
     collections::BTreeMap,
-    ffi::{CStr, c_char, c_void},
+    ffi::{c_char, c_void},
     ptr::{self, NonNull},
 };
 
@@ -20,8 +22,6 @@ unsafe extern "C" {
     fn xpc_connection_get_euid(peer: Object) -> u32;
     fn xpc_connection_cancel(peer: Object);
     fn xpc_connection_send_message(peer: Object, message: Object);
-    fn xpc_dictionary_get_uint64(object: Object, key: *const c_char) -> u64;
-    fn xpc_dictionary_get_string(object: Object, key: *const c_char) -> *const c_char;
 }
 
 struct Owned(NonNull<c_void>);
@@ -42,10 +42,19 @@ impl Drop for Owned {
     }
 }
 
+/// How the HAL reported finishing one inventory generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Settlement {
+    Applied,
+    Rejected,
+}
+
 struct Peer {
     object: Owned,
     subscribed: bool,
-    acknowledged: u64,
+    settled: Option<(u64, Settlement)>,
+    log: Log,
+    incompatible: bool,
 }
 
 #[derive(Default)]
@@ -57,10 +66,63 @@ impl Peers {
     pub(super) fn driver_connected(&self) -> bool {
         self.values.iter().any(|peer| peer.subscribed)
     }
-    pub(super) fn acknowledged(&self, generation: u64) -> bool {
+    pub(super) fn settlement(&self, generation: u64) -> Option<Settlement> {
         self.values
             .iter()
-            .any(|peer| peer.subscribed && peer.acknowledged == generation)
+            .filter(|peer| peer.subscribed)
+            .find_map(|peer| {
+                peer.settled
+                    .filter(|(settled, _)| *settled == generation)
+                    .map(|(_, settlement)| settlement)
+            })
+    }
+    fn subscribed(&self) -> impl DoubleEndedIterator<Item = &Peer> {
+        self.values.iter().filter(|peer| peer.subscribed)
+    }
+    /// The bound for a request issued now, from the newest subscribed HAL connection
+    /// that finished its replay.
+    pub(super) fn since(&self) -> Option<Since> {
+        self.subscribed().rev().find_map(|peer| peer.log.since())
+    }
+    /// The first settlement after `since` of a request for exactly `wanted`, read only
+    /// from the newest connection of the incarnation `since` came from.
+    pub(super) fn settled(
+        &self,
+        endpoint: [u8; 16],
+        since: Since,
+        wanted: Wanted,
+    ) -> Option<Configured> {
+        self.subscribed()
+            .rev()
+            .find(|peer| peer.log.incarnation() == Some(since.incarnation))?
+            .log
+            .find(endpoint, since, wanted)
+    }
+    /// Drops connections older than `current` that report another incarnation once
+    /// `current` has replayed: they belong to a HAL load that no longer runs.
+    fn retire_before(&mut self, current: Object) {
+        let Some(position) = self
+            .values
+            .iter()
+            .position(|peer| peer.object.raw() == current)
+        else {
+            return;
+        };
+        let incarnation = self.values[position].log.incarnation();
+        let mut index = 0;
+        self.values.retain(|peer| {
+            let older = index < position;
+            index += 1;
+            !older
+                || peer
+                    .log
+                    .incarnation()
+                    .is_none_or(|other| Some(other) == incarnation)
+        });
+    }
+    /// Whether a subscribed HAL reports with another protocol version.
+    pub(super) fn incompatible(&self) -> bool {
+        self.subscribed().any(|peer| peer.incompatible)
     }
     pub(super) fn send_inventory(&self, service: &Service) {
         let Some(message) = inventory(service) else {
@@ -127,31 +189,48 @@ fn inventory(service: &Service) -> Option<Owned> {
     .then_some(message)
 }
 
-fn acknowledge(service: &Service, entry: &mut Peer, event: Object) -> bool {
-    // SAFETY: peer_event has authenticated the retained peer and borrows its
-    // live event throughout this helper. XPC owns each returned string extent.
-    unsafe {
-        if xpc_get_type(event) != (&raw const _xpc_type_dictionary).cast() {
-            return false;
-        }
-        let operation = xpc_dictionary_get_string(event, c"operation".as_ptr());
-        if operation.is_null()
-            || CStr::from_ptr(operation) != c"inventory_ack"
-            || xpc_dictionary_get_uint64(event, c"version".as_ptr()) != 1
-        {
-            return false;
-        }
-        let generation = xpc_dictionary_get_uint64(event, c"generation".as_ptr());
-        if service
-            .published
-            .lock()
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.as_abi().generation == generation)
-        {
-            entry.acknowledged = generation;
+impl Peer {
+    fn receive(&mut self, service: &Service, report: Result<Report, Incompatible>) {
+        let Ok(report) = report else {
+            self.incompatible = true;
+            return;
+        };
+        match report {
+            Report::Inventory {
+                generation,
+                applied,
+            } => {
+                let settlement = if applied {
+                    Settlement::Applied
+                } else {
+                    Settlement::Rejected
+                };
+                // Never accept a settlement for anything but the current publication.
+                if service
+                    .published
+                    .lock()
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.as_abi().generation == generation)
+                {
+                    self.settled = Some((generation, settlement));
+                }
+            }
+            Report::Settled(configured) => self.log.record(configured),
+            Report::Replayed { incarnation, .. } => self.log.replayed(incarnation),
+            Report::Unprovisioned { endpoint, clients } => {
+                let endpoint = endpoint.map(|byte| format!("{byte:02x}")).concat();
+                if clients == 0 {
+                    tracing::info!(%endpoint, "HAL clients regained their output queues");
+                } else {
+                    tracing::warn!(
+                        %endpoint,
+                        clients,
+                        "HAL clients hold IO without an output queue and are silent until the HAL retries"
+                    );
+                }
+            }
         }
     }
-    true
 }
 
 /// # Safety
@@ -178,7 +257,9 @@ pub(crate) unsafe extern "C" fn mr_driver_service_accept_peer(peer: Object) -> b
     peers.values.push(Peer {
         object,
         subscribed: false,
-        acknowledged: 0,
+        settled: None,
+        log: Log::default(),
+        incompatible: false,
     });
     true
 }
@@ -212,9 +293,14 @@ pub(crate) unsafe extern "C" fn mr_driver_service_peer_event(peer: Object, event
         unsafe { xpc_connection_cancel(peer) };
         return;
     };
-    // Only the authenticated HAL sends ACKs, after all attachment perform
-    // callbacks have drained and committed. Never accept a future generation.
-    if acknowledge(service, entry, event) {
+    // Only the authenticated HAL sends reports, after its Perform callbacks settled.
+    // SAFETY: the dispatch block retains the event for this callback.
+    if let Some(report) = unsafe { Report::decode(event) } {
+        let replayed = matches!(report, Ok(Report::Replayed { .. }));
+        entry.receive(service, report);
+        if replayed {
+            peers.retire_before(peer);
+        }
         return;
     }
     let mut id = [0; 16];
@@ -273,3 +359,6 @@ pub(crate) extern "C" fn mr_driver_service_control_tick() {
     }
     service.registry.collect();
 }
+
+#[cfg(test)]
+mod tests;

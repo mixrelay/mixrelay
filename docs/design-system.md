@@ -213,6 +213,22 @@ Core는 필드·선택·메뉴·대화상자·체크·스위치·슬라이더·�
 
 Core `ActionButton`은 regular 28px·compact 24px를 최소 높이로 유지한다. 부모 폭보다 긴 명령은 같은 글꼴·안쪽 여백으로 줄바꿈하고 높이만 늘린다. `Inline` 다운로드와 `FormActions` 하단 명령은 이 공통 규격을 소비하며, 문구 잘림이나 모달 가로 넘침으로 긴 번역을 처리하지 않는다. Storybook ActionButton `Narrow Long Label`과 실제 UpdateAccess의 390px Pseudo로 확인한다.
 
+#### MIDI 매핑 상태
+
+편집기 헤더 오른쪽 끝의 MIDI 버튼은 Core ActionButton의 compact 24px·aria-pressed를 사용한다.
+로고·테마 묶음과 분리하고, 켠 상태는 Core 버튼의 중립 반전 채움으로 표시한다.
+매핑 대상만 파란 테두리·표면으로 강조하며 토글의 pressed 표현과 구분한다.
+매핑 패널은 모드 안에서 왼쪽 그래프 목록 자리를 사용하고 내부 스크롤로 옵션을 제공한다.
+MIDI 상태 스토리는 실제 App의 헤더·사이드바·그래프 캔버스를 렌더한다.
+`--midi-map-colour / --midi-map-surface`는 accent 역할을 소비한다. NodeSignalControls·TransportButton·
+AudioNodeCard의 gain은 매핑 모드에서 실제 액션을 같은 위치의 선택 버튼 하나로 교체하고 짧은 입력 이름을 표시한다.
+선택은 밑줄·반전 표면, 키보드 포커스는 기존 중립 윤곽으로 구분한다. 매핑 목록 선택은 캔버스의 해당 조작을 강조한다.
+MIDI 토글과 매핑 패널 외의 테마·일반 명령·하단 조작은 inert와 흐린 표현을 함께 적용한다.
+그래프 제목과 비매핑 필드는 비활성화하고 포트·케이블·resize는 흐리게 표시한다.
+캔버스의 이동·확대와 그래프 편집도 차단한다. 패널은 Core ContentSection·Stack·SelectField를 사용한다.
+하드웨어 입력을 그룹 제목으로 한 번 표시하고 각 매핑의 제목 버튼 → 상태 → 선택한 옵션 → 제거 순서로 배치한다.
+제목과 별도의 Select 버튼을 반복하지 않으며 제목 버튼 하나가 해당 매핑의 선택 포커스를 소유한다.
+
 #### 아이콘 행동·IconActionButton·Tooltip
 
 익숙한 추가·삭제·열기·재생 같은 기호 행동은 Core 아이콘 버튼/메뉴 트리거와 접근성 이름·hover/키보드 툴팁으로 제공한다. 행동 이름을 아이콘 옆에 반복하지 않는다. 알 수 없는 동작·위험 확인·제출 버튼은 짧은 텍스트를 사용한다. 기호만으로 disabled 사유·실패·적용 상태를 대신하지 않는다.

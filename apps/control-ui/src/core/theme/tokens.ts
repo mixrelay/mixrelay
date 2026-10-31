@@ -329,6 +329,8 @@ export const mixrelayVariables = {
   '--disclosure-chevron-gap': 'var(--space-1)',
   '--disclosure-panel-inset': 'var(--space-2)',
   '--control-radius': `${border.radius}px`,
+  '--midi-map-colour': 'var(--status-accent)',
+  '--midi-map-surface': 'var(--status-accent-surface)',
   '--control-height': 'var(--size-sm)',
   '--control-height-compact': 'var(--size-xs)',
   '--control-padding-inline': 'var(--space-3)',

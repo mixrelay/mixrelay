@@ -180,6 +180,10 @@ pub enum GraphCatalogAction {
     Delete {
         id: String,
     },
+    /// Restore the latest deleted graph with its original node and graph identities.
+    UndoDelete,
+    /// Delete the graph restored by the latest undo.
+    RedoDelete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

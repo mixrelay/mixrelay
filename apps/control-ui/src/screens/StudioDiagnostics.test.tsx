@@ -13,7 +13,7 @@ import {
   noWorkspaceProblems,
   type WorkspaceProblemSummary,
 } from '../features/routing-workspace/WorkspaceProblems';
-import { eventually } from '../test-support/fakeTimerQueries';
+import { eventually, finishFakeTimerTest } from '../test-support/fakeTimerQueries';
 import { StudioDiagnostics } from './StudioDiagnostics';
 
 const baseStatus: MixRelayStatus = {
@@ -75,19 +75,8 @@ function view(
     </MixRelayProvider>
   );
 }
-async function input(action: Promise<void>) {
-  let settled = false;
-  await Promise.all([
-    action.finally(() => {
-      settled = true;
-    }),
-    eventually(() => expect(settled).toBe(true)),
-  ]);
-}
-afterEach(async () => {
-  await act(async () => vi.runOnlyPendingTimersAsync());
-  vi.useRealTimers();
-});
+
+afterEach(() => finishFakeTimerTest(() => act(async () => vi.runOnlyPendingTimersAsync())));
 
 it('opens diagnostics by keyboard without scanning and returns focus when dismissed', async () => {
   vi.useFakeTimers();
@@ -100,29 +89,29 @@ it('opens diagnostics by keyboard without scanning and returns focus when dismis
   } as const;
   search.diagnostics = [diagnostic, diagnostic];
   render(view(baseStatus, search));
-  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync });
   const trigger = screen.getByRole('button', { name: 'Diagnostics · 1' });
   expect(trigger).toHaveAccessibleDescription('Scan issues (1)');
   trigger.focus();
-  await input(user.keyboard('{Enter}'));
+  await user.keyboard('{Enter}');
   const dialog = screen.getByRole('dialog', { name: 'Diagnostics' });
   expect(within(dialog).getByText('Audio session running')).toBeVisible();
   expect(within(dialog).getByText(/48000 Hz · 128 frames/)).toBeVisible();
   expect(within(dialog).getByRole('heading', { name: /Unavailable effect/ })).toBeVisible();
   expect(search.refresh).not.toHaveBeenCalled();
-  await input(user.keyboard('{Escape}'));
+  await user.keyboard('{Escape}');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   await eventually(() => expect(trigger).toHaveFocus());
-  await input(user.keyboard(' '));
-  await input(user.click(screen.getByRole('button', { name: 'Close' })));
+  await user.keyboard(' ');
+  await user.click(screen.getByRole('button', { name: 'Close' }));
   await eventually(() => expect(trigger).toHaveFocus());
 });
 
 it('reports missing observations without showing a healthy engine or driver', async () => {
   vi.useFakeTimers();
   render(view(null));
-  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-  await input(user.click(screen.getByRole('button', { name: 'Diagnostics' })));
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync });
+  await user.click(screen.getByRole('button', { name: 'Diagnostics' }));
   const dialog = screen.getByRole('dialog', { name: 'Diagnostics' });
   expect(within(dialog).getByText('Audio status unknown')).toBeVisible();
   expect(within(dialog).getByText('Audio device unavailable')).toBeVisible();
@@ -152,8 +141,8 @@ it('preserves a confirmed pause, unsaved state and driver errors in the report',
     changeDevice: vi.fn(),
   };
   render(view(status, catalog(), driver));
-  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-  await input(user.click(screen.getByRole('button', { name: 'Diagnostics' })));
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync });
+  await user.click(screen.getByRole('button', { name: 'Diagnostics' }));
   const dialog = screen.getByRole('dialog', { name: 'Diagnostics' });
   expect(within(dialog).getByText('Audio paused')).toBeVisible();
   expect(within(dialog).getByText(/engine stopped unexpectedly/)).toBeVisible();
@@ -182,7 +171,7 @@ it('counts current problems, hosts their recovery and saves a report without nam
       diagnosticsPort: { saveReport },
     }),
   );
-  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync });
   const trigger = screen.getByRole('button', { name: 'Diagnostics · 2' });
   expect(screen.getByRole('img', { name: 'Diagnostics: current problems (1)' })).toHaveAttribute(
     'data-tone',
@@ -191,18 +180,18 @@ it('counts current problems, hosts their recovery and saves a report without nam
   expect(trigger).toHaveAccessibleDescription(
     'Diagnostics: current problems (1) · Scan issues (1)',
   );
-  await input(user.click(trigger));
+  await user.click(trigger);
   const dialog = screen.getByRole('dialog', { name: 'Diagnostics' });
   const problems = within(dialog).getByRole('region', { name: 'Current problems' });
   expect(host).not.toBeNull();
   expect(problems).toContainElement(host);
-  await input(user.click(within(dialog).getByRole('button', { name: 'Save Diagnostic Report…' })));
+  await user.click(within(dialog).getByRole('button', { name: 'Save Diagnostic Report…' }));
   await eventually(() =>
     expect(within(dialog).getByRole('alert')).toHaveTextContent(
       'The diagnostic report could not be started.',
     ),
   );
-  await input(user.click(within(dialog).getByRole('button', { name: 'Save Diagnostic Report…' })));
+  await user.click(within(dialog).getByRole('button', { name: 'Save Diagnostic Report…' }));
   await eventually(() => expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument());
   expect(saveReport).toHaveBeenLastCalledWith({
     problems: ['graph_apply_timeout'],
@@ -214,8 +203,8 @@ it('counts current problems, hosts their recovery and saves a report without nam
 it('omits the problem section and report action when neither applies', async () => {
   vi.useFakeTimers();
   render(view(baseStatus));
-  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-  await input(user.click(screen.getByRole('button', { name: 'Diagnostics' })));
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync });
+  await user.click(screen.getByRole('button', { name: 'Diagnostics' }));
   const dialog = screen.getByRole('dialog', { name: 'Diagnostics' });
   expect(within(dialog).queryByRole('region', { name: 'Current problems' })).toBeNull();
   expect(within(dialog).queryByRole('button', { name: /Diagnostic Report/u })).toBeNull();

@@ -240,6 +240,7 @@ impl Absence {
 
 async fn finish_local_controls(app: &tauri::AppHandle) -> Result<Option<String>, String> {
     tracing::info!(phase = "local_socket", "draining runtime controls for Quit");
+    app.state::<crate::midi::Midi>().shutdown().await?;
     app.state::<crate::control_proxy::local::socket::LocalSocket>()
         .shutdown()
         .await?;

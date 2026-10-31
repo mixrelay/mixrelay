@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inspectPackage } from './check-linux-package.mjs';
 import { loadContract } from './support-contract.mjs';
+import { productContact } from './product-metadata.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -21,11 +22,14 @@ export function renderArchRecipe({ version, architecture, checksum }) {
   if (!arch || !/^\d+\.\d+\.\d+$/.test(version) || !/^[a-f0-9]{64}$/.test(checksum)) {
     throw new Error('Invalid Arch release version, architecture or payload checksum');
   }
+  const { contract } = loadContract();
   return fs.readFileSync(join(root, 'packaging/linux/arch/PKGBUILD.in'), 'utf8')
+    .replaceAll('@HOMEPAGE@', contract.metadata.homepage)
+    .replaceAll('@CONTACT@', productContact(contract.metadata))
     .replaceAll('@VERSION@', version).replaceAll('@ARCH@', arch).replaceAll('@SHA256@', checksum)
-    .replaceAll('@GLIBC@', loadContract().contract.minimums.linux.glibc)
-    .replaceAll('@PIPEWIRE@', loadContract().contract.minimums.linux.pipewire)
-    .replaceAll('@WIREPLUMBER@', loadContract().contract.minimums.linux.wireplumber);
+    .replaceAll('@GLIBC@', contract.minimums.linux.glibc)
+    .replaceAll('@PIPEWIRE@', contract.minimums.linux.pipewire)
+    .replaceAll('@WIREPLUMBER@', contract.minimums.linux.wireplumber);
 }
 
 /** Prepare a native makepkg recipe from the validated common release payload. */

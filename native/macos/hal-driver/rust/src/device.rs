@@ -22,6 +22,36 @@ pub(crate) struct Attachment {
     pub descriptor: OwnedFd,
     pub size: usize,
     pub geometry: Geometry,
+    /// The endpoint mapping, mapped and validated before any freeze; `None` fails Perform.
+    pub prepared: Option<Prepared>,
+}
+
+/// A native change allocated on control, outside the IO freeze. Dropping it
+/// releases the allocation unless a frozen commit has taken ownership.
+pub(crate) struct Prepared {
+    change: std::ptr::NonNull<c_void>,
+    discard: unsafe extern "C" fn(*mut c_void),
+}
+
+impl Prepared {
+    pub(crate) fn new(change: *mut c_void, native: NativeOps) -> Option<Self> {
+        std::ptr::NonNull::new(change).map(|change| Self {
+            change,
+            discard: native.discard,
+        })
+    }
+
+    /// Transfers ownership to the native operation that consumes the change.
+    pub(crate) fn into_raw(self) -> *mut c_void {
+        std::mem::ManuallyDrop::new(self).change.as_ptr()
+    }
+}
+
+impl Drop for Prepared {
+    fn drop(&mut self) {
+        // SAFETY: this owner holds the only reference to an unconsumed preparation.
+        unsafe { (self.discard)(self.change.as_ptr()) };
+    }
 }
 
 pub(crate) struct Pending {
@@ -35,6 +65,20 @@ pub(crate) struct Pending {
     pub formats: [SampleFormat; 2],
 }
 
+/// How the HAL finished one configuration request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Settled {
+    pub endpoint: [u8; 16],
+    /// Registry-wide order of settled requests; never reused within a HAL process.
+    pub sequence: u64,
+    /// The nominal rate the request asked for.
+    pub rate: u32,
+    /// Requested capture and render sample formats, as `SampleFormat` codes.
+    pub formats: [u32; 2],
+    /// False when Perform failed natively or coreaudiod aborted the request.
+    pub applied: bool,
+}
+
 pub(crate) struct Control {
     pub name: String,
     pub latency_lease: u64,
@@ -43,6 +87,9 @@ pub(crate) struct Control {
     pub pending: Option<Pending>,
     pub next_generation: u64,
     pub attachment_failed: bool,
+    /// Clients holding IO that still lack a queue after a configuration change detached
+    /// theirs; the control tick retries them and reports the count.
+    pub unprovisioned: u32,
 }
 
 pub(crate) struct Device {
@@ -66,6 +113,9 @@ pub(crate) struct Device {
     pub runtime: AtomicPtr<c_void>,
     frozen: AtomicBool,
     io_readers: AtomicUsize,
+    /// Freezes taken, recorded for tests.
+    #[cfg(test)]
+    pub(crate) freezes: AtomicUsize,
 }
 
 // Runtime stays allocated while alive; control mutation and retirement exclude
@@ -107,11 +157,14 @@ impl Device {
                 pending: None,
                 next_generation: 1,
                 attachment_failed: false,
+                unprovisioned: 0,
             }),
             native: native_runtime.0,
             runtime: AtomicPtr::new(native_runtime.1),
             frozen: AtomicBool::new(false),
             io_readers: AtomicUsize::new(0),
+            #[cfg(test)]
+            freezes: AtomicUsize::new(0),
         })
     }
 
@@ -153,6 +206,8 @@ impl Device {
     /// Only call while holding `control`. Waiting and eventual reclamation are
     /// confined to the control plane, never the callback's last-reader path.
     pub(crate) fn freeze(&self) -> Freeze<'_> {
+        #[cfg(test)]
+        self.freezes.fetch_add(1, Ordering::Relaxed);
         self.frozen.store(true, Ordering::SeqCst);
         while self.io_readers.load(Ordering::SeqCst) != 0 {
             std::thread::yield_now();

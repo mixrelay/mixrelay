@@ -9,6 +9,7 @@ import type {
 } from '../core/control-port/types';
 import { I18nProvider } from '../core/i18n';
 import { FeatureAccess } from '../core/licensing/FeatureAccess';
+import { MidiContext, MidiPanelContext } from '../core/midi/MidiPort';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import type { DriverSession } from '../features/driver-status/useDriverSession';
 import {
@@ -723,3 +724,49 @@ it('keeps the overlay sidebar open when a graph switch fails', async () => {
     matchMedia.mockRestore();
   }
 });
+
+it.each([false, true])(
+  'map mode ignores native graph-list commands and preserves prior visibility (%s)',
+  async (visible) => {
+    const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query) =>
+        ({
+          matches: false,
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }) as unknown as MediaQueryList,
+    );
+    const controlPort = port(1);
+    const frame = (active: boolean) => (
+      <MidiContext.Provider
+        value={{
+          active,
+          status: null,
+          selected: null,
+          toggle: vi.fn(),
+          assign: vi.fn(),
+          remove: vi.fn(),
+        }}
+      >
+        <MidiPanelContext.Provider value={<aside aria-label="Mappings">Mappings</aside>}>
+          {view(controlPort)}
+        </MidiPanelContext.Provider>
+      </MidiContext.Provider>
+    );
+    const rendered = render(frame(false));
+    try {
+      await screen.findByRole('navigation', { name: 'Graphs' });
+      if (!visible) act(() => graphListCommand.toggle());
+      rendered.rerender(frame(true));
+      expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
+      act(() => graphListCommand.toggle());
+      expect(screen.getByRole('complementary', { name: 'Mappings' })).toBeVisible();
+      rendered.rerender(frame(false));
+      expect(Boolean(screen.queryByRole('navigation', { name: 'Graphs' }))).toBe(visible);
+    } finally {
+      rendered.unmount();
+      matchMedia.mockRestore();
+    }
+  },
+);

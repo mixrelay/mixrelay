@@ -5,6 +5,11 @@
 use crate::clock_bridge::ClockRelation;
 use thiserror::Error;
 
+/// Playback latency target ceiling, independent of retention storage: half of the
+/// 16,384-frame device queue that first bounded it, so two 4,096-frame bursts fit.
+/// Raising it lengthens worst-case playback latency and every queue sized from it.
+pub const MAXIMUM_TARGET_FRAMES: usize = 8192;
+
 /// Storage and minimum-burst constraints supplied by a prepared queue owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QueueBounds {

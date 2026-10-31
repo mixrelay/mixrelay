@@ -51,6 +51,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Playground: Story = {};
+export const Pressed: Story = {
+  args: { children: 'MIDI', density: 'compact', 'aria-pressed': true },
+};
 export const Submit: Story = { args: { emphasis: 'strong' } };
 export const Loading: Story = { args: { emphasis: 'strong', loading: true } };
 export const Disabled: Story = { args: { disabled: true } };

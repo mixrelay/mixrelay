@@ -20,7 +20,7 @@
     "check:rust": "cargo fmt --all --check && cargo machete && node scripts/lab/native-check.mjs cargo clippy --workspace --all-targets --all-features -- -D warnings && pnpm coverage:rust",
     "check:ui-quality": "biome check biome.json apps/control-ui",
     "coverage:rust": "node scripts/lab/native-check.mjs cargo llvm-cov --workspace --lib --show-missing-lines --fail-under-functions 100 --fail-under-lines 100 --fail-under-regions 100 --fail-uncovered-functions 0 --fail-uncovered-lines 0 --fail-uncovered-regions 0",
-    "desktop:icons": "pnpm branding:build && pnpm --filter @mixrelay/desktop tauri icon ../../branding/icon.png && pnpm --filter @mixrelay/desktop tauri icon ../../branding/tray-white.svg --output src-tauri/tray-icons --png 512 && pnpm --filter @mixrelay/desktop tauri icon src-tauri/tray-icons/512x512.png --output src-tauri/tray-icons --png 32 --png 64",
+    "desktop:icons": "pnpm branding:build && pnpm --filter @mixrelay/desktop tauri icon ../../branding/icon.png && node branding/canonical-icns.mjs apps/desktop/src-tauri/icons/icon.icns &&pnpm --filter @mixrelay/desktop tauri icon ../../branding/tray-white.svg --output src-tauri/tray-icons --png 512 && pnpm --filter @mixrelay/desktop tauri icon src-tauri/tray-icons/512x512.png --output src-tauri/tray-icons --png 32 --png 64",
     "desktop:build": "node scripts/build-desktop.mjs",
     "release:manifest": "node scripts/prepare-release-manifest.mjs",
     "support:check": "node scripts/support-contract.mjs check",
@@ -51,9 +51,12 @@
     "check:product": "node scripts/product-version.mjs check && node --test scripts/product-version.test.mjs",
     "test:scripts": "node --test scripts/*.test.mjs scripts/lab/*.test.mjs scripts/e2e/*.test.mjs",
     "release:macos": "node scripts/release-macos.mjs",
-    "signing:check": "node scripts/macos-signing.mjs"
+    "signing:check": "node scripts/macos-signing.mjs",
+    "lab:midi": "cargo run -p mixrelay-desktop --example midi_lab"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.11"
-  }
+  },
+  "author": "Echo Vision Lab <support@rawsector.com>",
+  "homepage": "https://rawsector.com/products/mixrelay"
 }

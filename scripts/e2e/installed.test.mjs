@@ -262,3 +262,19 @@ test('a passing upgrade cannot hide a failed fresh-install scenario', async (t) 
   const all = f.reports.map((item) => (item.targetId === target.targetId ? report : item));
   assert.equal(evaluateQualification(f.candidate, all).passed, false);
 });
+
+for (const [name, cleanupCase] of [
+  ['configuration rejection', 'configuration'],
+  ['a failed payload check', 'verification'],
+]) {
+  test(`${name} after a fresh installation still runs package removal`, async () => {
+    const { spawnSync } = await import('node:child_process');
+    const { fileURLToPath } = await import('node:url');
+    const env = { ...process.env, MIXRELAY_CLEANUP_CASE: cleanupCase };
+    delete env.NODE_TEST_CONTEXT;
+    const result = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--test',
+      fileURLToPath(new URL('./installed-cleanup.fixture.mjs', import.meta.url))], { encoding: 'utf8', env });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /PKG-02: passed/);
+  });
+}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="macOS와 Linux에서 MIDI 컨트롤러로 노드를 제어합니다.">
+    <title>MIDI 컨트롤러 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/midi.html">
+    <link rel="alternate" hreflang="ko" href="../ko/midi.html">
+    <link rel="alternate" hreflang="ja" href="../ja/midi.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/midi.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/midi.html">
+    <link rel="alternate" hreflang="de" href="../de/midi.html">
+    <link rel="alternate" hreflang="fr" href="../fr/midi.html">
+    <link rel="alternate" hreflang="it" href="../it/midi.html">
+    <link rel="alternate" hreflang="es" href="../es/midi.html">
+    <link rel="alternate" hreflang="pt" href="../pt/midi.html">
+    <link rel="alternate" hreflang="ru" href="../ru/midi.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="제품 소개"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="언어"><a href="../en/midi.html" lang="en" hreflang="en">English</a> <a href="../ko/midi.html" lang="ko" hreflang="ko" aria-current="page">한국어</a> <a href="../ja/midi.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/midi.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/midi.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/midi.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/midi.html" lang="fr" hreflang="fr">Français</a> <a href="../it/midi.html" lang="it" hreflang="it">Italiano</a> <a href="../es/midi.html" lang="es" hreflang="es">Español</a> <a href="../pt/midi.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/midi.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 사전 공개 초안</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="안내서 목차">
+        <a class="back-link" href="../../index.html">← 제품 소개</a>
+        <a class="manual-mobile-index" href="index.html">전체 목차</a>
+        <nav class="guide-nav" aria-label="안내서 목차"><a href="index.html">안내서 시작</a>
+<a href="installation.html">시스템 요구사항과 설치</a>
+<a href="first-launch.html">처음 실행과 권한</a>
+<a href="workspace.html">라우팅 작업 영역</a>
+<a href="devices.html">장치와 가상 장치</a>
+<a href="app-capture.html">앱 오디오 캡처</a>
+<a href="recording.html">녹음</a>
+<a href="effects.html">내장 효과와 프리셋</a>
+<a href="plugins.html">외부 플러그인</a>
+<a href="stream-deck.html">Stream Deck 플러그인</a>
+<a href="midi.html" aria-current="page">MIDI 컨트롤러</a>
+<a href="licensing.html">무료 기능과 라이선스</a>
+<a href="updates.html">업데이트</a>
+<a href="uninstall.html">제거</a>
+<a href="troubleshooting.html">문제 해결과 진단</a>
+<a href="support.html">지원 문의</a></nav>
+      </aside>
+      <article class="guide-content">
+<header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>MIDI 컨트롤러</h1><p>macOS와 Linux에서 MIDI 컨트롤러로 노드를 제어합니다.</p><p class="guide-draft-note">사전 공개 초안입니다. 공개 다운로드와 구매는 아직 제공하지 않습니다. 현재 소스 빌드를 기준으로 작성했으며 아래에 표시한 환경의 설치본 검증은 남아 있습니다.</p></header>
+<nav class="manual-toc"><ul><li><a href="#assign">컨트롤 지정</a></li><li><a href="#controls">볼륨과 버튼</a></li><li><a href="#devices">장치와 저장된 지정</a></li></ul></nav>
+<section class="guide-section" id="assign" aria-labelledby="assign-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="assign-title">컨트롤 지정</h2><p>편집기 헤더 오른쪽 끝의 작은 MIDI 버튼, macOS Command+M·Linux Ctrl+M으로 MIDI 매핑 모드를 켜고 끕니다. Escape로도 종료합니다. 노드의 강조된 전원·음소거·볼륨과 녹음 시작/재개·일시정지·정지를 클릭하거나 Tab으로 이동해 Enter/Space로 선택한 뒤 MIDI 조작을 움직이면 즉시 저장합니다. 같은 선택에서 다른 입력을 움직이면 방금 지정한 매핑을 교체합니다. 다른 대상을 선택하고 같은 입력을 보내면 매핑이 추가됩니다. 정확한 중복은 옵션을 유지합니다. 모드 안에서는 그래프 편집을 멈추고 들어오는 MIDI로 동작을 실행하지 않습니다.</p></div></section>
+<section class="guide-section" id="controls" aria-labelledby="controls-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="controls-title">볼륨과 버튼</h2><p>0보다 큰 velocity의 Note On 또는 64 아래에서 64 이상으로 올라가는 CC는 일치하는 모든 버튼 동작을 한 번씩 실행합니다. 전원·음소거는 각 대상의 현재 상태를 토글합니다. 절대 볼륨은 CC 0–127과 기본 −60~+12 dB를 대응시키며 매핑마다 Min/Max를 지정하거나 반전할 수 있습니다. Pick-up은 페이더가 각 대상의 현재 값에 도달할 때까지 기다리고 외부 변경·재연결 뒤에도 다시 기다립니다. 상대 인코더는 two’s complement·offset 64와 매핑별 0.5·1·2·3 dB 단위를 사용합니다. 볼륨은 대상마다 초당 약 30회로 합쳐 적용합니다.</p></div></section>
+<section class="guide-section" id="devices" aria-labelledby="devices-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="devices-title">장치와 저장된 지정</h2><p>매핑 모드에서는 매핑 패널이 왼쪽 사이드바의 그래프 목록을 대체합니다. 모드를 종료하면 그래프 목록이 돌아옵니다. 같은 장치·채널·Note/CC 번호의 매핑을 하드웨어 입력별로 묶습니다. 각 매핑은 그래프·노드·동작을 담은 제목 하나로 선택하며 상태, 선택한 옵션, 제거 순서로 표시합니다. 행을 선택하면 해당 그래프로 이동해 대상을 강조하고 볼륨 옵션·녹음 동작을 편집합니다. 행이나 매핑된 조작의 Delete/Backspace 또는 제거 버튼은 매핑 하나만 지웁니다. 삭제된 대상도 마지막 이름을 보존합니다. 노드 삭제를 실행 취소하면 원래 ID와 매핑이 자동 복원됩니다. 그래프 목록의 macOS Command+Z·Linux Ctrl+Z로 그래프 삭제를 실행 취소하고 Shift를 더해 다시 실행합니다. 삭제 이력은 실행부 재시작까지 유지됩니다. 저장한 매핑·복원한 그래프 ID는 재시작 뒤에도 유지하고 장치는 자동 재연결합니다. 편집 창을 닫으면 매핑 모드를 끝내고 제어를 재개합니다.</p><p>MixRelay 백그라운드 프로세스가 실행 중이어야 하며 편집 창은 닫아도 됩니다. macOS는 CoreMIDI, Linux는 ALSA sequencer(PipeWire 노출 포트 포함)를 사용합니다. Linux에는 ALSA 라이브러리와 sequencer 접근 권한이 필요하며 실패 사유는 MIDI 사용 불가로 표시합니다. 입력만 지원하며 MIDI 출력·LED·모터 페이더 피드백·클록·BPM 제어는 제공하지 않습니다.</p></div></section>
+        <nav class="manual-pagination" aria-label="안내서 목차"><a rel="prev" href="stream-deck.html">← Stream Deck 플러그인</a><a rel="next" href="licensing.html">다음: 무료 기능과 라이선스 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>사전 공개 초안 · MixRelay 0.1.0</p><a href="../../index.html">제품 소개</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="정책" lang="ko"><a href="../../legal/ko/terms.html">판매조건·환불</a><a href="../../legal/ko/privacy.html">개인정보 처리방침</a></nav></div>
+    </footer>
+  </body>
+</html>

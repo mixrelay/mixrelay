@@ -5,6 +5,11 @@ import { afterEach, vi } from 'vitest';
 // Core components resolve accessible names through the app's i18n instance, as at runtime.
 import './core/i18n';
 
+// Testing Library detects fake timers through this Jest-shaped boundary, including
+// the zero-delay microtask drain after user-event. Without it, awaiting an input
+// under Vitest's fake clock hangs even when user-event has advanceTimers configured.
+Object.assign(globalThis, { jest: { advanceTimersByTime: vi.advanceTimersByTime } });
+
 afterEach(cleanup);
 
 Object.defineProperty(window, 'matchMedia', {

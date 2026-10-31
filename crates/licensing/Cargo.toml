@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-repository.workspace = true
+homepage.workspace = true
 publish = false
 
 [lints]
@@ -12,11 +12,13 @@ workspace = true
 
 [dependencies]
 # Public License API only; never embed a merchant API credential in a binary.
-reqwest = { workspace = true, features = ["form", "rustls"] }
+reqwest = { workspace = true, features = ["json", "rustls"] }
 secrecy = { version = "0.10.3", features = ["serde"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+uuid = "1.26.0"
+time = { version = "0.3.55", features = ["parsing"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 keyring = { version = "3.6.3", features = ["apple-native"] }

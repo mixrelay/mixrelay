@@ -1,7 +1,17 @@
-import { type CSSProperties, type ReactNode, type Ref, useEffect, useState } from 'react';
+import {
+  type CSSProperties,
+  type ReactNode,
+  type Ref,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
 import { Button } from 'react-aria-components';
 import { useTranslation } from 'react-i18next';
+import { MidiContext } from '../midi/MidiPort';
+import { useMidiControl } from '../midi/useMidiControl';
 import { spacing } from '../theme/tokens';
+import { ActionButton } from './ActionButton';
 import styles from './AudioNodeCard.module.css';
 import {
   AudioNodeEndpointOptions,
@@ -148,6 +158,8 @@ export function AudioNodeCard({
   // Endpoint, channel layout and gain settings, which only the Options panel reads.
   ...settings
 }: AudioNodeCardProps) {
+  const mapping = useContext(MidiContext)?.active ?? false;
+  const settingsDisabled = poweredOff || mapping;
   const { t } = useTranslation();
   const resolvedOptionsLabel = optionsLabel ?? t('routing.nodes.options');
   const { faceRef, faceBounds, contentRef, measureControls } = useCardMeasurements({
@@ -200,7 +212,7 @@ export function AudioNodeCard({
           <NodeHeaderActions
             {...{ title, actions: headerActions, mute: muteControl }}
             bypassControls={parameterControls}
-            bypassDisabled={poweredOff}
+            bypassDisabled={settingsDisabled}
             onBypassChange={onParameterChange}
             headerRef={headerRef}
             targetRef={setHeaderOptionsTarget}
@@ -217,11 +229,11 @@ export function AudioNodeCard({
             title={title}
           >
             <CompactNodeFeedback {...{ faceMode, detail, status, statusTone }} />
-            <div inert={poweredOff}>
+            <div inert={settingsDisabled}>
               <ProcessorEditorOption {...editor} />
             </div>
             <NodeOptions
-              disabled={poweredOff}
+              disabled={settingsDisabled}
               {...settings}
               channelLayout={channelLayout}
               hasOptions={hasOptions}
@@ -659,7 +671,17 @@ function EqualizerOptions({
   );
 }
 
-function StandardOptions({
+function StandardOptions(props: NodeOptionsProps & { layoutField: ReactNode }) {
+  const mapping = useContext(MidiContext)?.active ?? false;
+  const volume = useMidiControl('volume');
+  return mapping ? (
+    <MidiVolumeControl control={props.gainControl} available={Boolean(props.onGainChange)} />
+  ) : (
+    <StandardAudioOptions {...props} opened={props.opened || Boolean(volume?.selected)} />
+  );
+}
+
+function StandardAudioOptions({
   disabled,
   endpointControl,
   gainControl,
@@ -795,6 +817,30 @@ function NodePortOverlays({
   );
 }
 
+function MidiVolumeControl({
+  control,
+  available,
+}: {
+  control: NodeOptionsProps['gainControl'];
+  available: boolean;
+}) {
+  const mapping = useMidiControl('volume');
+  const { t } = useTranslation();
+  if (!control || !available || !mapping) return null;
+  return (
+    <ActionButton
+      density="compact"
+      data-midi-map
+      aria-label={mapping.label}
+      aria-pressed={mapping.selected}
+      onClick={mapping.select}
+      onKeyDown={mapping.keyDown}
+    >
+      {mapping.text || t('midi.actions.volume')}
+    </ActionButton>
+  );
+}
+
 function NodeGainControl({
   control,
   onChange,
@@ -804,10 +850,14 @@ function NodeGainControl({
   onChange: (gainDb: number) => void;
   disabled: boolean;
 }) {
+  const mapping = useMidiControl('volume');
   const [value, setValue] = useState(control.valueDb);
   useEffect(() => setValue(control.valueDb), [control.valueDb]);
   return (
-    <span className={`${styles.gainControl} nodrag nopan nowheel`}>
+    <span
+      className={`${styles.gainControl} nodrag nopan nowheel`}
+      data-midi-selected={mapping?.selected || undefined}
+    >
       <span className={styles.gainValue}>{value.toFixed(1)} dB</span>
       <ValueSlider
         disabled={disabled}

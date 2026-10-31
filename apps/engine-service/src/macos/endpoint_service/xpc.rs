@@ -173,15 +173,11 @@ pub(crate) unsafe extern "C" fn mr_engine_service_peer_event(peer: Object, event
         return;
     };
     if role == Role::AudioServer {
-        // SAFETY: event is live for this dispatch callback. Only the authenticated
-        // audio-server role can publish grants, and cannot request application leases.
-        let result =
-            unsafe { mixrelay_macos_transport::client_pcm::ClientPcmSnapshot::decode(event) }
-                .map_err(super::virtual_pcm::Error::from)
-                .and_then(|queues| service.virtual_pcm.replace(queues));
+        // SAFETY: the authenticated peer retains the complete request during decoding.
+        let result = unsafe { virtual_snapshot(service, event) };
         if let Err(error) = result {
             tracing::error!(boundary = "hal_shared_pcm", stage = "grant_snapshot", %error, "virtual input snapshot rejected");
-            // SAFETY: cancellation asks the producer to reconnect and resubmit a complete list.
+            // SAFETY: cancellation asks HAL to reconnect and submit its complete inventory.
             unsafe { xpc_connection_cancel(peer) };
         }
         return;
@@ -190,4 +186,45 @@ pub(crate) unsafe extern "C" fn mr_engine_service_peer_event(peer: Object, event
         // SAFETY: response retains the owned reply until this synchronous send.
         unsafe { xpc_connection_send_message(peer, response.raw()) };
     }
+}
+
+/// # Safety
+/// Event is a live envelope from the authenticated audio-server peer.
+unsafe fn virtual_snapshot(
+    service: &super::Service,
+    event: Object,
+) -> Result<(), super::virtual_pcm::Error> {
+    use mixrelay_macos_transport::client_pcm::ClientPcmSnapshot;
+    let received = mixrelay_realtime::host_time();
+    if service.inventory.stopped() {
+        return Err(super::virtual_pcm::Error::Stale);
+    }
+    // SAFETY: the caller retains this authenticated envelope; decode checks its
+    // dictionary/version before the remaining accessors inspect its fields.
+    let (queues, geometry, observed) = unsafe {
+        (
+            ClientPcmSnapshot::decode(event)?,
+            ClientPcmSnapshot::endpoints(event)?,
+            ClientPcmSnapshot::observed_at(event),
+        )
+    };
+    if queues
+        .iter()
+        .any(|queue| queue.capacity() != mixrelay_macos_transport::client_pcm::QUEUE_FRAMES)
+    {
+        return Err(super::virtual_pcm::Error::Geometry);
+    }
+    let pending = service
+        .virtual_pcm
+        .replace_ready(queues, observed, received)?;
+    service.inventory.submit(
+        std::sync::Arc::clone(&service.virtual_pcm),
+        super::inventory::Job {
+            geometry,
+            pending,
+            observed,
+            received,
+        },
+    )?;
+    Ok(())
 }

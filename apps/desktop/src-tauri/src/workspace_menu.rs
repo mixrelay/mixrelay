@@ -16,6 +16,7 @@ pub(crate) struct WorkspaceMenu {
     save_as: MenuItem<tauri::Wry>,
     view: Submenu<tauri::Wry>,
     graph_list: MenuItem<tauri::Wry>,
+    midi_map: MenuItem<tauri::Wry>,
     graph_list_state: GraphListLabel,
     app: tauri::AppHandle,
     #[cfg(target_os = "macos")]
@@ -40,6 +41,7 @@ impl WorkspaceMenu {
         self.save.set_text(labels.workspace_save)?;
         self.save_as.set_text(labels.workspace_save_as)?;
         self.view.set_text(labels.view)?;
+        self.midi_map.set_text(labels.midi_map)?;
         self.graph_list_state.set_labels(*labels);
         self.apply_graph_list_label()?;
         #[cfg(target_os = "macos")]
@@ -145,6 +147,7 @@ pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
     file.insert(&save, 2)?;
     file.insert(&save_as, 3)?;
     let (view, graph_list) = graph_list_item(app, &menu, &labels)?;
+    let midi_map = install_midi_map(app, &menu, &view, &labels)?;
     #[cfg(target_os = "linux")]
     let quit = {
         let quit = MenuItem::with_id(app, "app:quit", labels.quit, true, Some("Ctrl+Q"))?;
@@ -163,6 +166,7 @@ pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
         save_as,
         view,
         graph_list,
+        midi_map,
         graph_list_state: GraphListLabel::new(labels),
         app: app.handle().clone(),
         #[cfg(target_os = "macos")]
@@ -171,27 +175,75 @@ pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
         quit,
     });
     app.state::<WorkspaceMenu>().set_ready(false)?;
-    app.on_menu_event(|app, event| {
-        if event.id().as_ref() == "app:about" {
-            let _ = crate::app_menu::show_main_window(app);
-            let _ = app.emit("app-about", ());
-            return;
-        }
-        if event.id().as_ref() == "view:graph-list" {
-            // A closed editor only hides its window; bring it back so the change is seen.
-            let _ = crate::app_menu::show_main_window(app);
-            let _ = app.emit("graph-list-toggle", ());
-            return;
-        }
-        if event.id().as_ref() == "app:quit" {
-            app.exit(0);
-            return;
-        }
-        if let Some(action) = event.id().as_ref().strip_prefix("workspace:") {
-            let _ = app.emit("workspace-file", action);
-        }
-    });
+    app.on_menu_event(|app, event| handle_menu_event(app, &event));
     Ok(())
+}
+
+fn handle_menu_event(app: &tauri::AppHandle, event: &tauri::menu::MenuEvent) {
+    if event.id().as_ref() == "app:about" {
+        let _ = crate::app_menu::show_main_window(app);
+        let _ = app.emit("app-about", ());
+        return;
+    }
+    if event.id().as_ref() == "view:midi-map" {
+        let _ = app.emit("midi-map-toggle", ());
+        return;
+    }
+    if event.id().as_ref() == "window:minimise" {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.minimize();
+        }
+        return;
+    }
+    if event.id().as_ref() == "view:graph-list" {
+        // A closed editor only hides its window; bring it back so the change is seen.
+        let _ = crate::app_menu::show_main_window(app);
+        let _ = app.emit("graph-list-toggle", ());
+        return;
+    }
+    if event.id().as_ref() == "app:quit" {
+        app.exit(0);
+        return;
+    }
+    if let Some(action) = event.id().as_ref().strip_prefix("workspace:") {
+        let _ = app.emit("workspace-file", action);
+    }
+}
+
+/// Native accelerators consume Cmd+M before the webview can handle it.
+fn install_midi_map(
+    app: &tauri::App,
+    menu: &Menu<tauri::Wry>,
+    view: &Submenu<tauri::Wry>,
+    labels: &NativeMenuLabels,
+) -> tauri::Result<MenuItem<tauri::Wry>> {
+    #[cfg(target_os = "macos")]
+    if let Some(window) = menu
+        .get(tauri::menu::WINDOW_SUBMENU_ID)
+        .and_then(|item| item.as_submenu().cloned())
+        && let Some(item) = window.remove_at(0)?
+    {
+        let text = item
+            .as_predefined_menuitem()
+            .map(tauri::menu::PredefinedMenuItem::text)
+            .transpose()?
+            .unwrap_or_else(|| "Minimise".into());
+        window.insert(
+            &MenuItem::with_id(app, "window:minimise", text, true, None::<&str>)?,
+            0,
+        )?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = menu;
+    let item = MenuItem::with_id(
+        app,
+        "view:midi-map",
+        labels.midi_map,
+        true,
+        Some("CmdOrCtrl+M"),
+    )?;
+    view.append(&item)?;
+    Ok(item)
 }
 
 /// View → Show/Hide Graph List, at the top of the platform View menu.

@@ -3,7 +3,7 @@
 
 mod clock;
 mod ffi;
-pub use clock::{SourceClockRead, SourceClockSnapshot};
+pub use clock::{ConsumerTiming, ConsumerTimingRead, SourceClockRead, SourceClockSnapshot};
 pub use ffi::{
     TransportError, TransportErrorCode, mr_application_source_transport_attach,
     mr_application_source_transport_clock, mr_application_source_transport_connect,
@@ -66,17 +66,31 @@ impl SourceTransport {
         registry: &crate::source_registry::SourceRegistry,
         request: &crate::source_control::SourceRequest,
     ) -> std::io::Result<Self> {
+        Self::create_attaching(registry, request, |raw| {
+            // SAFETY: the registry owns this immutable backing and grants one producer lease.
+            unsafe { ffi::attach(raw, request.capacity_frames, request.channels) }
+        })
+    }
+    fn create_attaching(
+        registry: &crate::source_registry::SourceRegistry,
+        request: &crate::source_control::SourceRequest,
+        attach: impl FnOnce(
+            &mut crate::source_control::SourceAttachment,
+        ) -> Result<Self, TransportError>,
+    ) -> std::io::Result<Self> {
         use std::os::fd::IntoRawFd;
         let attachment = registry.attach(request)?;
+        let lease = attachment.producer_lease;
         let mut raw = crate::source_control::SourceAttachment {
             descriptor: attachment.descriptor.into_raw_fd(),
             mapped_size: attachment.mapped_size,
-            producer_lease: attachment.producer_lease,
+            producer_lease: lease,
             source_epoch: attachment.source_epoch,
         };
-        // SAFETY: the registry owns this immutable backing object and grants one producer lease.
-        unsafe { ffi::attach(&mut raw, request.capacity_frames, request.channels) }
-            .map_err(std::io::Error::other)
+        attach(&mut raw).map_err(|error| {
+            registry.cancel_attachment(lease);
+            std::io::Error::other(error)
+        })
     }
     fn owns_stream(&self) -> bool {
         // SAFETY: the mapping owns the validated buffer for the entire borrow;

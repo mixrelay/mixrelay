@@ -6,16 +6,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { inspectPackage } from "./check-linux-package.mjs";
 import { loadContract, checkGenerated } from './support-contract.mjs';
 
+import { validateLicensingBuildEnvironment, releaseLicensingEnvironment } from "./polar-configuration.mjs";
+export { validateLicensingBuildEnvironment } from "./polar-configuration.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopRoot = resolve(root, "apps/desktop");
 const require = createRequire(import.meta.url);
 const LINUX_BUNDLE_FORMATS = new Set(["deb", "rpm"]);
-const LEMON_CONFIGURATION_KEYS = [
-  "MIXRELAY_LEMON_STORE_ID",
-  "MIXRELAY_LEMON_PRODUCT_ID",
-  "MIXRELAY_LEMON_VARIANT_ID",
-  "MIXRELAY_LEMON_CHECKOUT_URL",
-];
 export const DESKTOP_CODE_CHECK_TAURI_CONFIG = '{"bundle":{"externalBin":[],"resources":[]}}';
 
 export function desktopCodeCheckEnvironment(env) {
@@ -33,14 +30,6 @@ export function assertDesktopPackagingAllowed(env) {
   if (env.MIXRELAY_DESKTOP_CODE_CHECK !== undefined
     || env.TAURI_CONFIG === DESKTOP_CODE_CHECK_TAURI_CONFIG) {
     throw new Error("Desktop packaging is disabled in the code-check environment");
-  }
-}
-
-export function validateLicensingBuildEnvironment(env) {
-  const values = LEMON_CONFIGURATION_KEYS.map(key => env[key]);
-  if (values.every(value => value === undefined)) return;
-  if (values.some(value => typeof value !== "string" || value.trim().length === 0)) {
-    throw new Error("MIXRELAY_LEMON_* build configuration must be all unset or all non-empty");
   }
 }
 
@@ -179,7 +168,10 @@ export async function main(
   try {
     const buildEnv = { ...env };
     assertDesktopPackagingAllowed(buildEnv);
-    validateLicensingBuildEnvironment(buildEnv);
+    const separator = args.indexOf("--");
+    const buildArgs = separator < 0 ? args : args.slice(0, separator);
+    const debug = platform === "linux" && buildArgs.some(argument => argument === "--debug" || argument === "-d");
+    validateLicensingBuildEnvironment(buildEnv, { required: !debug, release: !debug });
     if (platform === "linux") validateLinuxConfigBuildArguments(args);
     const [command, ...commandArgs] = desktopBuildCommand(platform, args);
     // Tauri and its engine hook run from different directories. Resolve once
@@ -219,9 +211,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     checkGenerated(loadContract().contract);
     if (process.platform !== "darwin") return main();
     desktopBuildCommand("darwin", process.argv.slice(2));
-    const { checkMacosSigning, withMacosSigning } = await import("./macos-signing.mjs");
+    const { checkMacosSigning, readMacosSigningConfig, withMacosSigning } = await import("./macos-signing.mjs");
+    const licensingEnv = releaseLicensingEnvironment(process.env, readMacosSigningConfig());
     checkMacosSigning();
-    return withMacosSigning((env, _config, owned) => main(process.argv.slice(2), "darwin", owned, inspectPackage, listDebianPackages, env));
+    return withMacosSigning((env, _config, owned) => main(process.argv.slice(2), "darwin", owned, inspectPackage, listDebianPackages, { ...env, ...licensingEnv }));
   };
   build().then(status => { process.exitCode = status; }).catch(error => {
     console.error(error.message);

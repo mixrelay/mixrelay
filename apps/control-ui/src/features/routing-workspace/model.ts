@@ -305,7 +305,7 @@ export function addRoutingNode(
       return model;
     return addVirtualEndpointSide(model, request, position, presentation);
   }
-  const id = nextNodeId(model, request.kind);
+  const id = newNodeId(request.kind);
   const base = {
     id,
     position,
@@ -333,7 +333,7 @@ function addEffectChain(
   if (preset === 'radio') requests.push({ kind: 'compressor' });
   for (const item of requests) {
     const node = createRoutingNode(
-      { id: nextNodeId(next, item.kind), position: { x: nextX, y: position.y } },
+      { id: newNodeId(item.kind), position: { x: nextX, y: position.y } },
       item,
       presentation,
     );
@@ -373,7 +373,7 @@ function addVirtualEndpointSide(
       node.runtime?.type === 'virtual_endpoint' &&
       directString(node.runtime.config, 'id') === spec.id,
   );
-  const nodeId = sibling ? runtimeNodeId(sibling) : nextVirtualNodeId(model);
+  const nodeId = sibling ? runtimeNodeId(sibling) : `virtual-${crypto.randomUUID()}`;
   const sideName = kind === 'virtual_input' ? 'source' : 'sink';
   if (
     model.nodes.some(
@@ -402,12 +402,6 @@ function addVirtualEndpointSide(
     new Set(model.nodes.map(runtimeNodeId)),
   ).find((node) => node.runtime?.binding?.side === sideName);
   return side ? addAudioGraphNode(model, { ...side, position }) : model;
-}
-
-function nextVirtualNodeId(model: AudioGraphModel): string {
-  let sequence = 1;
-  while (model.nodes.some((node) => runtimeNodeId(node) === `virtual-${sequence}`)) sequence += 1;
-  return `virtual-${sequence}`;
 }
 
 export function updateRoutingNodeGain(
@@ -1306,10 +1300,8 @@ function recorderNode(
   };
 }
 
-function nextNodeId(model: AudioGraphModel, kind: RoutingNodeRequest['kind']): string {
-  let sequence = 1;
-  while (model.nodes.some((node) => node.id === `${kind}-${sequence}`)) sequence += 1;
-  return `${kind}-${sequence}`;
+function newNodeId(kind: RoutingNodeRequest['kind']): string {
+  return `${kind}-${crypto.randomUUID()}`;
 }
 
 function runtimeNodeToAudioNodes(

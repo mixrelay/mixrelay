@@ -4,8 +4,7 @@
 //! control after local readers drain, never on an audio callback.
 use crate::{
     application_clock::{
-        ApplicationClock, VERSION, mr_application_clock_publish_consumer,
-        mr_application_clock_request_rate,
+        ApplicationClock, ConsumerRoute, VERSION, mr_application_clock_request_rate,
     },
     application_source_mapping::Mapping,
     shared_audio_buffer::{
@@ -47,7 +46,13 @@ pub mod content_latency;
 mod latency;
 mod timestamps;
 use latency::{Latency, Observation, transition};
+pub use timestamps::{GraphCredit, PublishedCredit, ReadMiss};
 const MAX_LEASE: u64 = (1 << 48) - 1;
+
+/// Opaque `SourceClock::epoch`: a lease above its 16-bit shared-buffer epoch.
+const fn stream_epoch(lease: u64, epoch: u64) -> u64 {
+    (lease << 16) | epoch
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
@@ -170,18 +175,18 @@ impl Timeline {
 
     fn publish(&self, source: &Source, epoch: u64, frames: u32, running: bool) {
         self.publish_telemetry(source.mapping.clock());
-        // SAFETY: the caller's nonblocking consumer claim owns this timeline;
-        // the read pin retains its mapping through bounded atomic publication.
-        unsafe {
-            mr_application_clock_publish_consumer(
-                source.mapping.clock.as_ptr(),
+        source
+            .mapping
+            .clock()
+            .publish_consumer(crate::application_clock::ConsumerPublication {
                 epoch,
-                self.policy.next,
+                next_frame: self.policy.next,
                 frames,
                 running,
-                self.policy.target,
-            );
-        }
+                target_backlog_frames: self.policy.target,
+                phase_ns: self.policy.timing.phase_ns(),
+                period_ns: self.policy.timing.period_ns(),
+            });
     }
 
     fn publish_telemetry(&self, clock: &ApplicationClock) {
@@ -363,6 +368,21 @@ impl Default for SourceRegistry {
     }
 }
 impl SourceRegistry {
+    /// Publishes how the graph's active plan uses a source to its producer. Returns
+    /// false when the identified source is absent.
+    pub fn set_consumer_route(&self, token: u64, route: ConsumerRoute) -> bool {
+        let read = self.read(token);
+        let Some(source) = read.source() else {
+            return false;
+        };
+        // Release publishes the route to the producer's next retention decision.
+        source
+            .mapping
+            .clock()
+            .consumer_route
+            .store(route.word(), Ordering::Release);
+        true
+    }
     /// Selects pacing authority without changing PCM, format, or producer ownership.
     pub fn set_clock_master(&self, token: u64, master: bool) -> bool {
         let read = self.read(token);
@@ -427,6 +447,43 @@ impl SourceRegistry {
         self.control
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    /// Whether a prepared producer still has a lease and storage for another stream.
+    /// Control checks this before handing queues to a pump, including idle epoch exhaustion.
+    pub fn producer_can_rearm(&self, token: u64) -> bool {
+        let read = self.read(token);
+        read.source().is_some_and(|source| {
+            !source.terminal()
+                && source
+                    .mapping
+                    .clock()
+                    .producer_lease
+                    .load(Ordering::Acquire)
+                    != 0
+        })
+    }
+    /// Closes only the local grant whose attachment failed; a later lease survives.
+    pub(crate) fn cancel_attachment(&self, lease: u64) {
+        let mut control = self.control();
+        for slot in &self.slots {
+            // SAFETY: control owns every slot until collection below, and its mutex
+            // excludes grant replacement while this failed local attachment closes.
+            if let Some(source) = unsafe { slot.load(Ordering::SeqCst).as_ref() } {
+                // AcqRel revokes exactly the failed lease; it cannot close a newer producer.
+                let _ = source.mapping.clock().producer_lease.compare_exchange(
+                    lease,
+                    0,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                );
+            }
+        }
+        self.collect(&mut control);
+    }
+    /// Reclaims closed producers on control after their endpoint workers have joined.
+    /// Existing graph pins retain mappings until a later collection observes no readers.
+    pub fn collect_retired(&self) {
+        self.collect(&mut self.control());
     }
     fn collect(&self, control: &mut Control) {
         // Attach and collection share the control mutex. A zero lease means its
@@ -626,7 +683,7 @@ impl SourceRegistry {
         }
         Some(SourcePcmProgress {
             clock: SourceClock {
-                epoch: (lease << 16) | epoch,
+                epoch: stream_epoch(lease, epoch),
                 native_frames: frames,
                 native_rate: rate,
                 graph_rate: u32::try_from(format & u64::from(u32::MAX)).ok()?,
@@ -660,6 +717,21 @@ impl SourceRegistry {
         frames: u32,
         timing: content_latency::ReadTiming,
     ) -> u32 {
+        self.read_audio_timed(token, samples, frames, timing)
+            .unwrap_or(0)
+    }
+
+    /// Reads one complete block like `read_audio_time`, reporting why none was read.
+    ///
+    /// # Errors
+    /// Returns the [`ReadMiss`] reason; `samples` is then silent and the cursor not advanced.
+    pub fn read_audio_timed(
+        &self,
+        token: u64,
+        samples: &mut [f32],
+        frames: u32,
+        timing: content_latency::ReadTiming,
+    ) -> Result<u32, ReadMiss> {
         let content_latency::ReadTiming {
             rate,
             first_nanos: requested_time,
@@ -667,14 +739,13 @@ impl SourceRegistry {
         } = timing;
         samples.fill(0.0);
         let read = self.read(token);
-        let Some(source) = read.source().filter(|source| {
-            frames != 0 && samples.len() == frames as usize * source.channels as usize
-        }) else {
-            return 0;
-        };
-        let Some(_claim) = source.claim_consumer() else {
-            return 0;
-        };
+        let source = read
+            .source()
+            .filter(|source| {
+                frames != 0 && samples.len() == frames as usize * source.channels as usize
+            })
+            .ok_or(ReadMiss::Unavailable)?;
+        let _claim = source.claim_consumer().ok_or(ReadMiss::Unavailable)?;
         let mut attempt = content_latency::Attempt::new(&source.measurements);
         // SAFETY: this nonblocking consumer claim is the only access to the
         // timeline; no control method modifies it, including replacement.
@@ -693,8 +764,10 @@ impl SourceRegistry {
             timeline.policy.started = false;
             timeline.previous_read = None;
             timeline.policy.next = 0;
+            // The reader's clock survives an unavailable source; its next read restarts
+            // the measured run, so it is never taken for a sequential reader meanwhile.
             timeline.publish(source, stats.epoch, frames, false);
-            return 0;
+            return Err(ReadMiss::Unavailable);
         }
         let observation = timeline.observe(source, stats, frames, (rate, self.clock.now()));
         let (mut policy, ready) = transition(timeline.policy, observation);
@@ -703,9 +776,9 @@ impl SourceRegistry {
                 timeline.policy = policy;
             }
             timeline.publish(source, stats.epoch, frames, false);
-            return 0;
+            return Err(ReadMiss::NotReady);
         }
-        if !timestamps::select(
+        if let Err(miss) = timestamps::select(
             source,
             stats,
             timeline.policy,
@@ -718,7 +791,7 @@ impl SourceRegistry {
                 timeline.policy = policy;
             }
             timeline.publish(source, stats.epoch, frames, false);
-            return 0;
+            return Err(miss);
         }
         let copied = timeline.copy_audio(
             source,
@@ -732,7 +805,10 @@ impl SourceRegistry {
             },
         );
         attempt.completed = copied != 0;
-        copied
+        if copied == 0 {
+            return Err(ReadMiss::Incomplete);
+        }
+        Ok(copied)
     }
 
     /// Takes normalized-sample faults once for the current source lease.

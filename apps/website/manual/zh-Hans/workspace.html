@@ -41,6 +41,7 @@
 <a href="effects.html">内置效果与预设</a>
 <a href="plugins.html">外部插件</a>
 <a href="stream-deck.html">Stream Deck 插件</a>
+<a href="midi.html">MIDI 控制器</a>
 <a href="licensing.html">免费版与许可</a>
 <a href="updates.html">更新</a>
 <a href="uninstall.html">卸载</a>
@@ -54,7 +55,7 @@
 <p>使用 <code>新建音频图</code> 创建音频图，通过 <code>添加节点</code> 添加 <code>音源</code>、<code>处理器</code> 或 <code>输出</code>。在 <code>音频图</code> 中选择要编辑的音频图。选择一个音频图不会关闭其他音频图。有许可时，多个音频图可以同时运行。</p><p>打开节点的 <code>选项</code> 可查看其可用参数。双击节点名称、在节点获得焦点时按 <kbd>F2</kbd>，或使用菜单中的 <code>更改显示名称</code> 可修改显示名称。显示名称仅影响当前节点，清空即可恢复原名。</p><p>编辑内容和布局会自动保存。出现保存警告时，更改可能在重新启动后丢失。如需可携带的工作区，请使用 <code>文件 → 保存</code> 或 <code>另存为…</code> 写入 <code>.mix</code> 文件。<code>新建工作区</code> 和 <code>打开…</code> 会在替换当前内容前询问确认。工作区文件不会安装缺失的设备或插件。</p>
 </div></section>
 <section class="guide-section" id="connections" aria-labelledby="connections-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="connections-title">连接与映射通道</h2>
-<p>将输出端口拖到输入端口。立体声需要连接两个通道。按住 <kbd>Shift</kbd> 可在同一节点上选择更多输出通道，再将所选通道拖至目标的第一个通道；目标通道之间的相对偏移会保留。按 <kbd>Escape</kbd> 可取消并清除通道选择。</p><p>右键点击连线可选择 <code>删除连线</code>。端口菜单提供 <code>断开通道</code> 或 <code>断开所选通道</code>。选中节点或连线后，按 <kbd>Delete</kbd> 或 <kbd>Backspace</kbd> 也可删除。<code>适配音频图视图</code> 可将整个音频图显示在视图中。在 macOS 上使用 <kbd>Command+Z</kbd>、在 Linux 上使用 <kbd>Ctrl+Z</kbd> 撤销音频图编辑；同时按住 <kbd>Shift</kbd> 可重做。</p><p><code>删除音频图</code> 会停止该音频图的音频与录音。删除音频图无法撤销，已保存的工作区文件仍会保留。</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
+<p>将输出端口拖到输入端口。立体声需要连接两个通道。按住 <kbd>Shift</kbd> 可在同一节点上选择更多输出通道，再将所选通道拖至目标的第一个通道；目标通道之间的相对偏移会保留。按 <kbd>Escape</kbd> 可取消并清除通道选择。</p><p>右键点击连线可选择 <code>删除连线</code>。端口菜单提供 <code>断开通道</code> 或 <code>断开所选通道</code>。选中节点或连线后，按 <kbd>Delete</kbd> 或 <kbd>Backspace</kbd> 也可删除。<code>适配音频图视图</code> 可将整个音频图显示在视图中。在 macOS 上使用 <kbd>Command+Z</kbd>、在 Linux 上使用 <kbd>Ctrl+Z</kbd> 撤销音频图编辑；同时按住 <kbd>Shift</kbd> 可重做。</p><p><code>删除音频图</code> 会停止该音频图的音频处理和录音。在图形列表中按macOS的Command+Z或Linux的Ctrl+Z撤销，加Shift重做。已保存的工作区文件仍保留。</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
 </div></section>
 <section class="guide-section" id="keyboard" aria-labelledby="keyboard-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="keyboard-title">不拖动也能连接</h2>
 <ol><li>按 <kbd>Tab</kbd> 将焦点移至音源节点。按 <kbd>Enter</kbd> 或 <kbd>Space</kbd> 选中节点。方向键可移动选中的节点，按住 <kbd>Shift</kbd> 可增大移动步幅。</li><li>按 <kbd>Shift+F10</kbd> 或上下文菜单键，然后选择 <code>连接声道…</code>。</li><li>选择 <code>起始输出声道</code> 和 <code>声道数</code>，或保留已有的通道选择。再选择 <code>目标</code> 和 <code>起始输入声道</code>。</li><li>查看 <code>预览</code>，包括跳过的连接及其原因。选择 <code>连接</code>，或选择 <code>取消</code> 以保持音频图不变。</li></ol><p>焦点位于连线或画布时，同样可以使用这些上下文菜单快捷键。节点内部控件保留各自的键盘操作方式。按 <kbd>Escape</kbd> 可关闭菜单和对话框。</p>

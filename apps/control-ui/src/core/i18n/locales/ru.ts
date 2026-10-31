@@ -1,5 +1,47 @@
 import { effectTranslations } from '../effects';
 export const ru = {
+  midi: {
+    mapMode: 'Режим MIDI-назначений',
+    mapTarget: 'Назначить {{name}}: {{action}}',
+    selectTarget: 'Выберите выделенный элемент, затем передвиньте фейдер или нажмите кнопку MIDI.',
+    waitingTarget: '{{name}} · {{action}} — передвиньте MIDI-регулятор для назначения или замены.',
+    done: 'Завершить назначение',
+    selectMapping: 'Выбрать {{name}} · {{action}}',
+    recorderAction: 'Действие рекордера',
+    min: 'Минимум',
+    max: 'Максимум',
+    empty:
+      'Нет MIDI-назначений. Выберите выделенный элемент управления, чтобы добавить назначение.',
+    targetUnavailable: 'Состояние целей недоступно',
+    title: 'Управление MIDI',
+    disconnected: 'Устройство отключено',
+    targetMissing: 'Цель не найдена',
+    unavailable: 'MIDI недоступен',
+    mode: 'Режим громкости',
+    pickup: 'Подведите фейдер к текущему уровню, чтобы начать управление.',
+    step: 'Шаг',
+    remove: 'Удалить',
+    removeTarget: 'Удалить назначение MIDI для {{name}}',
+    failed: 'Не удалось изменить настройки MIDI. Повторите попытку.',
+    control: '{{device}} · Канал {{channel}} · {{kind}} {{number}}',
+    modes: {
+      absolute: 'Абсолютный (подхват)',
+      twos_complement: 'Относительный: дополнительный код',
+      offset64: 'Относительный: смещение 64',
+    },
+    kinds: {
+      note: 'Нота',
+      cc: 'CC',
+    },
+    actions: {
+      power: 'Питание',
+      mute: 'Заглушить',
+      volume: 'Громкость',
+      record: 'Запись / продолжение',
+      pause: 'Пауза',
+      stop: 'Стоп',
+    },
+  },
   effects: effectTranslations.ru,
   theme: {
     label: 'Оформление',
@@ -276,7 +318,7 @@ export const ru = {
     audioPaused: 'Аудио приостановлено',
     deleteGraph: 'Удалить граф',
     deleteGraphNotice:
-      'Удалить «{{name}}»? Его обработка аудио и записи остановятся. Это действие нельзя отменить. Сохранённые файлы рабочего пространства не удаляются.',
+      'Удалить «{{name}}»? Обработка аудио и запись остановятся. В списке графов Command+Z в macOS или Ctrl+Z в Linux отменяет удаление; Shift повторяет его. Сохранённые файлы остаются.',
     catalogUnavailable: 'Сохранённые графы недоступны. Существующий граф не был заменён.',
     reloadGraphs: 'Перезагрузить графы',
     graphSaveFailed:

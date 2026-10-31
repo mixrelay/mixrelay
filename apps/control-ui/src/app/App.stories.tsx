@@ -13,6 +13,7 @@ import { ControlPortError } from '../core/control-port/types';
 import { i18n } from '../core/i18n';
 import type { LicensingPort } from '../core/licensing/LicensingPort';
 import { readyDriver } from '../features/driver-status/driverFixtures';
+import { midiBinding, midiFixture, midiPortFixture } from '../features/midi/midiFixtures';
 import { App } from './App';
 
 const graph: RuntimeGraphDocument = {
@@ -440,4 +441,47 @@ export const DiagnosticsNarrow: Story = {
       height={844}
     />
   ),
+};
+
+const workspaceMidiStatus = {
+  ...midiFixture,
+  bindings: [
+    {
+      ...midiBinding,
+      target: { graphId: 'graph-1', nodeId: 'trim' },
+      graphName: 'Untitled Graph',
+      nodeName: 'Monitor trim',
+    },
+  ],
+  targets: [
+    {
+      target: { graphId: 'graph-1', nodeId: 'trim' },
+      label: 'Untitled Graph / Monitor trim',
+    },
+  ],
+};
+const workspaceMidiPort = midiPortFixture(workspaceMidiStatus);
+export const MidiControls: Story = {
+  args: { midiPort: workspaceMidiPort },
+  beforeEach: () => workspaceMidiPort.setStatus(workspaceMidiStatus),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByRole('group', { name: 'Monitor trim' });
+    await userEvent.click(await canvas.findByRole('button', { name: i18n.t('midi.mapMode') }));
+    await expect(canvas.getByRole('complementary', { name: i18n.t('midi.title') })).toBeVisible();
+    const toggle = canvas.getByRole('button', { name: i18n.t('midi.mapMode') });
+    const title = canvas.getByRole('textbox', { name: i18n.t('studio.graphName') });
+    await expect(title).toBeDisabled();
+    await expect(toggle.closest('header')).toContainElement(title);
+    const appearance = canvas.getByRole('button', {
+      name: (name) =>
+        ['system', 'light', 'dark'].some(
+          (theme) => name === i18n.t('theme.current', { theme: i18n.t(`theme.${theme}`) }),
+        ),
+    });
+    await expect(appearance.closest('[inert]')).not.toBeNull();
+    await expect(
+      canvas.queryByRole('complementary', { name: i18n.t('studio.graphs') }),
+    ).not.toBeInTheDocument();
+  },
 };

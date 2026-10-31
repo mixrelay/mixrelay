@@ -6,9 +6,15 @@ use reqwest::Client;
 use secrecy::{ExposeSecret as _, SecretString};
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use crate::{Activation, LicenseError, ProductIdentity, response::Response};
+use crate::{
+    Activation, LicenseError, ProductIdentity,
+    response::{self, Activated, License},
+};
 
-const ORIGIN: &str = "https://api.lemonsqueezy.com/v1/licenses";
+const ORIGIN: &str = "https://api.polar.sh/v1/customer-portal/license-keys";
+const SANDBOX_ORIGIN: &str = "https://sandbox-api.polar.sh/v1/customer-portal/license-keys";
+const API_VERSION: &str = "2026-10";
+const LOCAL_DEVICE: &str = "local:";
 const MAX_RESPONSE_BYTES: usize = 65_536;
 
 /// Bounded async requests to the public License API. Clone to reuse its connection pool.
@@ -28,11 +34,11 @@ pub struct LicenseHttpResponse {
 
 /// HTTP boundary for licensing; implementations must not retry mutations.
 pub trait LicenseHttp: Send + Sync {
-    /// Post a form to one public License API operation.
+    /// Post JSON fields to one public License API operation.
     fn post<'a>(
         &'a self,
         operation: &'a str,
-        form: Vec<(&'a str, &'a str)>,
+        fields: Vec<(&'a str, &'a str)>,
     ) -> Pin<Box<dyn Future<Output = Result<LicenseHttpResponse, LicenseError>> + Send + 'a>>;
 }
 
@@ -56,25 +62,39 @@ impl std::fmt::Debug for LicenseHttpResponse {
 
 struct Http {
     client: Client,
+    origin: String,
 }
 
 impl LicenseHttp for Http {
     fn post<'a>(
         &'a self,
         operation: &'a str,
-        form: Vec<(&'a str, &'a str)>,
+        fields: Vec<(&'a str, &'a str)>,
     ) -> Pin<Box<dyn Future<Output = Result<LicenseHttpResponse, LicenseError>> + Send + 'a>> {
         Box::pin(async move {
             let response = self
                 .client
-                .post(format!("{ORIGIN}/{operation}"))
+                .post(format!("{}/{operation}", self.origin))
                 .header(reqwest::header::ACCEPT, "application/json")
-                .form(&form)
+                .header("Polar-Version", API_VERSION)
+                .json(
+                    &fields
+                        .into_iter()
+                        .collect::<std::collections::BTreeMap<_, _>>(),
+                )
                 .send()
                 .await
                 .map_err(|_| LicenseError::Unavailable)?;
             let status = response.status().as_u16();
             check_status(status)?;
+            if response
+                .headers()
+                .get("Polar-Version")
+                .and_then(|value| value.to_str().ok())
+                != Some(API_VERSION)
+            {
+                return Err(LicenseError::RequestFailed);
+            }
             Ok(LicenseHttpResponse {
                 status,
                 body: read_response(response).await?,
@@ -92,15 +112,31 @@ impl LicenseClient {
     /// # Errors
     /// Returns `Unavailable` if TLS/client initialization fails.
     pub fn new(product: ProductIdentity) -> Result<Self, LicenseError> {
-        let client = Client::builder()
-            .https_only(true)
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .timeout(Duration::from_secs(10))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .map_err(|_| LicenseError::Unavailable)?;
-        Ok(Self::with_http(product, Arc::new(Http { client })))
+        let client = http_client()?;
+        Ok(Self::with_http(
+            product,
+            Arc::new(Http {
+                client,
+                origin: ORIGIN.into(),
+            }),
+        ))
+    }
+
+    /// Create a sandbox client for development builds.
+    ///
+    /// # Errors
+    /// Release builds reject sandbox configuration.
+    pub fn sandbox(product: ProductIdentity) -> Result<Self, LicenseError> {
+        if !cfg!(debug_assertions) {
+            return Err(LicenseError::InvalidConfiguration);
+        }
+        Ok(Self::with_http(
+            product,
+            Arc::new(Http {
+                client: http_client()?,
+                origin: SANDBOX_ORIGIN.into(),
+            }),
+        ))
     }
 
     /// Bind the public product to an injected, bounded HTTP transport.
@@ -126,84 +162,110 @@ impl LicenseClient {
         before_send: impl FnOnce() -> Result<(), LicenseError>,
     ) -> Result<Activation, LicenseError> {
         check_argument(name)?;
-        let checked = self.request("validate", key, None).await?;
-        check_decision(checked.valid)?;
-        checked.check_product(self.product)?;
-        let expected_id = checked.license_id(&["active", "inactive"])?;
+        let checked = self.license(key, None).await?;
+        checked.check(self.product)?;
+        // Polar disallows remote activations when the benefit has no activation limit.
+        // Keep the readable device label locally; no remote mutation can be duplicated.
+        if checked.limit_activations.is_none() {
+            if name.len() > 255 - LOCAL_DEVICE.len() {
+                return Err(LicenseError::InvalidInput);
+            }
+            return checked.activation(&format!("{LOCAL_DEVICE}{name}"));
+        }
         before_send()?;
-        let activated = self
-            .request("activate", key, Some(("instance_name", name)))
+        let reply = self
+            .request("activate", key, Some(("label", name)))
             .await
             .map_err(uncertain_activation)?;
-        check_decision(activated.activated).map_err(uncertain_activation)?;
+        let activated: Activated =
+            serde_json::from_slice(&reply.body).map_err(|_| LicenseError::ActivationUncertain)?;
         activated
-            .check_product(self.product)
+            .license_key
+            .check(self.product)
             .map_err(uncertain_activation)?;
-        let activation = activated.activation().map_err(uncertain_activation)?;
-        if activation.license_id != expected_id {
+        let instance = &activated.instance;
+        response::check_id(&instance.id).map_err(uncertain_activation)?;
+        if instance.license_key_id != checked.id || activated.license_key.id != checked.id {
             return Err(LicenseError::ActivationUncertain);
         }
-        Ok(activation)
+        activated.license_key.activation(&instance.id)
     }
 
-    /// Validate this exact seat, including store/product/variant and returned instance ID.
-    ///
-    /// Errors are remote observations only: this client does not modify local audio or
-    /// delete a previously saved activation on transport failure.
+    /// Validate the saved device without renewing local entitlement on failure.
     ///
     /// # Errors
-    /// Returns `InvalidResponse` for a mismatched seat, `Rejected` for an invalid license,
-    /// or the relevant product, rate-limit, input or transport error.
+    /// Returns a definitive revocation only for a confirmed provider rejection.
     pub async fn validate(
         &self,
         key: &SecretString,
         instance: &str,
     ) -> Result<Activation, LicenseError> {
         check_argument(instance)?;
-        let response = self
-            .request("validate", key, Some(("instance_id", instance)))
-            .await?;
-        response.check_validation(self.product)?;
-        let activation = response.activation()?;
-        if activation.instance_id != instance {
-            return Err(LicenseError::InvalidResponse);
+        if let Some(label) = instance.strip_prefix(LOCAL_DEVICE) {
+            check_argument(label)?;
+            let checked = self.license(key, None).await?;
+            checked.check(self.product)?;
+            if checked.limit_activations.is_some() {
+                return Err(LicenseError::InvalidResponse);
+            }
+            return checked.activation(instance);
         }
-        Ok(activation)
-    }
-
-    /// Release only a validated seat of this product.
-    ///
-    /// Returns an error if validation or release fails. Only confirmed success permits
-    /// removing the caller's saved credential. No retry or shutdown action is performed.
-    ///
-    /// # Errors
-    /// Propagates validation errors or a rejected, malformed or unavailable release result.
-    pub async fn deactivate(&self, key: &SecretString, instance: &str) -> Result<(), LicenseError> {
-        let checked = match self.validate(key, instance).await {
+        response::check_id(instance).map_err(|_| LicenseError::InvalidInput)?;
+        let checked = match self.license(key, Some(instance)).await {
             Ok(checked) => checked,
-            Err(LicenseError::Revoked | LicenseError::ActivationDeactivated) => return Ok(()),
+            Err(LicenseError::Revoked) => {
+                // Polar uses the same 404 for missing keys and missing activations.
+                let key_only = self.license(key, None).await?;
+                key_only.check(self.product)?;
+                return Err(LicenseError::ActivationDeactivated);
+            }
             Err(error) => return Err(error),
         };
-        let response = self
-            .request("deactivate", key, Some(("instance_id", instance)))
-            .await?;
-        if let Err(error) = response.check_validation_failure(response.deactivated, self.product) {
-            return if matches!(
-                error,
-                LicenseError::Revoked | LicenseError::ActivationDeactivated
-            ) {
-                Ok(())
-            } else {
-                Err(error)
-            };
-        }
-        response.check_product(self.product)?;
-        if response.license_id(&["active", "inactive", "disabled", "expired"])?
-            != checked.license_id
-        {
+        checked.check(self.product)?;
+        let activation = checked
+            .activation
+            .as_ref()
+            .ok_or(LicenseError::InvalidResponse)?;
+        if activation.id != instance || activation.license_key_id != checked.id {
             return Err(LicenseError::InvalidResponse);
         }
-        Ok(())
+        checked.activation(instance)
+    }
+
+    /// Release this device. Unlimited keys have only local device state.
+    ///
+    /// # Errors
+    /// Transient remote failures preserve the saved activation for a later explicit retry.
+    pub async fn deactivate(&self, key: &SecretString, instance: &str) -> Result<(), LicenseError> {
+        check_argument(instance)?;
+        if let Some(label) = instance.strip_prefix(LOCAL_DEVICE) {
+            return check_argument(label);
+        }
+        match self.validate(key, instance).await {
+            Ok(_) => {}
+            Err(LicenseError::Revoked | LicenseError::ActivationDeactivated) => return Ok(()),
+            Err(error) => return Err(error),
+        }
+        match self
+            .request("deactivate", key, Some(("activation_id", instance)))
+            .await
+        {
+            Ok(reply) if reply.status == 204 && reply.body.is_empty() => Ok(()),
+            Err(LicenseError::Revoked) => Ok(()),
+            Ok(_) => Err(LicenseError::InvalidResponse),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn license(
+        &self,
+        key: &SecretString,
+        instance: Option<&str>,
+    ) -> Result<License, LicenseError> {
+        let reply = self
+            .request("validate", key, instance.map(|id| ("activation_id", id)))
+            .await?;
+        serde_json::from_slice(&reply.body).map_err(|_| LicenseError::InvalidResponse)
     }
 
     async fn request(
@@ -211,28 +273,30 @@ impl LicenseClient {
         operation: &str,
         key: &SecretString,
         extra: Option<(&str, &str)>,
-    ) -> Result<Response, LicenseError> {
+    ) -> Result<LicenseHttpResponse, LicenseError> {
         check_argument(key.expose_secret())?;
-        let mut form = vec![("license_key", key.expose_secret())];
-        form.extend(extra);
-        let response = self.http.post(operation, form).await?;
-        check_status(response.status)?;
-        if response.body.len() > MAX_RESPONSE_BYTES {
+        let organization = self.product.organization.to_string();
+        let benefit = self.product.benefit.to_string();
+        let mut fields = vec![
+            ("key", key.expose_secret()),
+            ("organization_id", &organization),
+        ];
+        if operation == "validate" {
+            fields.push(("benefit_id", &benefit));
+        }
+        fields.extend(extra);
+        let reply = self.http.post(operation, fields).await?;
+        check_status(reply.status)?;
+        if reply.body.len() > MAX_RESPONSE_BYTES {
             return Err(LicenseError::InvalidResponse);
         }
-        let decoded: Response = serde_json::from_slice(&response.body).map_err(|_| {
-            if (200..300).contains(&response.status) {
-                LicenseError::InvalidResponse
-            } else {
-                LicenseError::RequestFailed
-            }
-        })?;
-        if !(200..300).contains(&response.status)
-            && [decoded.valid, decoded.activated, decoded.deactivated].contains(&Some(true))
-        {
+        if !(200..300).contains(&reply.status) {
+            return Err(response::error(reply.status, &reply.body));
+        }
+        if reply.status != 200 && !(operation == "deactivate" && reply.status == 204) {
             return Err(LicenseError::InvalidResponse);
         }
-        Ok(decoded)
+        Ok(reply)
     }
 }
 
@@ -245,7 +309,7 @@ pub(super) fn check_argument(value: &str) -> Result<(), LicenseError> {
 
 fn check_status(status: u16) -> Result<(), LicenseError> {
     match status {
-        200..=299 | 400 | 404 => Ok(()),
+        200..=299 | 400 | 403 | 404 => Ok(()),
         429 => Err(LicenseError::RateLimited),
         400..=499 => Err(LicenseError::RequestFailed),
         _ => Err(LicenseError::Unavailable),
@@ -259,12 +323,15 @@ fn uncertain_activation(error: LicenseError) -> LicenseError {
     }
 }
 
-fn check_decision(flag: Option<bool>) -> Result<(), LicenseError> {
-    match flag {
-        Some(true) => Ok(()),
-        Some(false) => Err(LicenseError::Rejected),
-        None => Err(LicenseError::InvalidResponse),
-    }
+fn http_client() -> Result<Client, LicenseError> {
+    Client::builder()
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|_| LicenseError::Unavailable)
 }
 
 async fn read_response(mut response: reqwest::Response) -> Result<Vec<u8>, LicenseError> {

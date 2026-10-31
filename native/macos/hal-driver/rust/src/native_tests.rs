@@ -468,6 +468,10 @@ fn native_replacement_retires_old_mapping_and_preserves_device_identity() {
         (replacement.clock().running, replacement.clock().sample_rate),
         (1, 192_000)
     );
+    // Core Audio restarts IO after a configuration change; that start maps the client's
+    // queue in the new shape.
+    assert_eq!(fixture.registry.stop(id, 42), OK);
+    assert_eq!(fixture.registry.start(id, 42, 2), OK);
     let mut source = [0.75_f32; 224];
     assert!(unsafe {
         fixture.registry.io(IoOperation {

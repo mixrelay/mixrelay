@@ -1,100 +1,123 @@
+//! Public Polar configuration embedded by the checked desktop build.
 use mixrelay_licensing::{LicenseClient, LicenseError, ProductIdentity};
 
 pub(super) fn configuration() -> Result<Option<(ProductIdentity, String)>, LicenseError> {
-    parse_configuration([
-        option_env!("MIXRELAY_LEMON_STORE_ID"),
-        option_env!("MIXRELAY_LEMON_PRODUCT_ID"),
-        option_env!("MIXRELAY_LEMON_VARIANT_ID"),
-        option_env!("MIXRELAY_LEMON_CHECKOUT_URL"),
-    ])
+    parse_configuration(env!("MIXRELAY_POLAR_CONFIGURATION"), cfg!(debug_assertions))
 }
 
 fn parse_configuration(
-    values: [Option<&str>; 4],
+    marker: &str,
+    development: bool,
 ) -> Result<Option<(ProductIdentity, String)>, LicenseError> {
-    if values.iter().all(Option::is_none) {
+    if marker.is_empty() {
         return Ok(None);
     }
-    let [Some(store), Some(product), Some(variant), Some(checkout)] = values else {
-        return Err(LicenseError::InvalidConfiguration);
+    let invalid = LicenseError::InvalidConfiguration;
+    let values: Vec<_> = marker
+        .strip_prefix("MIXRELAY_POLAR_V1|")
+        .and_then(|value| value.strip_suffix("|END_POLAR"))
+        .ok_or(invalid)?
+        .split('|')
+        .collect();
+    let [organization, benefit, checkout, environment] = values.as_slice() else {
+        return Err(invalid);
     };
-    let number = |value: &str| {
-        value
-            .parse()
-            .map_err(|_| LicenseError::InvalidConfiguration)
+    let product = ProductIdentity::new(organization, benefit)?;
+    let sandbox = match *environment {
+        "production" => false,
+        "sandbox" if development => true,
+        _ => return Err(invalid),
     };
-    let product = ProductIdentity::new(number(store)?, number(product)?, number(variant)?)?;
-    let url = reqwest::Url::parse(checkout).map_err(|_| LicenseError::InvalidConfiguration)?;
-    if url.scheme() != "https"
-        || !url
-            .host_str()
-            .is_some_and(|host| host.ends_with(".lemonsqueezy.com"))
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.port().is_some()
-        || !url.path().starts_with("/buy/")
-        || url.path().trim_start_matches("/buy/").is_empty()
-        || url.query().is_some()
-        || url.fragment().is_some()
+    let prefix = if sandbox {
+        "https://sandbox-api.polar.sh/v1/checkout-links/"
+    } else {
+        "https://buy.polar.sh/"
+    };
+    let token = checkout.strip_prefix(prefix).ok_or(invalid)?;
+    let token = if sandbox {
+        token.strip_suffix("/redirect").ok_or(invalid)?
+    } else {
+        token
+    };
+    let token = token.strip_prefix("polar_cl_").ok_or(invalid)?;
+    if token.is_empty()
+        || !token
+            .bytes()
+            .all(|value| value.is_ascii_alphanumeric() || value == b'_' || value == b'-')
     {
-        return Err(LicenseError::InvalidConfiguration);
+        return Err(invalid);
     }
-    Ok(Some((product, url.into())))
+    Ok(Some((product, (*checkout).to_owned())))
 }
 
 pub(super) fn client() -> Result<LicenseClient, LicenseError> {
-    let (product, _) = configuration()?.ok_or(LicenseError::InvalidConfiguration)?;
-    LicenseClient::new(product)
+    let (product, checkout) = configuration()?.ok_or(LicenseError::InvalidConfiguration)?;
+    if checkout.starts_with("https://sandbox-api.polar.sh/") {
+        LicenseClient::sandbox(product)
+    } else {
+        LicenseClient::new(product)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    const ORG: &str = "10000000-0000-4000-8000-000000000001";
+    const BENEFIT: &str = "20000000-0000-4000-8000-000000000002";
+    fn marker(checkout: &str, environment: &str) -> String {
+        format!("MIXRELAY_POLAR_V1|{ORG}|{BENEFIT}|{checkout}|{environment}|END_POLAR")
+    }
     #[test]
-    fn configuration_is_absent_or_complete_not_a_placeholder() {
-        assert_eq!(parse_configuration([None; 4]), Ok(None));
-        let ids = [
-            Some("1"),
-            Some("2"),
-            Some("3"),
-            Some("https://mixrelay.lemonsqueezy.com/buy/product"),
-        ];
-        assert!(parse_configuration(ids).expect("configured").is_some());
-        for index in 0..4 {
-            let mut incomplete = ids;
-            incomplete[index] = None;
+    fn configuration_is_absent_or_complete_with_canonical_public_ids() {
+        assert_eq!(parse_configuration("", true), Ok(None));
+        let valid = marker("https://buy.polar.sh/polar_cl_fixture", "production");
+        assert!(parse_configuration(&valid, false).unwrap().is_some());
+        for invalid in [
+            valid.replace(ORG, ""),
+            valid.replace(BENEFIT, "1"),
+            valid.replace("production", "test"),
+            valid.replace("|END_POLAR", ""),
+        ] {
             assert_eq!(
-                parse_configuration(incomplete),
-                Err(LicenseError::InvalidConfiguration)
-            );
-        }
-        for number in ["0", "-1", "invalid"] {
-            let mut invalid = ids;
-            invalid[0] = Some(number);
-            assert_eq!(
-                parse_configuration(invalid),
+                parse_configuration(&invalid, true),
                 Err(LicenseError::InvalidConfiguration)
             );
         }
     }
-
     #[test]
-    fn checkout_cannot_inject_credentials_or_redirect_to_untrusted_hosts() {
-        for checkout in [
-            "http://mixrelay.lemonsqueezy.com/buy/a",
-            "https://lemonsqueezy.com.attacker.invalid/buy/a",
-            "https://user:secret@mixrelay.lemonsqueezy.com/buy/a",
-            "https://mixrelay.lemonsqueezy.com:9999/buy/a",
-            "https://mixrelay.lemonsqueezy.com/buy/",
-            "https://mixrelay.lemonsqueezy.com/buy/a?email=private",
-            "https://mixrelay.lemonsqueezy.com/buy/a#secret",
-            "https://mixrelay.lemonsqueezy.com/redirect/a",
+    fn checkout_rejects_credentials_ports_queries_fragments_and_host_spoofing() {
+        for url in [
+            "http://buy.polar.sh/polar_cl_a",
+            "https://buy.polar.sh.evil.invalid/polar_cl_a",
+            "https://user:secret@buy.polar.sh/polar_cl_a",
+            "https://buy.polar.sh:443/polar_cl_a",
+            "https://buy.polar.sh/polar_cl_",
+            "https://buy.polar.sh/polar_cl_a?email=private",
+            "https://buy.polar.sh/polar_cl_a#secret",
+            "https://polar.sh/checkout/a",
+            "https://buy.polar.sh/polar_cl_a/../b",
+            "https://buy.polar.sh/polar_cl_%61",
         ] {
             assert_eq!(
-                parse_configuration([Some("1"), Some("2"), Some("3"), Some(checkout)]),
+                parse_configuration(&marker(url, "production"), true),
                 Err(LicenseError::InvalidConfiguration)
             );
         }
+    }
+    #[test]
+    fn sandbox_is_explicit_and_never_accepted_by_a_release() {
+        let value = marker(
+            "https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_fixture/redirect",
+            "sandbox",
+        );
+        assert!(parse_configuration(&value, true).unwrap().is_some());
+        assert_eq!(
+            parse_configuration(&value, false),
+            Err(LicenseError::InvalidConfiguration)
+        );
+        assert!(
+            parse_configuration(&marker("https://buy.polar.sh/polar_cl_a", "sandbox"), true)
+                .is_err()
+        );
     }
 }

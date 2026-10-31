@@ -1,5 +1,46 @@
 import { effectTranslations } from '../effects';
 export const es = {
+  midi: {
+    mapMode: 'Modo de mapeo MIDI',
+    mapTarget: 'Asignar {{name}}: {{action}}',
+    selectTarget: 'Selecciona un control resaltado y mueve un fader o pulsa un botón MIDI.',
+    waitingTarget: '{{name}} · {{action}} — mueve un control MIDI para asignarlo o sustituirlo.',
+    done: 'Finalizar mapeo',
+    selectMapping: 'Seleccionar {{name}} · {{action}}',
+    recorderAction: 'Acción de grabación',
+    min: 'Mínimo',
+    max: 'Máximo',
+    empty: 'No hay asignaciones MIDI. Selecciona un control resaltado para añadir una.',
+    targetUnavailable: 'Estado de los destinos no disponible',
+    title: 'Controles MIDI',
+    disconnected: 'Dispositivo desconectado',
+    targetMissing: 'Destino no encontrado',
+    unavailable: 'MIDI no disponible',
+    mode: 'Modo de volumen',
+    pickup: 'Mueva el fader hasta el nivel actual para tomar el control.',
+    step: 'Incremento',
+    remove: 'Eliminar',
+    removeTarget: 'Eliminar control MIDI de {{name}}',
+    failed: 'No se han podido cambiar los controles MIDI. Reinténtelo.',
+    control: '{{device}} · Canal {{channel}} · {{kind}} {{number}}',
+    modes: {
+      absolute: 'Absoluto (captura suave)',
+      twos_complement: 'Relativo: complemento a dos',
+      offset64: 'Relativo: desplazamiento 64',
+    },
+    kinds: {
+      note: 'Nota',
+      cc: 'CC',
+    },
+    actions: {
+      power: 'Encendido',
+      mute: 'Silenciar',
+      volume: 'Volumen',
+      record: 'Grabar / reanudar',
+      pause: 'Pausa',
+      stop: 'Detener',
+    },
+  },
   effects: effectTranslations.es,
   theme: {
     label: 'Apariencia',
@@ -282,7 +323,7 @@ export const es = {
     audioPaused: 'Audio en pausa',
     deleteGraph: 'Eliminar grafo',
     deleteGraphNotice:
-      '¿Eliminar «{{name}}»? Se detendrán su procesamiento de audio y sus grabaciones. Esta acción no se puede deshacer. No se eliminarán los archivos del espacio de trabajo guardados.',
+      '¿Eliminar «{{name}}»? Se detendrán el audio y las grabaciones. En la lista de grafos, Command+Z en macOS o Ctrl+Z en Linux deshace la eliminación; añade Shift para rehacer. Se conservan los archivos guardados.',
     catalogUnavailable:
       'Los grafos guardados no están disponibles. Su grafo existente no fue reemplazado.',
     reloadGraphs: 'Volver a cargar los grafos',

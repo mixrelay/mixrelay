@@ -328,7 +328,8 @@ mod tests {
         );
         assert_eq!(host.groups(), [aggregate]);
         retire(output);
-        assert!(group.upgrade().is_none());
+        // `Native` stops upgrading before its fields drop on the worker thread.
+        wait_until(|| group.upgrade().is_none());
         Aggregate::reclaim_retired();
         assert!(host.groups().is_empty(), "retired group was destroyed");
     }

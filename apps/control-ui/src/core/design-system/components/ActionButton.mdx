@@ -3,6 +3,7 @@ import { DocsLayout } from '../DocsLayout';
 import { ComponentContract } from '../ComponentsReference';
 import * as Example from '../../ui/SystemControls.stories';
 import * as Api from '../../ui/ActionButton.stories';
+import * as Midi from '../../../app/MidiControls.stories';
 
 import * as States from '../../ui/ContractStates.stories';
 
@@ -58,6 +59,13 @@ strong은 해당 폼의 최종 제출, quiet는 일반 명령에 사용합니다
 ### Keyboard
 
 <Canvas of={Api.Keyboard} story={{ inline: false, height: 240, autoplay: true }} sourceState="hidden" />
+
+## MIDI 매핑 상태
+
+aria-pressed=true인 일반 토글·선택 버튼은 중립색 반전 채움을 사용합니다. 편집기 헤더 오른쪽 끝의 MIDI 토글도 이 계약을 따릅니다.
+매핑 모드에서는 파란 테두리의 대상 조작을 선택해 입력을 지정합니다. 선택 상태와 실제 오디오 상태는 별개이며, 모드 종료 후 오디오 제어를 재개합니다.
+
+<Canvas of={Midi.MappedControls} story={{ inline: false, height: 560 }} />
 
 <a href="/?path=/docs/design-system-components--docs" target="_top">전체 컴포넌트와 사용 구분</a>
 

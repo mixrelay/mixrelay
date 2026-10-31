@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertPublicDestination, checkPublicDestinations } from '../../scripts/check-public-destinations.mjs';
+
+checkPublicDestinations();
 
 const directory = dirname(fileURLToPath(import.meta.url));
 function htmlPages(folder) {
@@ -14,18 +17,6 @@ const pages = htmlPages(directory);
 const sources = new Map(pages.map((page) => [page, readFileSync(resolve(directory, page), 'utf8').replace(/<!--[\s\S]*?-->/g, '')]));
 const idsByPage = new Map(pages.map((page) => [page, new Set([...sources.get(page).matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]))]));
 const externalReference = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i;
-const legalReferences = new Set([
-  'mailto:privacy@dsub.io',
-  'https://www.lemonsqueezy.com/buyer-terms',
-  'https://www.lemonsqueezy.com/privacy',
-  'https://rawsector.com/privacy',
-  'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805939',
-  'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805883',
-  'https://law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1020398611',
-  'https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1029332499',
-  'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?lsJoLnkSeq=1033215161',
-  'https://www.easylaw.go.kr/CSP/CnpClsMain.laf?ccfNo=2&cciNo=3&cnpClsNo=2&csmSeq=2985&popMenu=ov',
-]);
 
 function resolveLocalReference(page, reference) {
   assert.ok(!externalReference.test(reference), `${page}: expected local asset ${reference}`);
@@ -41,18 +32,14 @@ function resolveLocalReference(page, reference) {
 }
 function checkAnchor(page, reference) {
   if (!externalReference.test(reference)) return resolveLocalReference(page, reference);
-  // The prerelease site has no public store or download destination yet.
-  assert.ok(reference === 'mailto:support@rawsector.com' ||
-    (page.startsWith('legal/') && legalReferences.has(reference.replaceAll('&amp;', '&'))) ||
-    (reference.startsWith('https://support.apple.com/') && new URL(reference).hostname === 'support.apple.com'),
-  `${page}: external destination is an approved support or legal reference: ${reference}`);
+  assertPublicDestination(reference.replaceAll('&amp;', '&'), page);
 }
 
 const manualLanguages = readdirSync(resolve(directory, 'manual'), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
 assert.ok(manualLanguages.includes('en') && manualLanguages.includes('ko'), 'English and Korean manual sources exist');
 const englishChapters = pages.filter((page) => page.startsWith('manual/en/')).map((page) => basename(page));
-const requiredChapters = ['index', 'installation', 'first-launch', 'workspace', 'devices', 'app-capture', 'recording', 'effects', 'plugins', 'stream-deck', 'licensing', 'updates', 'uninstall', 'troubleshooting', 'support'].map((slug) => `${slug}.html`).sort();
-assert.deepEqual(englishChapters, requiredChapters, 'all requested manual chapters exist');
+const requiredChapters = ['index', 'installation', 'first-launch', 'workspace', 'devices', 'app-capture', 'recording', 'effects', 'plugins', 'stream-deck', 'midi', 'licensing', 'updates', 'uninstall', 'troubleshooting', 'support'].map((slug) => `${slug}.html`);
+assert.deepEqual(englishChapters, [...requiredChapters].sort(), 'all requested manual chapters exist');
 for (const language of manualLanguages) {
   assert.deepEqual(pages.filter((page) => page.startsWith(`manual/${language}/`)).map((page) => basename(page)), englishChapters, `${language}: translated chapter paths match English`);
 }
@@ -121,6 +108,9 @@ for (const [page, html] of sources) {
     const englishIds = [...idsByPage.get(`manual/en/${chapter}`)].sort();
     assert.deepEqual([...idsByPage.get(page)].sort(), englishIds, `${page}: section IDs match English`);
     assert.match(html, /class="guide-nav"/, `${page}: chapter navigation`);
+    const chapterNav = html.match(/<nav class="guide-nav"[^>]*>([\s\S]*?)<\/nav>/)?.[1];
+    assert.deepEqual([...chapterNav.matchAll(/href="([^"]+)"/g)].map((link) => link[1]), requiredChapters, `${page}: chapter navigation includes every chapter once in reading order`);
+    assert.match(chapterNav, new RegExp(`href="${chapter}" aria-current="page"`), `${page}: chapter navigation marks its own page`);
     assert.match(html, /aria-current="page"/, `${page}: current chapter identified`);
     for (const target of manualLanguages) {
       assert.ok(html.includes(`hreflang="${target}" href="../${target}/${chapter}"`), `${page}: alternate metadata for ${target}`);
@@ -129,12 +119,20 @@ for (const [page, html] of sources) {
   }
   assert.doesNotMatch(html, /14일|평가판\s*·|영구 무료 기능 요금제는 없습니다|기간이 끝난 뒤 계속 사용하려면 구매가 필요/, `${page}: no obsolete trial policy`);
   assert.doesNotMatch(html, /그래프·매핑 저장 및 불러오기는 유료 기능|유료 라이선스로 추가 기능과 저장·복원/, `${page}: no obsolete paid-only saving policy`);
+  for (const price of html.matchAll(/US\$\d+(?:\.\d+)?/g)) {
+    assert.ok(['US$19', 'US$29'].includes(price[0]), `${page}: only confirmed early-adopter and 1.0 prices`);
+  }
 }
 
 const styles = readFileSync(resolve(directory, 'styles.css'), 'utf8');
 for (const reference of styles.matchAll(/url\((?:\s*["']?)([^)"']+)(?:["']?\s*)\)/gi)) resolveLocalReference('styles.css', reference[1].trim());
 assert.ok(!/@import\s+(?:url\()?\s*["']?https?:/i.test(styles), 'no remote stylesheet imports');
 const home = sources.get('index.html');
+const features = [...home.matchAll(/<article class="feature-card">([\s\S]*?)<\/article>/g)].map((entry) => entry[1]);
+assert.equal(features.length, 5, 'home: five product features');
+assert.match(features[3], /STREAM DECK/, 'home: Stream Deck precedes MIDI');
+assert.match(features[4], /MIDI/, 'home: MIDI feature follows Stream Deck');
+assert.match(features[4], /href="manual\/ko\/midi.html"/, 'home: MIDI feature opens its manual');
 assert.match(home, /id="business-info-title"/, 'home: business-information block exists');
 for (const detail of ['에코 비전 랩', '111-42-04359', '505-S80', '+82 10-6380-9646', 'support@rawsector.com', '배승현']) {
   assert.ok(home.includes(detail), `home: business information includes ${detail}`);
@@ -163,13 +161,62 @@ for (const language of ['en', 'ko']) {
     const original = resolve(directory, '../..', `${name}${language === 'ko' ? '.ko' : ''}.txt`);
     const copy = resolve(directory, 'legal', language, `${name}.txt`);
     assert.equal(readFileSync(copy, 'utf8'), readFileSync(original, 'utf8'), `${language}: website ${name} copy matches the installed agreement`);
+    if (name === 'LICENSE') {
+      const purchases = readFileSync(copy, 'utf8').split(/^2\. /m)[1]?.split(/^3\. /m)[0];
+      for (const version of ['1.0', '0.x', '1.x']) assert.ok(purchases?.includes(version), `${language}: agreement update rights include ${version}`);
+      assert.doesNotMatch(purchases, /US\$\d+/, `${language}: agreement does not state prices`);
+    }
     assert.ok(sources.get(`legal/${language}/terms.html`).includes(`href="${name}.txt"`), `${language}: terms link to ${name}`);
   }
 }
-for (const phrase of ['기간 제한 없이', '무료 Driver', '최대 64채널', '다운로드와 구매는 제공하지 않습니다', '구매 스토어는 아직 개설되지 않았습니다', 'US$69', 'US$39']) assert.ok(home.includes(phrase), `home: confirmed availability and pricing includes ${phrase}`);
+for (const phrase of ['기간 제한 없이', '무료 Driver', '최대 64채널', '다운로드와 구매는 제공하지 않습니다', '구매 스토어는 아직 개설되지 않았습니다']) assert.ok(home.includes(phrase), `home: confirmed availability includes ${phrase}`);
 assert.ok(sources.get('guide.html').includes('manual/ko/index.html') && sources.get('guide.html').includes('manual/en/index.html'), 'legacy guide links to both manuals');
-for (const [language, phrases] of [['en', ['30 days', 'US$69', 'US$39', 'unlimited number', '30 calendar days', 'Deactivate this device']], ['ko', ['30일', 'US$69', 'US$39', '수 제한 없이', '30달력일', '이 기기 비활성화']]]) {
+for (const [language, phrases] of [['en', ['30 days', 'unlimited number', '30 calendar days', 'Deactivate this device']], ['ko', ['30일', '수 제한 없이', '30달력일', '이 기기 비활성화']]]) {
   const license = sources.get(`manual/${language}/licensing.html`);
   for (const phrase of phrases) assert.ok(license.includes(phrase), `${language}: confirmed license policy includes ${phrase}`);
 }
+const pricingPages = ['index.html', ...['en', 'ko'].map((language) => `legal/${language}/terms.html`),
+  ...manualLanguages.map((language) => `manual/${language}/licensing.html`)];
+for (const page of pricingPages) {
+  const html = sources.get(page);
+  assert.deepEqual([...html.matchAll(/US\$\d+/g)].map((match) => match[0]), ['US$19', 'US$29'], `${page}: early-adopter price followed by the future 1.0 price`);
+  for (const version of ['1.0', '0.x', '1.x', '2.0']) assert.ok(html.includes(version), `${page}: pricing and update rights include ${version}`);
+  assert.doesNotMatch(html, /<(?:del|s|strike)\b|line-through|\d+\s*%/i, `${page}: plain pricing without strikethrough or percentage discounts`);
+}
+const translatedPricing = {
+  de: ['Frühkäuferpreis', 'vor der Veröffentlichung von MixRelay 1.0', 'Ab der Veröffentlichung von 1.0', 'jeweils ohne Steuern', 'Vor der Veröffentlichung von 1.0 gekaufte Lizenzen', 'bleibt optional'],
+  en: ['early-adopter price', 'before MixRelay 1.0 is released', 'From the 1.0 release', 'Both prices exclude tax', 'Purchases made before 1.0 include updates for all', 'is optional'],
+  es: ['precio para los primeros usuarios', 'antes del lanzamiento de MixRelay 1.0', 'A partir del lanzamiento de la versión 1.0', 'Ambos precios excluyen impuestos', 'Las compras anteriores al lanzamiento de la versión 1.0 incluyen', 'es opcional'],
+  fr: ['tarif pour les premiers utilisateurs', 'avant la sortie de MixRelay 1.0', 'À compter de la sortie de la version 1.0', 'Ces deux tarifs sont hors taxes', 'Les achats effectués avant la sortie de la version 1.0 incluent', 'reste facultatif'],
+  it: ['prezzo per i primi utenti', 'prima del rilascio di MixRelay 1.0', 'Dal rilascio della versione 1.0', 'Entrambi i prezzi sono al netto delle imposte', 'Gli acquisti effettuati prima del rilascio della versione 1.0 includono', 'resta facoltativo'],
+  ja: ['早期購入価格', 'MixRelay 1.0のリリース前', '1.0のリリース日から', 'いずれも税別', '1.0のリリース前に購入した場合、すべての', '購入するかは任意'],
+  ko: ['얼리 어답터 가격', 'MixRelay 1.0 출시 전', '1.0 출시일부터', '두 가격 모두 세금 별도', '1.0 출시 전 구매에는 모든', '구매는 선택'],
+  pt: ['preço para os primeiros usuários', 'antes do lançamento do MixRelay 1.0', 'A partir do lançamento da versão 1.0', 'Os dois preços não incluem impostos', 'As compras feitas antes do lançamento da versão 1.0 incluem', 'continua sendo opcional'],
+  ru: ['Цена для первых покупателей', 'до выхода MixRelay 1.0', 'Со дня выхода версии 1.0', 'Обе цены указаны без налогов', 'Покупки до выхода версии 1.0 включают', 'остаётся необязательной'],
+  'zh-Hans': ['早期用户价格', 'MixRelay 1.0 发布前购买', '1.0 发布之日起价格', '均不含税', '在 1.0 发布前购买，包含所有', '后续主要版本由您决定'],
+  'zh-Hant': ['早期使用者價格', 'MixRelay 1.0 發布前購買', '1.0 發布之日起價格', '均未含稅', '在 1.0 發布前購買，包含所有', '後續主要版本由您決定'],
+};
+assert.deepEqual(Object.keys(translatedPricing).sort(), manualLanguages, 'pricing policy covers every manual language');
+for (const [language, phrases] of Object.entries(translatedPricing)) {
+  for (const page of [`manual/${language}/licensing.html`, ...(language === 'en' || language === 'ko' ? [`legal/${language}/terms.html`] : []), ...(language === 'ko' ? ['index.html'] : [])]) {
+    for (const phrase of phrases) assert.ok(sources.get(page).includes(phrase), `${page}: confirmed pricing policy includes ${phrase}`);
+  }
+}
+for (const language of manualLanguages) {
+  const page = `manual/${language}/stream-deck.html`;
+  const html = sources.get(page);
+  assert.match(html, /macOS 14\.2/, `${page}: supported macOS minimum`);
+  assert.match(html, /Stream Deck 7\.1/, `${page}: SDK 3.x host minimum`);
+  assert.doesNotMatch(html, /Stream Deck 6\.6/, `${page}: no obsolete host requirement`);
+  assert.doesNotMatch(html, /\.streamDeckPlugin|href="https:\/\/rawsector\.com\/products\/mixrelay"/, `${page}: no direct plug-in download`);
+  assert.match(html, /Elgato Marketplace/, `${page}: Marketplace-only installation`);
+}
+
+for (const [page, source] of sources) {
+  if (!/^manual\/[^/]+\/midi\.html$/.test(page)) continue;
+  for (const behaviour of ['Command+M', 'Ctrl+M', 'Escape', 'Min/Max', 'Delete/Backspace', 'Command+Z', 'Ctrl+Z']) {
+    assert.ok(source.includes(behaviour), `${page}: documents MIDI map mode and identity recovery (${behaviour})`);
+  }
+}
+
 console.log(`Static website checks passed for ${pages.length} pages (links/assets, languages, headings, translation parity, accessibility structure and prerelease policy).`);

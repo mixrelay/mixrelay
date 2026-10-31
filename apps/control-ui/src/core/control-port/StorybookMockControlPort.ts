@@ -218,6 +218,9 @@ export class StorybookMockControlPort implements ControlPort {
     });
   }
 
+  private deletedGraphs: { graph: PreviewGraph; replacement?: string }[] = [];
+  private restoredGraphs: PreviewGraph[] = [];
+
   public async mutateGraphCatalog(request: GraphCatalogRequest): Promise<GraphCatalog> {
     if (
       request.expectedRevision !== this.state.graph.revision ||
@@ -225,7 +228,11 @@ export class StorybookMockControlPort implements ControlPort {
     ) {
       throw staleRevision({ catalogRevision: this.catalogRevision });
     }
-    if (request.action === 'delete') {
+    if (request.action === 'undo_delete' || request.action === 'redo_delete') {
+      if (!(await this.restoreCatalogDeletion(request.action))) return this.getGraphCatalog();
+    } else if (request.action === 'delete') {
+      this.rememberCatalogDeletion(request.id);
+      this.restoredGraphs = [];
       await this.removeCatalogGraph(request.id);
     } else if (request.action === 'rename') {
       const graph = this.savedGraphs.get(request.id);
@@ -251,6 +258,44 @@ export class StorybookMockControlPort implements ControlPort {
     }
     this.catalogRevision += 1;
     return this.getGraphCatalog();
+  }
+
+  private rememberCatalogDeletion(id: string) {
+    const graph = this.savedGraphs.get(id);
+    if (graph)
+      this.deletedGraphs.push({
+        graph: structuredClone(graph),
+        replacement: this.savedGraphs.size === 1 ? `graph-${this.catalogRevision + 1}` : undefined,
+      });
+  }
+
+  private async restoreCatalogDeletion(action: 'undo_delete' | 'redo_delete') {
+    if (action === 'undo_delete') {
+      const removed = this.deletedGraphs.pop();
+      if (!removed) return false;
+      const graph = removed.graph;
+      const replacement = removed.replacement && this.savedGraphs.get(removed.replacement);
+      if (
+        replacement &&
+        replacement.document.nodes.length === 0 &&
+        replacement.document.edges.length === 0 &&
+        replacement.name === 'Untitled Graph'
+      )
+        this.savedGraphs.delete(replacement.id);
+      this.savedGraphs.set(graph.id, graph);
+      this.activeGraph = graph;
+      await this.applyGraph({
+        ...structuredClone(graph.document),
+        revision: this.state.graph.revision + 1,
+      });
+      this.restoredGraphs.push(graph);
+    } else {
+      const graph = this.restoredGraphs.pop();
+      if (!graph) return false;
+      this.rememberCatalogDeletion(graph.id);
+      await this.removeCatalogGraph(graph.id);
+    }
+    return true;
   }
 
   private async removeCatalogGraph(id: string) {

@@ -387,8 +387,11 @@ it('does not materialize a side whose native endpoint has no channels for that d
 it('allocates a distinct recorder identity and keeps other nodes when resizing its inputs', () => {
   const first = addRoutingNode(runtimeGraphToAudioGraph(empty), { kind: 'recorder' }, position);
   const second = addRoutingNode(first, { kind: 'recorder' }, position);
-  expect(second.nodes.map((item) => item.id)).toEqual(['recorder-1', 'recorder-2']);
-  const changed = updateRecorderChannels(second, 'recorder-2', 1);
+  expect(new Set(second.nodes.map((item) => item.id)).size).toBe(2);
+  expect(second.nodes.map((item) => item.runtime?.type)).toEqual(['recorder', 'recorder']);
+  const secondId = second.nodes[1]?.id;
+  if (!secondId) throw new Error('second recorder required');
+  const changed = updateRecorderChannels(second, secondId, 1);
   expect(changed.nodes[0]).toBe(second.nodes[0]);
   expect(changed.nodes[1]?.inputPorts).toHaveLength(1);
   expect(audioGraphToRuntimeGraph(changed, empty).nodes[1]?.config).toEqual({ channels: 1 });

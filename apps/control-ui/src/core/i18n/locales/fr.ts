@@ -1,5 +1,48 @@
 import { effectTranslations } from '../effects';
 export const fr = {
+  midi: {
+    mapMode: 'Mode de mapping MIDI',
+    mapTarget: 'Affecter {{name}} : {{action}}',
+    selectTarget:
+      'Sélectionnez un contrôle surligné, puis déplacez un fader ou appuyez sur un bouton MIDI.',
+    waitingTarget:
+      '{{name}} · {{action}} — actionnez un contrôle MIDI pour l’affecter ou le remplacer.',
+    done: 'Terminer le mapping',
+    selectMapping: 'Sélectionner {{name}} · {{action}}',
+    recorderAction: 'Action de l’enregistreur',
+    min: 'Minimum',
+    max: 'Maximum',
+    empty: 'Aucune affectation MIDI. Sélectionnez un contrôle surligné pour en ajouter une.',
+    targetUnavailable: 'État des cibles indisponible',
+    title: 'Commandes MIDI',
+    disconnected: 'Appareil déconnecté',
+    targetMissing: 'Cible introuvable',
+    unavailable: 'MIDI indisponible',
+    mode: 'Mode de volume',
+    pickup: 'Amenez le fader au niveau actuel pour prendre le contrôle.',
+    step: 'Pas',
+    remove: 'Supprimer',
+    removeTarget: 'Supprimer la commande MIDI de {{name}}',
+    failed: 'Impossible de modifier les commandes MIDI. Réessayez.',
+    control: '{{device}} · Canal {{channel}} · {{kind}} {{number}}',
+    modes: {
+      absolute: 'Absolu (rattrapage)',
+      twos_complement: 'Relatif : complément à deux',
+      offset64: 'Relatif : décalage 64',
+    },
+    kinds: {
+      note: 'Note',
+      cc: 'CC',
+    },
+    actions: {
+      power: 'Marche/arrêt',
+      mute: 'Muet',
+      volume: 'Volume',
+      record: 'Enregistrer / reprendre',
+      pause: 'Pause',
+      stop: 'Arrêter',
+    },
+  },
   effects: effectTranslations.fr,
   theme: {
     label: 'Apparence',
@@ -281,7 +324,7 @@ export const fr = {
     audioPaused: 'Audio en pause',
     deleteGraph: 'Supprimer le graphe',
     deleteGraphNotice:
-      'Supprimer « {{name}} » ? Son traitement audio et ses enregistrements seront arrêtés. Cette action est irréversible. Les fichiers d’espace de travail enregistrés ne sont pas supprimés.',
+      'Supprimer « {{name}} » ? Le traitement audio et les enregistrements s’arrêtent. Dans la liste des graphes, Command+Z sur macOS ou Ctrl+Z sur Linux annule la suppression ; ajoutez Shift pour la rétablir. Les fichiers enregistrés sont conservés.',
     catalogUnavailable:
       'Les graphes enregistrés sont indisponibles. Votre graphe existant n’a pas été remplacé.',
     reloadGraphs: 'Recharger les graphes',

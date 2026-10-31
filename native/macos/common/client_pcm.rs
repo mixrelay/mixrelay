@@ -5,8 +5,10 @@
 mod clock;
 mod mapping;
 pub use clock::{ClientPcmClockOwner, ClientPcmTimeline, ClockPublication};
+mod geometry;
 mod mixer;
 mod snapshot;
+pub use geometry::EndpointGeometry;
 pub use mapping::{ClientPcmReader, ClientPcmWriter};
 pub use mixer::{ClientPcmMixer, MixError, MixWindow};
 pub use snapshot::{ClientPcmSnapshot, SnapshotError};
@@ -19,6 +21,25 @@ const VERSION: u32 = 1;
 pub const MAX_CLIENTS_PER_ENDPOINT: usize = 256;
 /// Existing HAL client-PCM budget, including each frame-tagged ring's header.
 pub const MAX_PCM_BYTES_PER_ENDPOINT: usize = 1 << 30;
+/// Largest host render span the HAL accepts into a client queue: the device's zero
+/// timestamp period (`kAudioDevicePropertyZeroTimeStampPeriod`, the HAL's `ring`), the
+/// span of the host's IO ring for the device, so no single IO request can exceed it.
+/// The selectable buffer sizes stop at 2,048 frames; the largest coalesced request the
+/// repository's evidence shows is 8,192 frames. Longer render spans are rejected as
+/// traced oversized extents.
+pub const MAX_RENDER_SPAN_FRAMES: u32 = 16_384;
+/// Frames in every HAL client render queue. A writer leads the device position by at
+/// most one render span, and `ReadInput` trails it by at most one more. Twice that sum
+/// leaves the engine pump 32,768 frames (170 ms at 192 kHz) of scheduling slack. The pump
+/// drains every cycle whether or not the graph has admitted a format, and capture
+/// retention lives in its engine backlog, so this size does not grow with
+/// `retention::RING_FRAMES`.
+pub const QUEUE_FRAMES: u32 = 65_536;
+const _: () = assert!(
+    QUEUE_FRAMES.is_power_of_two()
+        && MAX_RENDER_SPAN_FRAMES as usize >= mixrelay_audio_io::formats::MAX_BUFFER_FRAMES
+        && QUEUE_FRAMES >= 2 * 2 * MAX_RENDER_SPAN_FRAMES
+);
 
 #[repr(C)]
 struct Header {

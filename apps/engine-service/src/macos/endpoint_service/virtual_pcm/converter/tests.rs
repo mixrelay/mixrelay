@@ -1,4 +1,5 @@
 mod alignment;
+mod drift;
 mod handoff;
 use super::*;
 use mixrelay_macos_transport::{
@@ -23,6 +24,17 @@ impl SchedulingClock for Clock {
     fn now(&self) -> Instant {
         self.origin + Duration::from_nanos(self.nanos.load(Ordering::Relaxed))
     }
+}
+
+/// A converter whose stream has begun on the source.
+fn started(
+    transport: &mut SourceTransport,
+    clock: SourceClockSnapshot,
+    native: (u32, usize),
+) -> Converter {
+    let mut converter = Converter::new(clock, native).unwrap();
+    assert!(converter.restart(transport, clock));
+    converter
 }
 
 fn source_token(id: &str) -> u64 {
@@ -57,7 +69,7 @@ fn client_grants_with_capacity(capacity: u32) -> (ClientPcmWriter, Vec<ClientPcm
 #[test]
 fn shared_client_pcm_preserves_signal_and_silence_across_independent_reader_gaps() {
     let nanos = Arc::new(AtomicU64::new(0));
-    let registry = SourceRegistry::with_clock(Box::new(Clock {
+    let registry = crate::endpoint_service::virtual_pcm::test_storage::registry(Box::new(Clock {
         origin: Instant::now(),
         nanos: nanos.clone(),
     }));
@@ -76,9 +88,7 @@ fn shared_client_pcm_preserves_signal_and_silence_across_independent_reader_gaps
     registry.read_audio(token, &mut output, 128, 48_000);
     assert!(registry.set_clock_master(token, true));
     let clock = transport.clock().unwrap();
-    let mut converter = Converter::new(&mut transport, clock, (48_000, 2, 16_384))
-        .unwrap()
-        .unwrap();
+    let mut converter = started(&mut transport, clock, (48_000, 2));
     let (writer, queues) = client_grants();
     let mut mixer = ClientPcmMixer::default();
     let mut scratch = [0.0; 256];
@@ -119,7 +129,8 @@ fn shared_client_pcm_preserves_signal_and_silence_across_independent_reader_gaps
             for (index, time) in times.iter_mut().enumerate() {
                 *time = 1_000_000_000 + (frame + index as u64) * 1_000_000_000 / 48_000;
             }
-            converter.observe(transport.clock().unwrap()).unwrap();
+            let clock = transport.clock().unwrap();
+            converter.observe(&transport, clock).unwrap();
             assert!(converter.flush(&mut transport).unwrap());
             converter.push(&mut transport, &mut input, &times).unwrap();
             assert!(converter.flush(&mut transport).unwrap());

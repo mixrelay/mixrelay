@@ -106,7 +106,10 @@ the download catalog. GitHub Releases, tags and changelogs are preserved.
 
 ## Distribution and licensing
 
-This repository is public. Product installers are prepared for website distribution.
+This repository is private. Product installers are prepared for website distribution.
+The Stream Deck plug-in will be available only through Elgato Marketplace once its listing
+is approved and published. The qualified candidate file is for the owner to upload to
+Maker Console.
 Free driver, indefinite limited app trial and paid-app policies are defined only in
 the [product document](docs/product.md#제품-구성). These are product requirements,
 not a claim that the new licensing policy or standalone driver is implemented.

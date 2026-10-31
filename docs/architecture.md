@@ -15,6 +15,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 | 기반 | `mixrelay-licensing`(crates/licensing) | 라이선스 확인·저장 | 없음 |
 | 기반 | `mixrelay-processor-state`(crates/processor-state) | 플러그인 상태 저장 형식 | 없음 |
 | 기반 | `mixrelay-engine-process`(crates/engine-process) | 엔진 프로세스 수명·소유권 | 없음 |
+| 기반 | `mixrelay-midi-control`(crates/midi-control) | MIDI 바인딩·학습 입력 mailbox·pick-up·볼륨 발행 주기 정책 | 없음 |
 | 모델 | `mixrelay-audio-graph` | 그래프 문서, 검증, 실행 계획 컴파일 | 기반 |
 | 모델 | `mixrelay-audio-recorder` | 녹음 파일·작업자 | 기반 |
 | 모델 | `mixrelay-audio-engine` | 블록 처리, 렌더 계획, 지연 보상·측정 | 기반, `audio-graph`, `audio-recorder` |
@@ -105,7 +106,19 @@ HAL의 `ClientMix`는 등록된 클라이언트별 PCM 큐와 등록·제거·�
 장치 sample 좌표에서 게시된 큐를 한 번씩 합산한다. 큐의 게시 범위를 벗어난 프레임은 0을 더하며
 다른 클라이언트의 공급을 기다리지 않는다. 입력의 네이티브 정수 변환과 출력 볼륨·mute는
 `Device::process_io`가 맡는다. `ClientChange`와 `Transfer`는 등록 변경과 PCM 전송을 구분한다.
-제어 소유자는 `Device::freeze`로 콜백을 회수한 동안만 큐를 할당·교체·폐기한다.
+큐는 IO를 시작하는 클라이언트만 가진다. 장치가 이미 실행 중일 때 등록된 클라이언트는 자기 StartIO
+전에도 렌더할 수 있으므로 등록 때 받는다. 큐가 없거나 ring epoch를 다 쓴 클라이언트는 StartIO 때
+제어 스레드에서 freeze 밖에 새 큐를 매핑하고 미리 fault한 뒤, freeze 안에서는 게시만 한다.
+`PerformDeviceConfigurationChange`의 freeze 구간은 큐를 매핑하지도, 메모리를 할당하지도 않는다.
+샘플레이트만 바뀌면 큐와 grant를 유지하고 ring epoch·clock을 다시 게시해 이전 rate의 PCM을 버리며,
+epoch가 남지 않은 큐는 떼어 낸다. 형식이 바뀌면 새 endpoint 매핑(인벤토리를 받을 때 미리 매핑)으로
+바꾸고 이전 모양의 큐를 떼어 낸다. 떼어 낸 큐와 매핑은 freeze가 끝난 뒤 해제한다. coreaudiod는 이
+호출 앞뒤로 IO를 일시정지할 뿐 StopIO·StartIO를 부르지 않는다. 그래서 같은 호출이 반환하기 전에, IO가
+아직 멈춘 동안 IO를 가진 클라이언트의 새 큐를 freeze 밖에서 매핑하고 짧은 freeze에서 게시한다. IO를
+가지지 않은 클라이언트는 다음 StartIO에서 받는다. 큐가 필요 없으면 freeze도 잡지 않는다. 큐 메모리
+예산은 등록 때뿐 아니라 매핑·게시할 때마다 현재 형식 기준으로 다시 검사한다. 매핑하지 못하거나 예산을
+넘는 클라이언트는 설정을 되돌리지 않고 수를 기록한다. 제어 tick이 다시 시도하고, Driver service에 그 수와 회복을 보고해 로그에 남긴다. endpoint
+ring을 다시 열 수 없으면 rate 변경과 시작은 아무것도 바꾸지 않고 거부된다.
 `Registry`는 장치의 시작 참조를 세고 최초 시작·최종 종료를 네이티브 런타임에 요청한다.
 최초 시작은 모든 큐의 PCM 타임라인을 초기화한다. 다른 클라이언트의 시작·정지는 게시된 PCM을
 지우지 않으며, 등록된 출력 클라이언트가 직접 StartIO를 받아야 한다는 조건을 두지 않는다.
@@ -124,20 +137,48 @@ clock publication과 membership revision을 소유하고, 개별 writer가 PCM·
 Driver 서비스는 장치 인벤토리의 소유자로 유지한다. coreaudiod의 engine Mach-service 접근은
 HAL 번들에 선언하며 엔진은 audio-server UID의 grant 게시와 console 사용자 source 요청을 구분한다.
 
+Driver 서비스의 구성 거래는 단계마다 6초 안에 HAL의 적용을 기다린다. HAL은 인벤토리 세대의
+적용 또는 거부(검증·native 적용 실패 포함)를, 그리고 모든 rate·format·매핑 요청의 결과를 요청한
+rate·format, HAL incarnation과 함께 순서대로 보고한다. 순번은 보관 큐의 잠금 안에서 매기므로 여러
+장치가 동시에 끝나도 순서가 뒤바뀌지 않는다. 새 연결은 보관한 결과를 다시 보낸 뒤 완료 표시를 보낸다.
+서비스는 완료 표시를 받은 가장 새 연결에서 기준을 정하고, 같은 incarnation의 연결에서 그 기준보다
+나중에 같은 값을 요청한 거부만 그 요청의 거부로 보고 곧바로 이전 상태를 새 예산으로 되돌린다. 새
+incarnation이 완료 표시를 보내면 이전 incarnation의 연결은 버린다. 두 쪽은 `macos-transport`의 한
+보고 codec을 쓰고, 보고 버전이 다르면 부분 설치로 보고
+즉시 재설치가 필요하다는 오류를 낸다. HAL이 요청한 매핑 교체는 매핑만 바꾸고 rate·format을 요청하지
+않는다.
+6초를 넘긴 단계는 최대 24초 더 기다린다. HAL은 수행 중인 단계가 끝나기 전에는 새 인벤토리를
+처리하지 않기 때문이다. 그 안에 적용되면 경고만 남기고 거래를 계속한다. 그때까지도 수행 중이면
+되돌림을 게시만 하고 `ConfigurationPending`으로 보고하며, 관리자는 이전 인벤토리와 revision을
+유지한다. 다음 조회는 HAL readback으로 상태를 다시 관찰하고, rate·format 요청은 캐시한 의도가
+아니라 readback과 다를 때만 보낸다.
+
 엔진의 `endpoint_service::virtual_pcm`은 가상 입력 source registry와 endpoint별 pump 수명을
 소유한다. `ClientPcmMixer`는 native sample 좌표의 큐 합산과 forward cursor만 관리하고,
-`Converter`는 기존 SRC·포맷 승인·보류 출력을, `Scheduling`은 worker 정책과 제어 작업의
+pump의 `Backlog`는 비운 클라이언트 PCM의 native 보존을, `Converter`는 기존 SRC·포맷 승인·보류
+출력을, `Scheduling`은 worker 정책과 제어 작업의
 실시간 밖 실행을 맡는다. `cadence`는 coherent native clock을 완료된 128프레임 주기의
 좌표로 투영한다. 이 주기는 worker의 실시간 정책과 같은 상수를 사용한다. 늦게 깨어나도
 mixer의 forward cursor로 보존된 PCM을 순서대로 배출한다. 외부 HAL 독자의 부분 읽기는
 이 cursor를 변경하지 않는다.
 시간 credit은 게시된 PCM과 native playhead 범위로 제한한다. 타임스탬프는 worker가 깨어난
 시각이 아니라 native anchor와 프레임 좌표에서 구한다. 같은 클록의 master만 SRC를 우회한다.
+그 밖의 source는 독립 클록 bridge가 drift를 보정한다. 순서대로 읽는 소비자는 자기 클록으로 큐를 비우므로
+큐 점유와 목표의 차이로 보정한다. 시각으로 읽는 소비자는 변환 비율과 관계없이 큐 점유를 일정하게 유지하므로,
+현재 구간에서 요청 시각이 진행한 프레임 주기와 다음 미읽음 프레임의 위상(한 프레임 이내)을 소비자 위치와 함께
+게시하고, 변환기는 그 주기로 비율을 직접 정하고 위상 항(프레임당 120ppm)으로 맞춘다. 건너뛴 프레임이나 반
+프레임을 넘는 위상은 소비자 클록이 바뀌었다는 뜻이므로 구간을 마지막 걸음부터 다시 잰다. 커서 점프·재획득·새
+epoch도 구간을 다시 시작하되, 그때까지 잰 주기는 계속 게시한다. 공칭 주기에서 변환기 보정 한계(±2,000ppm)를
+벗어난 걸음은 프레임보다 작아도 커서 점프로 보고 주기에 넣지 않는다. 소비자의 목표 점유는 이번 읽기가 프레임을
+소비한 뒤의 점유다. 시각으로 읽던 소비자의 timing을 게시 도중이라 읽지 못한 주기에는 마지막 보정을 유지하고 큐
+점유로 되돌아가지 않는다.
 
 `cadence::next`는 native anchor에서 다음 절대 128프레임 경계를 계산한다.
 `Scheduling`은 그 deadline까지 기다리며 제어·종료 확인을 위해 대기를 5ms 이내로 제한한다.
 누적 credit은 `Pace::Block.available_frames` → `MacTimeline` → `MacEngineExternalIo`로 전달한다.
-획득 frontier는 이번 읽기 quantum과 아직 처리하지 않은 전체 credit을 구분한다.
+shared source가 준 credit은 `Pace::Block.publication`으로 그 게시 snapshot을 함께 전달한다.
+획득 frontier는 이번 읽기 quantum과 아직 처리하지 않은 전체 credit을 구분하고, 그 source의
+frontier는 snapshot의 게시 끝에서 계산한다.
 보존 용량 안의 가장 오래된 PCM부터 읽고, 같은 epoch에서 이미 읽은 시각으로 되돌아가지 않는다.
 
 `NativePacers`는 그래프가 기다리는 shared source의 신원을 생산자 실행 전에 선택한다.
@@ -155,16 +196,86 @@ native 단위로 재환산해 버리지 않는다. 물리 장치는 기존 하�
 
 `audio-io::retention`은 최대 지원 샘플레이트에서도 최소 4초의 backlog 저장량을 정한다.
 macOS 공유·native PCM과 앱 캡처, Linux 입력 링은 이를 2의 거듭제곱인 1,048,576프레임으로 올림한다.
+가상 입력의 보존은 엔진 pump가 맡는다. pump는 매 주기 클라이언트 큐를 native playhead까지 비워 backlog에 넣는다.
+얼마나 남길지는 그래프가 게시한 route(`ApplicationClock::consumer_route`)로 정한다. 그래프는 주기마다 활성 plan의
+가상 source마다 route를 게시한다. 노드가 켜져 있고 출력까지 이어지면 routed다. head는 pacer가 기다렸다가 첫
+credit부터 소비하는 source(`NativePacers::head`)이며, 장치 클록이 graph를 이끄는 동안에는 없다. pacer는 켜져 있고
+출력까지 이어진 shared source만 master로 고르거나 기다린다. 실행 중인 master는 계속 pacing할 수 있는 동안
+유지하고, 멈추거나 자격을 잃었을 때만 plan 순서대로 다음 실행 중인 source를 고른다. worker는 다음 plan에서 빠진 source와,
+끝날 때 모든 source를 unrouted로 게시한다. 이 route는 checkpoint나 렌더링 대기 중에도 바뀌지 않는다. route가
+아직 게시되지 않았으면 클라이언트 큐 하나(`QUEUE_FRAMES`)만큼만 변환 없이 남기며, 그 밖은 손실로 세지 않는다.
+head로 시작한 stream도 매 변환 전에 route를 다시 읽어, head를 잃었으면 남은 backlog를 버리고 live edge에서 이어 간다.
+unrouted source는 meter와 pacing을 위해 계속 게시하되 한 주기에 변환할 만큼만 남겨 live edge에 머문다. 이때
+버린 프레임과 큐에서 덮어쓰인 프레임은 손실로 세지 않는다. routed source는 포맷 승인·변환기 준비와 관계없이
+endpoint별 backlog에 native rate와 native 좌표 그대로 보존한다. backlog는 `retention::RING_FRAMES` ×
+endpoint 캡처 채널 수의 Float32(채널당 4MiB, 64채널에서 256MiB)다. HAL이 게시한 장치 geometry를
+엔진이 받으면 endpoint 잠금 밖의 제어 경로에서 source 매핑과 backlog를 확보하고 미리 fault한다.
+클라이언트가 없는 장치도 geometry 목록에 포함된다.
+geometry 준비는 전용 제어 worker 한 개가 처리하며 대기 중인 전체 snapshot은 최신 한 개로
+합친다. 이미 준비된 endpoint의 큐는 이 worker를 기다리지 않고 바로 전달한다. 준비 중·대기
+중인 목록은 geometry와 아직 pump가 없는 큐의 VM 매핑만 유지하며 PCM을 복사하지 않는다.
+이미 pump에 전달한 큐 매핑은 준비 목록에 보관하지 않는다. 준비 중인 snapshot보다
+새로운 큐 membership을 이전 준비 결과가 덮지 못하게 한다. geometry 시각과 큐 membership
+시각은 따로 비교하므로, 같은 geometry의 grant는 더 늦게 끝난 geometry 준비 뒤에도 사용할 수 있다.
+예약 실패는 새 HAL snapshot 없이 10ms부터 최대 1초 간격으로 다시 시도한다. HAL의
+StartIO·실행 중 클라이언트 추가·geometry 변경 후 큐 재준비는 엔진의 응답이나 준비 상태를
+기다리지 않는다. 엔진으로 보내는 geometry·grant snapshot은 비동기 단방향 메시지다.
+엔진이 없거나 응답하지 않거나 저장소 준비에 실패해도 HAL은 자체 큐와 native IO를 시작한다.
+이미 준비된 pump는 grant snapshot에서 큐만 넘겨받으므로 source·backlog의 할당이나 첫
+page touch를 기다리지 않는다. publication을 받지 못했거나 엔진 재시작·준비 실패로 pump가
+없는 endpoint의 첫 grant는 같은 제어 worker에서 저장소를 준비한 뒤 전달한다. 이 fallback의
+준비가 HAL 큐 보존 시간을 넘기면 덮어쓴 프레임을 기존 손실 보고에 포함한다.
+클라이언트가 모두 사라지면 pump는 native 정지와 남은 backlog 손실을 게시하고 저장소를 유지한다.
+같은 geometry의 다음 세션은 이 저장소를 재사용한다. 재사용 전에 producer lease와 terminal
+상태를 확인하고, epoch를 소진한 저장소는 다시 준비한다. 장치 삭제·geometry 변경·clear는 worker를
+멈추고 join한 뒤 저장소를 회수한다. 준비 중 clear가 오면 준비 결과를 게시하지 않는다.
+준비 실패는 부분 저장소를 회수하고 제어 worker에서 재시도한다. HAL의 geometry 관찰 host
+tick으로 오래된 snapshot이 새 geometry를 덮거나 새 endpoint를 회수하지 못하게 한다.
+endpoint 하나의 큰 저장소는 backlog와 source PCM 각각 채널당 4MiB, source frame tag·시각
+sidecar 24MiB다. 합계는 캡처 채널 수 C에 대해 (8C + 24)MiB이며, stereo는 40MiB,
+64채널은 536MiB다. 여기에 고정 scratch·run metadata, 변환기 저장소와 worker 한 개의 stack이
+더해진다. 큐가 없으면 worker는 비실시간 상태에서 park한다. grant·종료 신호 또는 남은 손실
+보고의 quiet 기한이 worker를 깨운다. 준비된
+endpoint는 최대 64개라 큰 저장소의 합은 최대 33.5GiB다. 전용 준비 worker는 한 개다.
+준비 경로는 endpoint마다 HAL 큐를 최대 두 세대 더 유지할 수 있으며, 각 세대는 기존
+`MAX_PCM_BYTES_PER_ENDPOINT`(1GiB) 한도를 따른다. 같은 큐의 VM 매핑은 물리 PCM을 공유한다.
+이전 source 매핑은 graph pin이 남아 있는 동안 기존 registry의 최대 128개 owner 한도 안에서 유지되며, pin 해제 후 제어 경로에서
+회수한다. 저장소와 큐 세대 수는 세션 수에 따라 늘어나지 않는다.
+같은 timeline의 공백과 timeline 변경은 앞선 run을 유지한다. 가득 차면 가장 오래된 프레임을
+버린다. 새 변환 stream은 원래 좌표의 시각으로 순서대로 변환한다. 보존한 head 전체는 head
+source에만 전달한다. 다른 source에는 첫 게시 전에 가장 새 run의 가장 새 한 주기만 남겨, 합류한 source가 공유
+획득 좌표나 다른 입력을 보존된 head로 되돌리지 않게 한다. head stream의 run 경계에서는 그 주기의 변환을 멈춘다.
+소비자가 현재 epoch를 다 읽거나 읽기를 멈추거나 200ms가 지난 뒤에만 새 epoch를 시작한다. 한 주기의 변환은 최대
+8주기다. sinc 변환은 48kHz 기준 4,096 채널·프레임을 native 주기에 비례해 줄인 예산 안에서 하되 최소 2주기는
+변환한다. 늦게 승인된 head source는 실시간의 8배 속도로 따라잡고, graph credit은 게시한 PCM만큼만 순서대로
+늘어난다. 변환기 bridge의 입력 FIFO는 한 주기분의 따라잡기·priming·sinc 이력을 담는 2,048프레임이다. 변환기는
+포맷 승인 뒤에 저장 공간을 준비하고, 같은 형식의 run 경계에서는 저장 공간을 그대로 다시 쓴다. 저장 공간을
+준비한 뒤에만 포맷을 승인하고 새 epoch를 시작하므로, 준비 실패는 source의 epoch를 바꾸지 않는다. 할당 실패는
+보존한 PCM을 유지하고 10ms부터 두 배씩 늘려 최대 1초 간격으로 다시 시도한다. 잘못된 변환 설정처럼 다시 시도해도
+같은 오류는 endpoint를 끝낸다. native clock이
+멈추면 포맷·backlog 상태와 관계없이 먼저 native 정지를 게시하고, 그 timeline의 남은 backlog와 변환 stream을
+끝낸다. 끝난 stream의 변환 출력은 다시 쓰지 않는다. routed source의 큐에서 덮어쓰인 프레임
+(`ClientPcmMixer::skipped_frames`), backlog에서 버린 프레임, 정지 때 routed였던 source가 게시하지 못한 프레임은 손실이 1초
+동안 멈춘 뒤 손실 구간마다 한 번 제어 경로 경고로 남긴다. grant 수신, source 저장소 준비 시작·완료, backlog 준비 완료, worker의 첫 drain,
+source 승인(변환기 준비·첫 게시)의 시각은 native sample 0 기준으로 기록한다. IO 시작 전에
+완료된 준비 시각은 음수다. 로그는 제어 경로에서만 쓴다. 물리 입력의 `HardwarePacer`는 첫 그래프 승인 때 준비 중 PCM을
+버린다. 앱이 가상 장치에 게시한 PCM은 위의 `ApplicationPacer` 계약대로 head source의 첫 프레임부터 보존한다.
+HAL 클라이언트 렌더 큐와 endpoint 매핑 링은 `client_pcm::QUEUE_FRAMES`
+(65,536프레임)로 준비한다. 쓰는 쪽은 최대 렌더 span(`MAX_RENDER_SPAN_FRAMES`, 장치의 zero timestamp
+period인 16,384프레임)만큼 앞서고 `ReadInput`은 그만큼 뒤처질 수 있으며, 큐는 그 합의 두 배다. 새 익명 매핑은 커널의 0 채움을 사용하므로 ring을 지우지 않고, 준비 단계에서 모든 페이지를
+미리 fault해 HAL IO 스레드가 page fault를 겪지 않게 한다.
 녹음 전달 큐는 256프레임 × 3,000개이며 192kHz에서 4초다. 모두 제어 경로에서 준비하고,
 실시간 중에는 확장하지 않는다. 이 저장 용량은 재생 priming·지연 목표와 별개다.
 지연 목표는 관찰한 callback burst와 클록 관계에서 정한다. `QueueBounds.maximum_target_frames`는
-저장량과 별도로 지정하며 macOS bridge의 기존 상한은 8,192프레임이다. Linux 출력 링은
+저장량과 별도로 지정하며 macOS bridge는 `buffer_policy::MAXIMUM_TARGET_FRAMES`(8,192프레임)를
+상한으로 쓴다. Linux 출력 링은
 최대 RAW 전송 32,768프레임을 수용하도록 65,536프레임으로 준비한다. 가득 찬 private FIFO는 실패한 쓰기를
 거부하며 기존 PCM을 보존한다. 시각 공유 링은 오래된 구간을 덮어쓰므로 독자가 누락·불연속을
 확인한다. 녹음 큐가 한계를 넘으면 받아 둔 prefix를 마무리하고 `Failed`로 보고한다.
 
 HAL의 호스트 I/O 요청 크기와 설정 가능한 버퍼 크기는 별개다. 한 요청은 준비한
-1,048,576프레임 보존량으로 제한하며, 2,048프레임을 넘는 요청은 같은 I/O pin 안에서
+1,048,576프레임 보존량으로 제한한다. 렌더 요청은 클라이언트 큐가 감당하도록 정한 span을 넘으면 독자가 읽기 전에 덮일 수 있으므로
+`MAX_RENDER_SPAN_FRAMES`로 제한하고 같은 extent 거부로 기록한다. 2,048프레임을 넘는 요청은 같은 I/O pin 안에서
 기존 scratch 크기로 나눠 처리한다. Float32·정수 변환·복수 클라이언트 믹스 모두 같은 경로다.
 정상 quantum은 추가 scratch 조회 없이 기존 처리로 보낸다. HAL trace v5는 null 버퍼와
 보존량 초과를 분리하고 마지막 거부의 크기·포인터 유무·방향을 기록한다.
@@ -192,6 +303,10 @@ HAL의 호스트 I/O 요청 크기와 설정 가능한 버퍼 크기는 별개�
 스케줄링 burst·reserve 증가로 frontier가 과거로 움직여도 이미 읽는 좌표를 되돌리지 않는다.
 다른 입력이 현재 좌표보다 오래된 frontier로 합류하거나 clock·rate·graph 연속성이 바뀌면
 공통 좌표를 다시 획득한다. 개별 source reader의 cursor는 앞으로만 진행한다.
+`SourceRegistry::read_audio_timed`는 시각 읽기 실패의 이유를 `ReadMiss`로 돌려준다. 그래프를
+진행시키는 source가 최신 게시보다 앞선(`Ahead`) 읽기를 보고하면 `CaptureAlignment::reacquire`로
+다음 frontier를 받고, 그 cycle의 정렬 입력은 불연속으로 이력을 초기화한다. 이유별 계수는
+graph worker가 주기 보고에 모은다.
 
 `HalIoContext`는 기존 공유 매핑의 클럭·epoch·producer activity를 게시한다.
 공유 PCM 링은 현재 매핑 형식의 수명 메타데이터를 보존하며 클라이언트 PCM의 저장소로 사용하지 않는다.

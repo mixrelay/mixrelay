@@ -100,12 +100,42 @@ fn thousand_errors_and_stale_callbacks_do_not_reconnect_or_disconnect_current_pe
     assert_eq!(counts.connections.get(), 3);
     heartbeat(&owner);
     assert_eq!(counts.connections.get(), 3);
-    assert_eq!(
-        counts.requests.borrow().as_slice(),
-        &[Request::Inventory; 4]
-    );
+    let inventory = counts
+        .requests
+        .borrow()
+        .iter()
+        .filter(|request| **request == Request::Inventory)
+        .count();
+    assert_eq!(inventory, 4);
     drop(owner);
     assert_eq!(counts.released.get(), 3);
+}
+
+#[test]
+fn each_connection_ends_its_settlement_replay_with_a_marker_once() {
+    let (owner, counts) = owner();
+    owner.open();
+    heartbeat(&owner);
+    let incarnation = owner.registry.incarnation;
+    let marker = Request::Report(Report::Replayed {
+        incarnation,
+        through: 0,
+    });
+    let markers = |counts: &Counts| {
+        counts
+            .requests
+            .borrow()
+            .iter()
+            .filter(|request| **request == marker)
+            .count()
+    };
+    // The service attributes no settlement to a request until this marker arrives.
+    assert_eq!(markers(&counts), 1);
+    let authority = owner.session.borrow().authority();
+    owner.disconnected(authority);
+    heartbeat(&owner);
+    heartbeat(&owner);
+    assert_eq!(markers(&counts), 2);
 }
 
 #[test]
@@ -151,4 +181,19 @@ fn null_host_initialization_does_not_publish_native_work() {
     let mut registry = ptr::null_mut();
     assert!(!unsafe { mr_hal_control_initialize(ptr::null(), &raw mut registry) });
     assert!(registry.is_null());
+}
+
+#[test]
+fn missing_client_queues_are_reported_on_each_change_and_on_recovery() {
+    let (one, two) = ([1; 16], [2; 16]);
+    assert_eq!(unprovisioned_changes(&vec![], &vec![(one, 2)]), [(one, 2)]);
+    assert!(unprovisioned_changes(&vec![(one, 2)], &vec![(one, 2)]).is_empty());
+    assert_eq!(
+        unprovisioned_changes(&vec![(one, 2)], &vec![(one, 1), (two, 1)]),
+        [(one, 1), (two, 1)]
+    );
+    assert_eq!(
+        unprovisioned_changes(&vec![(one, 1), (two, 1)], &vec![(two, 1)]),
+        [(one, 0)]
+    );
 }

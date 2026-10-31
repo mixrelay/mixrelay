@@ -1,5 +1,46 @@
 import { effectTranslations } from '../effects';
 export const koKR = {
+  midi: {
+    mapMode: 'MIDI 매핑 모드',
+    mapTarget: '{{name}}: {{action}} 매핑',
+    selectTarget: '강조된 조작을 선택한 뒤 MIDI 페이더나 버튼을 움직이세요.',
+    waitingTarget: '{{name}} · {{action}} — MIDI 조작을 움직여 지정하거나 교체하세요.',
+    done: '매핑 마치기',
+    selectMapping: '{{name}} · {{action}} 선택',
+    recorderAction: '녹음기 동작',
+    min: '최솟값',
+    max: '최댓값',
+    empty: 'MIDI 매핑이 없습니다. 강조된 조작을 선택해 추가하세요.',
+    targetUnavailable: '대상 상태 확인 불가',
+    title: 'MIDI 컨트롤',
+    disconnected: '장치 연결 해제',
+    targetMissing: '대상 없음',
+    unavailable: 'MIDI 사용 불가',
+    mode: '볼륨 모드',
+    pickup: '페이더를 현재 레벨로 움직이면 제어를 시작합니다.',
+    step: '변경 단위',
+    remove: '삭제',
+    removeTarget: '{{name}} MIDI 컨트롤 삭제',
+    failed: 'MIDI 컨트롤을 변경하지 못했습니다. 다시 시도하세요.',
+    control: '{{device}} · 채널 {{channel}} · {{kind}} {{number}}',
+    modes: {
+      absolute: '절대값(pick-up)',
+      twos_complement: '상대값: 2의 보수',
+      offset64: '상대값: 오프셋 64',
+    },
+    kinds: {
+      note: '노트',
+      cc: 'CC',
+    },
+    actions: {
+      power: '전원',
+      mute: '음소거',
+      volume: '볼륨',
+      record: '녹음 / 재개',
+      pause: '일시정지',
+      stop: '정지',
+    },
+  },
   effects: effectTranslations.koKR,
   theme: {
     label: '화면 테마',
@@ -271,7 +312,7 @@ export const koKR = {
     audioPaused: '오디오 일시정지됨',
     deleteGraph: '그래프 삭제',
     deleteGraphNotice:
-      '“{{name}}” 그래프를 삭제할까요? 이 그래프의 오디오 처리와 녹음이 종료됩니다. 되돌릴 수 없으며, 저장해 둔 작업 공간 파일은 삭제하지 않습니다.',
+      '“{{name}}” 그래프를 삭제할까요? 오디오 처리와 녹음이 멈춥니다. 그래프 목록에서 macOS Command+Z·Linux Ctrl+Z로 실행 취소하고 Shift를 더해 다시 실행합니다. 저장한 작업 공간 파일은 남습니다.',
     catalogUnavailable: '저장된 그래프를 불러올 수 없습니다. 기존 그래프는 유지됩니다.',
     reloadGraphs: '그래프 다시 불러오기',
     graphSaveFailed:

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Steuern Sie Knoten unter macOS und Linux per MIDI.">
+    <title>MIDI-Controller — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/midi.html">
+    <link rel="alternate" hreflang="ko" href="../ko/midi.html">
+    <link rel="alternate" hreflang="ja" href="../ja/midi.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/midi.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/midi.html">
+    <link rel="alternate" hreflang="de" href="../de/midi.html">
+    <link rel="alternate" hreflang="fr" href="../fr/midi.html">
+    <link rel="alternate" hreflang="it" href="../it/midi.html">
+    <link rel="alternate" hreflang="es" href="../es/midi.html">
+    <link rel="alternate" hreflang="pt" href="../pt/midi.html">
+    <link rel="alternate" hreflang="ru" href="../ru/midi.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Zum Inhalt springen</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Produktstartseite"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Sprache"><a href="../en/midi.html" lang="en" hreflang="en">English</a> <a href="../ko/midi.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/midi.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/midi.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/midi.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/midi.html" lang="de" hreflang="de" aria-current="page">Deutsch</a> <a href="../fr/midi.html" lang="fr" hreflang="fr">Français</a> <a href="../it/midi.html" lang="it" hreflang="it">Italiano</a> <a href="../es/midi.html" lang="es" hreflang="es">Español</a> <a href="../pt/midi.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/midi.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Vorläufige Fassung vor Veröffentlichung</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Kapitel des Handbuchs">
+        <a class="back-link" href="../../index.html">← Produktstartseite</a>
+        <a class="manual-mobile-index" href="index.html">Alle Kapitel</a>
+        <nav class="guide-nav" aria-label="Kapitel des Handbuchs"><a href="index.html">Handbuchübersicht</a>
+<a href="installation.html">Systemanforderungen und Installation</a>
+<a href="first-launch.html">Erster Start und Berechtigungen</a>
+<a href="workspace.html">Routing-Arbeitsbereich</a>
+<a href="devices.html">Geräte und virtuelle Endpunkte</a>
+<a href="app-capture.html">Audio von Anwendungen erfassen</a>
+<a href="recording.html">Aufnahme</a>
+<a href="effects.html">Integrierte Effekte und Voreinstellungen</a>
+<a href="plugins.html">Externe Plug-ins</a>
+<a href="stream-deck.html">Stream Deck-Plug-in</a>
+<a href="midi.html" aria-current="page">MIDI-Controller</a>
+<a href="licensing.html">Kostenlose Version und Lizenzierung</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Deinstallation</a>
+<a href="troubleshooting.html">Fehlerbehebung und Diagnose</a>
+<a href="support.html">Support kontaktieren</a></nav>
+      </aside>
+      <article class="guide-content">
+<header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>MIDI-Controller</h1><p>Steuern Sie Knoten unter macOS und Linux per MIDI.</p><p class="guide-draft-note">Vorläufige Fassung vor Veröffentlichung. Öffentliche Downloads und Käufe sind noch nicht verfügbar. Diese Anleitung beschreibt den aktuellen Build aus dem Quellcode. Das Verhalten nach der Installation muss in den unten genannten Umgebungen noch überprüft werden.</p></header>
+<nav class="manual-toc"><ul><li><a href="#assign">Steuerelement zuweisen</a></li><li><a href="#controls">Lautstärke und Tasten</a></li><li><a href="#devices">Geräte und gespeicherte Zuweisungen</a></li></ul></nav>
+<section class="guide-section" id="assign" aria-labelledby="assign-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="assign-title">Steuerelement zuweisen</h2><p>Die kleine MIDI-Schaltfläche am rechten Ende der Editor-Kopfzeile, Command+M unter macOS oder Ctrl+M unter Linux schaltet den MIDI-Zuweisungsmodus um. Escape beendet ihn ebenfalls. Hervorgehobene Elemente an den Knoten sind Ziele: Ein/Aus, Stumm, Lautstärke und Aufnahme/Fortsetzen, Pause, Stopp. Ein Element anklicken oder mit Tab und Enter/Leertaste auswählen, dann den MIDI-Regler betätigen. Die Zuweisung wird sofort gespeichert. Ein anderer Regler ersetzt die während derselben Auswahl erfasste Zuweisung. Ein anderes Ziel auswählen und denselben Regler betätigen, um eine weitere Zuweisung hinzuzufügen. Exakte Duplikate behalten ihre Optionen. Im Modus sind Graphbearbeitung und MIDI-Aktionen ausgesetzt.</p></div></section>
+<section class="guide-section" id="controls" aria-labelledby="controls-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="controls-title">Lautstärke und Tasten</h2><p>Note On mit Anschlagstärke über null oder eine CC-Flanke von unter 64 auf mindestens 64 löst jede passende Tastenaktion einmal aus. Ein/Aus und Stumm schalten den eigenen Zustand jedes Ziels um. Absolute Lautstärke verwendet CC 0–127, standardmässig von −60 bis +12 dB. Min/Max werden je Zuweisung festgelegt und können invertiert werden. Pick-up wartet für jedes Ziel auf dessen aktuellen Wert, auch nach externen Änderungen oder Wiederverbindung. Relative Encoder verwenden Zweierkomplement oder Offset 64 und eigene Schritte von 0,5, 1, 2 oder 3 dB. Lautstärkeänderungen werden je Ziel auf etwa 30 pro Sekunde zusammengefasst.</p></div></section>
+<section class="guide-section" id="devices" aria-labelledby="devices-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="devices-title">Geräte und gespeicherte Zuweisungen</h2><p>Im Zuweisungsmodus ersetzt das Zuweisungsfeld die Graphliste in der linken Seitenleiste. Beim Verlassen des Modus erscheint wieder die Graphliste. Es zeigt Graph- und Knotennamen, Aktion, Gerät, Kanal, Note/CC-Nummer und Status. Eine Zeile auswählen, um den Graphen zu öffnen, das Ziel hervorzuheben und Lautstärkeoptionen oder Aufnahmeaktion zu ändern. Delete/Backspace auf einer Zeile oder einem zugewiesenen Element sowie Entfernen löschen nur eine Zuweisung. Fehlende Ziele behalten ihre letzten Namen. Rückgängigmachen einer Knotenlöschung stellt ID und Zuweisungen wieder her. In der Graphliste macht Command+Z unter macOS oder Ctrl+Z unter Linux eine Graphlöschung rückgängig; mit Shift wird sie wiederholt. Der Verlauf bleibt bis zum Neustart des Hintergrundprozesses erhalten. Gespeicherte Zuweisungen und wiederhergestellte Graph-IDs überstehen Neustarts. Geräte verbinden sich automatisch neu. Das Schliessen des Editors beendet den Modus und setzt die Steuerung fort.</p><p>Der MixRelay-Hintergrundprozess muss laufen; das Editorfenster darf geschlossen sein. macOS nutzt CoreMIDI, Linux den ALSA-Sequencer einschließlich von PipeWire bereitgestellter Ports. Linux benötigt die ALSA-Bibliothek und Sequencer-Zugriff. Bei Fehlern zeigt MIDI nicht verfügbar den Grund. MIDI ist nur für Eingaben vorgesehen: keine Ausgabe, LED- oder Motorfader-Rückmeldung, Clock- oder BPM-Steuerung.</p></div></section>
+        <nav class="manual-pagination" aria-label="Kapitel des Handbuchs"><a rel="prev" href="stream-deck.html">← Stream Deck-Plug-in</a><a rel="next" href="licensing.html">Weiter: Kostenlose Version und Lizenzierung →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Vorläufige Fassung vor Veröffentlichung · MixRelay 0.1.0</p><a href="../../index.html">Produktstartseite</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

@@ -1,3 +1,5 @@
+import { useMidiControl } from '../midi/useMidiControl';
+import { ActionButton } from './ActionButton';
 import styles from './NodeSignalControls.module.css';
 import { Tooltip } from './Tooltip';
 
@@ -7,6 +9,24 @@ export function NodePowerButton(props: {
   label: string;
   onChange: () => void;
 }) {
+  const mapping = useMidiControl('power');
+  if (mapping?.active)
+    return (
+      <ActionButton
+        density="compact"
+        data-midi-map
+        aria-label={mapping.label}
+        aria-pressed={mapping.selected}
+        onClick={mapping.select}
+        onKeyDown={mapping.keyDown}
+      >
+        {mapping.text || (
+          <svg aria-hidden="true" viewBox="0 0 20 20">
+            <path d="M10 2v8M5 4.5a7 7 0 1 0 10 0" />
+          </svg>
+        )}
+      </ActionButton>
+    );
   return (
     <Tooltip label={props.label}>
       <button
@@ -14,6 +34,7 @@ export function NodePowerButton(props: {
         className={`${styles.button} nodrag nopan`}
         aria-label={props.label}
         aria-pressed={props.enabled}
+        data-midi-selected={mapping?.selected || undefined}
         data-action="power"
         disabled={props.disabled}
         onClick={(event) => {
@@ -35,6 +56,24 @@ export function NodeMuteButton(props: {
   label: string;
   onChange: () => void;
 }) {
+  const mapping = useMidiControl('mute');
+  if (mapping?.active)
+    return (
+      <ActionButton
+        density="compact"
+        data-midi-map
+        aria-label={mapping.label}
+        aria-pressed={mapping.selected}
+        onClick={mapping.select}
+        onKeyDown={mapping.keyDown}
+      >
+        {mapping.text || (
+          <svg aria-hidden="true" viewBox="0 0 20 20">
+            <path d="M3 7h3l4-4v14l-4-4H3z" />
+          </svg>
+        )}
+      </ActionButton>
+    );
   return (
     <Tooltip label={props.label}>
       <button
@@ -42,6 +81,7 @@ export function NodeMuteButton(props: {
         className={`${styles.button} nodrag nopan`}
         aria-label={props.label}
         aria-pressed={props.muted}
+        data-midi-selected={mapping?.selected || undefined}
         data-action="mute"
         disabled={props.disabled}
         onClick={(event) => {

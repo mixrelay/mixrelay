@@ -21,6 +21,7 @@ pub(crate) struct NativeMenuLabels {
     pub(crate) workspace_save: &'static str,
     pub(crate) workspace_save_as: &'static str,
     pub(crate) view: &'static str,
+    pub(crate) midi_map: &'static str,
     pub(crate) show_graph_list: &'static str,
     pub(crate) hide_graph_list: &'static str,
 }
@@ -36,6 +37,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "Save",
         workspace_save_as: "Save As…",
         view: "View",
+        midi_map: "MIDI Map Mode",
         show_graph_list: "Show Graph List",
         hide_graph_list: "Hide Graph List",
     },
@@ -49,6 +51,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "저장",
         workspace_save_as: "다른 이름으로 저장…",
         view: "보기",
+        midi_map: "MIDI 매핑 모드",
         show_graph_list: "그래프 목록 보기",
         hide_graph_list: "그래프 목록 가리기",
     },
@@ -62,6 +65,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "保存",
         workspace_save_as: "名前を付けて保存…",
         view: "表示",
+        midi_map: "MIDIマップモード",
         show_graph_list: "グラフ一覧を表示",
         hide_graph_list: "グラフ一覧を隠す",
     },
@@ -75,6 +79,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "保存",
         workspace_save_as: "另存为…",
         view: "显示",
+        midi_map: "MIDI映射模式",
         show_graph_list: "显示音频图列表",
         hide_graph_list: "隐藏音频图列表",
     },
@@ -88,6 +93,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "儲存",
         workspace_save_as: "另存新檔…",
         view: "顯示",
+        midi_map: "MIDI對應模式",
         show_graph_list: "顯示音訊圖列表",
         hide_graph_list: "隱藏音訊圖列表",
     },
@@ -101,6 +107,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "Enregistrer",
         workspace_save_as: "Enregistrer sous…",
         view: "Présentation",
+        midi_map: "Mode de mapping MIDI",
         show_graph_list: "Afficher la liste des graphes",
         hide_graph_list: "Masquer la liste des graphes",
     },
@@ -114,6 +121,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "Speichern",
         workspace_save_as: "Speichern unter…",
         view: "Darstellung",
+        midi_map: "MIDI-Zuweisungsmodus",
         show_graph_list: "Graphenliste einblenden",
         hide_graph_list: "Graphenliste ausblenden",
     },
@@ -127,6 +135,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "Guardar",
         workspace_save_as: "Guardar como…",
         view: "Visualización",
+        midi_map: "Modo de mapeo MIDI",
         show_graph_list: "Mostrar lista de grafos",
         hide_graph_list: "Ocultar lista de grafos",
     },
@@ -140,6 +149,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "Salvar",
         workspace_save_as: "Salvar como…",
         view: "Visualizar",
+        midi_map: "Modo de mapeamento MIDI",
         show_graph_list: "Mostrar lista de grafos",
         hide_graph_list: "Ocultar lista de grafos",
     },
@@ -153,6 +163,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "Salva",
         workspace_save_as: "Salva con nome…",
         view: "Vista",
+        midi_map: "Modalità mappatura MIDI",
         show_graph_list: "Mostra elenco grafi",
         hide_graph_list: "Nascondi elenco grafi",
     },
@@ -166,6 +177,7 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_save: "Сохранить",
         workspace_save_as: "Сохранить как…",
         view: "Вид",
+        midi_map: "Режим MIDI-назначений",
         show_graph_list: "Показать список графов",
         hide_graph_list: "Скрыть список графов",
     },
@@ -299,6 +311,22 @@ mod tests {
             assert_eq!(english.workspace_open, "Open…");
             assert_eq!(english.workspace_save, "Save");
             assert_eq!(english.workspace_save_as, "Save As…");
+        }
+    }
+}
+
+#[cfg(test)]
+mod midi_locale_tests {
+    #[test]
+    fn midi_menu_uses_each_locales_own_translation() {
+        for (locale, expected) in [
+            ("fr-FR", "Mode de mapping MIDI"),
+            ("de-DE", "MIDI-Zuweisungsmodus"),
+            ("es-ES", "Modo de mapeo MIDI"),
+            ("pt-BR", "Modo de mapeamento MIDI"),
+            ("it-IT", "Modalità mappatura MIDI"),
+        ] {
+            assert_eq!(super::labels(locale).midi_map, expected, "{locale}");
         }
     }
 }

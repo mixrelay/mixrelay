@@ -9,16 +9,14 @@ import {
   linuxBuildIncludesDebian,
   linuxDebianBundleDirectory,
   listDebianPackages,
-  main,
+  main as mainRaw,
   validateLicensingBuildEnvironment,
 } from "./build-desktop.mjs";
 
-const licensingKeys = [
-  "MIXRELAY_LEMON_STORE_ID",
-  "MIXRELAY_LEMON_PRODUCT_ID",
-  "MIXRELAY_LEMON_VARIANT_ID",
-  "MIXRELAY_LEMON_CHECKOUT_URL",
-];
+import { polarEnvironment } from './polar-configuration.fixture.mjs';
+import { POLAR_CONFIGURATION_KEYS } from './polar-configuration.mjs';
+const licensingKeys = POLAR_CONFIGURATION_KEYS;
+const main = (args, platform, run, inspect, find, env = { ...process.env, ...polarEnvironment }) => mainRaw(args, platform, run, inspect, find, env);
 
 test("desktop code checks use only the canonical no-payload Tauri override", () => {
   const environment = desktopCodeCheckEnvironment({ CARGO_TARGET_DIR: "target/fixture" });
@@ -35,10 +33,7 @@ test("desktop code checks use only the canonical no-payload Tauri override", () 
 
 test("licensing build configuration is either wholly absent or wholly non-empty", () => {
   const complete = {
-    MIXRELAY_LEMON_STORE_ID: "1",
-    MIXRELAY_LEMON_PRODUCT_ID: "2",
-    MIXRELAY_LEMON_VARIANT_ID: "3",
-    MIXRELAY_LEMON_CHECKOUT_URL: "https://mixrelay.lemonsqueezy.com/buy/product",
+    ...polarEnvironment,
   };
   assert.doesNotThrow(() => validateLicensingBuildEnvironment({}));
   assert.doesNotThrow(() => validateLicensingBuildEnvironment(complete));
@@ -53,26 +48,13 @@ test("licensing build configuration is either wholly absent or wholly non-empty"
   }
 });
 
-test("desktop build rejects partial licensing configuration before spawning and forwards the checked environment", async t => {
-  const saved = Object.fromEntries(licensingKeys.map(key => [key, process.env[key]]));
-  t.after(() => {
-    for (const key of licensingKeys) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key];
-    }
-  });
-  for (const key of licensingKeys) delete process.env[key];
-  process.env.MIXRELAY_LEMON_STORE_ID = "1";
-  const errors = [];
-  t.mock.method(console, "error", message => errors.push(message));
-  assert.equal(await main([], "darwin", () => assert.fail("partial configuration must not spawn")), 1);
-  assert.match(errors[0], /all unset or all non-empty/);
-  process.env.MIXRELAY_LEMON_PRODUCT_ID = "2";
-  process.env.MIXRELAY_LEMON_VARIANT_ID = "3";
-  process.env.MIXRELAY_LEMON_CHECKOUT_URL = "https://mixrelay.lemonsqueezy.com/buy/product";
+test("desktop build rejects partial licensing configuration before spawning and forwards checked values", async t => {
+  t.mock.method(console, "error", () => {});
+  assert.equal(await main([], "darwin", () => assert.fail("must not spawn"), undefined, undefined,
+    {MIXRELAY_POLAR_ORGANIZATION_ID: polarEnvironment.MIXRELAY_POLAR_ORGANIZATION_ID}), 1);
   assert.equal(await main([], "darwin", (_command, _args, options) => {
-    for (const key of licensingKeys) assert.equal(options.env[key], process.env[key]);
-    return { status: 0 };
+    for (const key of licensingKeys) assert.equal(options.env[key], polarEnvironment[key]);
+    return {status:0};
   }), 0);
 });
 
@@ -91,25 +73,21 @@ test("one public bundle supplies the editor and internal background runtime", ()
   assert.match(config.build.beforeBuildCommand, /desktop:prepare-engine --profile release/);
 });
 
-test("free Driver builds accept an entirely absent licensing configuration", async () => {
+test("release Driver builds refuse absent licensing configuration before spawning", async t => {
+  t.mock.method(console, "error", () => {});
   for (const platform of ["darwin", "linux"]) {
-    const args = platform === "darwin" ? [] : ["--no-bundle"];
-    let builds = 0;
-    assert.equal(await main(args, platform, (_command, _args, options) => {
-      builds += 1;
-      for (const key of licensingKeys) assert.equal(options.env[key], undefined);
-      return { status: 0 };
-    }, undefined, undefined, {}), 0);
-    assert.equal(builds, 1);
+    assert.equal(await main([], platform, () => assert.fail("unconfigured release must not spawn"),
+      undefined, undefined, {}), 1);
   }
+  for (const debug of ["--debug", "-d"]) {
+    assert.equal(await main([debug, "--no-bundle"], "linux", () => ({status:0}), undefined, undefined, {}), 0);
+  }
+  assert.equal(await main(["--no-bundle", "--", "--debug"], "linux", () => assert.fail("runner arguments cannot disable release checks"), undefined, undefined, {}), 1);
 });
 
 test("Driver builds forward complete licensing configuration to their runtime build", async () => {
   const env = {
-    MIXRELAY_LEMON_STORE_ID: "1",
-    MIXRELAY_LEMON_PRODUCT_ID: "2",
-    MIXRELAY_LEMON_VARIANT_ID: "3",
-    MIXRELAY_LEMON_CHECKOUT_URL: "https://mixrelay.lemonsqueezy.com/buy/product",
+    ...polarEnvironment,
   };
   for (const platform of ["darwin", "linux"]) {
     const args = platform === "darwin" ? [] : ["--no-bundle"];
@@ -125,10 +103,7 @@ test("Driver builds forward complete licensing configuration to their runtime bu
 
 test("Driver builds reject partial or blank licensing configuration before spawning", async t => {
   const complete = {
-    MIXRELAY_LEMON_STORE_ID: "1",
-    MIXRELAY_LEMON_PRODUCT_ID: "2",
-    MIXRELAY_LEMON_VARIANT_ID: "3",
-    MIXRELAY_LEMON_CHECKOUT_URL: "https://mixrelay.lemonsqueezy.com/buy/product",
+    ...polarEnvironment,
   };
   const errors = [];
   t.mock.method(console, "error", message => errors.push(message));

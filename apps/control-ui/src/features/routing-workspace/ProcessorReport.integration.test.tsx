@@ -7,7 +7,12 @@ import { processorReportState } from '../../../.storybook/fixtures/processorRepo
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
-import { advance, eventually, find } from '../../test-support/fakeTimerQueries';
+import {
+  advance,
+  eventually,
+  find,
+  finishFakeTimerTest,
+} from '../../test-support/fakeTimerQueries';
 import { RoutingWorkspace } from './RoutingWorkspace';
 
 beforeEach(() => {
@@ -39,22 +44,7 @@ beforeEach(() => {
   );
 });
 
-afterEach(async () => {
-  await act(async () => vi.runOnlyPendingTimersAsync());
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
-
-async function input(action: Promise<void>) {
-  let settled = false;
-  await Promise.all([
-    action.finally(() => {
-      settled = true;
-    }),
-    eventually(() => expect(settled).toBe(true)),
-  ]);
-}
+afterEach(() => finishFakeTimerTest(() => act(async () => vi.runOnlyPendingTimersAsync())));
 
 it('shows processing failure and recovery on the affected node while the other node remains available', async () => {
   vi.useFakeTimers();
@@ -125,22 +115,22 @@ it('opens the report from the real processor menu, rescans, and restores keyboar
   await advance();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  await input(user.click(add));
+  await user.click(add);
   const processor = await find('menuitem', { name: 'Processor' });
   processor.focus();
-  await input(user.keyboard('{ArrowRight}'));
+  await user.keyboard('{ArrowRight}');
   const entry = await find('menuitem', { name: 'View search report…' });
   expect(entry).toHaveTextContent('19');
-  await input(user.click(entry));
+  await user.click(entry);
   const dialog = await find('dialog', { name: 'Effect search report' });
   expect(dialog).toHaveTextContent('Unavailable Effect 19');
-  await input(user.click(within(dialog).getByRole('button', { name: 'Rescan audio effects' })));
+  await user.click(within(dialog).getByRole('button', { name: 'Rescan audio effects' }));
   await eventually(() =>
     expect(dialog).toHaveTextContent('Effect search completed without issues.'),
   );
   expect(scan).toHaveBeenCalledExactlyOnceWith([]);
   expect(within(dialog).queryByText('Unavailable Effect 19')).not.toBeInTheDocument();
-  await input(user.keyboard('{Escape}'));
+  await user.keyboard('{Escape}');
   await eventually(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   await eventually(() => expect(add).toHaveFocus());
   expect(apply).not.toHaveBeenCalled();
@@ -168,18 +158,18 @@ it('keeps a failed catalog lookup in the report and retries that lookup without 
   await advance();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  await input(user.click(screen.getByRole('button', { name: 'Add node' })));
+  await user.click(screen.getByRole('button', { name: 'Add node' }));
   const processor = await find('menuitem', { name: 'Processor' });
   processor.focus();
-  await input(user.keyboard('{ArrowRight}'));
+  await user.keyboard('{ArrowRight}');
   const entry = await find('menuitem', { name: 'View search report…' });
   expect(entry).toHaveTextContent('Effect search incomplete');
-  await input(user.click(entry));
+  await user.click(entry);
   const dialog = await find('dialog', { name: 'Effect search report' });
   expect(dialog).toHaveTextContent(
     'Could not load audio effects. The last available list is preserved.',
   );
-  await input(user.click(within(dialog).getByRole('button', { name: 'Retry' })));
+  await user.click(within(dialog).getByRole('button', { name: 'Retry' }));
   await eventually(() => expect(dialog).toHaveTextContent('Scan issues (19)'));
   expect(lookup).toHaveBeenCalledTimes(2);
   expect(scan).not.toHaveBeenCalled();
@@ -228,7 +218,7 @@ it('puts an editor communication failure in its own node and keeps the confirmed
     height: null,
     resizable: false,
   }));
-  await input(user.click(within(node).getByRole('button', { name: 'Retry' })));
+  await user.click(within(node).getByRole('button', { name: 'Retry' }));
   await eventually(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   view.unmount();
   await act(async () => vi.runOnlyPendingTimersAsync());

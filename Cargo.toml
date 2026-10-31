@@ -21,6 +21,7 @@ members = [
   "crates/engine-process",
   "crates/licensing",
   "crates/local-socket",
+  "crates/midi-control",
   "crates/macos-test-support",
   "crates/test-support",
   "tests/fixtures/native-clap",
@@ -40,8 +41,8 @@ members = [
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.96"
-authors = ["MixRelay"]
-repository = "https://github.com/mixrelay/mixrelay"
+authors = ["Echo Vision Lab <support@rawsector.com>"]
+homepage = "https://rawsector.com/products/mixrelay"
 
 [workspace.dependencies]
 rubato = { version = "5.0.0", default-features = false }

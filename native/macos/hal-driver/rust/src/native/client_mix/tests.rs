@@ -1,39 +1,58 @@
 use super::*;
 
+fn geometry(render: u32, capture: u32) -> Geometry {
+    Geometry {
+        endpoint_id: [1; 16],
+        render_channels: render,
+        capture_channels: capture,
+    }
+}
+
+fn add(mixer: &mut ClientMix, id: u32) -> bool {
+    mixer
+        .prepare(id)
+        .is_some_and(|mut prepared| mixer.register(&mut prepared))
+}
+
+/// Detached queues, reserved like the native runtime's retired list.
+fn retired() -> Vec<Queue> {
+    Vec::with_capacity(RETIRED_CAPACITY)
+}
+
 fn mixer(render: u32, capture: u32) -> ClientMix {
-    let mut mixer = ClientMix::new(
-        Geometry {
-            endpoint_id: [1; 16],
-            render_channels: render,
-            capture_channels: capture,
-        },
-        16_384,
-    )
-    .unwrap();
+    let mut mixer = ClientMix::new(geometry(render, capture)).unwrap();
     for id in [42, 43, 44] {
-        assert!(mixer.register(id));
+        assert!(add(&mut mixer, id));
     }
     mixer
 }
 
 #[test]
-fn retention_admission_includes_frame_tags_and_rejects_invalid_geometry() {
-    // At maximum retention capacity, the 1 GiB budget admits three 64-channel
-    // writers or 63 stereo writers. Per-frame tags and headers consume the rest.
-    assert_eq!(client_limit(1_048_576, 64), 3);
-    assert_eq!(client_limit(1_048_576, 2), 63);
-    assert_eq!(client_limit(16_384, 2), MAX_CLIENTS);
-    assert_eq!(client_limit(1_048_576, 0), MAX_CLIENTS);
-    for (capacity, channels) in [
-        (0, 2),
-        (3, 2),
-        (1 << 21, 2),
-        (u32::MAX, 2),
-        (128, 65),
-        (128, u32::MAX),
-    ] {
-        assert_eq!(client_limit(capacity, channels), 0);
+fn queue_admission_includes_frame_tags_and_rejects_invalid_geometry() {
+    // Per-frame tags and headers count against the 1 GiB budget. Retention-sized
+    // queues admitted only three 64-channel writers; playback-sized queues admit 62.
+    // Each admitted queue is resident once prepared, so the bound is also the HAL's
+    // worst-case client-PCM footprint per endpoint.
+    assert_eq!(client_limit(MAX_PCM_BYTES, 64), 62);
+    assert_eq!(client_limit(MAX_PCM_BYTES, 2), MAX_CLIENTS);
+    assert_eq!(client_limit(MAX_PCM_BYTES, 0), MAX_CLIENTS);
+    for channels in [65, u32::MAX] {
+        assert_eq!(client_limit(MAX_PCM_BYTES, channels), 0);
     }
+}
+
+#[test]
+fn registration_rejects_a_queue_prepared_for_another_endpoint_clock() {
+    let mut first = mixer(2, 2);
+    let other = mixer(2, 2);
+    let foreign = other.prepare(99).unwrap();
+    let revision = first.revision();
+    let mut foreign = foreign;
+    assert!(!first.register(&mut foreign));
+    assert_eq!(first.revision(), revision);
+    let mut capture_only = ClientMix::new(geometry(0, 2)).unwrap();
+    assert!(!capture_only.register(&mut first.prepare(5).unwrap()));
+    assert!(add(&mut capture_only, 5));
 }
 
 #[test]
@@ -49,7 +68,7 @@ fn rejected_registration_preserves_existing_pcm_and_membership() {
         });
     }
     let revision = mixer.revision();
-    assert!(!mixer.register(999));
+    assert!(!add(&mut mixer, 999));
     assert_eq!(mixer.revision(), revision);
     let mut output = [9.0; 16];
     assert_eq!(mixer.capture(0, &mut output, 8).available, 8);
@@ -60,7 +79,7 @@ fn rejected_registration_preserves_existing_pcm_and_membership() {
 fn failed_native_start_cannot_publish_a_running_client_clock() {
     let mut mixer = mixer(2, 2);
     let mut clock = Clock::new(48_000, 1, 1).unwrap();
-    assert!(mixer.publish_clock(&clock, true));
+    assert!(mixer.publish_clock(&clock, true, &mut retired()));
     let mut snapshot = ClientPcmSnapshot::new().unwrap();
     assert!(mixer.append_snapshot(&mut snapshot));
     // SAFETY: the test retains the complete snapshot and every immutable grant header.
@@ -71,36 +90,104 @@ fn failed_native_start_cannot_publish_a_running_client_clock() {
             .all(|reader| !reader.clock().unwrap().running)
     );
     assert!(clock.start(100));
-    assert!(!mixer.publish_clock_after(&clock, true, || {
-        assert!(readers.iter().all(|reader| reader.clock().is_none()));
-        false
-    }));
+    assert!(
+        !mixer.publish_clock_after(&clock, true, &mut retired(), || {
+            assert!(readers.iter().all(|reader| reader.clock().is_none()));
+            false
+        })
+    );
     assert!(
         readers
             .iter()
             .all(|reader| reader.clock().is_none_or(|clock| !clock.running))
     );
-    assert!(mixer.publish_clock(&clock, true));
+    assert!(mixer.publish_clock(&clock, true, &mut retired()));
     assert!(readers.iter().all(|reader| reader.clock().unwrap().running));
 }
 
 #[test]
-fn private_queue_epoch_exhaustion_replaces_grants_without_reusing_old_pcm() {
+fn an_exhausted_queue_detaches_without_allocating_until_its_client_installs_a_new_one() {
     let mut mixer = mixer(2, 2);
-    let mut clock = crate::clock::Clock::new(48_000, 1, 1).unwrap();
-    let revision = mixer.revision();
-    for generation in 0..=u64::from(u16::MAX) {
+    let mut clock = Clock::new(48_000, 1, 1).unwrap();
+    let mut detached = retired();
+    while !mixer.needs_queue(42) {
         clock.running = false;
-        assert!(clock.start(generation + 1));
-        assert!(mixer.publish_clock(&clock, true));
+        assert!(clock.start(1));
+        assert!(mixer.publish_clock(&clock, true, &mut detached));
     }
+    assert!(mixer.render(42, 0, &[0.375; 256], 128).accepted);
+    let revision = mixer.revision();
+    // The rate rearm cannot open another epoch: the queue leaves the published set and
+    // waits in the reserved retired list, so the freeze neither allocates nor unmaps.
+    let usage = allocation_counter::measure(|| {
+        assert!(mixer.publish_clock(&clock, true, &mut detached));
+    });
+    assert_eq!(usage.count_total, 0);
+    assert_eq!(detached.len(), 3);
     assert!(mixer.revision() > revision);
     let mut output = [9.0; 256];
     assert_eq!(mixer.capture(0, &mut output, 128).available, 0);
-    assert_eq!(output.map(f32::to_bits), [0.0_f32.to_bits(); 256]);
-    assert!(mixer.render(42, 0, &[0.375; 256], 128).accepted);
+    assert!(!mixer.render(42, 0, &[0.25; 256], 128).accepted);
+    // The client's next IO start maps a fresh queue on control and installs it.
+    let mut prepared = mixer.prepare(42).unwrap();
+    assert!(mixer.install(&mut prepared, &mut detached));
+    assert!(mixer.publish_clock(&clock, false, &mut detached));
+    assert!(mixer.render(42, 0, &[0.25; 256], 128).accepted);
     assert_eq!(mixer.capture(0, &mut output, 128).available, 128);
-    assert_eq!(output.map(f32::to_bits), [0.375_f32.to_bits(); 256]);
+    assert_eq!(output.map(f32::to_bits), [0.25_f32.to_bits(); 256]);
+    assert!(mixer.needs_queue(43));
+}
+
+#[test]
+fn a_writer_in_flight_is_not_mistaken_for_an_exhausted_queue() {
+    let mixer = mixer(2, 2);
+    let queue = mixer.clients[0].queue.as_ref().unwrap();
+    // IO-start preparation runs alongside IO, so a MixOutput callback may hold the claim.
+    let claim = queue.hold_producer().unwrap();
+    assert!(!queue.can_rearm());
+    assert!(!mixer.needs_queue(42));
+    drop(claim);
+    assert!(queue.can_rearm());
+}
+
+#[test]
+fn a_refused_endpoint_rearm_leaves_every_queue_and_the_clock_published() {
+    let mut mixer = mixer(2, 2);
+    let mut clock = Clock::new(48_000, 1, 1).unwrap();
+    assert!(clock.start(1));
+    assert!(mixer.publish_clock(&clock, true, &mut retired()));
+    assert!(mixer.render(42, 0, &[0.375; 256], 128).accepted);
+    let mut snapshot = ClientPcmSnapshot::new().unwrap();
+    assert!(mixer.append_snapshot(&mut snapshot));
+    // SAFETY: the test retains the complete snapshot and every immutable grant header.
+    let readers = unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }.unwrap();
+    let before = readers[0].clock().unwrap();
+    let revision = mixer.revision();
+    let mut faster = clock.clone();
+    assert!(faster.set_rate(96_000, 2));
+    assert!(!mixer.publish_clock_after(&faster, true, &mut retired(), || false));
+    assert_eq!(mixer.revision(), revision);
+    assert_eq!(readers[0].clock(), Some(before));
+    let mut output = [9.0; 256];
+    assert_eq!(mixer.capture(0, &mut output, 128).available, 128);
+}
+
+#[test]
+fn a_new_geometry_detaches_queues_of_the_old_shape_without_mapping() {
+    let mut mixer = mixer(2, 2);
+    let mut detached = retired();
+    let revision = mixer.revision();
+    let usage = allocation_counter::measure(|| mixer.reconfigure(geometry(4, 2), &mut detached));
+    assert_eq!(usage.count_total, 0);
+    assert_eq!(detached.len(), 3);
+    assert!(mixer.revision() > revision);
+    assert!([42, 43, 44].iter().all(|id| mixer.needs_queue(*id)));
+    let mut snapshot = ClientPcmSnapshot::new().unwrap();
+    assert!(mixer.append_snapshot(&mut snapshot));
+    // SAFETY: the snapshot retains every grant it holds, here none.
+    assert!(
+        !matches!(unsafe { ClientPcmSnapshot::decode(snapshot.as_raw()) }, Ok(readers) if !readers.is_empty())
+    );
 }
 
 #[test]
@@ -147,7 +234,7 @@ fn overlapping_clients_mix_once_and_registration_reuse_cannot_replay_or_reset_it
             .all(|frame| frame == [0.375, 0.375, 0.0, 0.0])
     );
     mixer.remove(43);
-    assert!(mixer.register(43));
+    assert!(add(&mut mixer, 43));
     assert_eq!(mixer.capture(100, &mut output, 8).available, 8);
     assert!(
         output
@@ -191,19 +278,6 @@ fn a_finished_client_supplies_zero_beyond_its_window_while_its_peer_continues() 
     assert!(!mixer.render(42, 4, &[0.25; 16], 8).accepted);
     assert_eq!(mixer.capture(u64::MAX, &mut output, 8).available, 0);
     assert_eq!(output.map(f32::to_bits), [0; 16]);
-}
-
-#[test]
-fn replacement_preserves_registration_but_starts_an_empty_pcm_timeline() {
-    let mixer = mixer(2, 2);
-    assert!(mixer.render(42, 0, &[0.5; 16], 8).accepted);
-    let replacement = mixer.replacement(mixer.geometry(), 16_384).unwrap();
-    let mut output = [1.0; 16];
-    assert_eq!(replacement.capture(0, &mut output, 8).available, 0);
-    assert_eq!(output.map(f32::to_bits), [0; 16]);
-    assert!(replacement.render(42, 0, &[0.25; 16], 8).accepted);
-    assert_eq!(replacement.capture(0, &mut output, 8).available, 8);
-    assert_eq!(output.map(f32::to_bits), [0.25_f32.to_bits(); 16]);
 }
 
 #[test]
@@ -277,17 +351,9 @@ fn client_mixing_throughput() {
     const FRAMES: u32 = 512;
     for (render, capture, contributors) in [(2, 2, 1), (2, 2, 2), (2, 2, 8), (2, 7, 2), (64, 64, 2)]
     {
-        let mut mixer = ClientMix::new(
-            Geometry {
-                endpoint_id: [1; 16],
-                render_channels: render,
-                capture_channels: capture,
-            },
-            16_384,
-        )
-        .unwrap();
+        let mut mixer = ClientMix::new(geometry(render, capture)).unwrap();
         for client in 1..=contributors {
-            assert!(mixer.register(client));
+            assert!(add(&mut mixer, client));
         }
         let input = vec![0.125; (FRAMES * render) as usize];
         let mut output = vec![0.0; (FRAMES * capture) as usize];
@@ -321,4 +387,29 @@ fn client_mixing_throughput() {
             elapsed.as_micros()
         );
     }
+}
+
+#[test]
+fn a_widened_geometry_maps_and_installs_queues_only_within_the_pcm_budget() {
+    let narrow = buffer::mr_shared_audio_buffer_required_bytes(QUEUE_FRAMES, 2);
+    let wide = buffer::mr_shared_audio_buffer_required_bytes(QUEUE_FRAMES, 16);
+    // Three 2-channel queues fit, but only one 16-channel queue.
+    let budget = (3 * narrow).max(wide);
+    assert_eq!(budget / wide, 1);
+    let mut mixer = ClientMix::new(geometry(2, 2)).unwrap().with_budget(budget);
+    for id in [42, 43, 44] {
+        assert!(add(&mut mixer, id));
+    }
+    let mut detached = retired();
+    mixer.reconfigure(geometry(16, 2), &mut detached);
+    // Registration-time admission no longer bounds what the wider shape maps.
+    let mut first = mixer.prepare(42).unwrap();
+    let mut second = mixer.prepare(43).unwrap();
+    assert!(mixer.install(&mut first, &mut detached));
+    assert!(mixer.prepare(44).is_none());
+    assert!(!mixer.install(&mut second, &mut detached));
+    assert!(second.into_queue().is_some());
+    // The installed client may still replace its own queue.
+    let mut replacement = mixer.prepare(42).unwrap();
+    assert!(mixer.install(&mut replacement, &mut detached));
 }

@@ -28,7 +28,12 @@ fn deferred_graph_consumption_keeps_all_pcm_already_covered_by_native_credit() {
 fn preallocated_retention_recovers_four_seconds_and_a_full_ring_of_quiet_and_signal() {
     let capacity = mixrelay_audio_io::retention::RING_FRAMES;
     for batch in [192_000, u64::from(capacity)] {
-        let mut input = AlignedInput::with_capacity(capacity);
+        // Production geometry: playback-sized HAL client queues drained by the pump into
+        // the retention-sized source while the graph defers its reads.
+        let mut input = AlignedInput::with_capacity(
+            capacity,
+            mixrelay_macos_transport::client_pcm::QUEUE_FRAMES,
+        );
         input.repeat_signal = true;
         let measured = allocation_counter::measure(|| input.run_batched(batch));
         assert_eq!(measured.count_total, 0);
@@ -58,15 +63,16 @@ struct AlignedInput {
 }
 impl AlignedInput {
     fn new() -> Self {
-        Self::with_capacity(16_384)
+        Self::with_capacity(16_384, 16_384)
     }
 
-    fn with_capacity(capacity: u32) -> Self {
+    fn with_capacity(capacity: u32, queue: u32) -> Self {
         let nanos = Arc::new(AtomicU64::new(0));
-        let registry = SourceRegistry::with_clock(Box::new(Clock {
-            origin: Instant::now(),
-            nanos: nanos.clone(),
-        }));
+        let registry =
+            crate::endpoint_service::virtual_pcm::test_storage::registry(Box::new(Clock {
+                origin: Instant::now(),
+                nanos: nanos.clone(),
+            }));
         let mut request = SourceRequest {
             capacity_frames: capacity,
             channels: 2,
@@ -82,10 +88,8 @@ impl AlignedInput {
         registry.read_audio(token, &mut output, 128, 48_000);
         assert!(registry.set_clock_master(token, true));
         let clock = transport.clock().unwrap();
-        let converter = Converter::new(&mut transport, clock, (48_000, 2, capacity))
-            .unwrap()
-            .unwrap();
-        let (writer, queues) = client_grants_with_capacity(capacity);
+        let converter = started(&mut transport, clock, (48_000, 2));
+        let (writer, queues) = client_grants_with_capacity(queue);
         Self {
             registry,
             transport,
@@ -157,12 +161,16 @@ impl AlignedInput {
             ))
             .enumerate()
         {
-            self.playhead += batch;
-            self.publish_callbacks();
-            self.nanos
-                .store(self.playhead * 1_000_000_000 / 48_000, Ordering::Relaxed);
-            while let Some(window) = self.mixer.window(&self.queues, |_| Some(self.playhead)) {
-                self.transfer(window);
+            // The pump keeps draining client queues while only the graph is deferred.
+            let deferred = self.playhead + batch;
+            while self.playhead < deferred {
+                self.playhead = (self.playhead + 2_048).min(deferred);
+                self.publish_callbacks();
+                self.nanos
+                    .store(self.playhead * 1_000_000_000 / 48_000, Ordering::Relaxed);
+                while let Some(window) = self.mixer.window(&self.queues, |_| Some(self.playhead)) {
+                    self.transfer(window);
+                }
             }
             let clock = self.registry.clock(self.token).unwrap();
             if step == 0 {
@@ -208,7 +216,7 @@ impl AlignedInput {
             *time = 1_000_000_000 + (window.first + offset as u64) * 1_000_000_000 / 48_000;
         }
         self.converter
-            .observe(self.transport.clock().unwrap())
+            .observe(&self.transport, self.transport.clock().unwrap())
             .unwrap();
         self.converter
             .push(
@@ -251,7 +259,15 @@ impl AlignedInput {
         let frames = cycle.frames;
         let frontier = self
             .registry
-            .source_time_for_credit(self.token, 48_000, frames, available_frames)
+            .source_time_for_credit(
+                self.token,
+                48_000,
+                mixrelay_macos_transport::source_registry::GraphCredit {
+                    frames,
+                    available_frames,
+                    published: None,
+                },
+            )
             .map(|time| CaptureFrontier::new(self.token, time));
         let period = self
             .registry

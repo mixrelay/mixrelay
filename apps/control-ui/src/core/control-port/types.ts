@@ -589,6 +589,8 @@ export type GraphCatalogAction =
   | { action: 'create'; name: string }
   | { action: 'select'; id: string }
   | { action: 'delete'; id: string }
+  | { action: 'undo_delete' }
+  | { action: 'redo_delete' }
   | { action: 'rename'; id: string; name: string };
 
 export type GraphCatalogRequest = GraphCatalogAction & {

@@ -11,5 +11,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.4"
-  }
+  },
+  "author": "Echo Vision Lab <support@rawsector.com>",
+  "homepage": "https://rawsector.com/products/mixrelay"
 }

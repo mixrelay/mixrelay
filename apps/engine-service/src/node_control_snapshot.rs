@@ -3,8 +3,8 @@
 
 use mixrelay_audio_graph::{GraphDocument, NodeConfig, NodeSpec};
 use mixrelay_control_protocol::{
-    EngineControlSnapshot, GraphControlSnapshot, GraphNodeControls, NodeControlCapabilities,
-    NodeControlDescriptor, NodeControlSnapshot, ProtocolError,
+    EngineControlSnapshot, GraphControlSnapshot, GraphLayout, GraphNodeControls,
+    NodeControlCapabilities, NodeControlDescriptor, NodeControlSnapshot, ProtocolError,
 };
 
 use crate::{EngineGraphController, graph_catalog::unavailable, node_control};
@@ -43,17 +43,18 @@ impl EngineGraphController {
     pub(super) fn refresh_control_snapshot(&self) {
         let graph = self.graph.read();
         let (graphs, recorder_ids) = self.catalog.inspect(|catalog| {
+            let empty_layout = GraphLayout::default();
             let documents = catalog.and_then(|value| value.as_ref().ok()).map_or_else(
-                || vec![("session", "Untitled Graph", &*graph)],
+                || vec![("session", "Untitled Graph", &*graph, &empty_layout)],
                 |value| value.control_documents().collect(),
             );
             let graphs = documents
                 .iter()
-                .map(|(id, name, document)| graph_snapshot(id, name, document))
+                .map(|(id, name, document, layout)| graph_snapshot(id, name, document, layout))
                 .collect();
             let recorder_ids = documents
                 .iter()
-                .flat_map(|(id, _, document)| {
+                .flat_map(|(id, _, document, _)| {
                     document.nodes.iter().filter_map(move |node| {
                         let NodeConfig::Recorder { channels } = node.config else {
                             return None;
@@ -133,7 +134,12 @@ impl EngineGraphController {
     }
 }
 
-fn graph_snapshot(id: &str, name: &str, graph: &GraphDocument) -> GraphControlSnapshot {
+fn graph_snapshot(
+    id: &str,
+    name: &str,
+    graph: &GraphDocument,
+    layout: &GraphLayout,
+) -> GraphControlSnapshot {
     GraphControlSnapshot {
         id: id.to_owned(),
         name: name.to_owned(),
@@ -142,8 +148,16 @@ fn graph_snapshot(id: &str, name: &str, graph: &GraphDocument) -> GraphControlSn
             .iter()
             .filter(|node| node_control::controllable(node))
             .filter_map(|node| {
+                let mut descriptor = descriptor(node)?;
+                if let Some(label) = layout
+                    .node_labels
+                    .get(node.id.as_str())
+                    .or_else(|| layout.node_labels.get(&format!("{}::host-source", node.id)))
+                {
+                    descriptor.label = Some(label.clone());
+                }
                 Some(NodeControlSnapshot {
-                    descriptor: descriptor(node)?,
+                    descriptor,
                     recorder: None,
                 })
             })

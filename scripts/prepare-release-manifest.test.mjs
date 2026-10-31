@@ -33,20 +33,20 @@ test("one product produces the exact publisher schema and preserve installer inp
   }
   assert.deepEqual(readFileSync(join(directory, file)), original);
   assert.equal(readFileSync(join(directory, "Uninstall MixRelay.pkg"), "utf8"), "Uninstaller is not selected\n");
-  assert.equal(readdirSync(directory).length, 8);
+  assert.equal(readdirSync(directory).length, 9);
 });
 
 test("the CLI publishes the complete qualified artifact selection and an explicit public notes URL", t => {
   const { directory, args, artifactArgs, artifacts } = fixture(t);
   const script = fileURLToPath(new URL("./prepare-release-manifest.mjs", import.meta.url));
   const result = spawnSync(process.execPath, [script, ...args,
-    "--notes-url", "https://mixrelay.com/releases/1.2.3",
+    "--notes-url", "https://rawsector.com/products/mixrelay",
     ...artifactArgs], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   const manifest = JSON.parse(readFileSync(join(directory, "mix-relay.release.json"), "utf8"));
   assert.deepEqual(manifest, {
     product: "mix-relay", version: "1.2.3", published_at: publishedAt,
-    notes_url: "https://mixrelay.com/releases/1.2.3",
+    notes_url: "https://rawsector.com/products/mixrelay",
     artifacts,
   });
 });
@@ -55,6 +55,14 @@ test('qualification cannot be omitted or used to release a subset of tested arti
   const { args, artifactArgs } = fixture(t);
   assert.throws(() => prepareReleaseManifest([...args.slice(0, 10), ...artifactArgs]), /--candidate and --reports/);
   assert.throws(() => prepareReleaseManifest([...args, ...artifactArgs.slice(0, 2)]), /exactly/);
+});
+
+test('the update manifest excludes the plugin but publication requires its exact candidate bytes and evidence', t => {
+  const f = fixture(t);
+  const plugin = f.candidate.artifacts.find(a => a.id === 'macos-universal-streamdeck');
+  writeFileSync(join(f.directory, plugin.file), 'changed plugin after qualification');
+  assert.throws(() => prepareReleaseManifest([...f.args, ...f.artifactArgs]), /bytes changed/);
+  assert.throws(() => prepareReleaseManifest([...f.args, ...f.artifactArgs, '--artifact', `macos:universal:${plugin.file}`]), /PKG/);
 });
 
 test("invalid options and artifact declarations cannot write a manifest", t => {
@@ -102,4 +110,13 @@ test("missing, empty, directory and linked installers are rejected without chang
   assert.throws(() => prepareReleaseManifest([...args, "--artifact", "macos:universal:MixRelay Install.pkg"]),
     { code: "EEXIST" });
   assert.equal(readFileSync(path, "utf8"), "Existing manifest must remain unchanged\n");
+});
+
+test('release notes reject private releases, unresolved domains and unapproved new hosts before writing', t => {
+  const { args, artifactArgs, directory } = fixture(t);
+  for (const url of ['https://github.com/mixrelay/mixrelay/releases', 'https://mixrelay.com/releases',
+    'https://new-host.example.org/notes']) {
+    assert.throws(() => prepareReleaseManifest([...args, ...artifactArgs, '--notes-url', url]), /unapproved/);
+    assert.equal(existsSync(join(directory, 'mix-relay.release.json')), false);
+  }
 });
