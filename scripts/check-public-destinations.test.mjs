@@ -27,8 +27,8 @@ test('new hosts, deceptive hosts, protocols and unapproved mailboxes fail', () =
 
 test('approved product, checkout, support and legal references pass', () => {
   for (const destination of ['https://rawsector.com/products/mixrelay', 'https://appserver.rawsector.com/products',
-    'https://downloads.rawsector.com/mix-relay.pkg', 'https://mixrelay.lemonsqueezy.com/buy/product',
-    'https://www.lemonsqueezy.com/buyer-terms', 'https://www.lemonsqueezy.com/privacy',
+    'https://downloads.rawsector.com/mix-relay.pkg', 'https://buy.polar.sh/polar_cl_fixture',
+    'https://polar.sh/legal/checkout-buyer-terms', 'https://polar.sh/legal/privacy-policy',
     'https://support.apple.com/en-gb/guide/mac-help', 'https://www.law.go.kr/LSW/index.html',
     'https://www.easylaw.go.kr/CSP/Main.laf', 'mailto:support@rawsector.com', 'legal@dsub.io', 'privacy@dsub.io']) {
     assert.doesNotThrow(() => assertPublicDestination(destination));

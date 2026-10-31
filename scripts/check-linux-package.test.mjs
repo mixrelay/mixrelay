@@ -1,3 +1,5 @@
+import { licensingBuildMarker } from './polar-configuration.mjs';
+import { polarEnvironment } from './polar-configuration.fixture.mjs';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
@@ -58,7 +60,9 @@ function elfHeader(machine) {
   return header;
 }
 
-// Every listed payload is 64 bytes; the receipt is padded JSON so its listed size matches its extracted bytes.
+// The desktop includes executable configuration; other payloads and the padded receipt are 64 bytes.
+const desktopMarker = Buffer.from(licensingBuildMarker(polarEnvironment));
+const desktopSize = 64 + desktopMarker.length;
 const fixture = (architecture = 'arm64') => ({
   packageName: 'mix-relay',
   homepage: 'https://rawsector.com/products/mixrelay',
@@ -68,12 +72,12 @@ const fixture = (architecture = 'arm64') => ({
   architecture: `${architecture}\n`,
   depends: 'libpipewire-0.3-0t64 (>= 1.2.0), liblilv-0-0, libgcc-s1, libc6 (>= 2.39), libwebkit2gtk-4.1-0, libgtk-3-0t64, librsvg2-common, pipewire (>= 1.2.0), wireplumber (>= 0.5.0), gnome-keyring, libpam-gnome-keyring, libayatana-appindicator3-1, zenity, pkexec, polkit-1-auth-agent | lxpolkit, systemd, util-linux',
   contents: [
-    ...binaries.map(name => `-rwxr-xr-x 0/0 64 2026-09-20 22:00 ./usr/bin/${name}`),
+    ...binaries.map(name => `-rwxr-xr-x 0/0 ${name === 'mixrelay-desktop' ? desktopSize : 64} 2026-09-20 22:00 ./usr/bin/${name}`),
     ...wirePlumberFiles.map(path => `-rw-r--r-- 0/0 64 2026-09-20 22:00 ./${path}`),
     ...uninstallFiles.map(path => `-rw-r--r-- 0/0 64 2026-09-20 22:00 ./${path}`),
     ...documentationFiles.map(path => `-rw-r--r-- 0/0 64 2026-09-20 22:00 ./${path}`),
   ].join('\n'),
-  elfHeaders: Object.fromEntries(binaries.map(name => [`usr/bin/${name}`, elfHeader(architecture === 'arm64' ? 183 : 62)])),
+  elfHeaders: Object.fromEntries(binaries.map(name => [`usr/bin/${name}`, name === 'mixrelay-desktop' ? Buffer.concat([elfHeader(architecture === 'arm64' ? 183 : 62), desktopMarker]) : elfHeader(architecture === 'arm64' ? 183 : 62)])),
 });
 const payloads = data => new Map([...Object.entries(data.elfHeaders), [receiptPath, Buffer.from(data.versionReceipt)]]);
 
@@ -506,7 +510,7 @@ test('desktop and service executables require root ownership and exact 0755 perm
 });
 test('zero-length required executables fail', () => {
   const data = fixture();
-  assert.throws(() => validatePackage({ ...data, contents: data.contents.replaceAll(' 64 ', ' 0 ') }),
+  assert.throws(() => validatePackage({ ...data, contents: data.contents.replace(/0\/0 \d+ /g, '0/0 0 ') }),
     /non-empty regular executable/);
 });
 test('ELF machine, class, byte order, and header validity must match package architecture', () => {
@@ -534,7 +538,7 @@ test('oversized executable or package listings are rejected before streaming ext
   const data = fixture();
   assert.throws(() => validatePackage({
     ...data,
-    contents: data.contents.replace(' 64 ', ' 268435457 '),
+    contents: data.contents.replace(/0\/0 \d+ /, '0/0 268435457 '),
   }), /bounded inspection size/);
   assert.throws(() => validatePackage({ ...data, contents: `${data.contents}\nnot a dpkg-deb listing` }), /Unrecognized Debian payload listing/);
 });
@@ -562,7 +566,7 @@ test('listing forces numeric ownership and executable extraction disables inheri
     runMetadata,
     fakeExtractor(payloads(data), extractionCalls, data.contents),
   );
-  assert.equal(result.scope, 'metadata-payload-elf-header-only');
+  assert.equal(result.scope, 'metadata-payload-elf-and-polar-configuration');
   assert.deepEqual(result.elfArchitectures, Object.fromEntries(binaries.map(name => [`usr/bin/${name}`, 'AArch64'])));
   assert.ok(calls.every(({ command, args }) => command === 'dpkg-deb'
     && ((args[0] === '--field' && ['Package', 'Version', 'Homepage', 'Maintainer', 'Architecture', 'Depends'].includes(args.at(-1)))
@@ -660,7 +664,7 @@ test('Debian artifact inspection rejects missing or modified lifecycle hooks', a
 test('the product contains editor, both services, one remover and the same version receipt', () => {
   const config = linuxConfig();
   const product = { ...fixture('amd64'),
-    contents: [...binaries.map(name => `-rwxr-xr-x 0/0 64 2026-10-12 00:00 ./usr/bin/${name}`),
+    contents: [...binaries.map(name => `-rwxr-xr-x 0/0 ${name === 'mixrelay-desktop' ? desktopSize : 64} 2026-10-12 00:00 ./usr/bin/${name}`),
       ...Object.keys(config.bundle.linux.deb.files).map(path => `-rw-r--r-- 0/0 64 2026-10-12 00:00 .${path}`)].join('\n'),
   };
   assert.deepEqual(validatePackage(product).executables, binaries.map(name => `usr/bin/${name}`));
@@ -695,5 +699,20 @@ test('DEB rejects an unresolved homepage and a maintainer without a contact addr
   for (const change of [{ homepage: 'https://mixrelay.com' }, { homepage: undefined },
     { maintainer: 'MixRelay' }, { maintainer: 'Unknown Packager' }, { maintainer: undefined }]) {
     assert.throws(() => validatePackage({ ...fixture(), ...change }), /Homepage and Maintainer/);
+  }
+});
+
+
+test('Debian inspection refuses an unconfigured desktop or a sandbox payment configuration', async () => {
+  const data = fixture();
+  for (const marker of ['', licensingBuildMarker({...polarEnvironment, MIXRELAY_POLAR_SANDBOX:'1',
+    MIXRELAY_POLAR_CHECKOUT_URL:'https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_fixture/redirect'})]) {
+    const binary = Buffer.concat([elfHeader(183),Buffer.from(marker)]);
+    const invalid = {...data,
+      contents:data.contents.replace(`0/0 ${desktopSize} `,`0/0 ${binary.length} `),
+      elfHeaders:{...data.elfHeaders,'usr/bin/mixrelay-desktop':binary}};
+    await assert.rejects(inspectPackage('/fixture/unconfigured.deb', (_command,args) => ({
+      status:0,stdout:metadataOutput(args.at(-1),invalid),
+    }), fakeExtractor(payloads(invalid),[],invalid.contents)), /Polar payment configuration|Polar production/);
   }
 });

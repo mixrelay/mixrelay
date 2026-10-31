@@ -1,3 +1,4 @@
+import { polarEnvironment } from './polar-configuration.fixture.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -8,8 +9,9 @@ import { fileURLToPath } from 'node:url';
 import test, { before, after } from 'node:test';
 import { buildStreamDeckArtifact, qualifyStreamDeckArtifact, validatePackedStreamDeck, validateStreamDeckManifest } from './streamdeck-artifact.mjs';
 import { qualificationFixture } from './e2e/qualification.fixture.mjs';
-import { createCandidate, evaluateQualification, readReports } from './qualification.mjs';
+import { createCandidate as createCandidateRaw, evaluateQualification, readReports } from './qualification.mjs';
 import { digest } from './support-contract.mjs';
+const createCandidate = (...args) => createCandidateRaw(...args.slice(0, 4), args[4], polarEnvironment);
 
 const plugin = fileURLToPath(new URL('../apps/streamdeck-plugin/', import.meta.url));
 const require = createRequire(join(plugin, 'package.json'));

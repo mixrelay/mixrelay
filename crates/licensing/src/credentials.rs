@@ -194,7 +194,7 @@ mod tests {
     fn stored_paid_access_requires_a_valid_unexpired_seat() {
         let mut record = EntitlementRecord::new(1_000);
         let activation: Activation =
-            serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
+            serde_json::from_str(r#"{"licenseId":"70000000-0000-4000-8000-000000000007","instanceId":"a0000000-0000-4000-8000-000000000001","purchasedMajor":0}"#)
                 .unwrap();
         record.record_verified(activation, 2_000).unwrap();
         let value = StoredLicense {
@@ -215,7 +215,7 @@ mod tests {
         let mut record = EntitlementRecord::new(1_000);
         let trial_expiry = record.observe(1_000).expires_at_unix;
         let activation: Activation =
-            serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
+            serde_json::from_str(r#"{"licenseId":"70000000-0000-4000-8000-000000000007","instanceId":"a0000000-0000-4000-8000-000000000001","purchasedMajor":0}"#)
                 .expect("fixture activation");
         record
             .record_verified(activation, 2_000)
@@ -236,7 +236,11 @@ mod tests {
         assert!(saved.key.is_none() && saved.record.activation().is_none());
         assert_eq!(saved.record.observe(2_001).expires_at_unix, trial_expiry);
         assert!(!value.expose_secret().contains("fixture-paid-key"));
-        assert!(!value.expose_secret().contains("seat-1"));
+        assert!(
+            !value
+                .expose_secret()
+                .contains("a0000000-0000-4000-8000-000000000001")
+        );
     }
 
     #[test]

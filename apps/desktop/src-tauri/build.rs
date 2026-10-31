@@ -3,6 +3,7 @@
     reason = "a build script fails the build by panicking; Cargo prints the message"
 )]
 fn main() {
+    configure_licensing();
     println!("cargo:rustc-check-cfg=cfg(mixrelay_application_clock_fixture)");
     println!("cargo:rerun-if-env-changed=MIXRELAY_APPLICATION_CLOCK_FIXTURE");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
@@ -85,4 +86,29 @@ fn build_macos_audio(identity: &str) {
     println!("cargo:rerun-if-changed={engine_include}/MRApplicationClock.h");
     println!("cargo:rerun-if-changed={hal_include}/MRHALControlProtocol.h");
     println!("cargo:rerun-if-changed={hal_include}/MRSharedAudioBuffer.h");
+}
+
+fn configure_licensing() {
+    for key in [
+        "MIXRELAY_POLAR_ORGANIZATION_ID",
+        "MIXRELAY_POLAR_BENEFIT_ID",
+        "MIXRELAY_POLAR_CHECKOUT_URL",
+        "MIXRELAY_POLAR_SANDBOX",
+        "MIXRELAY_DESKTOP_CODE_CHECK",
+    ] {
+        println!("cargo:rerun-if-env-changed={key}");
+    }
+    let script = "../../../scripts/polar-configuration.mjs";
+    println!("cargo:rerun-if-changed={script}");
+    let output = std::process::Command::new("node")
+        .args([script, "build-marker"])
+        .output()
+        .expect("Node.js is required to validate public Polar build configuration");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let marker = String::from_utf8(output.stdout).expect("Polar configuration is UTF-8");
+    println!("cargo:rustc-env=MIXRELAY_POLAR_CONFIGURATION={marker}");
 }

@@ -1,12 +1,16 @@
+import { writeInstallerFixture } from './installer-configuration.fixture.mjs';
+import { licensingBuildMarker } from './polar-configuration.mjs';
+import { polarEnvironment } from './polar-configuration.fixture.mjs';
 import assert from 'node:assert/strict';
 import { writeFileSync, readFileSync, symlinkSync, mkdirSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createCandidate, validateCandidate, evaluateQualification, readReports, qualificationInventory } from './qualification.mjs';
+import { artifactBytes, candidateCreationEnvironment, createCandidate as createCandidateRaw, validateCandidate, evaluateQualification, readReports, qualificationInventory } from './qualification.mjs';
 import { assertQualifiedRelease } from './prepare-release-manifest.mjs';
 import { validateRun, successfulSourceRun, readWorkflowReports } from './qualification-ci.mjs';
 import { qualificationMatrix } from './support-contract.mjs';
 import { qualificationFixture } from './e2e/qualification.fixture.mjs';
+const createCandidate = (...args) => createCandidateRaw(...args.slice(0, 4), args[4], polarEnvironment);
 
 test('one candidate maps the same Universal PKG and per-CPU DEBs across every required environment', t => {
   const f = qualificationFixture(t);
@@ -119,3 +123,41 @@ test('native qualification and publication require successful source CI for the 
     assert.throws(() => successfulSourceRun([{ ...run, ...changed }], candidate), /no successful/);
   }
 });
+
+test('candidate creation and validation refuse missing or sandbox payment configuration', t => {
+  const f = qualificationFixture(t);
+  const selected = f.candidate.artifacts.map(artifact => `${artifact.id}:${artifact.file}`);
+  assert.throws(() => createCandidateRaw(f.directory,selected,f.candidate.sourceRevision,f.candidate.version,undefined,{}), /Release requires/);
+  assert.throws(() => validateCandidate({...f.candidate,licensing:undefined},f.directory), /Polar production/);
+  assert.throws(() => validateCandidate({...f.candidate,licensing:{...f.candidate.licensing,sandbox:true}},f.directory), /Polar production/);
+});
+
+
+test('local candidate creation reads the same private release payment values without opening a keychain', () => {
+  const config = {polar:{organizationId:polarEnvironment.MIXRELAY_POLAR_ORGANIZATION_ID,
+    benefitId:polarEnvironment.MIXRELAY_POLAR_BENEFIT_ID,checkoutUrl:polarEnvironment.MIXRELAY_POLAR_CHECKOUT_URL}};
+  assert.deepEqual(candidateCreationEnvironment({},'darwin',() => config),polarEnvironment);
+  assert.throws(() => candidateCreationEnvironment({},'darwin',() => ({})),/Release requires/);
+  assert.deepEqual(candidateCreationEnvironment(polarEnvironment,'linux',() => assert.fail('CI uses Actions variables')),polarEnvironment);
+});
+
+for (const id of ['macos-universal-pkg', 'linux-x64-deb', 'linux-arm64-deb', 'linux-x64-arch']) {
+  for (const operation of ['creation', 'validation']) test(`candidate ${operation} inspects the desktop payload in ${id}`, t => {
+    const f = qualificationFixture(t);
+    const artifact = f.candidate.artifacts.find(item => item.id === id);
+    const definition = f.loaded.contract.artifacts.find(item => item.id === id);
+    const selected = f.candidate.artifacts.map(item => `${item.id}:${item.file}`);
+    for (const payload of [Buffer.from('Old unconfigured desktop'),
+      Buffer.from(licensingBuildMarker({...polarEnvironment, MIXRELAY_POLAR_CHECKOUT_URL: 'https://buy.polar.sh/polar_cl_other'}))]) {
+      writeInstallerFixture(join(f.directory, artifact.file), definition.format, payload);
+      if (operation === 'creation') {
+        assert.throws(() => createCandidate(f.directory, selected, f.candidate.sourceRevision, f.candidate.version), /configuration/);
+      } else {
+        // Rehashing an old installer must not make a forged candidate valid either.
+        const candidate = structuredClone(f.candidate);
+        Object.assign(candidate.artifacts.find(item => item.id === id), artifactBytes(f.directory, artifact));
+        assert.throws(() => validateCandidate(candidate, f.directory), /configuration/);
+      }
+    }
+  });
+}

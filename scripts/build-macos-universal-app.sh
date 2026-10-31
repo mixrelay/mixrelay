@@ -7,6 +7,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 repo_root="${0:A:h:h}"
+node "$repo_root/scripts/polar-configuration.mjs" check-release
 
 if (( $# != 0 )); then
   print -u2 "Usage: scripts/build-macos-universal-app.sh"

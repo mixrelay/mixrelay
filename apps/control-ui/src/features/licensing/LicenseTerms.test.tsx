@@ -51,10 +51,10 @@ describe('localized App license presentation', () => {
     for (const version of ['1.0', '0.x', '1.x']) {
       expect(purchases).toContain(version);
     }
-    expect(source).toContain('2026-10-30');
+    expect(source).toContain('2026-10-31');
     expect(source).toContain('111-42-04359');
     expect(source).toContain('https://appserver.rawsector.com');
-    expect(source).toContain('https://www.lemonsqueezy.com/privacy');
+    expect(source).toContain('https://polar.sh/legal/privacy-policy');
     expect(source).toContain('support@rawsector.com');
   });
 

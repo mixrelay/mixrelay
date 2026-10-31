@@ -1,3 +1,5 @@
+import { writeInstallerFixture } from '../installer-configuration.fixture.mjs';
+import { polarEnvironment } from '../polar-configuration.fixture.mjs';
 // Synthetic gate fixtures. These files are never installed or used as release evidence.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,10 +17,10 @@ export function qualificationFixture(t) {
     const names = { 'macos-universal-pkg': 'MixRelay Install.pkg', 'linux-x64-deb': 'MixRelay-x64.deb',
       'linux-arm64-deb': 'MixRelay-arm64.deb', 'linux-x64-arch': 'MixRelay-x64.pkg.tar.zst', 'macos-universal-streamdeck': 'MixRelay-StreamDeck-1.2.3.streamDeckPlugin' };
     const file = names[artifact.id];
-    writeFileSync(join(directory, file), `Synthetic installer fixture: ${artifact.id}`);
+    writeInstallerFixture(join(directory, file), artifact.format);
     return `${artifact.id}:${file}`;
   });
-  const candidate = createCandidate(directory, selections, 'a'.repeat(40), '1.2.3', loaded);
+  const candidate = createCandidate(directory, selections, 'a'.repeat(40), '1.2.3', loaded, polarEnvironment);
   const candidatePath = join(directory, 'mix-relay.candidate.json');
   writeFileSync(candidatePath, JSON.stringify(candidate));
   const reportsPath = join(directory, 'reports');

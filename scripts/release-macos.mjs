@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { constants, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { constants, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -10,6 +10,7 @@ import { checkPackageOutput } from './build-macos-installer-pkgs.mjs';
 import { checkNotarizationCredentials, notarizationArguments } from './macos-notarization.mjs';
 import { loadContract, checkGenerated } from './support-contract.mjs';
 import { streamDeckFilename } from './streamdeck-artifact.mjs';
+import { releaseLicensingEnvironment, assertBinaryLicensing } from './polar-configuration.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 /** A failure whose message the owned child already printed. */
@@ -41,8 +42,10 @@ try {
     const output = resolve(values.output);
     // The PKG step's output rules apply before any compile or signing work starts.
     checkPackageOutput(output);
+    const releaseConfig = readMacosSigningConfig();
+    const licensingEnv = releaseLicensingEnvironment(process.env, releaseConfig);
     const skipNotarization = values['skip-notarization'] ?? false;
-    const notarization = skipNotarization ? undefined : readMacosSigningConfig().notarization;
+    const notarization = skipNotarization ? undefined : releaseConfig.notarization;
     checkNotarizationCredentials(notarizationArguments(notarization, skipNotarization));
     checkMacosSigning();
     await withMacosSigning(async (signingEnvironment, _config, owned) => {
@@ -58,13 +61,14 @@ try {
     }
     const teamId = application?.match(/^Developer ID Application: [^\r\n]+ \(([A-Z0-9]{10})\)$/)?.[1];
     if (!teamId || !installer?.startsWith('Developer ID Installer: ') || !installer.endsWith(`(${teamId})`)) throw new Error('Matching Developer ID Application/Installer identities are required');
-    const env = { ...signingEnvironment, APPLE_SIGNING_IDENTITY: application, MIXRELAY_CODESIGN_IDENTITY: application };
+    const env = { ...signingEnvironment, ...licensingEnv, APPLE_SIGNING_IDENTITY: application, MIXRELAY_CODESIGN_IDENTITY: application };
     const release = join(root, 'target/universal-apple-darwin/release');
     const bundles = join(release, 'bundle/macos');
     if (!values['package-only']) {
       await run(owned, 'zsh', ['scripts/build-macos-universal-app.sh'], env);
       await run(owned, 'cargo', ['run', '-p', 'mixrelay-hal-bundle', '--', '--output', join(release, 'hal')], env);
     }
+    assertBinaryLicensing(readFileSync(join(bundles, 'MixRelay.app/Contents/MacOS/mixrelay-desktop')), env);
     const staging = join(root, 'target/product-release', version);
     mkdirSync(staging, { recursive: true });
     const temporary = mkdtempSync(join(staging, '.package-'));
@@ -76,7 +80,7 @@ try {
         payload: { manager: join(bundles, 'MixRelay.app'), hal: join(release, 'hal/MixRelayHAL.driver'), driver: join(release, 'mixrelay-driver-service'), engine: join(release, 'mixrelay-engine-service'), uninstaller: join(bundles, 'Uninstall MixRelay.app'), output: payload },
         packages: { payload, installerCli: join(release, 'mixrelay-macos-installer'), payloadChecker: join(release, 'mixrelay-macos-payload-check'), teamId, version, signingIdentity: installer, output, notarization, skipNotarization },
       };
-      await packageReleaseArtifacts(owned, stage, process.env);
+      await packageReleaseArtifacts(owned, stage, env);
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }

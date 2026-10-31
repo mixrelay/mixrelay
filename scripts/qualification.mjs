@@ -1,7 +1,9 @@
+import { assertInstallerLicensing } from './installer-configuration.mjs';
 import { readdirSync, readFileSync, lstatSync, writeFileSync } from 'node:fs';
 import { basename, resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { releaseLicensingEnvironment, validateLicensingBuildEnvironment } from './polar-configuration.mjs';
 import { digest, loadContract, requiredScenarios } from './support-contract.mjs';
 import { parseOsRelease, validateEnvironment } from './e2e/environment.mjs';
 
@@ -13,11 +15,26 @@ export function artifactBytes(directory, artifact) {
   if (!bytes.length) throw new Error(`Empty artifact: ${artifact.file}`);
   return { sha256: digest(bytes), size: bytes.length };
 }
+export function candidateCreationEnvironment(env, platform, readPrivateConfig) {
+  const configured = platform === 'darwin' ? releaseLicensingEnvironment(env, readPrivateConfig()) : env;
+  validateLicensingBuildEnvironment(configured, { required:true, release:true });
+  return configured;
+}
+
+export function candidateLicensingEnvironment(candidate) {
+  const config = candidate.licensing;
+  const env = { MIXRELAY_POLAR_ORGANIZATION_ID: config?.organization, MIXRELAY_POLAR_BENEFIT_ID: config?.benefit, MIXRELAY_POLAR_CHECKOUT_URL: config?.checkout };
+  if (config?.sandbox !== false) throw new Error('Candidate requires Polar production configuration');
+  validateLicensingBuildEnvironment(env, { required:true, release:true });
+  return env;
+}
+
 function revision(value) {
   if (!/^[a-f0-9]{40}$/.test(value)) throw new Error('A full source commit SHA is required');
 }
-export function createCandidate(directory, selected, sourceRevision, productVersion, loaded = loadContract()) {
+export function createCandidate(directory, selected, sourceRevision, productVersion, loaded = loadContract(), env = process.env) {
   revision(sourceRevision);
+  const licensing = validateLicensingBuildEnvironment(env, { required:true, release:true });
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(productVersion)) throw new Error('Invalid candidate version');
   const artifacts = selected.map(item => {
     const [id, ...parts] = item.split(':');
@@ -34,8 +51,13 @@ export function createCandidate(directory, selected, sourceRevision, productVers
   for (const definition of loaded.contract.artifacts) {
     if (!artifacts.some(a => a.id === definition.id)) throw new Error(`Missing candidate artifact: ${definition.id}`);
   }
+  for (const artifact of artifacts) {
+    const definition = loaded.contract.artifacts.find(item => item.id === artifact.id);
+    assertInstallerLicensing(resolve(directory, artifact.file), definition.format, env);
+  }
   return { schemaVersion: 1, product: loaded.contract.product, version: productVersion,
-    sourceRevision, contractSha256: loaded.sha256, artifacts };
+    sourceRevision, contractSha256: loaded.sha256, artifacts,
+    licensing };
 }
 function validArtifactName(file, format) {
   return !file.includes(':') && file.endsWith(format === 'arch' ? '.pkg.tar.zst' : `.${format}`);
@@ -44,8 +66,12 @@ export function validateCandidate(candidate, directory, loaded = loadContract())
   revision(candidate.sourceRevision);
   if (candidate.schemaVersion !== 1 || candidate.product !== loaded.contract.product
     || candidate.contractSha256 !== loaded.sha256) throw new Error('Candidate support contract mismatch');
+  for (const artifact of candidate.artifacts) {
+    const actual = artifactBytes(directory, artifact);
+    if (actual.sha256 !== artifact.sha256 || actual.size !== artifact.size) throw new Error('Candidate artifact bytes changed');
+  }
   const expected = createCandidate(directory, candidate.artifacts.map(a => `${a.id}:${a.file}`),
-    candidate.sourceRevision, candidate.version, loaded);
+    candidate.sourceRevision, candidate.version, loaded, candidateLicensingEnvironment(candidate));
   if (JSON.stringify(expected.artifacts) !== JSON.stringify(candidate.artifacts)) throw new Error('Candidate artifact bytes changed');
   return candidate;
 }
@@ -188,7 +214,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       const output = qualificationInventory({ sourceRevision: 'no candidate selected', artifacts: [] }, []);
       if (values.output) writeFileSync(values.output, output, { flag: 'wx' }); else console.log(output);
     } else if (command === 'candidate') {
-      const candidate = createCandidate(values.directory, values.artifact, values['source-revision'], values.version);
+      const readPrivate = process.platform === 'darwin'
+        ? (await import('./macos-signing.mjs')).readMacosSigningConfig : undefined;
+      const env = candidateCreationEnvironment(process.env, process.platform, readPrivate);
+      const candidate = createCandidate(values.directory, values.artifact, values['source-revision'], values.version, undefined, env);
       writeFileSync(resolve(values.directory, 'mix-relay.candidate.json'), JSON.stringify(candidate, null, 2) + '\n', { flag: 'wx' });
     } else {
       if (!values.candidate || !values.reports) throw new Error('--candidate and --reports are required');

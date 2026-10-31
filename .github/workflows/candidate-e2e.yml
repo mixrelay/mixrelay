@@ -80,9 +80,14 @@ jobs:
           gh release view "$MACOS_TAG" --json isDraft,isPrerelease | jq -e '.isDraft or .isPrerelease'
           gh release download "$MACOS_TAG" --dir inputs/macos --pattern '*.pkg' --pattern '*.streamDeckPlugin' --pattern source-revision.txt
           gh run download "$BUILD_RUN" --pattern 'candidate-*' --dir inputs/linux
+      - name: Install archive inspection tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
       - name: Pin source, contract and every installer byte
         id: selection
         env:
+          MIXRELAY_POLAR_ORGANIZATION_ID: ${{ vars.MIXRELAY_POLAR_ORGANIZATION_ID }}
+          MIXRELAY_POLAR_BENEFIT_ID: ${{ vars.MIXRELAY_POLAR_BENEFIT_ID }}
+          MIXRELAY_POLAR_CHECKOUT_URL: ${{ vars.MIXRELAY_POLAR_CHECKOUT_URL }}
           TARGET_IDS: ${{ inputs.targets }}
         run: node scripts/e2e/select-candidate.mjs --inputs inputs --output candidate
       - name: Install Stream Deck validation tools
@@ -275,6 +280,8 @@ jobs:
         with:
           pattern: installed-target-*
           path: qualification
+      - name: Install archive inspection tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
       - name: Record passed, failed, blocked and unavailable environments
         run: node scripts/qualification.mjs inventory --directory candidate --candidate candidate/mix-relay.candidate.json --reports qualification --output inventory.md
       - name: Preserve exact candidate and raw results

@@ -1,7 +1,7 @@
 MixRelay App
 Contrato de licença de software
 Licenciante e titular dos direitos autorais: Echo Vision Lab
-Versão: 2026-10-30
+Versão: 2026-10-31
 
 1. Uso da aplicação
 Estes termos regem a aplicação MixRelay gratuita e paga e o seu motor de grafos no macOS e no Linux. O MixRelay Driver é regido separadamente por LICENSE-Driver.txt, mesmo quando fornecido no mesmo instalador.
@@ -22,7 +22,7 @@ Não se trata de uma assinatura mensal. A instalação de uma atualização não
 3. Ativação e troca de dispositivos
 A aplicação paga exige autenticação de compra on-line. A autenticação off-line é válida por 30 dias a partir da última verificação on-line bem-sucedida. As condições de novas verificações on-line são apresentadas antes do pagamento. Esse período não é a duração da licença nem um período de pagamento recorrente. Reiniciar ou uma verificação malsucedida não o estendem. Expiração ou erro de rede, por si sós, não cancelam a compra nem interrompem abruptamente o áudio em reprodução.
 
-Para transferir a ativação, desative o dispositivo antigo on-line e ative o novo conforme as condições de ativação compradas. A desativação no servidor só termina após confirmação do serviço de licenças. Se o dispositivo antigo estiver inacessível ou a desativação não puder ser concluída, contate support@rawsector.com. Desinstalar, reinstalar ou excluir credenciais locais não libera, por si só, uma ativação do servidor nem cancela a compra.
+Pode ativar a mesma chave num número ilimitado de computadores próprios. Desativar este dispositivo remove localmente a chave guardada e o acesso pago, mesmo offline. Não cancela a compra nem afeta outros computadores. Não é necessário liberar um computador antigo antes de usar um novo. Desinstalar ou reinstalar não cancela a compra. Se não conseguir confirmar a ativação, contacte support@rawsector.com antes de repetir.
 
 Após desativação ou retirada dos direitos pagos, o sistema pode continuar usando as funções gratuitas da aplicação e do Driver. Essa mudança não exclui gravações, projetos ou configurações de dispositivos. Operações exclusivas pagas exigem direitos pagos válidos. Não compartilhe chaves para uso não autorizado nem contorne a autenticação de compra ou os limites gratuitos.
 
@@ -41,9 +41,11 @@ Você mantém os seus direitos sobre gravações, projetos e outros materiais cr
 Mantenha cópias dos trabalhos importantes antes de alterar a sua configuração. Deixar de usar o software ou encerrar a sua licença não transfere os seus trabalhos para nós nem exige a sua exclusão. Para os arquivos gerenciados pela aplicação, use as opções de exclusão de dados oferecidas durante a desinstalação; as suas gravações e os seus projetos externos não fazem parte da licença do software.
 
 6. Compras e reembolsos
-Nas compras por meio do Lemon Squeezy, o Lemon Squeezy é o vendedor responsável pela transação (merchant of record) e gerencia o pagamento, os impostos sobre vendas, os reembolsos e as contestações de cobrança conforme os seus termos de transação. A Echo Vision Lab continua sendo a desenvolvedora e licenciante da aplicação e assume o suporte do produto e as obrigações que lhe cabem conforme estes termos e a legislação aplicável.
+Nas compras por meio do Polar (Polar Software, Inc.), o Polar é o vendedor responsável pela transação (merchant of record) e gerencia o pagamento, os impostos sobre vendas, os reembolsos e as contestações de cobrança conforme os seus termos de transação. A Echo Vision Lab continua sendo a desenvolvedora e licenciante da aplicação e assume o suporte do produto e as obrigações que lhe cabem conforme estes termos e a legislação aplicável.
 
-O vendedor, o preço, os impostos, o âmbito da licença e as condições de reembolso aplicáveis são apresentados antes do pagamento. Para solicitar cancelamento ou reembolso, entre em contato com support@rawsector.com ou com o canal de suporte do pedido indicado no recibo, fornecendo informações que identifiquem a compra e a sua solicitação. Não envie dados de cartões de pagamento nem senhas. Auxiliaremos nas reclamações relacionadas ao produto; usar o Lemon Squeezy não exclui qualquer responsabilidade imposta à Echo Vision Lab pela legislação aplicável.
+Polar Buyer Terms: https://polar.sh/legal/checkout-buyer-terms
+
+O vendedor, o preço, os impostos, o âmbito da licença e as condições de reembolso aplicáveis são apresentados antes do pagamento. Para solicitar cancelamento ou reembolso, entre em contato com support@rawsector.com ou com o canal de suporte do pedido indicado no recibo, fornecendo informações que identifiquem a compra e a sua solicitação. Não envie dados de cartões de pagamento nem senhas. Auxiliaremos nas reclamações relacionadas ao produto; usar o Polar não exclui qualquer responsabilidade imposta à Echo Vision Lab pela legislação aplicável.
 
 Você pode solicitar reembolso integral dentro de 30 dias corridos após a compra sem indicar motivo. Envie a solicitação a support@rawsector.com ou ao suporte do pedido indicado no recibo, com informações que identifiquem a compra. Uma solicitação enviada dentro do prazo continua válida mesmo se processada depois. Esta política complementa e não limita direitos obrigatórios de desistência, reembolso ou reparação por defeitos. Baixar, instalar ou usar a aplicação não exclui, por si só, esta política de reembolso de 30 dias.
 
@@ -54,11 +56,11 @@ Para conteúdo fornecido em desacordo com a sua descrição ou o contrato, a leg
 Após reembolso integral, os direitos pagos são retirados quando uma resposta on-line do serviço de licenças confirma que os direitos reembolsados não são mais válidos. Uma falha de conexão, por si só, não é essa confirmação. Não exigimos reconectar um computador off-line apenas para aplicar o reembolso e permitimos continuar usando-o dentro da autorização off-line existente. Isso não estende o período off-line aplicável nem autoriza nova ativação paga. As funções gratuitas da aplicação e do Driver continuam disponíveis; o reembolso não exclui gravações, projetos ou configurações do usuário.
 
 7. Licenciamento, atualizações e informações pessoais
-A ativação online envia a sua chave de licença e o nome de ativação escolhido diretamente ao Lemon Squeezy por HTTPS. A validação e a desativação enviam a chave e o identificador de ativação. Essas solicitações autenticam a sua compra e gerenciam as ativações de dispositivos. As credenciais locais de ativação usam o armazenamento de credenciais do sistema operacional. As informações de pagamento são inseridas na página de pagamento do Lemon Squeezy, não no formulário de chave de licença da aplicação.
+A ativação e a validação online enviam a sua chave de licença e os identificadores públicos da organização e do benefício de licença diretamente à Polar por HTTPS. Com computadores ilimitados, o nome do dispositivo permanece neste computador e a desativação remove apenas as credenciais locais. A Polar não permite ativações remotas de dispositivos para chaves ilimitadas. As credenciais locais usam o armazenamento de credenciais do sistema operacional. As informações de pagamento são inseridas na página de pagamento da Polar, não no formulário de chave de licença da aplicação.
 
 A aplicação verifica atualizações ao iniciar, a cada 24 horas enquanto está em execução e quando você solicita uma verificação. As verificações entram em contato com https://appserver.rawsector.com com o produto, o sistema operacional e a arquitetura do processador. O serviço também recebe informações normais de conexão, como o seu endereço IP. As solicitações de licenciamento e de atualização não enviam o seu áudio, as suas gravações, o conteúdo dos projetos, os grafos nem os nomes dos dispositivos de áudio. Abrir um download usa o seu navegador e o servidor de download selecionado. Os plug-ins e serviços de terceiros têm as suas próprias práticas de tratamento de dados.
 
-Quando você entra em contato com o suporte, recebemos os dados de contato, a mensagem e os arquivos que escolher enviar. Envie apenas as informações necessárias para a sua solicitação. O tratamento dos dados de compra e de licenciamento pelo Lemon Squeezy, incluindo o processamento fora do seu país, está descrito em https://www.lemonsqueezy.com/privacy.
+Quando você entra em contato com o suporte, recebemos os dados de contato, a mensagem e os arquivos que escolher enviar. Envie apenas as informações necessárias para a sua solicitação. O tratamento dos dados de compra e de licenciamento pelo Polar, incluindo o processamento fora do seu país, está descrito em https://polar.sh/legal/privacy-policy.
 
 Aceitar este contrato não constitui consentimento para marketing opcional, análises opcionais nem transferências internacionais. Você pode enviar dúvidas sobre privacidade e solicitações de acesso, correção, exclusão ou restrição do tratamento das suas informações para privacy@dsub.io. Os requisitos aplicáveis de verificação de identidade e as obrigações legais de conservação de registros permanecem em vigor. Recusar um tratamento opcional não remove a sua licença de software nem os seus direitos legais.
 

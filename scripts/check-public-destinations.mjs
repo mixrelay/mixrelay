@@ -21,7 +21,7 @@ import { renderArchRecipe } from './prepare-arch-driver-package.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicHosts = new Set([
   'rawsector.com', 'appserver.rawsector.com', 'downloads.rawsector.com',
-  'mixrelay.lemonsqueezy.com', 'www.lemonsqueezy.com', 'api.lemonsqueezy.com',
+  'polar.sh', 'buy.polar.sh', 'api.polar.sh', 'sandbox-api.polar.sh',
   'support.apple.com', 'law.go.kr', 'www.law.go.kr', 'www.easylaw.go.kr',
 ]);
 const publicEmails = new Set([

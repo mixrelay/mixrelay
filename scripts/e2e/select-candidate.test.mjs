@@ -1,10 +1,14 @@
+import { writeInstallerFixture } from '../installer-configuration.fixture.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { selectCandidate } from './select-candidate.mjs';
+import { polarEnvironment } from '../polar-configuration.fixture.mjs';
+import { selectCandidate as selectCandidateRaw } from './select-candidate.mjs';
 import { validateCandidate } from '../qualification.mjs';
+
+const selectCandidate = (inputs, output, targets) => selectCandidateRaw(inputs, output, targets, polarEnvironment);
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'mixrelay-selection-'));
@@ -16,11 +20,11 @@ function fixture(t) {
     conclusion: 'success', head_sha: source, id: 1 };
   writeFileSync(join(inputs, 'build-run.json'), JSON.stringify(run));
   writeFileSync(join(inputs, 'macos/source-revision.txt'), source);
-  writeFileSync(join(inputs, 'macos/MixRelay.pkg'), 'signed package fixture');
+  writeInstallerFixture(join(inputs, 'macos/MixRelay.pkg'), 'pkg');
   writeFileSync(join(inputs, 'macos/MixRelay-StreamDeck-0.1.0.streamDeckPlugin'), 'plugin fixture');
   for (const [id, file] of [['linux-x64-deb', 'x64.deb'], ['linux-arm64-deb', 'arm64.deb'], ['linux-x64-arch', 'x64.pkg.tar.zst']]) {
     const dir = join(inputs, 'linux', `candidate-${id}`); mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, file), `${id} final payload`);
+    writeInstallerFixture(join(dir, file), id.endsWith('deb') ? 'deb' : 'arch');
     if (id.endsWith('deb')) writeFileSync(join(dir, 'source-revision.txt'), source);
   }
   return { inputs, output, source, run };
@@ -71,4 +75,11 @@ test('limits diagnosis to explicitly selected hosted targets without accepting u
   assert.throws(() => selectCandidate(invalid.inputs, invalid.output, ['invented-os']), /Unknown or unavailable/);
   assert.throws(() => selectCandidate(invalid.inputs, invalid.output, ['macos-14-2-arm64']), /Unknown or unavailable/);
   assert.throws(() => selectCandidate(invalid.inputs, invalid.output, ['macos-27-arm64', 'macos-27-arm64']), /Duplicate/);
+});
+
+test('candidate selection refuses absent payment configuration before copying any installer', t => {
+  const f = fixture(t);
+  assert.throws(() => selectCandidateRaw(f.inputs,f.output,[],{}), /Release requires/);
+  assert.throws(() => readFileSync(join(f.output,'MixRelay.pkg')), /ENOENT/);
+  assert.throws(() => readFileSync(join(f.output,'mix-relay.candidate.json')), /ENOENT/);
 });

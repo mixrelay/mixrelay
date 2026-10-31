@@ -26,7 +26,7 @@ impl CredentialStore for MemoryCredentials {
 }
 
 fn activation() -> Activation {
-    serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
+    serde_json::from_str(r#"{"licenseId":"70000000-0000-4000-8000-000000000007","instanceId":"a0000000-0000-4000-8000-000000000001","purchasedMajor":0}"#)
         .expect("seat")
 }
 
@@ -96,7 +96,7 @@ fn failed_save_retains_the_remote_seat_for_recovery_without_reactivation() {
             .expect("seat")
             .1
             .instance_id(),
-        "seat-1"
+        "a0000000-0000-4000-8000-000000000001"
     );
     store.fail.store(false, Ordering::Relaxed);
     state.snapshot(2_001).expect("save retry");
@@ -109,7 +109,7 @@ fn failed_save_retains_the_remote_seat_for_recovery_without_reactivation() {
             .expect("seat")
             .1
             .instance_id(),
-        "seat-1"
+        "a0000000-0000-4000-8000-000000000001"
     );
 }
 
@@ -158,7 +158,7 @@ fn credential_write_failure_recovers_the_committed_seat_after_restart() {
             .expect("receipt")
             .expect("seat")
             .instance_id(),
-        "seat-1"
+        "a0000000-0000-4000-8000-000000000001"
     );
     assert!(matches!(
         reopened.recoverable_activation(&SecretString::from("mistyped")),
@@ -221,7 +221,7 @@ fn journal_io_failure_retains_activation_and_reconciles_confirmed_clear_in_memor
             .expect("seat")
             .1
             .instance_id(),
-        "seat-1"
+        "a0000000-0000-4000-8000-000000000001"
     );
     let expired_trial = 1_000 + 14 * 86_400;
     assert!(state.clear_paid(expired_trial).is_err());

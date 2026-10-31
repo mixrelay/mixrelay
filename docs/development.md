@@ -84,3 +84,8 @@ Enter마다 Note와 velocity 0 release, 2ms 간격의 CC 7 왕복, 상대 CC 묶
 재시작 뒤 여러 대상의 복원을 확인한다. `q`로 source를 종료하면 목록의 연결 해제를 확인할 수 있다.
 CoreMIDI 가상 source를 새로 만들면 새 unique ID가 배정될 수 있으므로 물리 장치 재연결 검증과 구분한다.
 랩은 자신이 연 source만 정리하며 설치된 실행부·Driver·키체인에 접근하지 않는다.
+
+릴리스에 필요한 Polar 공개 설정은 [Polar 설정](polar-setup.md)을 따른다. 세 값의 누락·충돌·sandbox는 서명 준비 전에 실패하며, 코드 검사 전용 환경은 설치 파일을 만들 수 없다.
+후보 생성·검증과 관련 스크립트 테스트는 `bsdtar`로 설치 파일 안의 앱을 읽는다. macOS는 기본 도구를,
+Debian·Ubuntu·Kali는 `libarchive-tools`, Arch는 `libarchive` 패키지를 사용한다. 설치 스크립트를 실행하거나
+시스템 경로에 payload를 풀지 않는다.

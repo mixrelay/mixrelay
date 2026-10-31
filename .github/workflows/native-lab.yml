@@ -27,7 +27,9 @@ jobs:
         with:
           node-version: 24.19.0
       - run: node scripts/support-contract.mjs check
-      - run: node --test scripts/support-contract.test.mjs scripts/qualification.test.mjs scripts/e2e/*.test.mjs scripts/prepare-release-manifest.test.mjs scripts/prepare-compiler-cache.test.mjs
+      - name: Install archive inspection tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
+      - run: node --test scripts/support-contract.test.mjs scripts/polar-configuration.test.mjs scripts/installer-configuration.test.mjs scripts/qualification.test.mjs scripts/e2e/*.test.mjs scripts/prepare-release-manifest.test.mjs scripts/prepare-compiler-cache.test.mjs
       - name: Verify Linux D-Bus symbol isolation with the native ELF loader
         run: node --test scripts/ci/linux-dbus-link.test.mjs
       - id: matrix

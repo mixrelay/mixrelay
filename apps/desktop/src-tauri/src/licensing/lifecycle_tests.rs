@@ -73,16 +73,32 @@ fn http(
         entered: tokio::sync::Notify::new(),
     });
     (
-        LicenseClient::with_http(ProductIdentity::new(1, 2, 3).unwrap(), http.clone()),
+        LicenseClient::with_http(
+            ProductIdentity::new(
+                "10000000-0000-4000-8000-000000000001",
+                "20000000-0000-4000-8000-000000000002",
+            )
+            .unwrap(),
+            http.clone(),
+        ),
         http,
     )
 }
 fn valid(flag: &str, instance: Option<&str>) -> (u16, serde_json::Value) {
-    (
-        200,
-        serde_json::json!({flag: true, "license_key":{"id":7,"status":if instance.is_some() {"active"} else {"inactive"}}, "instance": instance.map(|id| serde_json::json!({"id":id})), "meta":{"store_id":1,"product_id":2,"variant_id":3}}),
-    )
+    let license = serde_json::json!({"id":"70000000-0000-4000-8000-000000000007",
+        "organization_id":"10000000-0000-4000-8000-000000000001", "benefit_id":"20000000-0000-4000-8000-000000000002",
+        "status":"granted", "expires_at":null,"limit_activations":100,
+        "activation":instance.map(|id| serde_json::json!({"id":id,"license_key_id":"70000000-0000-4000-8000-000000000007"}))});
+    if flag == "activated" {
+        (
+            200,
+            serde_json::json!({"id":instance,"license_key_id":"70000000-0000-4000-8000-000000000007","license_key":license}),
+        )
+    } else {
+        (200, license)
+    }
 }
+
 fn state(store: &Arc<MemoryCredentials>, clock: &Arc<AtomicU64>) -> Arc<LicensingState> {
     let clock = clock.clone();
     Arc::new(LicensingState::with_clock(
@@ -93,7 +109,7 @@ fn state(store: &Arc<MemoryCredentials>, clock: &Arc<AtomicU64>) -> Arc<Licensin
 fn licensed(state: &LicensingState) -> u64 {
     state.snapshot(START).unwrap();
     let activation: Activation =
-        serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
+        serde_json::from_str(r#"{"licenseId":"70000000-0000-4000-8000-000000000007","instanceId":"a0000000-0000-4000-8000-000000000001","purchasedMajor":0}"#)
             .unwrap();
     state
         .verified(SecretString::from("test-key"), activation, START)
@@ -111,7 +127,7 @@ async fn startup_and_first_connection_coalesce_and_restart_obeys_attempt_cooldow
     let (client, http) = http(
         vec![
             Err(LicenseError::Unavailable),
-            Ok(valid("valid", Some("seat-1"))),
+            Ok(valid("valid", Some("a0000000-0000-4000-8000-000000000001"))),
         ],
         None,
     );
@@ -147,7 +163,10 @@ async fn pending_online_check_keeps_local_access_and_only_success_renews_the_lea
     let expiry = licensed(&initial);
     let release = Arc::new(tokio::sync::Semaphore::new(0));
     let (client, http) = http(
-        vec![Ok(valid("valid", Some("seat-1")))],
+        vec![Ok(valid(
+            "valid",
+            Some("a0000000-0000-4000-8000-000000000001"),
+        ))],
         Some(release.clone()),
     );
     clock.store(START + DAY, Ordering::Relaxed);
@@ -198,16 +217,25 @@ async fn transient_failures_never_clear_or_extend_the_lease_but_revocation_clean
         assert_eq!(http.requests.lock().unwrap().len(), 1);
     }
     for error in [
-        "license_key is disabled.",
-        "license_key not found.",
-        "instance not found.",
+        "License key is no longer active.",
+        "License key has expired.",
+        "Not found",
     ] {
         let store = Arc::new(MemoryCredentials::default());
         let clock = Arc::new(AtomicU64::new(START));
         let initial = state(&store, &clock);
         licensed(&initial);
         let (client, _) = http(
-            vec![Ok((400, serde_json::json!({"valid":false,"error":error})))],
+            vec![
+                Ok((
+                    404,
+                    serde_json::json!({"error":"ResourceNotFound","detail":error}),
+                )),
+                Ok((
+                    404,
+                    serde_json::json!({"error":"ResourceNotFound","detail":error}),
+                )),
+            ],
             None,
         );
         automatic::check(&initial, &client).await.unwrap();
@@ -232,7 +260,7 @@ async fn manual_validation_bypasses_automatic_cooldown() {
     let (client, http) = http(
         vec![
             Err(LicenseError::Unavailable),
-            Ok(valid("valid", Some("seat-1"))),
+            Ok(valid("valid", Some("a0000000-0000-4000-8000-000000000001"))),
         ],
         None,
     );
@@ -292,7 +320,7 @@ async fn device_release_cleans_up_an_already_absent_activation_but_not_a_transie
         (
             Ok((
                 404,
-                serde_json::json!({"valid":false,"error":"instance not found."}),
+                serde_json::json!({"error":"ResourceNotFound","detail":"Not found"}),
             )),
             true,
         ),
@@ -302,7 +330,12 @@ async fn device_release_cleans_up_an_already_absent_activation_but_not_a_transie
         let clock = Arc::new(AtomicU64::new(START));
         let initial = state(&store, &clock);
         licensed(&initial);
-        let (client, http) = http(vec![reply], None);
+        let replies = if removed {
+            vec![reply, Ok(valid("valid", None))]
+        } else {
+            vec![reply]
+        };
+        let (client, http) = http(replies, None);
         let result = operations::deactivate_saved(&initial, &client).await;
         assert_eq!(result.is_ok(), removed);
         assert_eq!(initial.saved_activation().unwrap().is_none(), removed);
@@ -311,7 +344,14 @@ async fn device_release_cleans_up_an_already_absent_activation_but_not_a_transie
             restored.snapshot(START).unwrap().status == AccessStatus::Free,
             removed
         );
-        assert_eq!(http.requests.lock().unwrap().as_slice(), ["validate"]);
+        assert_eq!(
+            http.requests.lock().unwrap().as_slice(),
+            if removed {
+                vec!["validate", "validate"]
+            } else {
+                vec!["validate"]
+            }
+        );
     }
 }
 
@@ -320,7 +360,7 @@ fn unreadable_paid_record(store: &MemoryCredentials) {
     *store.0.lock().unwrap() = Some(SecretString::from(
         serde_json::json!({
             "record": {"initializedAtUnix": START, "latestObservedAtUnix": START, "paidVerifiedAtUnix": START,
-                       "activation": {"licenseId": 7, "instanceId": "seat-1"}},
+                       "activation": {"licenseId": "70000000-0000-4000-8000-000000000007", "instanceId": "a0000000-0000-4000-8000-000000000001"}},
             "key": "test-key",
         })
         .to_string(),
@@ -355,7 +395,13 @@ async fn an_unreadable_paid_record_is_restored_by_online_validation_even_across_
     // After a restart the seat is recovered again and restored without a new activation.
     let restarted = state(&store, &clock);
     restarted.snapshot(START).unwrap();
-    let (online, requests) = http(vec![Ok(valid("valid", Some("seat-1")))], None);
+    let (online, requests) = http(
+        vec![Ok(valid(
+            "valid",
+            Some("a0000000-0000-4000-8000-000000000001"),
+        ))],
+        None,
+    );
     operations::validate_saved(&restarted, &online)
         .await
         .unwrap();
@@ -384,10 +430,16 @@ async fn a_revoked_recovered_seat_ends_recovery_and_saves_a_free_record() {
     let state_now = state(&store, &clock);
     state_now.snapshot(START).unwrap();
     let (client, _) = http(
-        vec![Ok((
-            400,
-            serde_json::json!({"valid":false,"error":"license_key is disabled."}),
-        ))],
+        vec![
+            Ok((
+                404,
+                serde_json::json!({"error":"ResourceNotFound","detail":"License key is no longer active."}),
+            )),
+            Ok((
+                404,
+                serde_json::json!({"error":"ResourceNotFound","detail":"License key is no longer active."}),
+            )),
+        ],
         None,
     );
     assert!(
@@ -403,4 +455,52 @@ async fn a_revoked_recovered_seat_ends_recovery_and_saves_a_free_record() {
         reopened.salvaged_seat().is_none(),
         "the free record replaced the unreadable one"
     );
+}
+
+#[tokio::test]
+async fn unlimited_device_survives_restart_renews_online_and_deactivates_locally_offline() {
+    let store = Arc::new(MemoryCredentials::default());
+    let clock = Arc::new(AtomicU64::new(START));
+    let initial = state(&store, &clock);
+    initial.snapshot(START).unwrap();
+    let key = SecretString::from("test-key");
+    let (status, mut body) = valid("valid", None);
+    body["limit_activations"] = serde_json::Value::Null;
+    let (client, requests) = http(vec![Ok((status, body.clone())), Ok((status, body))], None);
+    let activation = operations::activate_new(&initial, &client, &key, "Studio Mac")
+        .await
+        .unwrap();
+    assert_eq!(activation.instance_id(), "local:Studio Mac");
+    initial.verified(key, activation, START).unwrap();
+    let restarted = state(&store, &clock);
+    assert_eq!(
+        restarted.snapshot(START).unwrap().status,
+        AccessStatus::Licensed
+    );
+    clock.store(START + DAY, Ordering::Relaxed);
+    automatic::check(&restarted, &client).await.unwrap();
+    assert_eq!(
+        restarted.snapshot(START + DAY).unwrap().expires_at_unix,
+        Some(START + 31 * DAY)
+    );
+    assert_eq!(
+        restarted
+            .saved_activation()
+            .unwrap()
+            .unwrap()
+            .1
+            .instance_id(),
+        "local:Studio Mac"
+    );
+    assert_eq!(
+        operations::deactivate_saved(&restarted, &client)
+            .await
+            .unwrap()
+            .status,
+        AccessStatus::Free
+    );
+    assert_eq!(*requests.requests.lock().unwrap(), ["validate", "validate"]);
+    let reopened = state(&store, &clock);
+    reopened.snapshot(START + DAY).unwrap();
+    assert!(reopened.saved_activation().unwrap().is_none());
 }

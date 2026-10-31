@@ -53,6 +53,8 @@ jobs:
           gh release view "$CANDIDATE_TAG" --json isDraft,isPrerelease | jq -e '.isDraft or .isPrerelease'
           mkdir candidate
           gh release download "$CANDIDATE_TAG" --dir candidate --pattern '*.pkg' --pattern '*.deb' --pattern '*.pkg.tar.zst' --pattern '*.streamDeckPlugin' --pattern 'mix-relay.candidate.json'
+      - name: Install archive inspection tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
       - name: Check source, contract, bytes and hosted execution matrix
         id: prepare
         env:
@@ -220,6 +222,8 @@ jobs:
         with:
           name: qualification-candidate
           path: qualification/qualification-candidate
+      - name: Install archive inspection tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
       - name: Produce inventory even when an environment failed
         run: node scripts/qualification.mjs inventory --directory qualification/qualification-candidate --candidate qualification/qualification-candidate/mix-relay.candidate.json --reports qualification --output inventory.md
       - name: Require every environment, scenario and exact artifact

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadContract } from './support-contract.mjs';
+import { assertBinaryLicensing } from './polar-configuration.mjs';
 import { productContact } from './product-metadata.mjs';
 
 const languages = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
@@ -197,7 +198,7 @@ function elfHeaderArchitecture(header, path) {
   return { machine, name: machine === 62 ? 'x86-64' : machine === 183 ? 'AArch64' : `e_machine=${machine}` };
 }
 
-/** Checks metadata and ELF headers without installing or executing package payloads. */
+/** Checks metadata, ELF architecture and embedded payment configuration without executing payloads. */
 export function validatePackage({ architecture, depends, contents, elfHeaders, packageName, version, versionReceipt, homepage, maintainer }) {
   const { architecture: normalizedArchitecture, executableEntries } = packageMetadata({ architecture, depends, contents, packageName, homepage, maintainer });
   const receipt = JSON.parse(versionReceipt ?? 'null');
@@ -220,7 +221,8 @@ export function validatePackage({ architecture, depends, contents, elfHeaders, p
     architecture: normalizedArchitecture,
     executables,
     elfArchitectures,
-    scope: 'metadata-payload-elf-header-only',
+    licensing: assertBinaryLicensing(elfHeaders[executables[0]]),
+    scope: 'metadata-payload-elf-and-polar-configuration',
   };
 }
 
@@ -350,7 +352,7 @@ async function extractOneElfHeader(archive, entry, spawnProcess) {
     {
       maxOutputBytes: entry.size,
       expectedOutputBytes: entry.size,
-      captureBytes: Math.min(entry.size, 64),
+      captureBytes: entry.path === executables[0] ? entry.size : Math.min(entry.size, 64),
       outputLimitMessage: 'tar returned more executable bytes than package metadata declared',
     },
   );

@@ -97,7 +97,7 @@ test("every App contract states update rights before and from the 1.0 release an
 test("required languages have complete distinct App and Driver contracts", () => {
   assert.deepEqual(languages.map(entry => entry.language).sort(), ["de", "en", "es", "fr", "it", "ja", "ko", "pt", "ru", "zh-Hans", "zh-Hant"]);
   for (const entry of languages) {
-    for (const [key, sections, version] of [["appTerms", 10, "2026-10-30"], ["driverTerms", 8, "2026-10-10"]]) {
+    for (const [key, sections, version] of [["appTerms", 10, "2026-10-31"], ["driverTerms", 8, "2026-10-10"]]) {
       const terms = readFileSync(new URL(`../${entry[key]}`, import.meta.url), "utf8");
       assert.deepEqual([...terms.matchAll(/^(\d+)\. /gm)].map(match => Number(match[1])), Array.from({ length: sections }, (_, i) => i + 1));
       for (const value of [version, "111-42-04359", "support@rawsector.com", "privacy@dsub.io", "legal@dsub.io", "+82 10-6380-9646", "Asia/Seoul"]) assert.ok(terms.includes(value), `${entry[key]}: ${value}`);
@@ -184,5 +184,16 @@ test("Linux install/update/removal prerequisites use every supported language", 
       assert.equal(result.stdout, messages[language][index]);
     }
     assert.match(source.slice(end), /printf '%s\\n' "\$instruction"/);
+  }
+});
+
+test("all eleven App agreements identify Polar and link its buyer terms and privacy policy", () => {
+  for (const entry of languages) {
+    const terms = readFileSync(new URL(`../${entry.appTerms}`, import.meta.url), "utf8");
+    assert.ok(terms.includes("Polar Software, Inc."), entry.appTerms);
+    assert.ok(terms.includes("https://polar.sh/legal/checkout-buyer-terms"), entry.appTerms);
+    assert.ok(terms.includes("https://polar.sh/legal/privacy-policy"), entry.appTerms);
+    assert.ok(terms.includes("2026-10-31"), entry.appTerms);
+    assert.doesNotMatch(terms, /lemon|squeezy/i, entry.appTerms);
   }
 });
