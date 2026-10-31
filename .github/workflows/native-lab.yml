@@ -9,9 +9,12 @@ on:
 permissions:
   contents: read
 
+# Release qualification needs a successful main run for the exact candidate commit, so main
+# runs are never cancelled. Each gets its own group: a shared group without cancel-in-progress
+# still replaces an older pending run. Other refs keep only their latest run.
 concurrency:
-  group: native-lab-${{ github.ref }}
-  cancel-in-progress: true
+  group: native-lab-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   support:
