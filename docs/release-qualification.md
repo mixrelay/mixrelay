@@ -17,8 +17,8 @@ on every push to `main`. It reads the Conventional Commits merged since the last
 and keeps one release PR open: `fix` raises the patch version, `feat` the minor version,
 and a breaking change (`!` or a `BREAKING CHANGE:` footer) the minor version in 0.x
 (`bump-minor-pre-major`) and the major version from 1.0.0. Other commit types do not open a release PR. The manifest starts at 0.1.0
-and `bootstrap-sha` is the `v0.1.0` source commit `c198dd16`, so the earlier history,
-which is mostly not in Conventional Commits form, never selects a version.
+and `bootstrap-sha` is `966613f6`, the last product change in v0.1.0, so the
+earlier history, which is mostly not in Conventional Commits form, never selects a version.
 [Development rules](development.md) describe the title convention and the optional
 `RELEASE_PLEASE_TOKEN`; without it, GitHub runs no checks on the release PR.
 
