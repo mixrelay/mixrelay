@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { parseArgs } from 'node:util';
+import { parseArgs, stripVTControlCharacters } from 'node:util';
 import { productVersion } from './product-version.mjs';
 import { artifactBytes, validateCandidate } from './qualification.mjs';
 import { digest, loadContract } from './support-contract.mjs';
@@ -54,7 +54,8 @@ export function validatePackedStreamDeck(file, version, run = execute) {
     const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json')));
     validateStreamDeckManifest(manifest, version);
     const cli = join(dirname(require.resolve('@elgato/cli/package.json')), 'bin/streamdeck.mjs');
-    const output = run(process.execPath, [cli, 'validate', directory]);
+    // CI runners force colour; the recorded evidence keeps only the CLI's text.
+    const output = stripVTControlCharacters(run(process.execPath, [cli, 'validate', directory]));
     assert.match(output, /Validation successful/, 'Stream Deck CLI must pass without warnings');
     assert.doesNotMatch(output, /\b(?:warning|error)s?\b/i);
     return { manifest, output: output.trim() };
