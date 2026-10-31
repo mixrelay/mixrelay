@@ -31,3 +31,16 @@ fn package_selection_uses_url_path_and_never_offers_another_package_manager() {
     assert!(Package::Pkg.accepts("https://downloads.example.test/universal.pkg"));
     assert!(!Package::Deb.accepts("https://downloads.example.test/universal.pkg"));
 }
+
+#[test]
+fn the_support_contract_parses_with_non_installer_artifacts() {
+    let support: serde_json::Value = serde_json::from_str(super::SUPPORT).unwrap();
+    assert!(
+        support["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|artifact| artifact["format"] == "streamDeckPlugin")
+    );
+    assert_eq!(linux("ID=ubuntu", "arm64").unwrap(), Package::Deb);
+}

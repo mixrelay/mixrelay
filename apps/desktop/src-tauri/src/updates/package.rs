@@ -6,8 +6,7 @@ use super::UpdateError;
 
 const SUPPORT: &str = include_str!("../../../../../support/environments.json");
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Package {
     Pkg,
     Deb,
@@ -32,10 +31,12 @@ struct Support {
     targets: Vec<Target>,
 }
 
+/// The contract also lists artifacts that are not app installers (the Stream Deck
+/// plugin), so formats stay strings and only installer formats are offered.
 #[derive(Deserialize)]
 struct Artifact {
     id: String,
-    format: Package,
+    format: String,
 }
 
 #[derive(Deserialize)]
@@ -61,7 +62,12 @@ pub(super) fn linux(os_release: &str, arch: &str) -> Result<Package, UpdateError
         .artifacts
         .iter()
         .find(|artifact| artifact.id == target.artifact)
-        .map(|artifact| artifact.format)
+        .and_then(|artifact| match artifact.format.as_str() {
+            "pkg" => Some(Package::Pkg),
+            "deb" => Some(Package::Deb),
+            "arch" => Some(Package::Arch),
+            _ => None,
+        })
         .ok_or(UpdateError::Unavailable)
 }
 
