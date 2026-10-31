@@ -1,3 +1,4 @@
+import { MINIMUM_MACOS } from '../macos-minimum.mjs';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
@@ -46,7 +47,7 @@ function compileTone(output, index) {
     execFileSync('plutil', ['-replace', key, '-string', value, plist]);
   }
   const executable = join(bundle, 'Contents/MacOS', name);
-  execFileSync('clang', ['-O2', '-fobjc-arc', '-fblocks', '-mmacosx-version-min=14.2',
+  execFileSync('clang', ['-O2', '-fobjc-arc', '-fblocks', `-mmacosx-version-min=${MINIMUM_MACOS}`,
     `-DMR_TONE_FREQUENCY=${index === 0 ? 1000 : 2000}.0`, `-DMR_TONE_CHANNEL=${index}`,
     'native/macos/application-capture/tests/MRVirtualToneSource.m', '-framework', 'AVFAudio',
     '-framework', 'AudioUnit', '-framework', 'CoreAudio', '-framework', 'Foundation', '-o', executable]);

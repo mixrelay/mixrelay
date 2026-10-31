@@ -8,7 +8,7 @@ fn main() {
         .include(format!("{root}/include"))
         .flag("-fobjc-arc")
         .flag("-fblocks")
-        .flag("-mmacosx-version-min=14.2")
+        .flag("-mmacosx-version-min=15.0")
         .warnings_into_errors(true)
         .compile("mixrelay_process_tap_objc");
     println!("cargo:rerun-if-changed={root}/src/MRProcessTap.m");

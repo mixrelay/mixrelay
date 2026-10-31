@@ -1,3 +1,4 @@
+import { MINIMUM_MACOS } from '../../scripts/macos-minimum.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, relative, resolve } from 'node:path';
@@ -202,10 +203,14 @@ for (const [language, phrases] of Object.entries(translatedPricing)) {
     for (const phrase of phrases) assert.ok(sources.get(page).includes(phrase), `${page}: confirmed pricing policy includes ${phrase}`);
   }
 }
+for (const page of ['index.html', ...manualLanguages.map(language => `manual/${language}/installation.html`)]) {
+  assert.match(sources.get(page), new RegExp(`macOS ${MINIMUM_MACOS.replaceAll('.', '\\.')}`), `${page}: supported macOS minimum`);
+  assert.doesNotMatch(sources.get(page), /14\.2/, `${page}: no retired product minimum`);
+}
 for (const language of manualLanguages) {
   const page = `manual/${language}/stream-deck.html`;
   const html = sources.get(page);
-  assert.match(html, /macOS 14\.2/, `${page}: supported macOS minimum`);
+  assert.match(html, new RegExp(`macOS ${MINIMUM_MACOS.replaceAll('.', '\\.')}`), `${page}: supported macOS minimum`);
   assert.match(html, /Stream Deck 7\.1/, `${page}: SDK 3.x host minimum`);
   assert.doesNotMatch(html, /Stream Deck 6\.6/, `${page}: no obsolete host requirement`);
   assert.doesNotMatch(html, /\.streamDeckPlugin|href="https:\/\/rawsector\.com\/products\/mixrelay"/, `${page}: no direct plug-in download`);

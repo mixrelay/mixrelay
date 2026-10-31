@@ -1,3 +1,4 @@
+import { MINIMUM_MACOS } from './macos-minimum.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -28,7 +29,7 @@ export function validateStreamDeckManifest(manifest, version) {
   assert.equal(manifest.Author, 'rawsector');
   assert.equal(manifest.Name, 'MixRelay');
   assert.equal(manifest.Category, 'MixRelay');
-  assert.deepEqual(manifest.OS, [{ Platform: 'mac', MinimumVersion: '14.2' }]);
+  assert.deepEqual(manifest.OS, [{ Platform: 'mac', MinimumVersion: MINIMUM_MACOS }]);
   assert.deepEqual(manifest.Actions.map(action => action.UUID).sort(),
     ['power', 'mute', 'volume', 'recording'].map(action => `${uuid}.${action}`).sort());
 }

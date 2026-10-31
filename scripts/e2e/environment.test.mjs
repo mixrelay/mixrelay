@@ -28,14 +28,16 @@ test('source CI verifies its declared CPU and distro while keeping container che
   assert.throws(() => validateCodeCheckEnvironment({ ...environment, version: '12' }, 'debian-arm64', f.loaded.contract));
   assert.throws(() => validateCodeCheckEnvironment({ ...environment, distro: 'ubuntu' }, 'debian-arm64', f.loaded.contract));
   const mac = f.reports[0].environment;
-  validateCodeCheckEnvironment(mac, 'macos-14-arm64', f.loaded.contract);
-  assert.throws(() => validateCodeCheckEnvironment({ ...mac, translated: true }, 'macos-14-arm64', f.loaded.contract));
+  validateCodeCheckEnvironment(mac, 'macos-15-arm64', f.loaded.contract);
+  assert.throws(() => validateCodeCheckEnvironment({ ...mac, translated: true }, 'macos-15-arm64', f.loaded.contract));
 });
 
 test('a hosted macOS major-version match cannot bypass the deployment minimum', t => {
   const f = qualificationFixture(t);
-  const target = f.loaded.contract.qualificationTargets.find(t => t.id === 'macos-14-arm64');
+  const target = f.loaded.contract.qualificationTargets.find(t => t.id === 'macos-15-arm64');
   const observed = f.reports.find(r => r.targetId === target.id).environment;
-  assert.throws(() => validateEnvironment({ ...observed, version: '14.1.9' }, target, f.loaded.contract), /Unsupported macOS/);
-  validateEnvironment({ ...observed, version: '14.2.0' }, target, f.loaded.contract);
+  assert.throws(() => validateEnvironment({ ...observed, version: '14.9.9' }, target, f.loaded.contract), /Wrong OS version/);
+  validateEnvironment({ ...observed, version: '15.0.0' }, target, f.loaded.contract);
+  const raisedPatchMinimum = { ...f.loaded.contract, minimums: { ...f.loaded.contract.minimums, macos: '15.1' } };
+  assert.throws(() => validateEnvironment({ ...observed, version: '15.0.9' }, target, raisedPatchMinimum), /Unsupported macOS/);
 });

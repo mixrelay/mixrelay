@@ -1,7 +1,7 @@
 # MixRelay macOS application capture
 
 This directory contains the Core Audio process-tap adapter, C ABI headers, and
-fixtures used by `ApplicationCaptureBackend` on macOS 14.2 and later. The
+fixtures used by `ApplicationCaptureBackend` on macOS 15.0 and later. The
 `mixrelay-process-tap` Rust crate owns capture sessions behind that ABI; the
 desktop capture pump delivers their PCM to application sources in the graph.
 

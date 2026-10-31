@@ -29,6 +29,7 @@ test('the packed distribution passes the actual CLI and uses the product identit
   const { manifest, output } = validatePackedStreamDeck(archive, '0.1.0');
   assert.equal(output, '✔ Validation successful');
   for (const change of [m => { m.SDKVersion = 2; }, m => { m.Software.MinimumVersion = '6.6'; },
+    m => { m.OS[0].MinimumVersion = '14.9'; }, m => { m.OS[0].MinimumVersion = '16.0'; },
     m => { m.Nodejs.Version = '20'; }, m => { m.UUID = 'io.mixrelay.streamdeck'; },
     m => { m.Version = '0.1.0.7'; }, m => { m.Actions[0].UUID = 'com.rawsector.mixrelay.node'; }]) {
     const invalid = structuredClone(manifest); change(invalid);

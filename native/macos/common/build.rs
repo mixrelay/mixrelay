@@ -12,7 +12,7 @@ fn main() -> std::io::Result<()> {
         .include("../hal-driver/include")
         .flag("-std=c17")
         .flag("-fblocks")
-        .flag("-mmacosx-version-min=14.2")
+        .flag("-mmacosx-version-min=15.0")
         .warnings_into_errors(true)
         .compile("mixrelay_source_xpc");
     println!("cargo:rerun-if-changed=../application-capture/src/MRApplicationSourceTransport.c");

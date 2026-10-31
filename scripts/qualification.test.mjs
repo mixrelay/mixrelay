@@ -35,8 +35,8 @@ test('missing environments remain visible and prevent any release manifest', t =
   const f = qualificationFixture(t);
   const reports = f.reports.slice(1);
   assert.equal(evaluateQualification(f.candidate, reports).passed, false);
-  assert.match(qualificationInventory(f.candidate, reports), /macos-14-arm64.*missing report/);
-  assert.match(qualificationInventory(f.candidate, reports), /macos-14-arm64 \| not run \| not run/);
+  assert.match(qualificationInventory(f.candidate, reports), /macos-15-arm64.*missing report/);
+  assert.match(qualificationInventory(f.candidate, reports), /macos-15-arm64 \| not run \| not run/);
   assert.throws(() => assertQualifiedRelease({ product: 'mix-relay', version: '1.2.3', artifacts: f.artifacts }, f.candidate, f.directory, reports), /missing report/);
 });
 
@@ -90,15 +90,16 @@ test('unqualified formats, missing candidate artifacts and symlink installers ar
   assert.ok(readFileSync(f.candidatePath).length > 0);
 });
 
-test('qualification checks major-version representatives separately from the API deployment minimum', t => {
+test('qualification checks major-version representatives with the product deployment minimum', t => {
   const { loaded } = qualificationFixture(t);
   const matrix = qualificationMatrix(loaded.contract).include;
-  assert.equal(matrix.length, 13);
+  assert.equal(matrix.length, 12);
   assert.ok(matrix.every(t => !t.runner.includes('self-hosted')));
-  assert.equal(matrix.find(t => t.id === 'macos-14-arm64').runner, 'macos-14');
+  assert.equal(matrix.find(t => t.id === 'macos-15-arm64').runner, 'macos-15');
   assert.equal(matrix.find(t => t.id === 'debian-13-arm64').runner, 'ubuntu-24.04-arm');
-  assert.ok(!matrix.some(t => t.id.startsWith('macos-14-2')));
-  assert.equal(loaded.contract.minimums.macos, '14.2');
+  assert.ok(!matrix.some(t => t.os === 'macos' && Number(t.version) < 15));
+  assert.ok(!matrix.some(t => t.id.startsWith('macos-15-0')));
+  assert.equal(loaded.contract.minimums.macos, '15.0');
   assert.equal(matrix.length, loaded.contract.qualificationTargets.length);
   assert.ok(loaded.contract.qualificationTargets.filter(t => t.os === 'macos').every(t => t.versionMatch === 'major'));
 });

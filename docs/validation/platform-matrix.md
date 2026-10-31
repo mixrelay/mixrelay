@@ -6,6 +6,8 @@
 
 현재 후보 `c5259184`의 GitHub Actions 설치본 실행은 [후보 기록](candidates/2026-10-24-c525918/README.md)을 따른다. 현재 후보의 전체 판정은 해당 실행의 inventory를 따르며, 아래 표는 과거 빌드의 조사 기록으로 유지한다. 새 후보의 설치·오디오 통과 여부는 후보별 결과에서 확인한다.
 
+2026-11-01 제품 결정으로 최소 지원을 macOS 15.0으로 올렸다. macOS 14 hosted runner는 2026-11-02 종료하므로 출시 검증 대상에서 제외한다. 아래 macOS 14 행은 과거 검증 근거만 보존한다. 현재 필수 환경은 [생성된 환경표](supported-environments.md)를 따른다.
+
 ## 판정 방법
 
 지원 범위, 검사 구현 여부, 실행 결과, 검증한 빌드를 따로 읽는다. `지원 대상`은 제품 정책이며 시험 통과를 뜻하지 않는다. 표의 결과는 다음과 같다.
@@ -25,17 +27,17 @@
 
 현재 지원 정의와 필수 환경 ID는 [`support/environments.json`](../../support/environments.json)과 [생성된 환경표](supported-environments.md)를 따른다. 아래 표의 대문자 ID는 2026-10-23에 정리한 과거 기록의 묶음이며 현재 CI 행렬이나 출시 대상 정의로 소비하지 않는다. 새 후보의 환경별 결과는 `pnpm validation:inventory`로 파일 해시와 함께 생성한다.
 
-macOS는 14.2 이상 Apple Silicon·Intel, Linux는 x86_64·arm64의 정상 사용자 PipeWire 세션이 제품 범위다. Linux는 PipeWire 1.2 이상·WirePlumber 0.5 이상을 요구한다. 현재 Linux 패키지의 glibc 요구는 [패키징 문서](../../packaging/linux/README.md)의 2.39이며, 오디오 서버 하한만으로 모든 배포판 설치를 보장하지 않는다.
+macOS는 15.0 이상 Apple Silicon과 15.0–26의 Apple 지원 Intel 모델, Linux는 x86_64·arm64의 정상 사용자 PipeWire 세션이 제품 범위다. Linux는 PipeWire 1.2 이상·WirePlumber 0.5 이상을 요구한다. 현재 Linux 패키지의 glibc 요구는 [패키징 문서](../../packaging/linux/README.md)의 2.39이며, 오디오 서버 하한만으로 모든 배포판 설치를 보장하지 않는다.
 
 | 환경 ID | OS·CPU | 제품 범위 | 빌드·소스 검사 근거 | 설치·실행·오디오 근거 |
 | --- | --- | --- | --- | --- |
-| MAC-14-ARM | macOS 14.8.7 · arm64 · Tart/headless | 지원 대상 | Universal PKG | 설치·업데이트·제거 일부 확인 [M19](#m19). UI·권한 대화상자·캡처·녹음 미확인 |
-| MAC-14-OTHER | macOS 14.2 이상 14.x 중 14.8.7 이외 · arm64/Intel | 지원 대상 | 최소 버전 설정·Universal 산출물 있음 | 해당 버전 설치본 미확인. 14.8.7 결과를 복제하지 않음 |
-| MAC-14-INTEL | macOS 14.8.7 · Intel | 지원 대상 | Universal x86_64 slice 빌드·서명 기록 | Intel OS에서 실제 실행 미확인 |
+| MAC-14-ARM | macOS 14.8.7 · arm64 · Tart/headless | 비지원: hosted 검증 종료 | Universal PKG | 설치·업데이트·제거 일부 확인 [M19](#m19). UI·권한 대화상자·캡처·녹음 미확인 |
+| MAC-14-OTHER | macOS 14.x 중 14.8.7 이외 · arm64/Intel | 비지원: hosted 검증 종료 | 최소 버전 설정·Universal 산출물 있음 | 해당 버전 설치본 미확인. 14.8.7 결과를 복제하지 않음 |
+| MAC-14-INTEL | macOS 14.8.7 · Intel | 비지원: hosted 검증 종료 | Universal x86_64 slice 빌드·서명 기록 | Intel OS에서 실제 실행 미확인 |
 | MAC-15 | macOS 15 · CI runner | 지원 대상 | 소스 검사 통과 기록 [CI18](#ci18). runner 실행 아키텍처는 인용 기록에 없음 | 설치본·권한·오디오 미확인 |
 | MAC-26 | macOS 26 · arm64/Intel | 지원 대상 | 개별 OS 실행 기록 없음 | 설치본 미확인 |
 | MAC-27-DEV | macOS 27 개발 Mac · 10월 11일 기록은 27.0.1 | 지원 대상 | 로컬 소스·Universal 빌드 기록 [M17](#m17)·[M18](#m18) | 설치·캡처·일부 왕복·수명 확인. 후속 기록의 정확한 OS 패치·실행 CPU는 미기록 |
-| MAC-27-INTEL | macOS 27 · Intel | 비대상: Apple 공식 호환 모델 없음 | Universal의 x86_64 slice는 Intel용 macOS 14.2–26에서 사용 | [Apple 공식 목록](https://support.apple.com/en-us/127255)에 따라 필수 조합에서 제외 |
+| MAC-27-INTEL | macOS 27 · Intel | 비대상: Apple 공식 호환 모델 없음 | Universal의 x86_64 slice는 Intel용 macOS 15.0–26에서 사용 | [Apple 공식 목록](https://support.apple.com/en-us/127255)에 따라 필수 조합에서 제외 |
 | LINUX-DEB-X64 | Debian 13 · x86_64 · Proxmox VM 107 | 지원 대상 | CI 기록 [CI18](#ci18), VM 소스 검사 [L16](#l16) | DEB 설치·업그레이드·런처·실제 PipeWire PCM 일부 확인 [L16](#l16) |
 | LINUX-DEB-ARM | Debian 13 · arm64 | 지원 대상 | Docker CI 소스 검사 통과 기록 [CI18](#ci18) | 해당 CPU의 정상 사용자 세션·설치본·오디오 미확인 |
 | LINUX-UBUNTU | Ubuntu 26.04 · x86_64/arm64 | 실행 의존성 충족 시 지원 대상 | Docker CI 소스 검사 통과 기록 [CI18](#ci18) | 이 배포판의 설치본·오디오 미확인 |

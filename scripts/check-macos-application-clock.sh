@@ -4,12 +4,13 @@ set -euo pipefail
 # Opt-in fixture only. Exact MixRelay virtual UID; no physical/default routing,
 # installed graph mutation, permission reset, or user-application capture.
 repo_root="${0:A:h:h}"
+minimum_macos="$(node "$repo_root/scripts/macos-minimum.mjs")"
 fixture_root="${1:?provide a dedicated output directory}"
 endpoint_id="${2:?provide an existing test-owned canonical endpoint UUID}"
 mkdir -p "$fixture_root/MRVirtualToneSource.app/Contents/MacOS"
 native_root="$repo_root/native/macos/application-capture"
 cp "$native_root/tests/MRVirtualToneSource-Info.plist" "$fixture_root/MRVirtualToneSource.app/Contents/Info.plist"
-clang -fobjc-arc -fmodules -fblocks -mmacosx-version-min=14.2 \
+clang -fobjc-arc -fmodules -fblocks "-mmacosx-version-min=$minimum_macos" \
   -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Werror \
   "$native_root/tests/MRVirtualToneSource.m" \
   -framework AVFAudio -framework Foundation -framework CoreAudio -framework AudioUnit \

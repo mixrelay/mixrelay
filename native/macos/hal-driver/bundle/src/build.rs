@@ -2,7 +2,7 @@ use std::{error::Error, ffi::OsStr, fs, path::Path, process::Command};
 
 use super::command::{output, run};
 
-const DEPLOYMENT_TARGET: &str = "14.2";
+const DEPLOYMENT_TARGET: &str = "15.0";
 const HAL_BUNDLE_IDENTIFIER: &str = "io.mixrelay.audio.driver";
 const SLICES: [(&str, &str); 2] = [
     ("arm64", "aarch64-apple-darwin"),
@@ -160,7 +160,7 @@ fn link_command(root: &Path, target_directory: &Path, architecture: &str, target
             "-bundle",
             "-arch",
             architecture,
-            "-mmacosx-version-min=14.2",
+            "-mmacosx-version-min=15.0",
             "-Wall",
             "-Wextra",
             "-Wpedantic",

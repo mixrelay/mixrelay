@@ -20,19 +20,35 @@ test('complete product packaging requires one prepared payload and rejects legac
 
 test('every macOS build and the Installer share the app minimum macOS version', async () => {
   const { readFileSync } = await import('node:fs');
-  const { MINIMUM_MACOS } = await import('./build-macos-installer-pkgs.mjs');
-  assert.match(MINIMUM_MACOS, /^\d+\.\d+$/);
+  const { execFileSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const { MINIMUM_MACOS } = await import('./macos-minimum.mjs');
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  assert.equal(MINIMUM_MACOS, '15.0');
   assert.match(distribution('MixRelay.component.pkg', '0.1.1'), new RegExp(`<allowed-os-versions><os-version min="${MINIMUM_MACOS.replace('.', '\\.')}"/></allowed-os-versions>`));
-  // Native code compiled for an older target would load on systems the app rejects, and
-  // a newer one would make the Installer accept systems the binaries cannot run on.
-  for (const path of [
-    'scripts/build-macos-universal-app.sh', 'scripts/build-macos-universal-engine.sh', 'scripts/build-macos-driver-launcher.sh',
+  assert.equal(execFileSync(process.execPath, ['scripts/macos-minimum.mjs'], { cwd: root, encoding: 'utf8' }).trim(), MINIMUM_MACOS);
+  // Scan all tracked build inputs, including native fixtures and CI helpers, so a
+  // new compiler invocation cannot silently diverge from the Installer's floor.
+  const paths = execFileSync('git', ['ls-files', '-z', '--', 'apps', 'crates', 'native', 'scripts'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
+  // Shipped native code without a floor would build for the SDK's default instead.
+  const shipped = new Set([
     'apps/engine-service/build.rs', 'native/macos/common/build.rs', 'native/macos/process-tap/build.rs',
     'native/macos/driver-control/build.rs', 'native/macos/hal-driver/bundle/src/build.rs',
-  ]) {
+  ]);
+  for (const path of paths.filter(path => /\.(?:rs|sh|mjs|yml|json|plist)$/.test(path))) {
     const source = readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-    const targets = [...source.matchAll(/(?:version-min=|MACOSX_DEPLOYMENT_TARGET=?"?)(\d+\.\d+)/g)].map(match => match[1]);
-    assert.ok(targets.length > 0, `${path} declares its macOS target`);
-    assert.deepEqual([...new Set(targets)], [MINIMUM_MACOS], path);
+    const targets = [...source.matchAll(/(?:version-min=|MACOSX_DEPLOYMENT_TARGET["']?\s*[,=]\s*["']?|DEPLOYMENT_TARGET:\s*&str\s*=\s*"|LSMinimumSystemVersion['"]?\s*[:,]\s*['"])(\d+\.\d+)/g)].map(match => match[1]);
+    if (shipped.delete(path)) assert.ok(targets.length > 0, `${path} declares its macOS target`);
+    for (const target of targets) assert.equal(target, MINIMUM_MACOS, path);
+    if (/version-min=|MACOSX_DEPLOYMENT_TARGET=/.test(source) && /\.(?:sh|mjs)$/.test(path) && !path.endsWith('.test.mjs')) {
+      assert.match(source, /macos-minimum\.mjs/, `${path} reads the app minimum`);
+    }
   }
+  assert.deepEqual([...shipped], [], 'every shipped native build input is tracked');
+  const project = readFileSync(new URL('./e2e/macos-ui/project.yml', import.meta.url), 'utf8');
+  assert.match(project, new RegExp(`macOS: '${MINIMUM_MACOS.replace('.', '\\.')}'`));
+  const manifest = JSON.parse(readFileSync(new URL('../apps/streamdeck-plugin/manifest.json', import.meta.url), 'utf8'));
+  assert.deepEqual(manifest.OS, [{ Platform: 'mac', MinimumVersion: MINIMUM_MACOS }]);
+  const removal = readFileSync(new URL('./build-macos-removal-app.mjs', import.meta.url), 'utf8');
+  assert.match(removal, /LSMinimumSystemVersion:MINIMUM_MACOS/);
 });

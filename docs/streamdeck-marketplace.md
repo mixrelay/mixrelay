@@ -18,7 +18,7 @@ v0.1.0 플러그인의 제출 자료와 소유자 작업 절차다. 제품 동�
 | 지원 URL | https://rawsector.com/products/mixrelay/manual |
 | 지원 메일 | support@rawsector.com |
 | 가격 제안 | 무료 플러그인. MixRelay 무료 기능으로도 사용 가능 |
-| 플랫폼 | macOS 14.2+, Stream Deck 7.1+ |
+| 플랫폼 | macOS 15.0+, Stream Deck 7.1+ |
 | UUID | com.rawsector.mixrelay |
 | 동작 UUID | com.rawsector.mixrelay.power / .mute / .volume / .recording |
 | 제품·매니페스트 버전 | 0.1.0 / 0.1.0.0 |
@@ -45,7 +45,7 @@ Maker Console이 처리한 DRM 배포본의 실제 설치 시험은 소유자가
 >
 > Choose a graph and a supported node in the property inspector. Settings save as you change them. Failed actions show an alert; disconnected commands are never queued for later replay.
 >
-> Requires macOS 14.2 or later, Stream Deck 7.1 or later, and MixRelay running. The plug-in is free and works with MixRelay’s free edition within its limits. Audio control stays on your Mac through a private local Unix socket. No account or external network connection is required by the plug-in.
+> Requires macOS 15.0 or later, Stream Deck 7.1 or later, and MixRelay running. The plug-in is free and works with MixRelay’s free edition within its limits. Audio control stays on your Mac through a private local Unix socket. No account or external network connection is required by the plug-in.
 
 영문 개인정보 안내:
 
@@ -85,7 +85,7 @@ Elgato Marketplace의 계정·배포 처리를 플러그인의 통신으로 소�
 >
 > Control node power and mute, adjust volume from keys or Stream Deck + dials, and start, resume, pause or stop recordings. Choose targets in the property inspector with settings saved on change. Recording uses MixRelay’s existing folder and format settings. Keys and dials show confirmed state and alert when an action fails.
 >
-> Requires macOS 14.2+, Stream Deck 7.1+ and MixRelay running. Includes English and Korean action labels. Prepared for Marketplace DRM with SDKVersion 3.
+> Requires macOS 15.0+, Stream Deck 7.1+ and MixRelay running. Includes English and Korean action labels. Prepared for Marketplace DRM with SDKVersion 3.
 
 ## 패키지·자격 검증
 

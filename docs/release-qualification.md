@@ -185,13 +185,13 @@ successful source build/unit-test workflow for that exact `main` commit, contrac
 and file hashes. It uses standard GitHub-hosted runners and the ordinary workflow
 token. It requires no registered QA machines or repository administration token.
 
-macOS installs the Universal PKG directly on six hosted OS/CPU combinations: 14 arm64,
-15 arm64/x64, 26 arm64/x64 and 27 arm64. GitHub chooses each image's patch version;
-the report records the observed version. The macOS deployment minimum remains 14.2
-because the process-tap API requires it. Qualification uses the available patch
-of each hosted major-version representative, rather than requiring an exact 14.2
-image. macOS 14 Intel and patches below the observed hosted versions remain
-untested; the support minimum does not claim those exact combinations were tested.
+macOS는 hosted OS·CPU 5개 조합(15 arm64/x64, 26 arm64/x64, 27 arm64)에 같은 Universal PKG를 설치한다.
+GitHub가 각 이미지의 패치를 정하며 보고서에는 실제 관측한 버전을 기록한다.
+v0.1.0의 배포·지원 하한은 15.0이다. 2026-11-02 macOS 14 hosted runner 종료로
+해당 주 버전을 계속 검증할 수 없어 macOS 14를 지원 계약에서 제외한다.
+process tap API의 도입 버전은 14.2이며 제품 지원 하한의 근거와 구별한다.
+지원하는 각 hosted 주 버전의 제공 패치를 대표 환경으로 검증하며, 모든 지원 패치를
+직접 시험했다는 뜻은 아니다. Intel은 Apple 지원 모델의 macOS 15.0–26을 대상으로 한다.
 
 Linux uses `ubuntu-24.04` or `ubuntu-24.04-arm` as the VM host. QEMU boots each
 distribution's complete cloud image with its own kernel, systemd, X11 display,
@@ -469,7 +469,7 @@ gate의 해시 검사 대상이다. 기존 실패를 성공으로 바꾸거나 �
 단일 그래프의 ID·노드·설정·연결, 외부 `.mix` 파일, 무료 Driver의 장치 구성과 현재 형식이다.
 앱 환경설정·레이아웃·여러 그래프 선택·유료 인증·장시간 녹음의 보존은 검증하지 않는다.
 실제 설치·업그레이드 성공은
-해당 후보로 hosted CI를 실행한 뒤에만 판단한다. 최소 지원 버전 14.2와 실제 검증한
+해당 후보로 hosted CI를 실행한 뒤에만 판단한다. 최소 지원 버전 15.0과 실제 검증한
 macOS 패치·CPU 조합은 구별해 기록한다. Arch arm64와 macOS 27 x64는 지원 계약의 대상이 아니다.
 
 로컬 진단도 초기화 가능한 QA 세션에서만 실행한다.
