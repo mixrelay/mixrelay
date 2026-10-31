@@ -119,8 +119,9 @@ fn assert_reaped(pid: u32) {
     );
 }
 
+/// Only a stalled child reaches the guard; loaded hosted runners can take seconds per transition.
 fn wait_until(mut predicate: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !predicate() {
         assert!(
             Instant::now() < deadline,
