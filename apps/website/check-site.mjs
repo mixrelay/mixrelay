@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertPublicDestination, checkPublicDestinations } from '../../scripts/check-public-destinations.mjs';
+
+checkPublicDestinations();
 
 const directory = dirname(fileURLToPath(import.meta.url));
 function htmlPages(folder) {
@@ -14,18 +17,6 @@ const pages = htmlPages(directory);
 const sources = new Map(pages.map((page) => [page, readFileSync(resolve(directory, page), 'utf8').replace(/<!--[\s\S]*?-->/g, '')]));
 const idsByPage = new Map(pages.map((page) => [page, new Set([...sources.get(page).matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]))]));
 const externalReference = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i;
-const legalReferences = new Set([
-  'mailto:privacy@dsub.io',
-  'https://www.lemonsqueezy.com/buyer-terms',
-  'https://www.lemonsqueezy.com/privacy',
-  'https://rawsector.com/privacy',
-  'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805939',
-  'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805883',
-  'https://law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1020398611',
-  'https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1029332499',
-  'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?lsJoLnkSeq=1033215161',
-  'https://www.easylaw.go.kr/CSP/CnpClsMain.laf?ccfNo=2&cciNo=3&cnpClsNo=2&csmSeq=2985&popMenu=ov',
-]);
 
 function resolveLocalReference(page, reference) {
   assert.ok(!externalReference.test(reference), `${page}: expected local asset ${reference}`);
@@ -41,12 +32,7 @@ function resolveLocalReference(page, reference) {
 }
 function checkAnchor(page, reference) {
   if (!externalReference.test(reference)) return resolveLocalReference(page, reference);
-  // Stream Deck downloads come from the product page, independently of Marketplace approval.
-  assert.ok(reference === 'mailto:support@rawsector.com' ||
-    (page.startsWith('manual/') && page.endsWith('/stream-deck.html') && reference === 'https://rawsector.com/products/mixrelay') ||
-    (page.startsWith('legal/') && legalReferences.has(reference.replaceAll('&amp;', '&'))) ||
-    (reference.startsWith('https://support.apple.com/') && new URL(reference).hostname === 'support.apple.com'),
-  `${page}: external destination is an approved support or legal reference: ${reference}`);
+  assertPublicDestination(reference.replaceAll('&amp;', '&'), page);
 }
 
 const manualLanguages = readdirSync(resolve(directory, 'manual'), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
@@ -222,9 +208,8 @@ for (const language of manualLanguages) {
   assert.match(html, /macOS 14\.2/, `${page}: supported macOS minimum`);
   assert.match(html, /Stream Deck 7\.1/, `${page}: SDK 3.x host minimum`);
   assert.doesNotMatch(html, /Stream Deck 6\.6/, `${page}: no obsolete host requirement`);
-  assert.match(html, /MixRelay-StreamDeck-0\.1\.0\.streamDeckPlugin/, `${page}: release package installation`);
-  assert.match(html, /href="https:\/\/rawsector\.com\/products\/mixrelay"/, `${page}: official release downloads`);
-  assert.match(html, /Elgato Marketplace/, `${page}: conditional Marketplace installation`);
+  assert.doesNotMatch(html, /\.streamDeckPlugin|href="https:\/\/rawsector\.com\/products\/mixrelay"/, `${page}: no direct plug-in download`);
+  assert.match(html, /Elgato Marketplace/, `${page}: Marketplace-only installation`);
 }
 
 for (const [page, source] of sources) {

@@ -61,6 +61,11 @@ Linux 전체 시스템 캡처, 가상 장치 추가·이름 변경을 제공한�
 
 약관 원문은 [앱](../LICENSE.txt)과 [Driver](../LICENSE-Driver.txt)로 구분한다.
 사업자는 에코 비전 랩(Echo Vision Lab), 지원 연락처는 `support@rawsector.com`이다.
+패키지 홈페이지·제작자·연락처는 `support/environments.json`의 `metadata`가 단일 원본이며
+`pnpm support:sync`가 Cargo·npm·Tauri 메타데이터를 생성하고 Arch 레시피도 같은 값을 읽는다.
+DEB Maintainer와 Arch packager는 이름과 지원 메일을 함께 표시한다.
+`pnpm test:scripts`와 웹사이트 검사는 고객용 소스·설치 자원·사용권·패키지·배포 명세의
+외부 URL과 메일을 공통 허용 목록으로 검사한다. 새 호스트와 주소는 명시적으로 등록해야 한다.
 계약서의 사업자 정보와 판매 채널의 법정 고지를 맞추며 설치 약관에 대표자 개인 이름을 넣지 않는다.
 계약·개인정보·제3자 고지 기준은 [법무 검토](legal-review.md)를 따른다.
 
@@ -227,10 +232,11 @@ macOS 14.2+와 Stream Deck 7.1+가 필요하다. DRM의 하한은 6.9지만 최�
 플러그인 신원은 `com.rawsector.mixrelay`, 동작은 `.power`·`.mute`·`.volume`·`.recording`, 제작자는 `rawsector`다.
 SDKVersion 3·Node.js 24를 사용하며 플러그인 코드는 실행 중 매니페스트를 읽거나 배포 자원을 수정하지 않는다.
 설정은 변경 즉시 저장하고 실패한 키·다이얼 조작은 `showAlert`로 알린다. 확인된 상태의 표시 갱신은 초당 10회 이하로 합친다.
-v0.1.0부터 `MixRelay-StreamDeck-<제품 버전>.streamDeckPlugin`을 PKG와 별도 다운로드로 배포하고 Stream Deck에서 연다.
+Stream Deck 플러그인은 Elgato Marketplace에서만 배포한다. 등록 승인·공개 전에는 출시 예정으로 안내하며 날짜를 약속하지 않는다.
+`MixRelay-StreamDeck-<제품 버전>.streamDeckPlugin`은 고객 다운로드로 제공하지 않는다.
 패키지를 후보 명세에 필수로 넣어 크기·SHA-256을 고정하며, 후보 CI가 실제 압축 해제한 파일의 공식 CLI·SDK·최소 버전·UUID를 검사한다.
 이 증거와 파일은 설치기와 같은 자격 검증·공개 단계에서 재확인한다. 앱 업데이트 명세에는 앱 설치기만 넣고 Stream Deck 패키지는 제외한다.
-Marketplace 등록 공개 뒤에는 제품 페이지에서 설치할 수도 있다. 등록 자료와 소유자 제출 절차는 [제출 키트](streamdeck-marketplace.md)에 둔다.
+소유자는 후보 체인에서 자격 검증한 동일 플러그인 파일을 Maker Console에 업로드한다. Marketplace 등록 공개 뒤에는 해당 제품 페이지에서 설치한다. 등록 자료와 소유자 제출 절차는 [제출 키트](streamdeck-marketplace.md)에 둔다.
 실제 Stream Deck 설치·키·다이얼과 Maker Console이 암호화한 배포본 검증은 자동 검사와 구분한다.
 
 ### MIDI 컨트롤러

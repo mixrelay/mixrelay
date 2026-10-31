@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { syncProductMetadata, validateProductMetadata } from './product-metadata.mjs';
 
 export const contractPath = fileURLToPath(new URL('../support/environments.json', import.meta.url));
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -21,6 +22,7 @@ function unique(items, label) {
 
 export function validateContract(value) {
   if (value.schemaVersion !== 1 || value.product !== 'mix-relay') throw new Error('Unsupported support contract');
+  validateProductMetadata(value.metadata);
   if (!/^\d+\.\d+$/.test(value.minimums?.macos ?? '')
     || !['pipewire', 'wireplumber', 'glibc'].every(name => /^\d+\.\d+(?:\.\d+)?$/.test(value.minimums?.linux?.[name] ?? ''))) {
     throw new Error('Invalid deployment or dependency minimum');
@@ -141,6 +143,7 @@ export function contractInventory(contract) {
 }
 
 export function checkGenerated(contract, root = fileURLToPath(new URL('..', import.meta.url)), write = false) {
+  syncProductMetadata(contract.metadata, root, write);
   for (const [relative, expected] of [
     ['infra/lab/compose.yaml', composeDocument(contract)],
     ['docs/validation/supported-environments.md', contractInventory(contract)],

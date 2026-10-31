@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadContract } from './support-contract.mjs';
+import { productContact } from './product-metadata.mjs';
 
 const languages = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
 const localizedDocuments = languages.flatMap(language => [language.appTerms, language.driverTerms]);
@@ -83,8 +84,12 @@ function inspectionEnvironment() {
   return env;
 }
 
-function packageMetadata({ architecture, depends, contents, packageName }) {
+function packageMetadata({ architecture, depends, contents, packageName, homepage, maintainer }) {
   if (packageName !== 'mix-relay') throw new Error(`Unsupported package: ${packageName}`);
+  const { metadata } = loadContract().contract;
+  if (homepage?.trim() !== metadata.homepage || maintainer?.trim() !== productContact(metadata)) {
+    throw new Error('Package Homepage and Maintainer must match the public product metadata');
+  }
   const normalizedArchitecture = architecture.trim();
   if (!Object.hasOwn(expectedElf, normalizedArchitecture)) {
     throw new Error(`Unsupported package architecture: ${normalizedArchitecture}`);
@@ -193,8 +198,8 @@ function elfHeaderArchitecture(header, path) {
 }
 
 /** Checks metadata and ELF headers without installing or executing package payloads. */
-export function validatePackage({ architecture, depends, contents, elfHeaders, packageName, version, versionReceipt }) {
-  const { architecture: normalizedArchitecture, executableEntries } = packageMetadata({ architecture, depends, contents, packageName });
+export function validatePackage({ architecture, depends, contents, elfHeaders, packageName, version, versionReceipt, homepage, maintainer }) {
+  const { architecture: normalizedArchitecture, executableEntries } = packageMetadata({ architecture, depends, contents, packageName, homepage, maintainer });
   const receipt = JSON.parse(versionReceipt ?? 'null');
   if (!receipt || !/^\d+\.\d+\.\d+$/.test(receipt.version) || receipt.version !== version?.replace(/-\d+$/, '')) {
     throw new Error('Driver version receipt must match the actual package version');
@@ -385,6 +390,8 @@ export async function inspectPackage(path, run = spawnSync, spawnProcess = spawn
   const packageDetails = {
     packageName: field('Package').trim(),
     version: field('Version').trim(),
+    homepage: field('Homepage'),
+    maintainer: field('Maintainer'),
     architecture: field('Architecture'),
     depends: field('Depends'),
     contents: await listNumericOwnedContents(archive, spawnProcess),

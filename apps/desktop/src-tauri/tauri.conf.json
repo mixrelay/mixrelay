@@ -90,6 +90,8 @@
       "files": {
         "Resources/mixrelay-driver-launcher": "../../../target/universal-apple-darwin/release/mixrelay-driver-launcher"
       }
-    }
+    },
+    "publisher": "Echo Vision Lab",
+    "homepage": "https://rawsector.com/products/mixrelay"
   }
 }

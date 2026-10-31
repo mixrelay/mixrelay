@@ -453,5 +453,10 @@
         "arch": "alsa-lib"
       }
     }
+  },
+  "metadata": {
+    "homepage": "https://rawsector.com/products/mixrelay",
+    "publisher": "Echo Vision Lab",
+    "email": "support@rawsector.com"
   }
 }

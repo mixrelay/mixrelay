@@ -40,13 +40,13 @@ test("the CLI publishes the complete qualified artifact selection and an explici
   const { directory, args, artifactArgs, artifacts } = fixture(t);
   const script = fileURLToPath(new URL("./prepare-release-manifest.mjs", import.meta.url));
   const result = spawnSync(process.execPath, [script, ...args,
-    "--notes-url", "https://mixrelay.com/releases/1.2.3",
+    "--notes-url", "https://rawsector.com/products/mixrelay",
     ...artifactArgs], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   const manifest = JSON.parse(readFileSync(join(directory, "mix-relay.release.json"), "utf8"));
   assert.deepEqual(manifest, {
     product: "mix-relay", version: "1.2.3", published_at: publishedAt,
-    notes_url: "https://mixrelay.com/releases/1.2.3",
+    notes_url: "https://rawsector.com/products/mixrelay",
     artifacts,
   });
 });
@@ -110,4 +110,13 @@ test("missing, empty, directory and linked installers are rejected without chang
   assert.throws(() => prepareReleaseManifest([...args, "--artifact", "macos:universal:MixRelay Install.pkg"]),
     { code: "EEXIST" });
   assert.equal(readFileSync(path, "utf8"), "Existing manifest must remain unchanged\n");
+});
+
+test('release notes reject private releases, unresolved domains and unapproved new hosts before writing', t => {
+  const { args, artifactArgs, directory } = fixture(t);
+  for (const url of ['https://github.com/mixrelay/mixrelay/releases', 'https://mixrelay.com/releases',
+    'https://new-host.example.org/notes']) {
+    assert.throws(() => prepareReleaseManifest([...args, ...artifactArgs, '--notes-url', url]), /unapproved/);
+    assert.equal(existsSync(join(directory, 'mix-relay.release.json')), false);
+  }
 });
