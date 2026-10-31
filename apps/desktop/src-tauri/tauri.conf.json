@@ -66,7 +66,14 @@
       "../../../packaging/macos/localization/es.lproj/InfoPlist.strings": "es.lproj/InfoPlist.strings",
       "../../../packaging/macos/localization/pt.lproj/InfoPlist.strings": "pt.lproj/InfoPlist.strings",
       "../../../packaging/macos/localization/it.lproj/InfoPlist.strings": "it.lproj/InfoPlist.strings",
-      "../../../packaging/macos/localization/ru.lproj/InfoPlist.strings": "ru.lproj/InfoPlist.strings"
+      "../../../packaging/macos/localization/ru.lproj/InfoPlist.strings": "ru.lproj/InfoPlist.strings",
+      "../../../third-party/midir/LICENSE": "third-party/midir/LICENSE",
+      "../../../third-party/coremidi/LICENSE": "third-party/coremidi/LICENSE",
+      "../../../third-party/coremidi-sys/LICENSE": "third-party/coremidi-sys/LICENSE",
+      "../../../third-party/alsa/LICENSE-MIT": "third-party/alsa/LICENSE-MIT",
+      "../../../third-party/alsa-sys/LICENSE": "third-party/alsa-sys/LICENSE",
+      "../../../third-party/alsa-lib/COPYING": "third-party/alsa-lib/COPYING",
+      "../../../third-party/alsa-lib/NOTICE": "third-party/alsa-lib/NOTICE"
     },
     "icon": [
       "icons/32x32.png",
@@ -83,6 +90,8 @@
       "files": {
         "Resources/mixrelay-driver-launcher": "../../../target/universal-apple-darwin/release/mixrelay-driver-launcher"
       }
-    }
+    },
+    "publisher": "Echo Vision Lab",
+    "homepage": "https://rawsector.com/products/mixrelay"
   }
 }

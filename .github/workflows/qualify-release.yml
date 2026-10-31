@@ -52,12 +52,27 @@ jobs:
         run: |
           gh release view "$CANDIDATE_TAG" --json isDraft,isPrerelease | jq -e '.isDraft or .isPrerelease'
           mkdir candidate
-          gh release download "$CANDIDATE_TAG" --dir candidate --pattern '*.pkg' --pattern '*.deb' --pattern '*.pkg.tar.zst' --pattern 'mix-relay.candidate.json'
+          gh release download "$CANDIDATE_TAG" --dir candidate --pattern '*.pkg' --pattern '*.deb' --pattern '*.pkg.tar.zst' --pattern '*.streamDeckPlugin' --pattern 'mix-relay.candidate.json'
+      - name: Install archive inspection tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
       - name: Check source, contract, bytes and hosted execution matrix
         id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/qualification-ci.mjs prepare --directory candidate
+      - name: Install Stream Deck validation tools
+        run: |
+          npm install --global pnpm@11.9.0
+          pnpm install --frozen-lockfile
+      - name: Qualify the packed Stream Deck bytes without running Stream Deck
+        run: node scripts/streamdeck-artifact.mjs qualify --directory candidate --output streamdeck-evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          overwrite: true
+          name: qualification-target-streamdeck-plugin
+          path: streamdeck-evidence/
+          retention-days: 90
+          if-no-files-found: error
       - name: Fetch previous installers and verify upgrade ancestry
         env:
           GH_TOKEN: ${{ github.token }}
@@ -207,6 +222,8 @@ jobs:
         with:
           name: qualification-candidate
           path: qualification/qualification-candidate
+      - name: Install archive inspection tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
       - name: Produce inventory even when an environment failed
         run: node scripts/qualification.mjs inventory --directory qualification/qualification-candidate --candidate qualification/qualification-candidate/mix-relay.candidate.json --reports qualification --output inventory.md
       - name: Require every environment, scenario and exact artifact

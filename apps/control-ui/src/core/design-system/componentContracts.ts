@@ -85,7 +85,7 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid: '위험 동작을 색만으로 구별하거나 Feature CSS로 크기·표면을 바꾸지 않는다.',
     anatomy: 'React Aria Button → 실제 button → 레이블.',
     states:
-      'tone neutral/critical · density regular/compact · emphasis quiet/outlined/strong · loading와 disabled 독립. 기본 neutral/regular/quiet, stretch=false, align=center.',
+      'tone neutral/critical · density regular/compact · emphasis quiet/outlined/strong · loading와 disabled 독립. 기본 neutral/regular/quiet, stretch=false, align=center. aria-pressed=true는 중립색 반전 채움이며 MIDI 토글도 사용한다. 파란 매핑 대상 테두리와 구분한다.',
     tokens:
       '--control-height 28 / compact 24; --font-control 12; control 표면·text·focus·disabled 역할.',
     interaction:
@@ -118,6 +118,7 @@ export const componentContracts: readonly ComponentContract[] = [
     storyId: 'core-design-system-system-controls--interactive',
     storyTitle: 'Core/Design System/System Controls',
     stateStories: [
+      { id: 'core-controls-actionbutton--pressed', label: 'Pressed' },
       { id: 'core-controls-actionbutton--submit', label: 'Submit' },
       { id: 'core-controls-actionbutton--loading', label: 'Loading' },
       { id: 'core-controls-actionbutton--disabled', label: 'Disabled' },
@@ -214,7 +215,7 @@ export const componentContracts: readonly ComponentContract[] = [
       '노드 Off/Mute와 같은 상태로 묶지 않는다. active/pressed/busy/disabled를 서로 대신하지 않는다.',
     anatomy: 'Tooltip → Button → 16px SVG glyph.',
     states:
-      'icon record/pause/stop/resume · active=false · compact=false · disabled 필수. pressed 미지정 시 active가 aria-pressed. busy는 비활성화를 자동 적용하지 않음.',
+      'icon record/pause/stop/resume · active=false · compact=false · disabled 필수. pressed 미지정 시 active가 aria-pressed. busy는 비활성화를 자동 적용하지 않음. MIDI 모드에서는 매핑 버튼 하나가 포커스를 소유하고 선택 상태·짧은 입력 레이블을 표시한다.',
     tokens:
       '--transport-size / compact 24; --transport-*; pause-active는 별도 토큰. Record 의미색 유지.',
     interaction:
@@ -262,7 +263,8 @@ export const componentContracts: readonly ComponentContract[] = [
     use: '실제 enabled와 대상 이름이 들어간 label을 전달한다.',
     avoid: 'Mute·Bypass·앱 전체 Pause나 화면 선택을 전원 상태로 표시하지 않는다.',
     anatomy: '24px button → 14px power SVG.',
-    states: 'enabled와 disabled 필수·독립. aria-pressed=enabled.',
+    states:
+      'enabled와 disabled 필수·독립. aria-pressed=enabled. MIDI 모드에서는 매핑 버튼 하나가 포커스를 소유하고 선택 상태·짧은 입력 레이블을 표시한다.',
     tokens:
       '--node-control-size 24; enabled --text-primary(정상은 중립, 색은 예외에만); disabled·Off --text-muted; hover --surface-hover; focus 역할.',
     interaction:
@@ -294,7 +296,8 @@ export const componentContracts: readonly ComponentContract[] = [
     use: 'muted와 대상·Mute/Unmute 행동 이름을 실제 readback에서 전달한다.',
     avoid: 'Off나 전체 재생 Pause로 대체하지 않는다.',
     anatomy: '24px button → 14px speaker/waves 또는 cross SVG.',
-    states: 'muted와 disabled 필수·독립. aria-pressed=muted.',
+    states:
+      'muted와 disabled 필수·독립. aria-pressed=muted. MIDI 모드에서는 매핑 버튼 하나가 포커스를 소유하고 선택 상태·짧은 입력 레이블을 표시한다.',
     tokens: '--node-control-size 24; muted --status-warning + 10% 혼합 표면; focus·disabled 역할.',
     interaction:
       'Enter/Space. 클릭 전파를 막고 대상 이름이 들어간 label을 aria-label·공통 Tooltip에 사용한다. muted·disabled를 독립적으로 제공한다.',
@@ -1901,7 +1904,7 @@ export const componentContracts: readonly ComponentContract[] = [
     anatomy:
       'header actions/title/Options → face(AudioNodeIcon·AudioNodeMeterBanks·EQ/dynamics·AudioNodeParameterGrid·content) → utility → disclosure(AudioNodeEndpointOptions·fields); ports 별도 geometry.',
     states:
-      'poweredOff/bypassed/offline/selected 독립=false. faceMode=standard; showPorts=true; channelCount0; statusTone=neutral; parameter/meter lists=[]; optionsLabel 생략 시 현재 언어의 routing.nodes.options. compact의 detail은 controls 영역에 표시하며 critical status가 있으면 우선한다.',
+      'poweredOff/bypassed/offline/selected 독립=false. faceMode=standard; showPorts=true; channelCount0; statusTone=neutral; parameter/meter lists=[]; optionsLabel 생략 시 현재 언어의 routing.nodes.options. compact의 detail은 controls 영역에 표시하며 critical status가 있으면 우선한다. MIDI 모드에서는 매핑 버튼 하나가 포커스를 소유하고 선택 상태·짧은 입력 레이블을 표시한다.',
     tokens:
       'audioNodeFrame header28(size-sm)/utility24(size-xs)/minBody66/border1; node widths·face metrics; off 표면; 포트 좌표는 Options 밖.',
     interaction:
@@ -2125,7 +2128,7 @@ export const componentContracts: readonly ComponentContract[] = [
     interaction:
       '노드/선 외부 하나씩 Tab: Enter/Space 선택, 방향키 이동(Shift 크게), Esc 해제, Delete/Backspace 삭제. 내부 필드 그래프 키 분리. 키보드 포트 연결 완료는 별도 제품 검증.',
     source: 'apps/control-ui/src/core/audio-graph/AudioGraphCanvas.tsx',
-    api: "const emptyProcessorEditorStatuses = new Map<string, ProcessorEditorStatus>();\n\nexport interface AudioNodeControlSlots {\n  power?: ReactNode;\n  mute?: ReactNode;\n}\n\nexport type AudioGraphNodeMenuItem = HierarchicalMenuItem;\n\nexport type AudioGraphChangeKind =\n  | 'layout'\n  | 'level'\n  | 'processor_parameter'\n  | 'parameter_group'\n  | 'runtime';\n\nexport interface ProcessorEditorLabels {\n  open: string;\n  retry: string;\n  failure: Record<ProcessorEditorFailure, string>;\n}\n\nexport interface AudioGraphViewport {\n  x: number;\n  y: number;\n  zoom: number;\n}\n\nexport interface AudioGraphCanvasProps {\n  renderNodeControls?: (node: AudioGraphNode) => AudioNodeControlSlots | null;\n  renderNodeContent?: (node: AudioGraphNode) => ReactNode;\n  contextMenuLabels?: GraphContextMenuLabels;\n  addNodeLabel?: string;\n  ariaLabel: string;\n  meterStore?: AudioMeterStore;\n  model: AudioGraphModel;\n  nodeMenuItems?: readonly AudioGraphNodeMenuItem[];\n  onAddNode?: (itemId: string, position: XYPosition, placeNodes?: PlaceGraphNodes) => void;\n  onNodeMenuOpenedChange?: (opened: boolean) => void;\n  onNodeRenameRequest?: (nodeId: string) => void;\n  onModelChange: (model: AudioGraphModel, kind: AudioGraphChangeKind) => void;\n  onNodeEndpointChange?: (nodeId: string, value: EndpointUpdate) => void;\n  /** A choice from the node's `channelLayoutControl`. */\n  onNodeChannelLayoutChange?: (nodeId: string, value: string) => void;\n  onNodeGainChange?: (nodeId: string, gainDb: number) => void;\n  onNodeParameterChange?: (nodeId: string, parameterId: string, value: number) => void;\n  onNodeParametersChange?: (\n    nodeId: string,\n    updates: readonly { id: string; value: number }[],\n  ) => void;\n  onProcessorEditorRetry?: (nodeId: string) => void;\n  processorEditorLabels?: ProcessorEditorLabels;\n  processorEditorStatuses?: ReadonlyMap<string, ProcessorEditorStatus>;\n  /** Initial or externally restored view; user movement remains locally interactive. */\n  viewport?: AudioGraphViewport;\n  /** Reports user pan/zoom and insertion reveals, never external viewport restoration. */\n  onViewportChange?: (viewport: AudioGraphViewport) => void;\n}\n\nexport function AudioGraphCanvas({\n  addNodeLabel,\n  contextMenuLabels,\n  ariaLabel,\n  meterStore,\n  model,\n  nodeMenuItems = [],\n  onAddNode,\n  onModelChange,\n  onNodeMenuOpenedChange,\n  onNodeRenameRequest,\n  onProcessorEditorRetry,\n  processorEditorLabels,\n  processorEditorStatuses = emptyProcessorEditorStatuses,\n  renderNodeContent,\n  renderNodeControls,\n  viewport,\n  onViewportChange,\n  ...edits\n}: AudioGraphCanvasProps)",
+    api: "const emptyProcessorEditorStatuses = new Map<string, ProcessorEditorStatus>();\n\nexport interface AudioNodeControlSlots {\n  power?: ReactNode;\n  mute?: ReactNode;\n}\n\nexport type AudioGraphNodeMenuItem = HierarchicalMenuItem;\n\nexport type AudioGraphChangeKind =\n  | 'layout'\n  | 'level'\n  | 'processor_parameter'\n  | 'parameter_group'\n  | 'runtime';\n\nexport interface ProcessorEditorLabels {\n  open: string;\n  retry: string;\n  failure: Record<ProcessorEditorFailure, string>;\n}\n\nexport interface AudioGraphViewport {\n  x: number;\n  y: number;\n  zoom: number;\n}\n\nexport interface AudioGraphCanvasProps {\n  nodeContextActions?: (nodeId: string) => readonly NodeContextAction[];\n  renderNodeControls?: (node: AudioGraphNode) => AudioNodeControlSlots | null;\n  renderNodeContent?: (node: AudioGraphNode) => ReactNode;\n  contextMenuLabels?: GraphContextMenuLabels;\n  addNodeLabel?: string;\n  ariaLabel: string;\n  meterStore?: AudioMeterStore;\n  model: AudioGraphModel;\n  nodeMenuItems?: readonly AudioGraphNodeMenuItem[];\n  onAddNode?: (itemId: string, position: XYPosition, placeNodes?: PlaceGraphNodes) => void;\n  onNodeMenuOpenedChange?: (opened: boolean) => void;\n  onNodeRenameRequest?: (nodeId: string) => void;\n  onModelChange: (model: AudioGraphModel, kind: AudioGraphChangeKind) => void;\n  onNodeEndpointChange?: (nodeId: string, value: EndpointUpdate) => void;\n  /** A choice from the node's `channelLayoutControl`. */\n  onNodeChannelLayoutChange?: (nodeId: string, value: string) => void;\n  onNodeGainChange?: (nodeId: string, gainDb: number) => void;\n  onNodeParameterChange?: (nodeId: string, parameterId: string, value: number) => void;\n  onNodeParametersChange?: (\n    nodeId: string,\n    updates: readonly { id: string; value: number }[],\n  ) => void;\n  onProcessorEditorRetry?: (nodeId: string) => void;\n  processorEditorLabels?: ProcessorEditorLabels;\n  processorEditorStatuses?: ReadonlyMap<string, ProcessorEditorStatus>;\n  /** Initial or externally restored view; user movement remains locally interactive. */\n  viewport?: AudioGraphViewport;\n  /** Reports user pan/zoom and insertion reveals, never external viewport restoration. */\n  onViewportChange?: (viewport: AudioGraphViewport) => void;\n}\n\nexport function AudioGraphCanvas({\n  addNodeLabel,\n  contextMenuLabels,\n  ariaLabel,\n  meterStore,\n  model,\n  nodeMenuItems = [],\n  onAddNode,\n  onModelChange,\n  onNodeMenuOpenedChange,\n  onNodeRenameRequest,\n  nodeContextActions,\n  onProcessorEditorRetry,\n  processorEditorLabels,\n  processorEditorStatuses = emptyProcessorEditorStatuses,\n  renderNodeContent,\n  renderNodeControls,\n  viewport,\n  onViewportChange,\n  ...edits\n}: AudioGraphCanvasProps)",
     consumers: ['apps/control-ui/src/features/routing-workspace/RoutingWorkspace.tsx'],
     tests: ['apps/control-ui/src/core/audio-graph/AudioGraphCanvas.test.tsx'],
     storyId: 'core-audio-graph-canvas--connect-disconnect-reconnect',

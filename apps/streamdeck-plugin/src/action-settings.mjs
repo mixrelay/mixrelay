@@ -1,10 +1,10 @@
 import { operations } from './capabilities.mjs';
 
 export const actionIds = {
-  power: 'io.mixrelay.streamdeck.node',
-  mute: 'io.mixrelay.streamdeck.mute',
-  volume: 'io.mixrelay.streamdeck.volume',
-  recording: 'io.mixrelay.streamdeck.recorder',
+  power: 'com.rawsector.mixrelay.power',
+  mute: 'com.rawsector.mixrelay.mute',
+  volume: 'com.rawsector.mixrelay.volume',
+  recording: 'com.rawsector.mixrelay.recording',
 };
 export const volumeSteps = [0.5, 1, 2, 3];
 

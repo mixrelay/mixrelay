@@ -3,6 +3,7 @@ import {
   type ReactNode,
   type Ref,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -32,6 +33,7 @@ import type {
 import { ControlPortError } from '../../core/control-port/types';
 import { type HistoryStep, useUndoHistory } from '../../core/history/useUndoHistory';
 import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
+import { MidiContext, MidiGraphContext } from '../../core/midi/MidiPort';
 import type { EndpointControl } from '../../core/ui/AudioNodeEndpointOptions';
 import { InlineNotice } from '../../core/ui/InlineNotice';
 import { NodeMuteButton, NodePowerButton } from '../../core/ui/NodeSignalControls';
@@ -109,6 +111,7 @@ export interface RoutingWorkspaceProps {
     create: (spec: VirtualEndpointSpec) => Promise<VirtualEndpointSpec | null>;
   };
   headerActions?: ReactNode;
+  headerEnd?: ReactNode;
   notice?: ReactNode;
   /** The diagnostics window's problem list; workspace failures render only there. */
   problemsTarget?: HTMLElement | null;
@@ -1117,6 +1120,7 @@ interface WorkspaceViewProps {
   permissionWaiting: boolean;
   documentRevision: number;
   headerActions?: ReactNode;
+  headerEnd?: ReactNode;
   notice?: ReactNode;
   problemsTarget?: HTMLElement | null;
   onProblemsChange?: (summary: WorkspaceProblemSummary) => void;
@@ -1373,12 +1377,13 @@ function WorkspaceView(props: WorkspaceViewProps) {
     props.interactionDisabled,
   );
   return (
-    <section className={styles.root} data-state={state}>
+    <WorkspaceShell props={props}>
       <WorkspaceToolbar
         titleRef={titleRef}
         title={props.title}
         onTitleChange={props.onTitleChange}
         headerActions={props.headerActions}
+        headerEnd={props.headerEnd}
       />
       {props.notice}
       <WorkspacePermissionNotice waiting={props.permissionWaiting} />
@@ -1429,7 +1434,24 @@ function WorkspaceView(props: WorkspaceViewProps) {
       )}
       {nodeNames.dialog}
       {scanReport.dialog}
-    </section>
+    </WorkspaceShell>
+  );
+}
+
+function WorkspaceShell({ props, children }: { props: WorkspaceViewProps; children: ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <MidiGraphContext.Provider
+      value={
+        props.graphId
+          ? { graphId: props.graphId, graphName: props.title ?? t('studio.untitledGraph') }
+          : null
+      }
+    >
+      <section className={styles.root} data-state={props.state}>
+        {children}
+      </section>
+    </MidiGraphContext.Provider>
   );
 }
 
@@ -1484,16 +1506,20 @@ function WorkspaceToolbar({
   title,
   onTitleChange,
   headerActions,
-}: Pick<WorkspaceViewProps, 'title' | 'onTitleChange' | 'headerActions'> & {
+  headerEnd,
+}: Pick<WorkspaceViewProps, 'title' | 'onTitleChange' | 'headerActions' | 'headerEnd'> & {
   titleRef: Ref<HTMLInputElement>;
 }) {
   const { t } = useTranslation();
+  const mapping = useContext(MidiContext)?.active ?? false;
   return (
     <WorkspaceHeader>
       <div className={styles.titleBlock}>
         <TitleField
           ref={titleRef}
           aria-label={t('studio.graphName')}
+          readOnly={mapping}
+          disabled={mapping}
           onBlur={(event) => {
             const normalized = event.currentTarget.value.trim();
             onTitleChange?.(normalized || t('studio.untitledGraph'));
@@ -1506,7 +1532,16 @@ function WorkspaceToolbar({
           value={title ?? t('studio.untitledGraph')}
         />
       </div>
-      {headerActions ? <div className={styles.headerActions}>{headerActions}</div> : null}
+      {headerActions ? (
+        <div
+          className={styles.headerActions}
+          inert={mapping}
+          data-midi-inactive={mapping || undefined}
+        >
+          {headerActions}
+        </div>
+      ) : null}
+      {headerEnd}
     </WorkspaceHeader>
   );
 }
@@ -1525,7 +1560,7 @@ type NodeRenderInputs = Pick<
   | 'playbackPaused'
   | 'state'
   | 'updateModel'
-> & { idle: boolean; layoutDirty: boolean };
+> & { idle: boolean; layoutDirty: boolean; mapping: boolean };
 
 function useNodeRenderers(
   props: WorkspaceViewProps,
@@ -1547,9 +1582,11 @@ function useNodeRenderers(
     state,
     updateModel,
   } = props;
+  const mapping = useContext(MidiContext)?.active ?? false;
   const layoutDirty = props.layout.dirty;
   const inputs = useMemo<NodeRenderInputs>(
     () => ({
+      mapping,
       application,
       catalogRevision,
       controlPort,
@@ -1564,6 +1601,7 @@ function useNodeRenderers(
       updateModel,
     }),
     [
+      mapping,
       application,
       catalogRevision,
       controlPort,
@@ -1651,13 +1689,15 @@ function nodeControlIdle(props: WorkspaceViewProps) {
 }
 
 function useWorkspaceNodeControls(props: WorkspaceViewProps) {
-  return useNodeControls(
+  const mapping = useContext(MidiContext)?.active ?? false;
+  const snapshot = useNodeControls(
     props.controlPort,
     props.graphId,
     props.documentRevision,
-    nodeControlIdle(props),
+    nodeControlIdle(props) || mapping,
     props.application,
   );
+  return snapshot;
 }
 
 function nodeRecoveryControl(
@@ -1711,10 +1751,7 @@ function nodeSignalControls(
   snapshot: import('../../core/control-port/types').GraphNodeControls | null,
 ) {
   const control = node.runtime?.control ?? { enabled: true, muted: false };
-  const recoveryOnly =
-    node.runtime?.type === 'effect' ||
-    node.runtime?.type === 'compressor' ||
-    node.runtime?.type === 'limiter';
+  const recoveryOnly = usesRecoveryControls(node, props.mapping);
   if (recoveryOnly && control.enabled && !control.muted) return null;
   const nodeId = node.runtime?.binding?.nodeId ?? node.id;
   const entry = snapshot?.nodes.find((candidate) => candidate.nodeId === nodeId);
@@ -1757,4 +1794,10 @@ function nodeSignalControls(
       />
     ) : null,
   };
+}
+
+function usesRecoveryControls(node: AudioGraphNode, mapping: boolean) {
+  return (
+    !mapping && ['effect', 'compressor', 'limiter'].some((kind) => kind === node.runtime?.type)
+  );
 }

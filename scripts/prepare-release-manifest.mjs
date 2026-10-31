@@ -2,13 +2,14 @@ import { lstatSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { loadContract } from './support-contract.mjs';
+import { loadContract, releaseInstallers } from './support-contract.mjs';
 import { validateCandidate, evaluateQualification, readReports } from './qualification.mjs';
+import { assertPublicReferences } from './check-public-destinations.mjs';
 
 export function assertQualifiedRelease(manifest, candidate, directory, reports, loaded = loadContract()) {
   validateCandidate(candidate, directory, loaded);
   if (manifest.product !== candidate.product || manifest.version !== candidate.version) throw new Error('Release differs from qualified candidate');
-  const expected = candidate.artifacts.map(artifact => {
+  const expected = releaseInstallers(candidate, loaded.contract).map(artifact => {
     const definition = loaded.contract.artifacts.find(item => item.id === artifact.id);
     return { os: definition.os, arch: definition.arch, file: artifact.file };
   });
@@ -89,6 +90,7 @@ export function prepareReleaseManifest(args) {
     artifacts,
   };
   const path = join(directory, `${values.product}.release.json`);
+  assertPublicReferences(JSON.stringify(manifest), path);
   // Preserve the existing no-overwrite contract even when a previous release has aged evidence.
   try { lstatSync(path); throw Object.assign(new Error('Manifest already exists'), { code: 'EEXIST' }); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }

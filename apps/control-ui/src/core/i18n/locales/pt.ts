@@ -1,5 +1,46 @@
 import { effectTranslations } from '../effects';
 export const pt = {
+  midi: {
+    mapMode: 'Modo de mapeamento MIDI',
+    mapTarget: 'Atribuir {{name}}: {{action}}',
+    selectTarget: 'Selecione um controlo realçado e mova um fader ou prima um botão MIDI.',
+    waitingTarget: '{{name}} · {{action}} — mova um controlo MIDI para atribuir ou substituir.',
+    done: 'Concluir mapeamento',
+    selectMapping: 'Selecionar {{name}} · {{action}}',
+    recorderAction: 'Ação do gravador',
+    min: 'Mínimo',
+    max: 'Máximo',
+    empty: 'Sem mapeamentos MIDI. Selecione um controlo realçado para adicionar um.',
+    targetUnavailable: 'Estado dos destinos indisponível',
+    title: 'Controlos MIDI',
+    disconnected: 'Dispositivo desligado',
+    targetMissing: 'Destino em falta',
+    unavailable: 'MIDI indisponível',
+    mode: 'Modo de volume',
+    pickup: 'Mova o fader até ao nível atual para assumir o controlo.',
+    step: 'Incremento',
+    remove: 'Remover',
+    removeTarget: 'Remover controlo MIDI de {{name}}',
+    failed: 'Não foi possível alterar os controlos MIDI. Tente novamente.',
+    control: '{{device}} · Canal {{channel}} · {{kind}} {{number}}',
+    modes: {
+      absolute: 'Absoluto (captação suave)',
+      twos_complement: 'Relativo: complemento de dois',
+      offset64: 'Relativo: desvio 64',
+    },
+    kinds: {
+      note: 'Nota',
+      cc: 'CC',
+    },
+    actions: {
+      power: 'Ligar/desligar',
+      mute: 'Silenciar',
+      volume: 'Volume',
+      record: 'Gravar / retomar',
+      pause: 'Pausa',
+      stop: 'Parar',
+    },
+  },
   effects: effectTranslations.pt,
   theme: {
     label: 'Aparência',
@@ -283,7 +324,7 @@ export const pt = {
     audioPaused: 'Áudio em pausa',
     deleteGraph: 'Excluir grafo',
     deleteGraphNotice:
-      'Excluir “{{name}}”? O processamento de áudio e as gravações deste grafo serão interrompidos. Esta ação não pode ser desfeita. Os arquivos de espaço de trabalho salvos não serão excluídos.',
+      'Eliminar “{{name}}”? O áudio e as gravações serão interrompidos. Na lista de grafos, Command+Z no macOS ou Ctrl+Z no Linux anula; acrescente Shift para refazer. Os ficheiros guardados permanecem.',
     catalogUnavailable:
       'Os grafos salvos não estão disponíveis. O grafo existente não foi substituído.',
     reloadGraphs: 'Recarregar grafos',

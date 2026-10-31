@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="macOSとLinuxでMIDIコントローラーからノードを操作します。">
+    <title>MIDIコントローラー — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/midi.html">
+    <link rel="alternate" hreflang="ko" href="../ko/midi.html">
+    <link rel="alternate" hreflang="ja" href="../ja/midi.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/midi.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/midi.html">
+    <link rel="alternate" hreflang="de" href="../de/midi.html">
+    <link rel="alternate" hreflang="fr" href="../fr/midi.html">
+    <link rel="alternate" hreflang="it" href="../it/midi.html">
+    <link rel="alternate" hreflang="es" href="../es/midi.html">
+    <link rel="alternate" hreflang="pt" href="../pt/midi.html">
+    <link rel="alternate" hreflang="ru" href="../ru/midi.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">本文へスキップ</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="製品ホーム"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="言語"><a href="../en/midi.html" lang="en" hreflang="en">English</a> <a href="../ko/midi.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/midi.html" lang="ja" hreflang="ja" aria-current="page">日本語</a> <a href="../zh-Hans/midi.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/midi.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/midi.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/midi.html" lang="fr" hreflang="fr">Français</a> <a href="../it/midi.html" lang="it" hreflang="it">Italiano</a> <a href="../es/midi.html" lang="es" hreflang="es">Español</a> <a href="../pt/midi.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/midi.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 公開前の草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="マニュアルの章">
+        <a class="back-link" href="../../index.html">← 製品ホーム</a>
+        <a class="manual-mobile-index" href="index.html">すべての章</a>
+        <nav class="guide-nav" aria-label="マニュアルの章"><a href="index.html">マニュアル概要</a>
+<a href="installation.html">システム要件とインストール</a>
+<a href="first-launch.html">初回起動とアクセス許可</a>
+<a href="workspace.html">ルーティングワークスペース</a>
+<a href="devices.html">デバイスと仮想エンドポイント</a>
+<a href="app-capture.html">アプリの音声キャプチャ</a>
+<a href="recording.html">録音</a>
+<a href="effects.html">内蔵エフェクトとプリセット</a>
+<a href="plugins.html">外部プラグイン</a>
+<a href="stream-deck.html">Stream Deckプラグイン</a>
+<a href="midi.html" aria-current="page">MIDIコントローラー</a>
+<a href="licensing.html">無料版とライセンス</a>
+<a href="updates.html">アップデート</a>
+<a href="uninstall.html">アンインストール</a>
+<a href="troubleshooting.html">トラブルシューティングと診断</a>
+<a href="support.html">サポート窓口</a></nav>
+      </aside>
+      <article class="guide-content">
+<header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>MIDIコントローラー</h1><p>macOSとLinuxでMIDIコントローラーからノードを操作します。</p><p class="guide-draft-note">公開前の草稿です。一般向けのダウンロードと購入はまだ利用できません。本書は現在のソースからビルドした製品を説明しています。以下に記載する環境では、インストール後の動作確認が引き続き必要です。</p></header>
+<nav class="manual-toc"><ul><li><a href="#assign">コントロールを割り当てる</a></li><li><a href="#controls">音量とボタン</a></li><li><a href="#devices">デバイスと保存した割り当て</a></li></ul></nav>
+<section class="guide-section" id="assign" aria-labelledby="assign-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="assign-title">コントロールを割り当てる</h2><p>エディターのヘッダー右端にある小さなMIDIボタン、macOSのCommand+M、LinuxのCtrl+MでMIDIマップモードを切り替えます。Escapeでも終了します。ノードの強調表示された電源、ミュート、音量、録音開始/再開、一時停止、停止をクリックするか、Tabで移動してEnter/Spaceで選び、MIDIコントロールを操作すると即座に保存します。同じ選択中に別の入力を操作すると直前の割り当てを置き換えます。別の対象を選んで同じ入力を操作すると割り当てを追加します。完全な重複は既存の設定を維持します。モード中はグラフ編集を停止し、受信MIDIで操作を実行しません。</p></div></section>
+<section class="guide-section" id="controls" aria-labelledby="controls-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="controls-title">音量とボタン</h2><p>ゼロより大きいベロシティのNote On、または64未満から64以上になるCCは、一致するすべてのボタン操作を一度ずつ実行します。電源とミュートは各対象自身の状態を切り替えます。絶対音量はCC 0–127に対応し、既定範囲は−60～+12 dBです。割り当てごとにMin/Maxと逆転範囲を設定できます。Pick-upはフェーダーが各対象の現在値に届くまで待ち、外部変更や再接続後も再度待ちます。相対エンコーダーはtwo’s complementまたはoffset 64と、割り当てごとの0.5、1、2、3 dBのステップを使用します。音量更新は対象ごとに毎秒約30回にまとめます。</p></div></section>
+<section class="guide-section" id="devices" aria-labelledby="devices-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="devices-title">デバイスと保存した割り当て</h2><p>割り当てモードでは、左サイドバーのグラフ一覧が割り当てパネルに切り替わります。モードを終了するとグラフ一覧に戻ります。グラフ名、ノード名、操作、デバイス、チャンネル、Note/CC番号と状態を表示します。行を選ぶと対象のグラフを開いて対象を強調表示し、音量設定や録音操作を変更できます。行または割り当て済み操作のDelete/Backspace、削除ボタンは一つの割り当てだけを削除します。対象がなくなっても最後の名前を残します。ノード削除を取り消すと元のIDと割り当てが自動復元します。グラフ一覧ではmacOSのCommand+Z、LinuxのCtrl+Zでグラフ削除を取り消し、Shiftを加えるとやり直します。削除履歴は実行プロセスの再起動まで有効です。保存した割り当てと復元したグラフIDは再起動後も維持し、デバイスは自動再接続します。編集ウィンドウを閉じるとモードを終了して制御を再開します。</p><p>MixRelayのバックグラウンド処理を実行しておいてください。編集ウィンドウは閉じても構いません。macOSはCoreMIDI、LinuxはALSA sequencer（PipeWireが公開するポートを含む）を使います。LinuxではALSAライブラリとsequencerへのアクセスが必要で、利用できない理由はMIDI設定に表示します。入力専用で、出力、LEDやモーターフェーダーへのフィードバック、クロック、BPM制御はありません。</p></div></section>
+        <nav class="manual-pagination" aria-label="マニュアルの章"><a rel="prev" href="stream-deck.html">← Stream Deckプラグイン</a><a rel="next" href="licensing.html">次へ: 無料版とライセンス →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
+    </footer>
+  </body>
+</html>

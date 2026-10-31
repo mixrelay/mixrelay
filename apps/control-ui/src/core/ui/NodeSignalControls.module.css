@@ -37,3 +37,8 @@
 .button:disabled {
   opacity: var(--control-disabled-opacity);
 }
+
+.button[data-midi-selected] {
+  background: var(--midi-map-surface);
+  color: var(--midi-map-colour);
+}

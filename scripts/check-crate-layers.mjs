@@ -14,6 +14,7 @@ const FOUNDATION = [
   'mixrelay-licensing',
   'mixrelay-processor-state',
   'mixrelay-engine-process',
+  'mixrelay-midi-control',
 ];
 const MODELS = ['mixrelay-audio-graph', 'mixrelay-audio-recorder', 'mixrelay-audio-engine'];
 const CONTRACTS = ['mixrelay-control-protocol', 'mixrelay-driver-control'];
@@ -27,6 +28,7 @@ const ALL_BUT_APPS = Symbol('all but apps');
  * new edge needs a table change here and in the document.
  */
 export const CRATES = {
+  'mixrelay-midi-control': { layer: 'foundation', allows: [] },
   'mixrelay-audio-io': { layer: 'foundation', allows: [] },
   'mixrelay-pcm-ring': { layer: 'foundation', allows: [] },
   'mixrelay-realtime': { layer: 'foundation', allows: [] },

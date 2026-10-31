@@ -1,5 +1,46 @@
 import { effectTranslations } from '../effects';
 export const en = {
+  midi: {
+    mapMode: 'MIDI map mode',
+    mapTarget: 'Map {{name}}: {{action}}',
+    selectTarget: 'Select a highlighted control, then move a fader or press a MIDI button.',
+    waitingTarget: '{{name}} · {{action}} — move a MIDI control to assign or replace it.',
+    done: 'Finish mapping',
+    selectMapping: 'Select {{name}} · {{action}}',
+    recorderAction: 'Recorder action',
+    min: 'Minimum',
+    max: 'Maximum',
+    empty: 'No MIDI mappings. Select a highlighted control to add one.',
+    targetUnavailable: 'Targets unavailable',
+    title: 'MIDI controls',
+    disconnected: 'Device disconnected',
+    targetMissing: 'Target missing',
+    unavailable: 'MIDI unavailable',
+    mode: 'Volume mode',
+    pickup: 'Move the fader to the current level before it takes control.',
+    step: 'Step',
+    remove: 'Remove',
+    removeTarget: 'Remove MIDI control for {{name}}',
+    failed: 'Could not update MIDI controls. Try again.',
+    control: '{{device}} · Channel {{channel}} · {{kind}} {{number}}',
+    modes: {
+      absolute: 'Absolute (pick-up)',
+      twos_complement: 'Relative: two’s complement',
+      offset64: 'Relative: offset 64',
+    },
+    kinds: {
+      note: 'Note',
+      cc: 'CC',
+    },
+    actions: {
+      power: 'Power',
+      mute: 'Mute',
+      volume: 'Volume',
+      record: 'Record / resume',
+      pause: 'Pause',
+      stop: 'Stop',
+    },
+  },
   effects: effectTranslations.en,
   theme: {
     label: 'Appearance',
@@ -272,7 +313,7 @@ export const en = {
     audioPaused: 'Audio paused',
     deleteGraph: 'Delete graph',
     deleteGraphNotice:
-      'Delete “{{name}}”? Its audio processing and recordings will stop. This cannot be undone. Saved workspace files are not deleted.',
+      'Delete “{{name}}”? Its audio processing and recordings will stop. In the graph list, use Command+Z on macOS or Ctrl+Z on Linux to undo; add Shift to redo. Saved workspace files remain.',
     catalogUnavailable: 'Saved graphs are unavailable. Your existing graph was not replaced.',
     reloadGraphs: 'Reload graphs',
     graphSaveFailed:

@@ -76,6 +76,8 @@ export function installAndVerify(
     paths = installedPaths(os),
     wait = (milliseconds) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds),
     ticketTransport = withAppleTicketHttps,
+    // Called once the installer succeeds, before payload checks that may still fail.
+    onInstalled = () => {},
   } = {},
 ) {
   const run = runCommand;
@@ -86,6 +88,7 @@ export function installAndVerify(
       writeFileSync(join(output, 'package-install.log'), run(program, args, timeout), {
         flag: 'wx',
       });
+      onInstalled();
     } catch (error) {
       if (!existsSync(join(output, 'package-install.log')))
         writeFileSync(

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 import { renderArchRecipe } from './prepare-arch-driver-package.mjs';
 
 test('Arch recipe pins the checked payload and keeps the release binaries intact', () => {
@@ -12,6 +13,18 @@ test('Arch recipe pins the checked payload and keeps the release binaries intact
     assert.match(recipe, /glibc>=2\.39/);
     assert.doesNotMatch(recipe, /@VERSION@|@ARCH@|@SHA256@/);
   }
+});
+
+test('makepkg receives the real homepage and named packager with a support address', () => {
+  const recipe = renderArchRecipe({ version: '0.1.0', architecture: 'amd64', checksum: 'a'.repeat(64) });
+  const result = spawnSync('bash', ['-c', `${recipe}\nprintf '%s\\n' "$url" "$PACKAGER"`], {
+    encoding: 'utf8', env: { ...process.env, PACKAGER: 'Unknown Packager' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n'), [
+    'https://rawsector.com/products/mixrelay', 'Echo Vision Lab <support@rawsector.com>',
+  ]);
+  assert.doesNotMatch(recipe, /@[A-Z]+@/);
 });
 
 test('Arch recipe rejects malformed substitutions before shell execution', () => {

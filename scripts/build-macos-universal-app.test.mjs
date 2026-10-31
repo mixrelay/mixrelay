@@ -1,3 +1,4 @@
+import { polarEnvironment } from './polar-configuration.fixture.mjs';
 import assert from "node:assert/strict";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -54,6 +55,7 @@ function fixture(t) {
   writeFileSync(join(root, "CHANGELOG.md"), changelog);
   writeFileSync(unrelated, "preserve me\n");
   copyFileSync(sourceScript, script);
+  copyFileSync(new URL("./polar-configuration.mjs", import.meta.url), join(scripts, "polar-configuration.mjs"));
   executable(join(scripts, "build-macos-driver-launcher.sh"), `#!/bin/sh
 printf 'launcher built\\n' >> "$MOCK_LOG"
 mkdir -p target/universal-apple-darwin/release
@@ -208,7 +210,7 @@ exit 0
 }
 
 function runBuild(paths, extraEnv = {}, args = []) {
-  const env = { ...process.env };
+  const env = { ...process.env, ...polarEnvironment };
   for (const key of [
     "CARGO_TARGET_DIR",
     "CARGO_BUILD_JOBS",

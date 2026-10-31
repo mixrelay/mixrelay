@@ -138,7 +138,11 @@ it('shares a canonical identity on both sides without allocating or renaming a d
   render(view(owner()));
   fireEvent.click(screen.getByRole('button', { name: 'Share input' }));
   fireEvent.click(screen.getByRole('button', { name: 'Share output' }));
-  expect(uuid).not.toHaveBeenCalled();
+  expect(uuid).toHaveBeenCalledTimes(1);
+  const saved = JSON.parse(screen.getByTestId('saved').textContent ?? '{}') as RuntimeGraphDocument;
+  expect(saved.nodes).toHaveLength(1);
+  expect(saved.nodes[0]?.id).toMatch(/^virtual-[0-9a-f-]{36}$/);
+  expect(saved.nodes[0]?.config).toMatchObject({ id: virtualSpec.id });
   expect(screen.getByTestId('saved')).toHaveTextContent(virtualSpec.id);
   expect(screen.getByTestId('saved')).toHaveTextContent(
     '"reference":{"render":true,"capture":true}',

@@ -245,7 +245,7 @@ impl ControlProxyClient {
 // A receipt proves that the server still owns the accepted operation, not that
 // native work has completed. Keep shutdown ownership while that observation is
 // live; individual exchanges and native providers retain their own deadlines.
-async fn wait_for_controls<T>(
+pub(crate) async fn wait_for_controls<T>(
     completion: impl std::future::Future<Output = T>,
     liveness: &tokio::sync::Notify,
 ) -> Result<T, String> {

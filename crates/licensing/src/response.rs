@@ -1,132 +1,111 @@
-//! Decode provider decisions without exposing customer data or error text.
+//! Decode Polar decisions without exposing echoed keys, customer data or error text.
 
 use serde::Deserialize;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{Activation, LicenseError, ProductIdentity};
 
-// Omit echoed keys and customer data. Error text is used only for exact API classification.
-#[derive(Deserialize)]
-pub(super) struct Response {
-    error: Option<String>,
-    pub activated: Option<bool>,
-    pub valid: Option<bool>,
-    pub deactivated: Option<bool>,
-    pub license_key: Option<License>,
-    pub instance: Option<Instance>,
-    pub meta: Option<Metadata>,
-}
-
 #[derive(Deserialize)]
 pub(super) struct License {
-    pub id: u64,
-    pub status: String,
+    pub id: String,
+    organization_id: String,
+    benefit_id: String,
+    status: String,
+    // Missing policy fields must not turn a malformed reply into unlimited access.
+    #[serde(deserialize_with = "required_option")]
+    pub limit_activations: Option<u64>,
+    #[serde(deserialize_with = "required_option")]
+    expires_at: Option<String>,
+    pub activation: Option<Instance>,
 }
 
 #[derive(Deserialize)]
 pub(super) struct Instance {
     pub id: String,
+    pub license_key_id: String,
 }
 
 #[derive(Deserialize)]
-pub(super) struct Metadata {
-    #[serde(rename = "store_id")]
-    store: u64,
-    #[serde(rename = "product_id")]
-    product: u64,
-    #[serde(rename = "variant_id")]
-    variant: u64,
+pub(super) struct Activated {
+    #[serde(flatten)]
+    pub instance: Instance,
+    pub license_key: License,
 }
 
-impl Response {
-    pub(super) fn check_validation(&self, product: ProductIdentity) -> Result<(), LicenseError> {
-        self.check_validation_failure(self.valid, product)?;
-        self.check_product(product)
-    }
-
-    pub(super) fn check_validation_failure(
-        &self,
-        decision: Option<bool>,
-        product: ProductIdentity,
-    ) -> Result<(), LicenseError> {
-        if decision == Some(true) {
-            return Ok(());
-        }
-        if decision != Some(false) {
-            return Err(LicenseError::InvalidResponse);
-        }
-        // A foreign product response cannot revoke this product's saved entitlement.
-        if self.meta.is_some() {
-            self.check_product(product)?;
-        }
-        match self.error.as_deref() {
-            Some(
-                "license_key not found." | "license_key is disabled." | "license_key is expired.",
-            ) => return Err(LicenseError::Revoked),
-            Some("instance not found." | "instance_id not found.") => {
-                return Err(LicenseError::ActivationDeactivated);
-            }
-            _ => {}
-        }
-        if self
-            .license_key
-            .as_ref()
-            .is_some_and(|license| matches!(license.status.as_str(), "disabled" | "expired"))
-            && self.meta.is_some()
-        {
-            return Err(LicenseError::Revoked);
-        }
-        if self
-            .license_key
-            .as_ref()
-            .is_some_and(|license| license.status == "inactive")
-            && self.meta.is_some()
-        {
-            return Err(LicenseError::ActivationDeactivated);
-        }
-        Err(LicenseError::Rejected)
-    }
-
-    pub(super) fn check_product(&self, expected: ProductIdentity) -> Result<(), LicenseError> {
-        let meta = self.meta.as_ref().ok_or(LicenseError::InvalidResponse)?;
-        if (meta.store, meta.product, meta.variant)
-            != (expected.store, expected.product, expected.variant)
+impl License {
+    pub(super) fn check(&self, expected: ProductIdentity) -> Result<(), LicenseError> {
+        if self.organization_id != expected.organization.to_string()
+            || self.benefit_id != expected.benefit.to_string()
         {
             return Err(LicenseError::WrongProduct);
+        }
+        check_id(&self.id)?;
+        match self.status.as_str() {
+            "granted" => {}
+            "revoked" | "disabled" => return Err(LicenseError::Revoked),
+            _ => return Err(LicenseError::InvalidResponse),
+        }
+        if let Some(value) = &self.expires_at {
+            let expiry = OffsetDateTime::parse(value, &Rfc3339)
+                .map_err(|_| LicenseError::InvalidResponse)?;
+            if expiry <= OffsetDateTime::now_utc() {
+                return Err(LicenseError::Revoked);
+            }
+        }
+        if self.limit_activations == Some(0) {
+            return Err(LicenseError::InvalidResponse);
         }
         Ok(())
     }
 
-    pub(super) fn license_id(&self, statuses: &[&str]) -> Result<u64, LicenseError> {
-        let license = self
-            .license_key
-            .as_ref()
-            .filter(|license| license.id != 0)
-            .ok_or(LicenseError::InvalidResponse)?;
-        if !statuses.contains(&license.status.as_str()) {
-            return Err(
-                if matches!(license.status.as_str(), "disabled" | "expired") {
-                    LicenseError::Revoked
-                } else {
-                    LicenseError::Rejected
-                },
-            );
-        }
-        Ok(license.id)
-    }
-
-    pub(super) fn activation(&self) -> Result<Activation, LicenseError> {
-        let license_id = self.license_id(&["active"])?;
-        let instance = self
-            .instance
-            .as_ref()
-            .ok_or(LicenseError::InvalidResponse)?;
-        super::client::check_argument(&instance.id).map_err(|_| LicenseError::InvalidResponse)?;
+    pub(super) fn activation(&self, instance: &str) -> Result<Activation, LicenseError> {
         Ok(Activation {
-            license_id,
+            license_id: self.id.clone(),
             purchased_major: env!("CARGO_PKG_VERSION_MAJOR")
                 .parse()
                 .map_err(|_| LicenseError::InvalidConfiguration)?,
-            instance_id: instance.id.clone(),
+            instance_id: instance.to_owned(),
         })
     }
+}
+
+pub(super) fn check_id(value: &str) -> Result<(), LicenseError> {
+    uuid::Uuid::parse_str(value)
+        .ok()
+        .filter(|id| !id.is_nil() && id.hyphenated().to_string() == value)
+        .map(|_| ())
+        .ok_or(LicenseError::InvalidResponse)
+}
+
+pub(super) fn error(status: u16, body: &[u8]) -> LicenseError {
+    #[derive(Deserialize)]
+    struct ErrorResponse {
+        error: String,
+        detail: String,
+    }
+    let Ok(response) = serde_json::from_slice::<ErrorResponse>(body) else {
+        return LicenseError::RequestFailed;
+    };
+    // Only the documented resource error is a definitive rejection. Unknown routes,
+    // version errors, proxies and malformed bodies cannot revoke an offline lease.
+    if status == 404 && response.error == "ResourceNotFound" {
+        return match response.detail.as_str() {
+            "Not found" | "License key is no longer active." | "License key has expired." => {
+                LicenseError::Revoked
+            }
+            _ => LicenseError::RequestFailed,
+        };
+    }
+    match (status, response.error.as_str()) {
+        (403, "NotPermitted") => LicenseError::Rejected,
+        _ => LicenseError::RequestFailed,
+    }
+}
+
+fn required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::deserialize(deserializer)
 }

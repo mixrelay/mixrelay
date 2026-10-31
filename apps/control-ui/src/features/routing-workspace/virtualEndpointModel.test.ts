@@ -285,10 +285,10 @@ it.each([
       reference: duplexReference,
     });
     expect(runtimeGraphToAudioGraph(saved).nodes[0]?.appearance.meterBanks).toEqual([
-      { channels: captureChannels, nodeId: 'virtual-1', portId: 'from_os' },
+      { channels: captureChannels, nodeId: saved.nodes[0]?.id, portId: 'from_os' },
     ]);
     expect(runtimeGraphToAudioGraph(saved).nodes[1]?.appearance.meterBanks).toEqual([
-      { channels: renderChannels, nodeId: 'virtual-1', portId: 'to_os' },
+      { channels: renderChannels, nodeId: saved.nodes[0]?.id, portId: 'to_os' },
     ]);
     expect(audioGraphToRuntimeGraph(runtimeGraphToAudioGraph(saved), saved)).toEqual(saved);
     for (const removed of ['source', 'sink'] as const) {

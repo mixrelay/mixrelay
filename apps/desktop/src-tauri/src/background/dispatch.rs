@@ -6,7 +6,13 @@ use tauri::Manager as _;
 pub(crate) fn is_service_command(name: &str) -> bool {
     matches!(
         name,
-        "control_get_graph_layout"
+        "midi_map"
+            | "midi_status"
+            | "midi_learn"
+            | "midi_cancel"
+            | "midi_save"
+            | "midi_remove"
+            | "control_get_graph_layout"
             | "control_set_graph_layout"
             | "control_get_status"
             | "control_reconfigure_session"
@@ -83,6 +89,12 @@ pub(crate) async fn dispatch(
     arguments: Value,
 ) -> Result<Value, Value> {
     match name {
+        "midi_map" | "midi_status" | "midi_learn" | "midi_cancel" | "midi_save" | "midi_remove" => {
+            app.state::<crate::midi::Midi>()
+                .command(name, &arguments)
+                .await
+                .map_err(|error| Value::String(error.to_string()))
+        }
         "hello" => {
             crate::licensing::first_connection(app);
             Ok(

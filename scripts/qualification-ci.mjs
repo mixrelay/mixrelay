@@ -4,7 +4,7 @@ import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } 
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { digest, loadContract, checkGenerated, qualificationMatrix } from './support-contract.mjs';
+import { digest, loadContract, checkGenerated, qualificationMatrix, releaseInstallers } from './support-contract.mjs';
 import { validateCandidate, readReports, evaluateQualification } from './qualification.mjs';
 import { prepareReleaseManifest, assertQualifiedRelease } from './prepare-release-manifest.mjs';
 
@@ -65,7 +65,7 @@ async function main() {
       && report.provenance.runAttempt === process.env.GITHUB_RUN_ATTEMPT), 'Evidence belongs to another workflow execution');
     const path = prepareReleaseManifest(['--directory', directory, '--product', candidate.product, '--version', candidate.version,
       '--published-at', new Date().toISOString(), '--candidate', join(directory, 'mix-relay.candidate.json'), '--reports', values.reports,
-      ...candidate.artifacts.flatMap(artifact => {
+      ...releaseInstallers(candidate, loaded.contract).flatMap(artifact => {
         const definition = loaded.contract.artifacts.find(item => item.id === artifact.id);
         return ['--artifact', `${definition.os}:${definition.arch}:${artifact.file}`];
       })]);

@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadContract } from './support-contract.mjs';
+import { assertBinaryLicensing } from './polar-configuration.mjs';
+import { productContact } from './product-metadata.mjs';
 
 const languages = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
 const localizedDocuments = languages.flatMap(language => [language.appTerms, language.driverTerms]);
@@ -83,8 +85,12 @@ function inspectionEnvironment() {
   return env;
 }
 
-function packageMetadata({ architecture, depends, contents, packageName }) {
+function packageMetadata({ architecture, depends, contents, packageName, homepage, maintainer }) {
   if (packageName !== 'mix-relay') throw new Error(`Unsupported package: ${packageName}`);
+  const { metadata } = loadContract().contract;
+  if (homepage?.trim() !== metadata.homepage || maintainer?.trim() !== productContact(metadata)) {
+    throw new Error('Package Homepage and Maintainer must match the public product metadata');
+  }
   const normalizedArchitecture = architecture.trim();
   if (!Object.hasOwn(expectedElf, normalizedArchitecture)) {
     throw new Error(`Unsupported package architecture: ${normalizedArchitecture}`);
@@ -192,9 +198,9 @@ function elfHeaderArchitecture(header, path) {
   return { machine, name: machine === 62 ? 'x86-64' : machine === 183 ? 'AArch64' : `e_machine=${machine}` };
 }
 
-/** Checks metadata and ELF headers without installing or executing package payloads. */
-export function validatePackage({ architecture, depends, contents, elfHeaders, packageName, version, versionReceipt }) {
-  const { architecture: normalizedArchitecture, executableEntries } = packageMetadata({ architecture, depends, contents, packageName });
+/** Checks metadata, ELF architecture and embedded payment configuration without executing payloads. */
+export function validatePackage({ architecture, depends, contents, elfHeaders, packageName, version, versionReceipt, homepage, maintainer }) {
+  const { architecture: normalizedArchitecture, executableEntries } = packageMetadata({ architecture, depends, contents, packageName, homepage, maintainer });
   const receipt = JSON.parse(versionReceipt ?? 'null');
   if (!receipt || !/^\d+\.\d+\.\d+$/.test(receipt.version) || receipt.version !== version?.replace(/-\d+$/, '')) {
     throw new Error('Driver version receipt must match the actual package version');
@@ -215,7 +221,8 @@ export function validatePackage({ architecture, depends, contents, elfHeaders, p
     architecture: normalizedArchitecture,
     executables,
     elfArchitectures,
-    scope: 'metadata-payload-elf-header-only',
+    licensing: assertBinaryLicensing(elfHeaders[executables[0]]),
+    scope: 'metadata-payload-elf-and-polar-configuration',
   };
 }
 
@@ -345,7 +352,7 @@ async function extractOneElfHeader(archive, entry, spawnProcess) {
     {
       maxOutputBytes: entry.size,
       expectedOutputBytes: entry.size,
-      captureBytes: Math.min(entry.size, 64),
+      captureBytes: entry.path === executables[0] ? entry.size : Math.min(entry.size, 64),
       outputLimitMessage: 'tar returned more executable bytes than package metadata declared',
     },
   );
@@ -385,6 +392,8 @@ export async function inspectPackage(path, run = spawnSync, spawnProcess = spawn
   const packageDetails = {
     packageName: field('Package').trim(),
     version: field('Version').trim(),
+    homepage: field('Homepage'),
+    maintainer: field('Maintainer'),
     architecture: field('Architecture'),
     depends: field('Depends'),
     contents: await listNumericOwnedContents(archive, spawnProcess),

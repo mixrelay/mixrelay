@@ -20,9 +20,10 @@ function buildPolicy(t) {
   const source = readFileSync(new URL('../../apps/desktop/src-tauri/build.rs', import.meta.url), 'utf8');
   const main = source.slice(0, source.indexOf('fn build_macos_audio('));
   assert.match(main, /fn main\(\)/);
-  // Run the actual build-script entry point; the native macOS and Tauri hooks
-  // do not participate in the ELF link policy exercised here.
+  // Run the actual build-script entry point; the licensing, native macOS and Tauri
+  // hooks do not participate in the ELF link policy exercised here.
   writeFileSync(join(directory, 'build.rs'), `${main}
+fn configure_licensing() {}
 fn build_macos_audio(_: &str) {}
 mod tauri_build { pub fn build() {} }
 `);

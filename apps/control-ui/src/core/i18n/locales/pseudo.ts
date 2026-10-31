@@ -3,6 +3,12 @@ import { pseudoResource } from '../pseudoResource';
 import { en } from './en';
 
 const overrides = {
+  midi: {
+    title: '[!! MIDI controller assignments and settings — expanded !!]',
+    selectTarget:
+      '[!! Select a highlighted control, then move a physical fader or press a controller button — expanded !!]',
+    control: '[!! {{device}} — MIDI channel {{channel}} — {{kind}} control number {{number}} !!]',
+  },
   effects: Object.fromEntries(
     Object.entries(effectTranslations.en).map(([key, value]) => [key, `[!! ${value} expanded !!]`]),
   ),

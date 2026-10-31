@@ -232,8 +232,9 @@ impl EntitlementRecord {
         if let Some(expiry) = paid_end.filter(|&expiry| {
             now < expiry
                 && self.activation.as_ref().is_some_and(|activation| {
-                    Some(activation.purchased_major())
-                        == env!("CARGO_PKG_VERSION_MAJOR").parse().ok()
+                    env!("CARGO_PKG_VERSION_MAJOR")
+                        .parse()
+                        .is_ok_and(|major| activation.covers_major(major))
                 })
         }) {
             AccessSnapshot {
@@ -257,7 +258,7 @@ const fn valid_time(unix: u64) -> bool {
 
 fn valid_activation(activation: &Activation) -> bool {
     let instance_id = activation.instance_id();
-    activation.license_id() != 0
+    uuid::Uuid::parse_str(activation.license_id()).is_ok_and(|id| !id.is_nil())
         && !instance_id.trim().is_empty()
         && instance_id.len() <= 255
         && !instance_id.chars().any(char::is_control)
@@ -270,7 +271,7 @@ mod tests {
     const START: u64 = 1_700_000_000;
 
     fn activation() -> Activation {
-        serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
+        serde_json::from_str(r#"{"licenseId":"70000000-0000-4000-8000-000000000007","instanceId":"a0000000-0000-4000-8000-000000000001","purchasedMajor":0}"#)
             .expect("valid seat fixture")
     }
 
@@ -444,6 +445,18 @@ mod tests {
     }
 
     #[test]
+    fn early_adopter_purchase_covers_zero_and_one_but_never_a_later_major() {
+        let mut early = activation();
+        assert!(early.covers_major(0));
+        assert!(early.covers_major(1));
+        assert!(!early.covers_major(2));
+        early.purchased_major = 1;
+        assert!(!early.covers_major(0));
+        assert!(early.covers_major(1));
+        assert!(!early.covers_major(2));
+    }
+
+    #[test]
     fn invalid_persisted_fields_are_rejected() {
         let valid = serde_json::to_value(EntitlementRecord::new(START)).expect("serialize");
         let mut examples = Vec::new();
@@ -462,8 +475,7 @@ mod tests {
         examples.push(paid_in_future);
         let mut invalid_seat = valid.clone();
         invalid_seat["paidVerifiedAtUnix"] = START.into();
-        invalid_seat["activation"] =
-            serde_json::json!({"licenseId": 0, "instanceId": "seat-1", "purchasedMajor":0});
+        invalid_seat["activation"] = serde_json::json!({"licenseId": "", "instanceId": "a0000000-0000-4000-8000-000000000001", "purchasedMajor":0});
         examples.push(invalid_seat);
         let mut out_of_range = valid;
         out_of_range["latestObservedAtUnix"] = u64::MAX.into();
@@ -483,7 +495,7 @@ mod tests {
             Err(LicenseError::ClockInvalid)
         );
         let invalid_seat: Activation =
-            serde_json::from_str(r#"{"licenseId":0,"instanceId":"seat-1","purchasedMajor":0}"#)
+            serde_json::from_str(r#"{"licenseId":"","instanceId":"a0000000-0000-4000-8000-000000000001","purchasedMajor":0}"#)
                 .expect("shape valid");
         assert_eq!(
             record.record_verified(invalid_seat, START),

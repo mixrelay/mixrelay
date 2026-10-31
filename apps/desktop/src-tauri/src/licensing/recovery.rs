@@ -90,7 +90,7 @@ mod tests {
         let directory = tempfile::tempdir().expect("directory");
         let path = directory.path().join("remote-change.json");
         let activation: Activation =
-            serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
+            serde_json::from_str(r#"{"licenseId":"70000000-0000-4000-8000-000000000007","instanceId":"a0000000-0000-4000-8000-000000000001","purchasedMajor":0}"#)
                 .expect("seat");
         write(
             &path,

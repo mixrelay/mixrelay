@@ -41,6 +41,7 @@
 <a href="effects.html">内蔵エフェクトとプリセット</a>
 <a href="plugins.html">外部プラグイン</a>
 <a href="stream-deck.html">Stream Deckプラグイン</a>
+<a href="midi.html">MIDIコントローラー</a>
 <a href="licensing.html">無料版とライセンス</a>
 <a href="updates.html">アップデート</a>
 <a href="uninstall.html">アンインストール</a>
@@ -54,7 +55,7 @@
 <p><code>新規グラフ</code>でグラフを作成し、<code>ノードを追加</code>から<code>ソース</code>、<code>プロセッサー</code>、<code>出力</code>を追加します。編集するグラフは<code>グラフ</code>で選びます。選択しても他のグラフはオフになりません。有料ライセンスでは複数のグラフを同時に動かせます。</p><p>ノードの<code>オプション</code>を開くと、使用可能なパラメーターを確認できます。名前をダブルクリックするか、ノードにフォーカスして<kbd>F2</kbd>を押すか、メニューの<code>表示名を変更</code>を使って名前を変更します。表示名の変更はそのノードだけに適用されます。空欄にすると元の名前に戻ります。</p><p>編集内容と配置は自動保存されます。保存の警告が出た場合、再起動後に変更が失われる可能性があります。持ち運べるワークスペースを作るには、<code>ファイル → 保存</code>または<code>名前を付けて保存…</code>で<code>.mix</code>ファイルに保存します。<code>新規ワークスペース</code>と<code>開く…</code>では、現在の内容を置き換える前に確認が表示されます。ワークスペースファイルから、不足しているデバイスやプラグインがインストールされることはありません。</p>
 </div></section>
 <section class="guide-section" id="connections" aria-labelledby="connections-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="connections-title">チャンネルを接続し、割り当てる</h2>
-<p>出力ポートを入力ポートにドラッグします。ステレオの場合は両チャンネルを接続してください。同じノードの出力チャンネルを追加選択するには<kbd>Shift</kbd>を押しながら選び、選択したチャンネルを接続先の最初のチャンネルにドラッグします。接続先でもチャンネル間の相対的な位置は維持されます。<kbd>Escape</kbd>でキャンセルし、チャンネルの選択を解除できます。</p><p>ケーブルを右クリックすると<code>ケーブルを削除</code>を選べます。ポートメニューには<code>チャンネルを切断</code>と<code>選択したチャンネルを切断</code>があります。ノードまたはケーブルを選んで<kbd>Delete</kbd>か<kbd>Backspace</kbd>を押しても削除できます。<code>グラフ全体を表示</code>でグラフ全体を表示できます。グラフの編集を取り消すにはmacOSでは<kbd>Command+Z</kbd>、Linuxでは<kbd>Ctrl+Z</kbd>を使います。<kbd>Shift</kbd>を加えるとやり直せます。</p><p><code>グラフを削除</code>を実行すると、そのグラフの音声と録音が停止します。グラフの削除は取り消せません。保存済みのワークスペースファイルは残ります。</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
+<p>出力ポートを入力ポートにドラッグします。ステレオの場合は両チャンネルを接続してください。同じノードの出力チャンネルを追加選択するには<kbd>Shift</kbd>を押しながら選び、選択したチャンネルを接続先の最初のチャンネルにドラッグします。接続先でもチャンネル間の相対的な位置は維持されます。<kbd>Escape</kbd>でキャンセルし、チャンネルの選択を解除できます。</p><p>ケーブルを右クリックすると<code>ケーブルを削除</code>を選べます。ポートメニューには<code>チャンネルを切断</code>と<code>選択したチャンネルを切断</code>があります。ノードまたはケーブルを選んで<kbd>Delete</kbd>か<kbd>Backspace</kbd>を押しても削除できます。<code>グラフ全体を表示</code>でグラフ全体を表示できます。グラフの編集を取り消すにはmacOSでは<kbd>Command+Z</kbd>、Linuxでは<kbd>Ctrl+Z</kbd>を使います。<kbd>Shift</kbd>を加えるとやり直せます。</p><p><code>グラフを削除</code> で、そのグラフの音声処理と録音が停止します。グラフ一覧でmacOSのCommand+Z、LinuxのCtrl+Zで取り消し、Shiftを加えるとやり直せます。保存済みファイルは残ります。</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
 </div></section>
 <section class="guide-section" id="keyboard" aria-labelledby="keyboard-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="keyboard-title">ドラッグせずに接続する</h2>
 <ol><li><kbd>Tab</kbd>でソースノードにフォーカスし、<kbd>Enter</kbd>または<kbd>Space</kbd>で選択します。選択したノードは矢印キーで移動できます。<kbd>Shift</kbd>を押しながら操作すると移動量が大きくなります。</li><li><kbd>Shift+F10</kbd>またはコンテキストメニューキーを押し、<code>チャンネルを接続…</code>を選びます。</li><li><code>最初の出力チャンネル</code>と<code>チャンネル数</code>を指定するか、すでに選択したチャンネルを使います。<code>接続先</code>と<code>最初の入力チャンネル</code>を選びます。</li><li><code>プレビュー</code>で、スキップされる接続とその理由も確認します。<code>接続</code>を選んで接続するか、<code>キャンセル</code>で変更せずに閉じます。</li></ol><p>ケーブルやキャンバスにフォーカスしている場合も、同じキーでコンテキストメニューを開けます。ノード内の各コントロールは、それぞれのキーボード操作を維持します。<kbd>Escape</kbd>でメニューやダイアログを閉じます。</p>

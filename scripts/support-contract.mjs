@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { syncProductMetadata, validateProductMetadata } from './product-metadata.mjs';
 
 export const contractPath = fileURLToPath(new URL('../support/environments.json', import.meta.url));
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -21,6 +22,7 @@ function unique(items, label) {
 
 export function validateContract(value) {
   if (value.schemaVersion !== 1 || value.product !== 'mix-relay') throw new Error('Unsupported support contract');
+  validateProductMetadata(value.metadata);
   if (!/^\d+\.\d+$/.test(value.minimums?.macos ?? '')
     || !['pipewire', 'wireplumber', 'glibc'].every(name => /^\d+\.\d+(?:\.\d+)?$/.test(value.minimums?.linux?.[name] ?? ''))) {
     throw new Error('Invalid deployment or dependency minimum');
@@ -31,10 +33,20 @@ export function validateContract(value) {
     if (!Array.isArray(items) || items.length === 0) throw new Error(`Missing ${label} definitions`);
     unique(items, label);
   }
+  if (!Array.isArray(value.artifactChecks)) throw new Error('Missing artifact checks');
+  unique(value.artifactChecks, 'artifact check');
+  unique([...value.qualificationTargets, ...value.artifactChecks], 'qualification');
+  for (const check of value.artifactChecks) {
+    if (check.kind !== 'streamdeck' || !value.artifacts.some(a => a.id === check.artifact && a.format === 'streamDeckPlugin')) {
+      throw new Error(`Invalid artifact check: ${check.id}`);
+    }
+  }
   for (const artifact of value.artifacts) {
     if (!(artifact.os === 'macos' && artifact.arch === 'universal' && artifact.format === 'pkg')
+      && !(artifact.os === 'macos' && artifact.arch === 'universal' && artifact.format === 'streamDeckPlugin')
       && !(artifact.os === 'linux' && ['x64', 'arm64'].includes(artifact.arch) && ['deb', 'arch'].includes(artifact.format))) throw new Error(`Invalid artifact definition: ${artifact.id}`);
-    if (!value.qualificationTargets.some(t => t.artifact === artifact.id)) throw new Error(`Artifact has no qualification target: ${artifact.id}`);
+    if (!(artifact.format === 'streamDeckPlugin' ? value.artifactChecks : value.qualificationTargets)
+      .some(t => t.artifact === artifact.id)) throw new Error(`Artifact has no qualification target: ${artifact.id}`);
   }
   for (const target of value.qualificationTargets) {
     const artifact = value.artifacts.find(item => item.id === target.artifact);
@@ -72,6 +84,11 @@ export function validateContract(value) {
   for (const scenario of value.scenarios) {
     if (!['artifact', 'installed-api', 'installed-ui', 'native-audio'].includes(scenario.scope)
       || typeof scenario.required !== 'boolean') throw new Error(`Invalid scenario: ${scenario.id}`);
+    if (scenario.artifact && (scenario.scope !== 'artifact'
+      || !value.artifactChecks.some(check => check.artifact === scenario.artifact))) throw new Error(`Invalid artifact scenario: ${scenario.id}`);
+  }
+  for (const check of value.artifactChecks) {
+    if (!value.scenarios.some(s => s.required && s.artifact === check.artifact)) throw new Error(`Artifact check has no required scenario: ${check.id}`);
   }
 }
 
@@ -103,8 +120,13 @@ export function composeDocument(contract) {
 }
 
 export function requiredScenarios(contract, target) {
-  return contract.scenarios.filter(item => item.required && (!item.os || item.os.includes(target.os)));
+  return contract.scenarios.filter(item => item.required && (item.artifact
+    ? item.artifact === target.artifact
+    : !target.kind && (!item.os || item.os.includes(target.os))));
 }
+
+export const releaseInstallers = (candidate, contract) => candidate.artifacts.filter(artifact =>
+  contract.artifacts.find(definition => definition.id === artifact.id)?.format !== 'streamDeckPlugin');
 
 export function matchesVersion(actual, target) {
   if (target.versionMatch === 'rolling') return typeof actual === 'string' && actual.length > 0;
@@ -121,6 +143,7 @@ export function contractInventory(contract) {
 }
 
 export function checkGenerated(contract, root = fileURLToPath(new URL('..', import.meta.url)), write = false) {
+  syncProductMetadata(contract.metadata, root, write);
   for (const [relative, expected] of [
     ['infra/lab/compose.yaml', composeDocument(contract)],
     ['docs/validation/supported-environments.md', contractInventory(contract)],
@@ -132,10 +155,12 @@ export function checkGenerated(contract, root = fileURLToPath(new URL('..', impo
   const tauri = JSON.parse(readFileSync(resolve(root, 'apps/desktop/src-tauri/tauri.conf.json')));
   if (tauri.bundle.macOS.minimumSystemVersion !== contract.minimums.macos) throw new Error('macOS deployment minimum differs from support contract');
   const linux = JSON.parse(readFileSync(resolve(root, 'apps/desktop/src-tauri/tauri.linux.conf.json'))).bundle.linux;
+  if (linux.deb.depends.includes(contract.runtimeLibraries.linux.midi.arch)) throw new Error('DEB MIDI dependency uses an Arch package name');
   for (const dependency of [`libc6 (>= ${contract.minimums.linux.glibc})`,
-    `pipewire (>= ${contract.minimums.linux.pipewire})`, `wireplumber (>= ${contract.minimums.linux.wireplumber})`]) {
+    `pipewire (>= ${contract.minimums.linux.pipewire})`, `wireplumber (>= ${contract.minimums.linux.wireplumber})`, contract.runtimeLibraries.linux.midi.deb]) {
     if (!linux.deb.depends.includes(dependency)) throw new Error(`Linux dependency differs from support contract: ${dependency}`);
   }
+  if (!readFileSync(resolve(root, 'packaging/linux/arch/PKGBUILD.in'), 'utf8').includes(`'${contract.runtimeLibraries.linux.midi.arch}'`)) throw new Error('Arch MIDI library differs from support contract');
   if (!readFileSync(resolve(root, 'native/linux/pipewire/build.rs'), 'utf8')
     .includes(`.atleast_version("${contract.minimums.linux.pipewire}")`)) throw new Error('PipeWire build floor differs from support contract');
 }

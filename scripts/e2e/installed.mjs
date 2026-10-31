@@ -1,3 +1,4 @@
+import { assertBinaryLicensing } from '../polar-configuration.mjs';
 import assert from 'node:assert/strict';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -7,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { engineOperations } from '../lab/engine-operations.mjs';
 import { invoke } from '../lab/macos-installed-capture-acceptance.mjs';
 import { driverSocket, engineSocket, socketRequest } from '../local-socket.mjs';
-import { artifactBytes, validateCandidate } from '../qualification.mjs';
+import { artifactBytes, candidateLicensingEnvironment, validateCandidate } from '../qualification.mjs';
 import { digest, loadContract, requiredScenarios } from '../support-contract.mjs';
 import { validateBaseline } from './baseline.mjs';
 import { collectLinux, collectLinuxUiProblems } from './collect-linux.mjs';
@@ -16,7 +17,7 @@ import { observeEnvironment, validateEnvironment } from './environment.mjs';
 import { finishAfterCleanup, startInstalledUi } from './installed-ui.mjs';
 import { analyseRecording, nativeSignal, runNativeAudioCases } from './native-signal.mjs';
 import { driverOperations } from './driver-operations.mjs';
-import { installAndVerify, launchInstalled, requireDisposableHost } from './package.mjs';
+import { installAndVerify, installedPaths, launchInstalled, requireDisposableHost } from './package.mjs';
 import { removeInstalled } from './removal.mjs';
 import { wholeSystemCapture } from './system-capture.mjs';
 import { controlRecorder } from './recorder-control.mjs';
@@ -232,8 +233,9 @@ export async function qualifyMode({
       report.isolatedFreshState = isolateFreshState(target.os, output, { disposable });
       const baselineOutput = join(output, 'baseline');
       mkdirSync(baselineOutput);
-      installAndVerify(baselineArtifact, definition, baselineDirectory, baselineOutput, target.os);
-      packageInstalled = true;
+      installAndVerify(baselineArtifact, definition, baselineDirectory, baselineOutput, target.os, {
+        onInstalled: () => { packageInstalled = true; },
+      });
       stop = await launchInstalled(target.os, baselineOutput);
       await eventually(
         driver,
@@ -260,8 +262,10 @@ export async function qualifyMode({
       stop = undefined;
     }
     const installed = await scenario('PKG-01', async () => {
-      installAndVerify(artifact, definition, directory, output, target.os);
-      packageInstalled = true;
+      installAndVerify(artifact, definition, directory, output, target.os, {
+        onInstalled: () => { packageInstalled = true; },
+      });
+      assertBinaryLicensing(readFileSync(installedPaths(target.os)[0]), candidateLicensingEnvironment(candidate));
       report.environmentBeforeInstall = report.environment;
       report.environment = observeEnvironment();
       validateEnvironment(report.environment, target, contract);

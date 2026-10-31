@@ -63,7 +63,7 @@ macOS 설치·업데이트·제거 전에는 기존 코드의 번들 ID·실행 
 새 payload·설치 완료 결과의 엄격한 검증도 확인한다.
 소스의 주입된 서명 메타데이터 테스트와 실제 서명 PKG의 설치 검증 결과는 구분해 기록한다.
 
-Collect the four final artifacts in a fresh directory. For example:
+최종 설치 파일 네 개와 Stream Deck 패키지를 새 디렉터리에 모은다. 예시는 다음과 같다.
 
 ```sh
 pnpm release:candidate --directory /absolute/candidate \
@@ -71,7 +71,8 @@ pnpm release:candidate --directory /absolute/candidate \
   --artifact macos-universal-pkg:MixRelay-1.2.3.pkg \
   --artifact linux-x64-deb:MixRelay-1.2.3-x64.deb \
   --artifact linux-arm64-deb:MixRelay-1.2.3-arm64.deb \
-  --artifact linux-x64-arch:mix-relay-1.2.3-1-x86_64.pkg.tar.zst
+  --artifact linux-x64-arch:mix-relay-1.2.3-1-x86_64.pkg.tar.zst \
+  --artifact macos-universal-streamdeck:MixRelay-StreamDeck-1.2.3.streamDeckPlugin
 ```
 
 This writes `mix-relay.candidate.json` with the source commit, contract SHA-256 and
@@ -79,16 +80,22 @@ each file's size and SHA-256. Rebuilding, signing, stapling or repacking changes
 candidate and requires another qualification run. Attach these files to a draft or
 prerelease GitHub release; creating a candidate does not publish the product.
 
+Stream Deck 패키지는 앱 설치기가 아니므로 `mix-relay.release.json`에서 제외한다.
+`mix-relay.candidate.json`에는 필수로 포함한다. 두 후보 workflow의 준비 작업은 실제 패키지를
+풀어 공식 CLI 검증과 매니페스트 신원·SDK·최소 버전·제품 버전을 확인한다. `STREAMDECK-01`
+보고서와 원시 증거의 해시는 기존 자격 검증·공개 단계에서 다시 확인한다. Stream Deck 앱을
+실행한 결과로 표시하지 않는다. 빌드·제출 절차는 [Marketplace 키트](streamdeck-marketplace.md)를 따른다.
+
 ## GitHub-hosted execution
 
-Before merging a source branch, use `Test installed candidate on hosted environments`
-to diagnose the same final installers on the hosted matrix. Build Linux packages with
-`Build Linux release candidates once per CPU`, then attach the signed, notarized macOS
-PKG and a `source-revision.txt` containing its full source SHA to a draft release.
-Dispatch `candidate-e2e.yml` on the source branch with `linux_build_run` and
-`macos_candidate_tag`. The selector checks the Linux workflow identity, successful build,
-matching source records and all four artifact hashes. The suite revision is recorded
-separately, so test-tool fixes can exercise existing installers without rebuilding them.
+소스 브랜치를 병합하기 전에 `Test installed candidate on hosted environments`에서 같은
+최종 설치 파일을 호스트 매트릭스로 진단한다. Linux 패키지는
+`Build Linux release candidates once per CPU`로 빌드한다. 서명·공증한 macOS PKG,
+Stream Deck 패키지와 전체 소스 SHA가 담긴 `source-revision.txt`를 draft 릴리스에 첨부한다.
+소스 브랜치의 `candidate-e2e.yml`을 `linux_build_run`과 `macos_candidate_tag`로 실행한다.
+선택기는 Linux workflow 신원·빌드 성공, 일치하는 소스 기록과 다섯 산출물의 해시를 확인한다.
+검사 도구의 소스 버전은 별도로 기록하므로 제품을 바꾸지 않은 검사 수정은 같은 설치 파일을
+다시 빌드하지 않고 실행할 수 있다.
 The suite also compares the complete installer source tree with its checked-out commit.
 Only documentation, `scripts/e2e/` and the three qualification workflows may differ.
 Product code, package recipes, build tools, executable modes and submodule differences
@@ -457,11 +464,11 @@ pnpm release:qualify --directory /absolute/candidate \
   --reports /absolute/qualification-evidence
 ```
 
-A successful native workflow creates `publication/mix-relay.release.json` and
-`publication/mix-relay.qualification.json` inside its `qualification-evidence` Actions
-artifact. Attach both files, the candidate JSON and the unchanged installers to the
-final `vMAJOR.MINOR.PATCH` GitHub release. Keep the Actions evidence for the publication
-window (currently 90 days). After expiration, rerun qualification before publication.
+성공한 자격 검증 workflow는 `qualification-evidence` Actions 산출물 안에
+`publication/mix-relay.release.json`과 `publication/mix-relay.qualification.json`을 생성한다.
+두 파일과 후보 JSON, 변경하지 않은 설치 파일 네 개와 Stream Deck 패키지를 최종
+`vMAJOR.MINOR.PATCH` GitHub 릴리스에 첨부한다. Actions 증거는 공개 시점까지 보존한다
+(현재 90일). 만료됐다면 공개 전에 자격 검증을 다시 실행한다.
 
 `publish-updates.yml` checks the final tag's source commit, candidate hashes, manifest
 hash, successful source CI and the successful `main` qualification workflow run and

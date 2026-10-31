@@ -14,6 +14,7 @@ use super::{ControlProxyClient, ControlProxyResponse, Method, rejected};
 use crate::macos_audio::ApplicationCaptureState;
 
 mod meters;
+pub(crate) mod midi;
 mod outbound;
 pub(crate) mod socket;
 

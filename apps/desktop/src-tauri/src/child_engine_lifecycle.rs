@@ -170,6 +170,7 @@ async fn restart_owned_engine(app: &tauri::AppHandle) -> Result<bool, String> {
 }
 
 async fn finish_engine(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    app.state::<crate::midi::Midi>().shutdown().await?;
     app.state::<crate::control_proxy::local::socket::LocalSocket>()
         .shutdown()
         .await?;

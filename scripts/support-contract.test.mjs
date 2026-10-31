@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadContract, validateContract, ciMatrices, checkGenerated, requiredScenarios } from './support-contract.mjs';
+import { readFileSync } from 'node:fs';
+import { loadContract, validateContract, ciMatrices, checkGenerated, requiredScenarios, releaseInstallers } from './support-contract.mjs';
 
 test('support registry drives native multi-architecture CI and checked-in generated consumers', () => {
   const { contract } = loadContract();
@@ -12,6 +13,20 @@ test('support registry drives native multi-architecture CI and checked-in genera
   assert.ok(!matrices.linux.include.some(t => t.id === 'arch-arm64'));
   assert.ok(requiredScenarios(contract, { os: 'macos' }).some(s => s.id === 'AUDIO-11'));
   assert.ok(!requiredScenarios(contract, { os: 'linux' }).some(s => s.id === 'AUDIO-11'));
+});
+test('Stream Deck is a required archive check, separate from installer environments and the update catalog', () => {
+  const { contract } = loadContract();
+  const check = contract.artifactChecks[0];
+  assert.deepEqual(requiredScenarios(contract, check).map(s => s.id), ['STREAMDECK-01']);
+  assert.ok(!requiredScenarios(contract, contract.qualificationTargets[0]).some(s => s.id === 'STREAMDECK-01'));
+  assert.equal(releaseInstallers({ artifacts: contract.artifacts }, contract).length, 4);
+  for (const change of [c => { c.artifactChecks = []; }, c => { c.artifactChecks[0].artifact = 'macos-universal-pkg'; },
+    c => { c.artifactChecks[0].id = c.qualificationTargets[0].id; },
+    c => { c.scenarios.find(s => s.id === 'STREAMDECK-01').required = false; },
+    c => { c.scenarios.find(s => s.id === 'STREAMDECK-01').artifact = 'missing'; }]) {
+    const invalid = structuredClone(contract); change(invalid);
+    assert.throws(() => validateContract(invalid));
+  }
 });
 test('duplicate environments, unknown artifacts and floating distro images fail contract validation', () => {
   for (const mutate of [c => c.qualificationTargets.push(c.qualificationTargets[0]),
@@ -27,4 +42,20 @@ test('duplicate environments, unknown artifacts and floating distro images fail 
     const contract = structuredClone(loadContract().contract); mutate(contract);
     assert.throws(() => validateContract(contract));
   }
+});
+
+test('MIDI requires the declared ALSA runtime library in both Linux package formats', () => {
+  for (const format of ['deb', 'arch']) {
+    const contract = structuredClone(loadContract().contract);
+    contract.runtimeLibraries.linux.midi[format] = 'missing-midi-runtime';
+    assert.throws(() => checkGenerated(contract), /dependency differs|MIDI library differs/);
+  }
+});
+
+test('DEB MIDI dependencies use Debian names and Arch retains its own ALSA package', () => {
+  const linux = JSON.parse(readFileSync(new URL('../apps/desktop/src-tauri/tauri.linux.conf.json', import.meta.url))).bundle.linux;
+  assert.ok(linux.deb.depends.includes('libasound2t64'));
+  assert.ok(!linux.deb.depends.includes('alsa-lib'), 'Arch/RPM package names cannot be installed by APT');
+  const arch = readFileSync(new URL('../packaging/linux/arch/PKGBUILD.in', import.meta.url), 'utf8');
+  assert.match(arch, /depends=\([\s\S]*?'alsa-lib'/);
 });

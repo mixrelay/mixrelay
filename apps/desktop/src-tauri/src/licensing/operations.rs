@@ -81,7 +81,7 @@ pub(super) async fn validate_existing(
 ) -> Result<mixrelay_licensing::Activation, LicenseError> {
     let activation = client.validate(key, seat.instance_id()).await?;
     if activation.license_id() != seat.license_id()
-        || activation.purchased_major() != seat.purchased_major()
+        || !seat.covers_major(activation.purchased_major())
     {
         return Err(LicenseError::InvalidResponse);
     }

@@ -359,3 +359,28 @@ it('returns isolated native activity fixtures and observed empty by default', as
   cloned.playing = false;
   expect(state.deviceAppActivity.native?.[0]?.playing).toBe(true);
 });
+
+it('catalog deletion undo and redo preserve graph/node identities and reject absent history', async () => {
+  const { port } = fixture();
+  const mutate = async (action: import('./types').GraphCatalogAction) => {
+    const catalog = await port.getGraphCatalog();
+    return port.mutateGraphCatalog({
+      ...action,
+      expectedRevision: catalog.document.revision,
+      expectedCatalogRevision: catalog.catalogRevision,
+    });
+  };
+  const unchanged = await port.getGraphCatalog();
+  await expect(mutate({ action: 'undo_delete' })).resolves.toEqual(unchanged);
+  await expect(mutate({ action: 'redo_delete' })).resolves.toEqual(unchanged);
+  const original = await port.getGraphCatalog();
+  await mutate({ action: 'delete', id: original.activeId });
+  const restored = await mutate({ action: 'undo_delete' });
+  expect(restored.activeId).toBe(original.activeId);
+  expect(restored.graphs).toEqual(original.graphs);
+  expect(restored.document.nodes).toEqual(original.document.nodes);
+  await mutate({ action: 'redo_delete' });
+  expect((await port.getGraph()).nodes).toEqual([]);
+  await mutate({ action: 'undo_delete' });
+  expect((await port.getGraph()).nodes).toEqual(original.document.nodes);
+});
