@@ -135,7 +135,7 @@ impl<R: Clone, W> ReceiptLedger<R, W> {
                 Some(waiter)
             }
             // The first completion stands.
-            first => {
+            first @ Receipt::Complete { .. } => {
                 *receipt = first;
                 None
             }
@@ -169,7 +169,7 @@ impl<R: Clone, W> ReceiptLedger<R, W> {
         let (id, receipt) = self.receipts.remove_entry(id)?;
         match receipt {
             Receipt::Complete { response, .. } => Some(response),
-            pending => {
+            pending @ Receipt::Pending(_) => {
                 self.receipts.insert(id, pending);
                 None
             }
