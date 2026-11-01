@@ -1,7 +1,6 @@
 use std::{
-    collections::HashMap,
     sync::{Arc, Mutex, MutexGuard},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -14,6 +13,21 @@ use axum::{
 };
 use mixrelay_control_protocol::{ErrorCode, ProtocolError};
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
+
+mod ledger;
+use ledger::{Ack, ReceiptLedger, Rejection, Snapshot};
+use mixrelay_time::MonotonicClock;
+
+/// The standard library's monotonic clock, read from when the owner was created. It is the
+/// production clock because `std::time::Instant` behaves the same on every platform; tests
+/// pass their own through `with_clock`.
+struct StdClock(StdInstant);
+
+impl MonotonicClock for StdClock {
+    fn now(&self) -> mixrelay_time::Instant {
+        mixrelay_time::Instant::from_origin(self.0.elapsed())
+    }
+}
 
 pub(super) const MAX_RECEIPTS: usize = 8;
 pub(super) const RESPONSE_LIMIT: usize = 16 * 1024 * 1024;
@@ -49,32 +63,14 @@ pub struct ControlOperations {
 }
 
 struct Inner {
-    state: Mutex<State>,
+    ledger: Mutex<ReceiptLedger<Box<StoredResponse>, Arc<Notify>>>,
+    clock: Box<dyn MonotonicClock>,
     ingress: Arc<Semaphore>,
     owner_nonce: u128,
     next_id: std::sync::atomic::AtomicU64,
     wake: Notify,
     /// Becomes true when admission closes; long-lived streams end with it.
     closing: tokio::sync::watch::Sender<bool>,
-}
-
-struct State {
-    admission_open: bool,
-    pending: usize,
-    records: HashMap<String, Record>,
-}
-
-struct Record {
-    notify: Arc<Notify>,
-    outcome: Outcome,
-}
-
-enum Outcome {
-    Pending,
-    Complete {
-        response: StoredResponse,
-        completed_at: Instant,
-    },
 }
 
 #[derive(Clone, Debug)]
@@ -85,30 +81,6 @@ struct StoredResponse {
     original: bool,
 }
 
-#[derive(Debug)]
-enum Snapshot {
-    Pending,
-    Complete(Box<StoredResponse>),
-    Missing,
-}
-
-/// Why `admit` did not start a new operation.
-#[derive(Debug)]
-enum Rejection<'a> {
-    /// The client ID already names a running operation.
-    Pending(&'a str),
-    /// The client ID already names a completed operation; replay its response.
-    Complete(&'a str, Box<StoredResponse>),
-    /// Admission is closed or the receipt table is full.
-    Full,
-}
-
-enum Ack {
-    Completed,
-    Pending,
-    Missing,
-}
-
 #[derive(serde::Serialize)]
 struct PendingResponse<'a> {
     #[serde(rename = "operationId")]
@@ -117,7 +89,12 @@ struct PendingResponse<'a> {
 
 impl ControlOperations {
     /// Creates an open operation owner with a fresh session identifier namespace.
+    #[must_use]
     pub fn new() -> Self {
+        Self::with_clock(Box::new(StdClock(StdInstant::now())))
+    }
+
+    fn with_clock(clock: Box<dyn MonotonicClock>) -> Self {
         static OWNER_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -125,11 +102,8 @@ impl ControlOperations {
         let sequence = OWNER_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
             inner: Arc::new(Inner {
-                state: Mutex::new(State {
-                    admission_open: true,
-                    pending: 0,
-                    records: HashMap::new(),
-                }),
+                ledger: Mutex::new(ReceiptLedger::new(MAX_RECEIPTS, COMPLETED_TTL)),
+                clock,
                 ingress: Arc::new(Semaphore::new(INGRESS_PERMITS)),
                 owner_nonce: now ^ (u128::from(sequence) << 64),
                 next_id: std::sync::atomic::AtomicU64::new(1),
@@ -141,8 +115,7 @@ impl ControlOperations {
 
     /// Stops accepting new work while allowing all admitted handlers to finish.
     pub fn close_admission(&self) {
-        let mut state = self.lock_state();
-        state.admission_open = false;
+        self.lock_ledger().close();
         self.inner.closing.send_replace(true);
     }
 
@@ -158,7 +131,7 @@ impl ControlOperations {
     pub async fn drain(&self) {
         loop {
             let notified = self.inner.wake.notified();
-            if self.lock_state().pending == 0 {
+            if self.lock_ledger().pending() == 0 {
                 return;
             }
             notified.await;
@@ -176,117 +149,56 @@ impl ControlOperations {
             })
     }
 
-    fn admit<'a>(&self, requested: Option<&'a str>) -> Result<Admission, Rejection<'a>> {
-        let mut state = self.lock_state();
-        purge_expired(&mut state);
-        if let Some(id) = requested
-            && let Some(record) = state.records.get(id)
-        {
-            return Err(match &record.outcome {
-                Outcome::Pending => Rejection::Pending(id),
-                Outcome::Complete { response, .. } => {
-                    Rejection::Complete(id, Box::new(response.clone()))
-                }
-            });
-        }
-        if !state.admission_open || state.records.len() >= MAX_RECEIPTS {
-            return Err(Rejection::Full);
-        }
-        let id = requested.map_or_else(
-            || loop {
+    fn now(&self) -> mixrelay_time::Instant {
+        self.inner.clock.now()
+    }
+
+    fn admit<'a>(
+        &self,
+        requested: Option<&'a str>,
+    ) -> Result<Admission, Rejection<'a, Box<StoredResponse>>> {
+        let notify = Arc::new(Notify::new());
+        let now = self.now();
+        let id = self
+            .lock_ledger()
+            .admit(requested, notify.clone(), now, || {
                 let sequence = self
                     .inner
                     .next_id
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let id = format!("op-{:032x}-{:016x}", self.inner.owner_nonce, sequence);
-                if !state.records.contains_key(&id) {
-                    break id;
-                }
-            },
-            str::to_owned,
-        );
-        let notify = Arc::new(Notify::new());
-        state.records.insert(
-            id.clone(),
-            Record {
-                notify: notify.clone(),
-                outcome: Outcome::Pending,
-            },
-        );
-        state.pending += 1;
+                format!("op-{:032x}-{:016x}", self.inner.owner_nonce, sequence)
+            })?;
         Ok(Admission { id, notify })
     }
 
     fn complete(&self, id: &str, response: StoredResponse) {
-        let notify = {
-            let mut state = self.lock_state();
-            let notify = {
-                let Some(record) = state.records.get_mut(id) else {
-                    return;
-                };
-                if !matches!(&record.outcome, Outcome::Pending) {
-                    return;
-                }
-                let notify = record.notify.clone();
-                record.outcome = Outcome::Complete {
-                    response,
-                    completed_at: Instant::now(),
-                };
-                notify
-            };
-            state.pending = state.pending.saturating_sub(1);
-            notify
+        let now = self.now();
+        let Some(notify) = self.lock_ledger().complete(id, Box::new(response), now) else {
+            return;
         };
         notify.notify_waiters();
         self.inner.wake.notify_waiters();
     }
 
-    fn snapshot(&self, id: &str) -> Snapshot {
-        let mut state = self.lock_state();
-        purge_expired(&mut state);
-        match state.records.get(id) {
-            Some(Record {
-                outcome: Outcome::Pending,
-                ..
-            }) => Snapshot::Pending,
-            Some(Record {
-                outcome: Outcome::Complete { response, .. },
-                ..
-            }) => Snapshot::Complete(Box::new(response.clone())),
-            None => Snapshot::Missing,
-        }
+    fn snapshot(&self, id: &str) -> Snapshot<Box<StoredResponse>> {
+        let now = self.now();
+        self.lock_ledger().snapshot(id, now)
     }
 
     fn acknowledge(&self, id: &str) -> Ack {
-        let mut state = self.lock_state();
-        purge_expired(&mut state);
-        let Some(record) = state.records.get(id) else {
-            return Ack::Missing;
-        };
-        if matches!(&record.outcome, Outcome::Pending) {
-            return Ack::Pending;
-        }
-        state.records.remove(id);
-        Ack::Completed
+        let now = self.now();
+        self.lock_ledger().acknowledge(id, now)
     }
 
     fn take_completed(&self, id: &str) -> Option<StoredResponse> {
-        let mut state = self.lock_state();
-        if !matches!(
-            state.records.get(id).map(|record| &record.outcome),
-            Some(Outcome::Complete { .. })
-        ) {
-            return None;
-        }
-        match state.records.remove(id)?.outcome {
-            Outcome::Complete { response, .. } => Some(response),
-            Outcome::Pending => None,
-        }
+        self.lock_ledger()
+            .take_completed(id)
+            .map(|response| *response)
     }
 
-    fn lock_state(&self) -> MutexGuard<'_, State> {
+    fn lock_ledger(&self) -> MutexGuard<'_, ReceiptLedger<Box<StoredResponse>, Arc<Notify>>> {
         self.inner
-            .state
+            .ledger
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
@@ -484,14 +396,6 @@ pub(super) async fn delete(
     }
 }
 
-fn purge_expired(state: &mut State) {
-    let now = Instant::now();
-    state.records.retain(|_, record| {
-        !matches!(&record.outcome, Outcome::Complete { completed_at, .. }
-            if now.saturating_duration_since(*completed_at) >= COMPLETED_TTL)
-    });
-}
-
 async fn collect_response(response: Response) -> StoredResponse {
     let (parts, body) = response.into_parts();
     let mut headers = parts.headers;
@@ -628,6 +532,7 @@ mod tests {
         middleware,
         routing::{MethodRouter, get as route_get, post},
     };
+    use mixrelay_time::ManualClock;
     use serde_json::{Value, json};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
@@ -725,7 +630,7 @@ mod tests {
             operations.close_admission();
         }
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert_eq!(operations.lock_state().records.len(), 1);
+        assert_eq!(operations.lock_ledger().len(), 1);
         assert_eq!(
             super::delete(Extension(operations.clone()), Path(id.into()))
                 .await
@@ -779,7 +684,7 @@ mod tests {
             .unwrap();
         assert_eq!(pending_id(duplicate).await, id);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert_eq!(operations.lock_state().records.len(), MAX_RECEIPTS);
+        assert_eq!(operations.lock_ledger().len(), MAX_RECEIPTS);
         release.notify_one();
         assert_eq!(
             terminal_response(&operations, id).await.status(),
@@ -927,7 +832,7 @@ mod tests {
             .await
             .unwrap();
         assert_invalid_id(response).await;
-        assert!(operations.lock_state().records.is_empty());
+        assert_eq!(operations.lock_ledger().len(), 0);
         for id in ["a".repeat(16), "Z0_-".repeat(16)] {
             let response = router
                 .clone()
@@ -951,7 +856,7 @@ mod tests {
         let client = operations.admit(Some(&id)).unwrap();
         let generated = operations.admit(None).unwrap();
         assert_ne!(client.id, generated.id);
-        assert_eq!(operations.lock_state().records.len(), 2);
+        assert_eq!(operations.lock_ledger().len(), 2);
         operations.complete(&client.id, stored(StatusCode::OK, b"ok", true));
         assert!(matches!(operations.acknowledge(&client.id), Ack::Completed));
         assert_eq!(operations.admit(Some(&id)).unwrap().id, id);
@@ -981,12 +886,13 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::CONFLICT);
         assert_eq!(response.headers()[ENGINE_HEADER], "new-engine");
-        assert!(operations.lock_state().records.is_empty());
+        assert_eq!(operations.lock_ledger().len(), 0);
     }
 
     #[tokio::test]
     async fn client_receipts_are_bounded_until_acknowledged_or_expired() {
-        let operations = ControlOperations::new();
+        let clock = ManualClock::new(mixrelay_time::Instant::from_origin(Duration::ZERO));
+        let operations = ControlOperations::with_clock(Box::new(clock.clone()));
         let router = test_router(
             operations.clone(),
             post(|| async { StatusCode::NO_CONTENT }),
@@ -1027,15 +933,7 @@ mod tests {
         assert!(matches!(operations.acknowledge(first), Ack::Completed));
         operations.admit(Some(first)).unwrap();
         operations.complete(first, stored(StatusCode::OK, b"ok", true));
-        let mut state = operations.lock_state();
-        if let Some(Record {
-            outcome: Outcome::Complete { completed_at, .. },
-            ..
-        }) = state.records.get_mut(first)
-        {
-            *completed_at = Instant::now().checked_sub(COMPLETED_TTL).unwrap();
-        }
-        drop(state);
+        clock.advance(COMPLETED_TTL);
         assert_eq!(operations.admit(Some(first)).unwrap().id, first);
     }
 
@@ -1159,13 +1057,13 @@ mod tests {
         request.abort();
         release.notify_one();
         for _ in 0..100 {
-            if operations.lock_state().pending == 0 {
+            if operations.lock_ledger().pending() == 0 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert_eq!(operations.lock_state().pending, 0);
+        assert_eq!(operations.lock_ledger().pending(), 0);
     }
 
     #[tokio::test]
@@ -1246,7 +1144,8 @@ mod tests {
 
     #[test]
     fn acknowledgement_and_expiry_remove_completed_receipts_only() {
-        let operations = ControlOperations::new();
+        let clock = ManualClock::new(mixrelay_time::Instant::from_origin(Duration::ZERO));
+        let operations = ControlOperations::with_clock(Box::new(clock.clone()));
         let pending = operations.admit(None).expect("pending admission");
         assert!(matches!(operations.acknowledge(&pending.id), Ack::Pending));
         operations.complete(&pending.id, stored(StatusCode::OK, b"ok", true));
@@ -1261,19 +1160,14 @@ mod tests {
 
         let expired = operations.admit(None).expect("expiry admission");
         operations.complete(&expired.id, stored(StatusCode::OK, b"ok", true));
-        if let Some(Record {
-            outcome: Outcome::Complete { completed_at, .. },
-            ..
-        }) = operations.lock_state().records.get_mut(&expired.id)
-        {
-            *completed_at = Instant::now()
-                .checked_sub(COMPLETED_TTL + Duration::from_secs(1))
-                .expect("fixture clock supports a previous completed receipt");
-        }
+        clock.advance(COMPLETED_TTL);
         assert!(matches!(
             operations.snapshot(&expired.id),
             Snapshot::Missing
         ));
+        // A late completion for a receipt that is gone changes nothing.
+        operations.complete(&expired.id, stored(StatusCode::OK, b"late", true));
+        assert_eq!(operations.lock_ledger().len(), 0);
     }
 
     #[tokio::test]

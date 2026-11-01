@@ -2840,6 +2840,7 @@ dependencies = [
  "mixrelay-audio-graph",
  "mixrelay-control-protocol",
  "mixrelay-local-socket",
+ "mixrelay-time",
  "serde",
  "serde_json",
  "tokio",
