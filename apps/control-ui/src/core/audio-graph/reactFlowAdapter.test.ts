@@ -1,16 +1,14 @@
 import { assert, describe, expect, it } from 'vitest';
 import { connectGraph, disconnectGraph } from '../domain/graph/topology';
-
 import {
   type AudioGraphModel,
   graphNodeDefaultWidth,
   normalizeAudioGraphNodeSize,
   resizeAudioGraphNode,
 } from './model';
+import { audioGraphEdgeEndpoints, namedAudioPorts } from './portNames';
 import {
   applyAudioNodeLayers,
-  audioGraphEdgeEndpoints,
-  namedAudioPorts,
   reconcileAudioFlowEdges,
   reconcileAudioFlowNodes,
 } from './reactFlowAdapter';

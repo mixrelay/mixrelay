@@ -1,5 +1,5 @@
 import { nodeInsertionGap, nodeWidths } from '../theme/tokens';
-import type { AudioGraphViewport } from './AudioGraphCanvas';
+import type { AudioGraphViewport } from './graphViewport';
 import type { AudioGraphModel, AudioGraphPosition } from './model';
 
 export interface GraphRectangle extends AudioGraphPosition {

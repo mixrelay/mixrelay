@@ -15,7 +15,7 @@ import { Stack } from '../ui/Stack';
 import { Text } from '../ui/Text';
 import styles from './ChannelConnectionDialog.module.css';
 import { type AudioGraphModel, type AudioGraphNode, audioGraphNodeTitle } from './model';
-import { namedAudioPorts } from './reactFlowAdapter';
+import { namedAudioPorts } from './portNames';
 
 export interface ChannelConnectionDialogProps {
   model: AudioGraphModel;

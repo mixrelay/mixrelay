@@ -9,7 +9,8 @@ import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { frequencyPosition, gainPosition } from '../ui/equalizerResponse';
 import { NodeOptionsSection } from '../ui/NodeOptionsSection';
 import { useNodeOptionsState } from '../ui/nodeOptionsState';
-import { AudioGraphCanvas, type AudioGraphViewport } from './AudioGraphCanvas';
+import { AudioGraphCanvas } from './AudioGraphCanvas';
+import type { AudioGraphViewport } from './graphViewport';
 import type { AudioGraphModel, AudioGraphNode } from './model';
 
 type MockItem = Record<string, unknown>;
