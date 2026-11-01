@@ -1,8 +1,8 @@
 import type { ControlStateSnapshot, ControlTelemetry } from '../../domain/control/state';
 import {
   array,
-  integer,
   literal,
+  nonNegativeInteger,
   nullable,
   object,
   optional,
@@ -34,17 +34,17 @@ interface PackedTelemetry {
 
 const packedTelemetry = object<PackedTelemetry>({
   engineIncarnation: string,
-  sequence: integer,
+  sequence: nonNegativeInteger,
   meters: object<PackedMeters>({
     protocolVersion: literal(1),
-    revision: integer,
+    revision: nonNegativeInteger,
     bindings: optional(
       array(
         object<MeterBinding>({
           nodeId: string,
           portId: string,
-          channels: integer,
-          inputChannels: nullable(integer),
+          channels: nonNegativeInteger,
+          inputChannels: nullable(nonNegativeInteger),
         }),
       ),
     ),

@@ -47,8 +47,8 @@ import {
   array,
   boolean,
   type Decoder,
-  integer,
   literal,
+  nonNegativeInteger,
   nullable,
   number,
   object,
@@ -64,8 +64,8 @@ const protocolVersion = literal(1);
 const sampleFormat = literal('float32', 'signed16', 'signed24', 'signed32');
 
 export const nativeStreamFormat = object<NativeStreamFormat>({
-  sampleRate: integer,
-  channels: integer,
+  sampleRate: nonNegativeInteger,
+  channels: nonNegativeInteger,
   sampleFormat,
 });
 const nativeStreamFormats = object<NativeStreamFormats>({
@@ -79,13 +79,13 @@ const nativeDeviceFormats = object<NativeDeviceFormats>({
 
 const runtimeStreamSpec = object<RuntimeStreamSpec>({
   channelLayout: literal('discrete', 'mono', 'stereo'),
-  channels: integer,
+  channels: nonNegativeInteger,
 });
 const streamSpecFields = {
   render: optional(nullable(runtimeStreamSpec)),
   capture: optional(nullable(runtimeStreamSpec)),
-  supportedSampleRates: array(integer),
-  defaultSampleRate: integer,
+  supportedSampleRates: array(nonNegativeInteger),
+  defaultSampleRate: nonNegativeInteger,
 };
 export const virtualEndpointSpec = object<VirtualEndpointSpec>({
   id: string,
@@ -96,33 +96,33 @@ const virtualEndpointDevice = object<VirtualEndpointDevice>({
   nativeDeviceIds: array(string),
   nativeFormats: nativeDeviceFormats,
   spec: virtualEndpointSpec,
-  observedSampleRate: nullable(integer),
-  supportedSampleRates: array(integer),
+  observedSampleRate: nullable(nonNegativeInteger),
+  supportedSampleRates: array(nonNegativeInteger),
   canSetSampleRate: boolean,
 });
 export const virtualEndpointSettings = object<VirtualEndpointSettings>({
   canCreate: boolean,
   canRename: boolean,
-  renderChannels: array(integer),
-  captureChannels: array(integer),
+  renderChannels: array(nonNegativeInteger),
+  captureChannels: array(nonNegativeInteger),
   creationTemplate: nullable(object(streamSpecFields)),
   devices: array(virtualEndpointDevice),
 });
 
 const sessionFormat = object<AudioSessionStatus['format']>({
-  sampleRate: integer,
-  blockFrames: integer,
+  sampleRate: nonNegativeInteger,
+  blockFrames: nonNegativeInteger,
 });
 const audioSessionStatus = object<AudioSessionStatus>({
   endpointPreferencesUnavailable: optional(boolean),
   virtualEndpointSettings: optional(virtualEndpointSettings),
   processingState: optional(literal('idle', 'running', 'stopped')),
-  discontinuities: optional(integer),
+  discontinuities: optional(nonNegativeInteger),
   format: sessionFormat,
   preferredFormat: optional(nullable(sessionFormat)),
   clockAuthority: literal('engine_timer', 'device', 'audio_server', 'host'),
-  observedDeviceSampleRate: nullable(integer),
-  observedDeviceBufferFrames: optional(nullable(integer)),
+  observedDeviceSampleRate: nullable(nonNegativeInteger),
+  observedDeviceBufferFrames: optional(nullable(nonNegativeInteger)),
   issue: nullable(
     literal(
       'processing_failed',
@@ -138,11 +138,11 @@ const audioSessionStatus = object<AudioSessionStatus>({
       'stored_format_unavailable',
     ),
   ),
-  transportLatencyFrames: nullable(integer),
+  transportLatencyFrames: nullable(nonNegativeInteger),
   capabilities: object<AudioSessionStatus['capabilities']>({
     backend: literal('core_audio', 'pipe_wire', 'contract_only'),
-    supportedSampleRates: array(integer),
-    supportedBlockFrames: array(integer),
+    supportedSampleRates: array(nonNegativeInteger),
+    supportedBlockFrames: array(nonNegativeInteger),
     canReconfigureLive: boolean,
     hardwareInput: boolean,
     hardwareOutput: boolean,
@@ -166,15 +166,15 @@ export const mixRelayStatus = object<MixRelayStatus>({
     array(object({ graphId: string, instanceId: string, nodeId: string })),
   ),
   processorTimings: optional(
-    array(object({ graphId: string, nodeId: string, roundTripNs: integer })),
+    array(object({ graphId: string, nodeId: string, roundTripNs: nonNegativeInteger })),
   ),
   processorLatencies: optional(
     array(
       object({
         graphId: string,
         nodeId: string,
-        transportFrames: integer,
-        intrinsicFrames: nullable(integer),
+        transportFrames: nonNegativeInteger,
+        intrinsicFrames: nullable(nonNegativeInteger),
       }),
     ),
   ),
@@ -191,10 +191,10 @@ export const mixRelayStatus = object<MixRelayStatus>({
     'version_mismatch',
     'ready',
   ),
-  sampleRate: nullable(integer),
-  bufferFrames: nullable(integer),
-  underruns: integer,
-  overruns: integer,
+  sampleRate: nullable(nonNegativeInteger),
+  bufferFrames: nullable(nonNegativeInteger),
+  underruns: nonNegativeInteger,
+  overruns: nonNegativeInteger,
   audioSession: optional(audioSessionStatus),
 });
 
@@ -212,7 +212,9 @@ const runtimeGraphEdge = object<RuntimeGraphEdge>({
     auto: object({ mode: literal('auto') }),
     explicit: object({
       mode: literal('explicit'),
-      routes: array(object({ destinationChannel: integer, sourceChannel: integer })),
+      routes: array(
+        object({ destinationChannel: nonNegativeInteger, sourceChannel: nonNegativeInteger }),
+      ),
     }),
   }),
   destination: endpoint,
@@ -222,20 +224,20 @@ const runtimeGraphEdge = object<RuntimeGraphEdge>({
 export const runtimeGraphDocument = object<RuntimeGraphDocument>({
   edges: array(runtimeGraphEdge),
   nodes: array(runtimeGraphNode),
-  revision: integer,
+  revision: nonNegativeInteger,
   schemaVersion: literal(2),
 });
 
 export const graphRuntimeStatus = object<GraphRuntimeStatus>({
   pendingReason: optional(literal('awaiting_microphone_permission')),
-  activeRevision: integer,
+  activeRevision: nonNegativeInteger,
   protocolVersion,
-  submittedRevision: integer,
+  submittedRevision: nonNegativeInteger,
 });
 
 const graphApplyFields = {
   protocolVersion,
-  revision: integer,
+  revision: nonNegativeInteger,
   state: literal('active', 'pending'),
   persistenceError: optional(string),
 };
@@ -257,7 +259,7 @@ const nodeControls = array(
 );
 export const graphNodeControls = object<GraphNodeControls>({
   graphId: string,
-  revision: integer,
+  revision: nonNegativeInteger,
   nodes: nodeControls,
 });
 
@@ -272,18 +274,18 @@ const nodeMeterSnapshot = object<NodeMeterSnapshot>({
 export const meterSnapshot = object<MeterSnapshot>({
   nodes: array(nodeMeterSnapshot),
   protocolVersion,
-  revision: integer,
+  revision: nonNegativeInteger,
 });
 export const meterTelemetry = object<MeterTelemetry>({
   engineIncarnation: string,
-  sequence: integer,
+  sequence: nonNegativeInteger,
   meters: meterSnapshot,
 });
 
 const processorFormat = literal('au', 'auv3', 'clap', 'lv2', 'vst3');
 const providerBus = object<ProviderBus>({
   channelFormat: literal('mono', 'stereo', 'surround5_1', 'surround7_1', 'discrete'),
-  channels: integer,
+  channels: nonNegativeInteger,
   id: string,
   kind: literal('main', 'sidechain', 'auxiliary'),
   name: string,
@@ -296,10 +298,10 @@ const providerPorts = object<ProviderPorts>({
 const processorParameter = object<ProcessorParameterDescriptor>({
   canAutomate: boolean,
   defaultValue: number,
-  id: integer,
+  id: nonNegativeInteger,
   isReadOnly: boolean,
   name: string,
-  stepCount: integer,
+  stepCount: nonNegativeInteger,
 });
 const processorDescriptor = object<ExternalProcessorDescriptor>({
   displayName: string,
@@ -327,7 +329,7 @@ export const externalProcessorCatalog = object<ExternalProcessorCatalog>({
 
 export const processorParameterUpdateResponse = object<ProcessorParameterUpdateResponse>({
   nodeId: string,
-  parameterId: integer,
+  parameterId: nonNegativeInteger,
   protocolVersion,
   value: number,
   persistenceError: optional(string),
@@ -342,18 +344,18 @@ export const processorEditorStatus = object<ProcessorEditorStatus>({
       'worker_unavailable',
     ),
   ),
-  height: nullable(integer),
+  height: nullable(nonNegativeInteger),
   nodeId: string,
   protocolVersion,
   resizable: boolean,
   state: literal('unavailable', 'closed', 'opening', 'open', 'failed'),
-  width: nullable(integer),
+  width: nullable(nonNegativeInteger),
 });
 export const processorEditorFrame = object<ProcessorEditorFrame>({
   instanceId: string,
-  session: integer,
-  width: integer,
-  height: integer,
+  session: nonNegativeInteger,
+  width: nonNegativeInteger,
+  height: nonNegativeInteger,
   pngBase64: string,
 });
 
@@ -361,14 +363,14 @@ const recorderEncoding = literal('pcm16', 'pcm24', 'float32');
 export const recorderStatus = object<RecorderStatus>({
   state: literal('stopped', 'recording', 'paused', 'failed'),
   path: nullable(string),
-  sampleRate: nullable(integer),
+  sampleRate: nullable(nonNegativeInteger),
   encoding: nullable(recorderEncoding),
-  frames: integer,
+  frames: nonNegativeInteger,
   error: nullable(string),
 });
 export const recorderSettings = object<RecorderSettings>({
   folder: string,
-  sampleRate: nullable(integer),
+  sampleRate: nullable(nonNegativeInteger),
   encoding: recorderEncoding,
 });
 
@@ -381,14 +383,14 @@ const graphLayout = object<GraphLayout>({
 });
 export const graphLayoutResponse = object<GraphLayoutResponse>({
   graphId: string,
-  layoutRevision: integer,
+  layoutRevision: nonNegativeInteger,
   layout: graphLayout,
 });
 export const graphCatalog = object<GraphCatalog>({
   layout: optional(graphLayout),
-  layoutRevision: optional(integer),
+  layoutRevision: optional(nonNegativeInteger),
   protocolVersion,
-  catalogRevision: integer,
+  catalogRevision: nonNegativeInteger,
   activeId: string,
   graphs: array(object({ id: string, name: string })),
   document: runtimeGraphDocument,
@@ -405,7 +407,7 @@ const selector: Decoder<RuntimeApplicationSelector> = tagged<RuntimeApplicationS
   process_id: object({
     include_descendants: boolean,
     match: literal('process_id'),
-    process_id: integer,
+    process_id: nonNegativeInteger,
   }),
   all_except: object({ bundle_ids: array(string), match: literal('all_except') }),
 });
@@ -414,17 +416,17 @@ export const capturableApplications = array(
     bundleId: string,
     displayName: string,
     iconDataUrl: nullable(string),
-    processId: integer,
+    processId: nonNegativeInteger,
     selector,
   }),
 );
 export const audioDevices = array(
   object<AudioDeviceDescriptor>({
     displayName: string,
-    inputChannels: integer,
+    inputChannels: nonNegativeInteger,
     isDefaultInput: boolean,
     isDefaultOutput: boolean,
-    outputChannels: integer,
+    outputChannels: nonNegativeInteger,
     uid: string,
   }),
 );
@@ -434,7 +436,7 @@ export const deviceAppActivity = record(
       bundleId: string,
       displayName: string,
       iconDataUrl: optional(string),
-      processId: integer,
+      processId: nonNegativeInteger,
       playing: boolean,
       recording: boolean,
     }),
@@ -442,14 +444,14 @@ export const deviceAppActivity = record(
 );
 
 export const controlStateSnapshot = object<ControlStateSnapshot>({
-  generation: integer,
+  generation: nonNegativeInteger,
   status: mixRelayStatus,
   graph: graphRuntimeStatus,
   controls: nullable(
     object<NonNullable<ControlStateSnapshot['controls']>>({
-      revision: integer,
-      activeRevision: integer,
-      structureGeneration: integer,
+      revision: nonNegativeInteger,
+      activeRevision: nonNegativeInteger,
+      structureGeneration: nonNegativeInteger,
       graphs: array(object({ id: string, nodes: nodeControls })),
     }),
   ),

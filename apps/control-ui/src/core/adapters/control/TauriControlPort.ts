@@ -44,7 +44,14 @@ import type { ControlPort } from '../../ports/control/ControlPort';
 import type { MeterTelemetryListener, StateListener } from '../../ports/control/TelemetryPort';
 import type { Scheduler } from '../../ports/Scheduler';
 import { timerScheduler } from '../browser/timers';
-import { type Decoder, integer, nullable, object, string, unknownValue } from '../decode';
+import {
+  type Decoder,
+  nonNegativeInteger,
+  nullable,
+  object,
+  string,
+  unknownValue,
+} from '../decode';
 import {
   audioDevices,
   capturableApplications,
@@ -87,7 +94,7 @@ function isEnd(message: unknown): boolean {
 
 /** The desktop forwards engine replies with their HTTP status. */
 const proxyResponse = object<{ status: number; body: unknown }>({
-  status: integer,
+  status: nonNegativeInteger,
   body: unknownValue,
 });
 
@@ -281,7 +288,7 @@ export class TauriControlPort implements ControlPort {
       credit();
     };
     id = decodeReply(
-      integer,
+      nonNegativeInteger,
       await this.invokeCommand('control_subscribe_telemetry', { channel }),
       'control_subscribe_telemetry',
     );

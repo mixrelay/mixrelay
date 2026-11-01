@@ -1,6 +1,6 @@
 import type { ProductUpdate, UpdateDownload, UpdateProduct } from '../../domain/updates';
 import type { UpdatesPort } from '../../ports/UpdatesPort';
-import { array, integer, literal, nullable, object, string } from '../decode';
+import { array, literal, nonNegativeInteger, nullable, object, string } from '../decode';
 import { type NativeInvoke, tauriInvoke } from './nativeInvoke';
 
 const productUpdates = array(
@@ -15,7 +15,7 @@ const productUpdates = array(
         arch: string,
         url: string,
         sha256: string,
-        size: integer,
+        size: nonNegativeInteger,
       }),
     ),
     notesUrl: nullable(string),

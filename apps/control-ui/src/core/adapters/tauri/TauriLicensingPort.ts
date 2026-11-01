@@ -1,12 +1,12 @@
 import type { LicensingStatus } from '../../domain/licensing';
 import type { LicensingPort } from '../../ports/LicensingPort';
-import { boolean, integer, literal, nullable, object, optional } from '../decode';
+import { boolean, literal, nonNegativeInteger, nullable, object, optional } from '../decode';
 import { type NativeInvoke, tauriInvoke } from './nativeInvoke';
 
 const licensingStatus = object<LicensingStatus>({
   status: literal('free', 'licensed', 'clock_invalid'),
-  expiresAtUnix: nullable(integer),
-  remainingDays: integer,
+  expiresAtUnix: nullable(nonNegativeInteger),
+  remainingDays: nonNegativeInteger,
   configured: boolean,
   hasActivation: optional(boolean),
 });

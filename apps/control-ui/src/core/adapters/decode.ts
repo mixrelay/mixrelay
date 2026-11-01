@@ -30,7 +30,7 @@ export const boolean: Decoder<boolean> = (value, path) =>
 export const number: Decoder<number> = (value, path) =>
   typeof value === 'number' && Number.isFinite(value) ? value : fail(path, 'a finite number');
 
-export const integer: Decoder<number> = (value, path) =>
+export const nonNegativeInteger: Decoder<number> = (value, path) =>
   Number.isSafeInteger(value) && typeof value === 'number' && value >= 0
     ? value
     : fail(path, 'a non-negative integer');
@@ -92,7 +92,9 @@ export function object<T>(fields: { [Key in keyof T]-?: Decoder<T[Key]> }): Deco
 export function tagged<T>(key: string, variants: Record<string, Decoder<T>>): Decoder<T> {
   return (value, path) => {
     const tag = isRecord(value) ? value[key] : undefined;
-    const decoder = typeof tag === 'string' ? variants[tag] : undefined;
+    // A tag such as `toString` names an inherited property, not a variant.
+    const decoder =
+      typeof tag === 'string' && Object.hasOwn(variants, tag) ? variants[tag] : undefined;
     return decoder
       ? decoder(value, path)
       : fail(`${path}.${key}`, Object.keys(variants).join(' | '));

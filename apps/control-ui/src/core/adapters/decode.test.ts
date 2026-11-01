@@ -3,8 +3,8 @@ import {
   array,
   boolean,
   InvalidResponseError,
-  integer,
   literal,
+  nonNegativeInteger,
   nullable,
   number,
   object,
@@ -27,16 +27,16 @@ it('accepts only the JSON value each primitive names', () => {
   expect(string('a', 'x')).toBe('a');
   expect(boolean(false, 'x')).toBe(false);
   expect(number(-0.5, 'x')).toBe(-0.5);
-  expect(integer(0, 'x')).toBe(0);
+  expect(nonNegativeInteger(0, 'x')).toBe(0);
   for (const [decoder, value] of [
     [string, 1],
     [boolean, 'true'],
     [number, Number.NaN],
     [number, Number.POSITIVE_INFINITY],
-    [integer, 1.5],
-    [integer, -1],
-    [integer, '1'],
-    [integer, 2 ** 53],
+    [nonNegativeInteger, 1.5],
+    [nonNegativeInteger, -1],
+    [nonNegativeInteger, '1'],
+    [nonNegativeInteger, 2 ** 53],
   ] as const)
     expect(failure(() => decoder(value, 'value'))).toBe('value');
 });
@@ -80,7 +80,7 @@ it('selects a tagged variant by its tag and rejects an unknown or missing tag', 
   type Mapping = { mode: 'auto' } | { mode: 'explicit'; routes: number[] };
   const mapping = tagged<Mapping>('mode', {
     auto: object({ mode: literal('auto') }),
-    explicit: object({ mode: literal('explicit'), routes: array(integer) }),
+    explicit: object({ mode: literal('explicit'), routes: array(nonNegativeInteger) }),
   });
   expect(mapping({ mode: 'explicit', routes: [1] }, 'm')).toEqual({
     mode: 'explicit',
@@ -88,6 +88,7 @@ it('selects a tagged variant by its tag and rejects an unknown or missing tag', 
   });
   expect(failure(() => mapping({ mode: 'manual' }, 'm'))).toBe('m.mode');
   expect(failure(() => mapping({ mode: 7 }, 'm'))).toBe('m.mode');
+  expect(failure(() => mapping({ mode: 'toString' }, 'm'))).toBe('m.mode');
   expect(failure(() => mapping('auto', 'm'))).toBe('m.mode');
   expect(failure(() => mapping({ mode: 'explicit', routes: [-1] }, 'm'))).toBe('m.routes[0]');
 });

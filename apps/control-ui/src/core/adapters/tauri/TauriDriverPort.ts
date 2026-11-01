@@ -1,12 +1,12 @@
 import type { DriverCommand, DriverSnapshot } from '../../domain/driver';
 import type { DriverPort } from '../../ports/DriverPort';
 import { virtualEndpointSettings } from '../control/protocolDecoders';
-import { integer, literal, nullable, object, optional, string } from '../decode';
+import { literal, nonNegativeInteger, nullable, object, optional, string } from '../decode';
 import { type NativeInvoke, tauriInvoke } from './nativeInvoke';
 
 const driverSnapshot = object<DriverSnapshot>({
   protocolVersion: literal(1),
-  revision: integer,
+  revision: nonNegativeInteger,
   state: literal('ready', 'not_installed', 'installed_not_loaded', 'unavailable'),
   installedVersion: nullable(string),
   settings: virtualEndpointSettings,
