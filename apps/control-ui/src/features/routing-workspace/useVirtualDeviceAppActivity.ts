@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { DeviceAppActivity } from '../../core/domain/control/inventory';
 import type { VirtualEndpointSettings } from '../../core/domain/control/status';
+import { structuralShare } from '../../core/domain/structuralShare';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
-import { structuralShare } from '../../core/structuralShare';
 
 export type DeviceActivityObservation =
   | { state: 'loading' | 'unavailable' }

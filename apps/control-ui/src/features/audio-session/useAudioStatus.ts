@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { MixRelayStatus } from '../../core/domain/control/status';
+import { structuralShare } from '../../core/domain/structuralShare';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
-import { structuralShare } from '../../core/structuralShare';
 
 type Observation = { controlPort: ControlPort; value: MixRelayStatus } | null;
 

@@ -1,11 +1,12 @@
-import type { NativeDeviceFormats, NativeSampleFormat } from '../domain/control/nativeFormat';
+import type { NativeDeviceFormats, NativeSampleFormat } from './nativeFormat';
 
-export const sampleFormatLabels: Record<NativeSampleFormat, string> = {
-  signed16: '16-bit PCM',
-  signed24: '24-bit PCM',
-  signed32: '32-bit PCM',
-  float32: '32-bit Float',
-};
+/** Sample formats in the order choices are offered. */
+export const nativeSampleFormats: readonly NativeSampleFormat[] = [
+  'signed16',
+  'signed24',
+  'signed32',
+  'float32',
+];
 
 /** The native shared PCM command preserves each current rate/channel tuple. */
 export function sharedDevicePcm(formats: NativeDeviceFormats, render: boolean, capture: boolean) {
@@ -15,7 +16,7 @@ export function sharedDevicePcm(formats: NativeDeviceFormats, render: boolean, c
   const current = streams[0]?.current?.sampleFormat ?? null;
   const value =
     current && streams.every((stream) => stream.current?.sampleFormat === current) ? current : null;
-  const options = (Object.keys(sampleFormatLabels) as NativeSampleFormat[]).filter(
+  const options = nativeSampleFormats.filter(
     (sampleFormat) =>
       streams.length > 0 &&
       streams.every(

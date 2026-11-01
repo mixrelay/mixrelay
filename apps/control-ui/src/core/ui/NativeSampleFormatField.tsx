@@ -1,6 +1,13 @@
 import type { NativeDeviceFormats, NativeSampleFormat } from '../domain/control/nativeFormat';
-import { sampleFormatLabels, sharedDevicePcm } from '../driver/sharedDeviceFormat';
+import { sharedDevicePcm } from '../domain/control/sharedDeviceFormat';
 import { SelectField } from './SelectField';
+
+const sampleFormatLabels: Record<NativeSampleFormat, string> = {
+  signed16: '16-bit PCM',
+  signed24: '24-bit PCM',
+  signed32: '32-bit PCM',
+  float32: '32-bit Float',
+};
 
 export function NativeSampleFormatField({
   formats,

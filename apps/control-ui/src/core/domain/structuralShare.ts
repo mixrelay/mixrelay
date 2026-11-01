@@ -1,5 +1,3 @@
-import { type SetStateAction, useCallback, useRef, useState } from 'react';
-
 /** Returns `next` with every subtree that deep-equals the matching part of `previous`
  * replaced by the previous object, so unchanged data keeps its identity across polls and
  * presentation passes and memoized consumers skip work. Plain objects, arrays and Map
@@ -56,28 +54,4 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
-}
-
-/** `structuralShare` against the previous render's value. */
-export function useStructuralShare<T>(value: T): T {
-  const shared = useRef(value);
-  shared.current = structuralShare(shared.current, value);
-  return shared.current;
-}
-
-/** `useState` whose updates keep the previous value when the next one is deep-equal, so a
- * poll that observes nothing new does not re-render its consumers. */
-export function useSharedState<T>(initial: T | (() => T)) {
-  const [value, setValue] = useState(initial);
-  const set = useCallback(
-    (next: SetStateAction<T>) =>
-      setValue((previous) =>
-        structuralShare(
-          previous,
-          typeof next === 'function' ? (next as (previous: T) => T)(previous) : next,
-        ),
-      ),
-    [],
-  );
-  return [value, set] as const;
 }

@@ -9,6 +9,7 @@ import {
   removeGraphItems,
 } from '../domain/graph/topology';
 import { MidiContext, MidiNodeContext } from '../midi/MidiContext';
+import { useStructuralShare } from '../ui/useStructuralShare';
 import { type AudioGraphEdgeEndpoints, namedAudioPorts } from './portNames';
 import type { SelectedAudioPort } from './portSelection';
 import '@xyflow/react/dist/base.css';
@@ -57,7 +58,6 @@ import {
 import { useTranslation } from 'react-i18next';
 import { AudioMeterProvider } from '../audio-meter/AudioMeterProvider';
 import type { AudioMeterStore } from '../audio-meter/AudioMeterStore';
-import { useStructuralShare } from '../structuralShare';
 import { AudioNodeCard } from '../ui/AudioNodeCard';
 import type { EndpointUpdate } from '../ui/AudioNodeEndpointOptions';
 import { audioNodePortTop } from '../ui/audioNodeLayout';

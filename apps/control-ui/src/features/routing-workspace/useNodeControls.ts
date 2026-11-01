@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { GraphNodeControls } from '../../core/domain/control/graph';
 import { graphControls } from '../../core/domain/control/state';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
-import { useSharedState } from '../../core/structuralShare';
+import { useSharedState } from '../../core/ui/useStructuralShare';
 import type { GraphApplicationQueue } from './GraphApplicationQueue';
 
 /** A single bounded-rate reader; stale graph/port replies cannot affect a replacement workspace. */
