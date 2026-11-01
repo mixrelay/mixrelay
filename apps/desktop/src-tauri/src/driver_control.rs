@@ -22,7 +22,7 @@ pub(crate) async fn driver_status(app: tauri::AppHandle) -> Result<DriverSnapsho
     let client = session_client().map_err(|error| error.to_string())?;
     let snapshot = match client.snapshot().await {
         Ok(snapshot) => Ok(snapshot),
-        Err(DriverError::Http(error)) if error.is_connect() => {
+        Err(DriverError::NotReachable(_)) => {
             tauri::async_runtime::spawn_blocking(unavailable_snapshot)
                 .await
                 .map_err(|error| error.to_string())

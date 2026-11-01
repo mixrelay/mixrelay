@@ -193,25 +193,28 @@ async fn blocking_and_async_clients_share_socket_inventory_and_revision_errors()
 async fn explicit_missing_socket_fails_without_falling_back_to_session_service() {
     let fixture = mixrelay_test_support::FixtureDir::ipc("drv").unwrap();
     let client = DriverClient::with_socket_path(fixture.join(DRIVER_SOCKET)).unwrap();
-    assert!(matches!(client.snapshot().await, Err(DriverError::Http(_))));
+    assert!(matches!(
+        client.snapshot().await,
+        Err(DriverError::NotReachable(_))
+    ));
     assert!(matches!(
         client
             .mutate(&DriverCommand::Activate {
                 expected_revision: 0
             })
             .await,
-        Err(DriverError::Http(_))
+        Err(DriverError::NotReachable(_))
     ));
     tokio::task::spawn_blocking(move || {
         assert!(matches!(
             client.snapshot_blocking(),
-            Err(DriverError::Http(_))
+            Err(DriverError::NotReachable(_))
         ));
         assert!(matches!(
             client.mutate_blocking(&DriverCommand::Deactivate {
                 expected_revision: 0
             }),
-            Err(DriverError::Http(_))
+            Err(DriverError::NotReachable(_))
         ));
     })
     .await

@@ -187,8 +187,10 @@ pub(crate) async fn stop_driver(app: &tauri::AppHandle) -> Result<DriverSnapshot
         .map_err(|error| error.to_string())?
         .set_active(false)
         .await;
-    if matches!(&result, Err(mixrelay_driver_control::DriverError::Http(error)) if error.is_connect())
-        && let Ok(snapshot) = crate::driver_control::driver_status(app.clone()).await
+    if matches!(
+        &result,
+        Err(mixrelay_driver_control::DriverError::NotReachable(_))
+    ) && let Ok(snapshot) = crate::driver_control::driver_status(app.clone()).await
         && snapshot.state == mixrelay_driver_control::DriverState::NotInstalled
         && snapshot.settings.devices.is_empty()
     {

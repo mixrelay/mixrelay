@@ -1,4 +1,5 @@
 mod blocking;
+mod lifecycle;
 
 use std::{
     io::Read,
@@ -13,7 +14,8 @@ use mixrelay_local_socket::{
 
 use crate::{DriverCommand, DriverError, DriverSnapshot, SNAPSHOT_ROUTE, contract::JSON_LIMIT};
 
-/// Cloneable client fixed to the independent local Driver service, with a five-second deadline.
+/// Cloneable client fixed to the independent local Driver service. Requests have a five-second
+/// deadline, fifteen for activation and deactivation.
 #[derive(Debug, Clone)]
 pub struct DriverClient {
     client: reqwest::Client,
@@ -124,17 +126,7 @@ impl DriverClient {
     pub async fn mutate(&self, command: &DriverCommand) -> Result<DriverSnapshot, DriverError> {
         let response = self
             .claim(self.client.put(&self.endpoint))
-            // Native inventory ACK/drain can take six seconds; allow its bounded result.
-            .timeout(
-                if matches!(
-                    command,
-                    DriverCommand::Activate { .. } | DriverCommand::Deactivate { .. }
-                ) {
-                    Duration::from_secs(15)
-                } else {
-                    Duration::from_secs(5)
-                },
-            )
+            .timeout(command_timeout(command))
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(command_bytes(command)?)
             .send()
@@ -147,27 +139,7 @@ impl DriverClient {
     /// # Errors
     /// Returns transport, native stop/start, persistence or revision errors.
     pub async fn set_active(&self, active: bool) -> Result<DriverSnapshot, DriverError> {
-        for attempt in 0..3 {
-            let snapshot = self.snapshot().await?;
-            if !active
-                && snapshot.state == crate::DriverState::NotInstalled
-                && snapshot.settings.devices.is_empty()
-            {
-                return Ok(snapshot);
-            }
-            let expected_revision = snapshot.revision;
-            let command = if active {
-                DriverCommand::Activate { expected_revision }
-            } else {
-                DriverCommand::Deactivate { expected_revision }
-            };
-            let result = self.mutate(&command).await;
-            if attempt < 2 && matches!(result, Err(DriverError::Remote { status: 409, .. })) {
-                continue;
-            }
-            return result;
-        }
-        unreachable!("bounded revision retries return on the final attempt")
+        lifecycle::set_active(self, active).await
     }
 
     /// Reads actual Driver state on a non-async control worker.
@@ -186,21 +158,47 @@ impl DriverClient {
     pub fn mutate_blocking(&self, command: &DriverCommand) -> Result<DriverSnapshot, DriverError> {
         let response = self
             .claim_blocking(self.blocking.client(&self.socket_path)?.put(&self.endpoint))
-            // Native inventory ACK/drain can take six seconds; allow its bounded result.
-            .timeout(
-                if matches!(
-                    command,
-                    DriverCommand::Activate { .. } | DriverCommand::Deactivate { .. }
-                ) {
-                    Duration::from_secs(15)
-                } else {
-                    Duration::from_secs(5)
-                },
-            )
+            .timeout(command_timeout(command))
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(command_bytes(command)?)
             .send()?;
         read_blocking_response(response)
+    }
+}
+
+impl lifecycle::DriverRequests for DriverClient {
+    fn snapshot(&self) -> impl Future<Output = Result<DriverSnapshot, DriverError>> + Send {
+        Self::snapshot(self)
+    }
+
+    fn mutate(
+        &self,
+        command: &DriverCommand,
+    ) -> impl Future<Output = Result<DriverSnapshot, DriverError>> + Send {
+        Self::mutate(self, command)
+    }
+}
+
+/// Reqwest failures in the contract's terms; a refused connection reached nothing.
+impl From<reqwest::Error> for DriverError {
+    fn from(error: reqwest::Error) -> Self {
+        if error.is_connect() {
+            Self::NotReachable(error.to_string())
+        } else {
+            Self::Transport(error.to_string())
+        }
+    }
+}
+
+fn command_timeout(command: &DriverCommand) -> Duration {
+    // Native inventory ACK/drain can take six seconds; allow its bounded result.
+    if matches!(
+        command,
+        DriverCommand::Activate { .. } | DriverCommand::Deactivate { .. }
+    ) {
+        Duration::from_secs(15)
+    } else {
+        Duration::from_secs(5)
     }
 }
 
