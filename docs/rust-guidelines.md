@@ -24,7 +24,7 @@ MixRelay의 Rust 코드에 적용하는 규칙이다. 작업에 해당하는 조
 
 ## 설계·의존을 정할 때
 - 판단 로직은 입출력 없이 데이터를 받아 결과를 돌려주는 순수한 core로 두고, OS·소켓·파일·시계를 다루는 껍질은 얇게 둔다(functional core / imperative shell, MS M-IMPL-IO).
-- OS·장치·시계·IPC·프로세스 조회는 주입 가능한 경계 뒤에 둔다(MS M-MOCKABLE-SYSCALLS). 기존 경계: `macos_devices::host::Host`, `audio-io`의 `*Backend`, `device_io` `Backend`·`ListenerBackend`, `transport::ProcessInspection`, `GraphResourceBackend`. 입출력 타입에 실제 OS에 연결하는 `Default`를 두지 않는다.
+- OS·장치·시계·IPC·프로세스 조회는 주입 가능한 경계 뒤에 둔다(MS M-MOCKABLE-SYSCALLS). 기존 경계: `mixrelay-time`의 `MonotonicClock`·`Sleeper`, `macos_devices::host::Host`, `audio-io`의 `*Backend`, `device_io` `Backend`·`ListenerBackend`, `transport::ProcessInspection`, `GraphResourceBackend`. 입출력 타입에 실제 OS에 연결하는 `Default`를 두지 않는다.
 - 주입 방법은 구체 타입 → 제네릭 → `dyn` 순으로 고른다. 경계 하나에 trait 하나를 두고 trait을 작게 유지한다(MS M-DI-HIERARCHY).
 - C 브리지와 `extern "C"` 함수는 ABI 변환만 하고 정책은 안전한 Rust에 둔다(MS M-FFI-TRANSLATES).
 - 상태를 가진 전역 `static`(`Mutex`·`OnceLock`·전역 원자 변수)을 새로 만들지 않는다. 상태는 소유자를 통해 전달한다. 성능용 캐시처럼 정확성에 영향이 없는 것만 예외다(MS M-AVOID-STATICS).
@@ -62,7 +62,7 @@ MixRelay의 Rust 코드에 적용하는 규칙이다. 작업에 해당하는 조
 - 라이브러리의 `#[cfg(test)]`는 그 크레이트 자신의 단위 테스트에만 적용된다. 같은 패키지의 `--bins` 테스트나 다른 크레이트의 테스트가 링크하는 라이브러리는 제품 설정으로 컴파일되므로, 키체인·OS 서비스 같은 실제 의존을 `cfg(test)` 기본값으로 피하지 않는다. 생성 설정의 필수 인자로 받고 제품 진입점만 실제 구현을 넘긴다(예: `EngineGraphControllerConfig::paid_access`). 테스트 빌드마다 서명이 바뀌어 키체인 승인 창이 매번 뜬다.
 - `#[ignore]`로 실패를 숨기지 않는다. 검증할 동작은 기본 테스트로 옮긴다. 장시간 soak·벤치마크만 ignore할 수 있고, 그 이유를 `#[ignore = "..."]`에 쓴다.
 - 실제 설치본·장치·외부 코덱을 독립적으로 검증하는 시험은 `native-lab` 테스트 feature로 명시적으로 실행한다. 기본 시험의 가짜 경계·합성 PCM 검증을 대신하지 않는다. 같은 테스트 실행 파일의 자식으로만 실행하는 프로세스 종료 fixture는 기본 실행에서 제외하는 ignore가 필요하다.
-- 테스트 전용 가짜·생성자·우회는 `#[cfg(test)]`나 테스트용 feature 뒤에 둔다. 테스트 때문에 제품 코드의 공개 범위를 넓히지 않는다(MS M-TEST-UTIL).
+- 테스트 전용 가짜·생성자·우회는 `#[cfg(test)]`나 테스트용 feature 뒤에 둔다. 테스트 때문에 제품 코드의 공개 범위를 넓히지 않는다(MS M-TEST-UTIL). 다른 크레이트의 테스트가 켜는 feature는 `test-`로 시작하는 이름(`test-util`·`test-observation`)으로 짓고 dev 의존에서만 켠다. `pnpm check:crate-layers`가 일반·build 의존에서 켠 것을 거부한다.
 - 정의를 되풀이하는 테스트(상수 비교, 구현 분기 따라 쓰기)를 쓰지 않는다. 실제 신호·시각·상태로 관찰 가능한 동작을 확인하고, 결함을 막는 테스트는 결함을 넣었을 때 실패하는지 확인한다(MS M-TAUTOLOGICAL-TESTS).
 - 단위 테스트는 모듈 옆에 둔다. 새 코드는 `foo/tests.rs`(`#[cfg(test)] mod tests;`) 형식을 쓴다. CI는 `--lib --bins`, 커버리지(`pnpm coverage:rust`)는 `--lib` 대상만 실행한다. 실행 파일(`--bins`) 테스트는 커버리지에 잡히지 않고, 크레이트의 `tests/` 통합 테스트는 어느 쪽도 실행하지 않으므로 두 명령에 `--tests`가 더해질 때까지 새로 만들지 않는다(Book 11.3, MS M-INTEGRATION-TESTS).
 - 복구 가능한 실패는 `Err`·`None`을 확인하고, 의도한 panic 계약은 `#[should_panic(expected = "...")]`로 확인한다(Book 11.1).

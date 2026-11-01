@@ -2,7 +2,8 @@
 // Checks that workspace crates depend only on what docs/architecture.md allows.
 // Reads `cargo metadata`; prints each forbidden dependency and each workspace crate missing
 // from the table, and exits 1 when any exist. Normal, build and dev dependencies all follow
-// the table; dev dependencies may additionally use test support.
+// the table; dev dependencies may additionally use test support and enable a workspace
+// crate's `test-*` features (test fakes and observation hooks).
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -10,6 +11,7 @@ const FOUNDATION = [
   'mixrelay-audio-io',
   'mixrelay-pcm-ring',
   'mixrelay-realtime',
+  'mixrelay-time',
   'mixrelay-local-socket',
   'mixrelay-licensing',
   'mixrelay-processor-state',
@@ -18,9 +20,20 @@ const FOUNDATION = [
 ];
 const MODELS = ['mixrelay-audio-graph', 'mixrelay-audio-recorder', 'mixrelay-audio-engine'];
 const CONTRACTS = ['mixrelay-control-protocol', 'mixrelay-driver-control'];
+const DOMAIN = ['mixrelay-engine'];
 const PLUGIN_FORMATS = ['truce-rack-core', 'truce-rack-clap', 'truce-rack-vst3'];
 /** Every non-app crate; apps may use any of them ("앱 외 전부"). Test support stays dev-only. */
 const ALL_BUT_APPS = Symbol('all but apps');
+
+/**
+ * Allowances of an engine adapter row: an OS crate under native/ that implements
+ * `mixrelay-engine` ports. It may use the domain crate and the foundation, model and contract
+ * types its ports carry, plus the same-OS adapters it names. Other adapters may not use the
+ * domain crate. No engine adapter exists yet; their rows use this when they are added.
+ */
+export function engineAdapter(...sameOsAdapters) {
+  return [...FOUNDATION, ...MODELS, ...CONTRACTS, ...DOMAIN, ...sameOsAdapters];
+}
 
 /**
  * The table in docs/architecture.md, one row per crate: its layer and the exact workspace
@@ -36,11 +49,13 @@ export const CRATES = {
   'mixrelay-licensing': { layer: 'foundation', allows: [] },
   'mixrelay-processor-state': { layer: 'foundation', allows: [] },
   'mixrelay-engine-process': { layer: 'foundation', allows: [] },
+  'mixrelay-time': { layer: 'foundation', allows: [] },
   'mixrelay-audio-graph': { layer: 'model', allows: FOUNDATION },
   'mixrelay-audio-recorder': { layer: 'model', allows: FOUNDATION },
   'mixrelay-audio-engine': { layer: 'model', allows: [...FOUNDATION, 'mixrelay-audio-graph', 'mixrelay-audio-recorder'] },
   'mixrelay-control-protocol': { layer: 'contract', allows: [...FOUNDATION, ...MODELS] },
   'mixrelay-driver-control': { layer: 'contract', allows: FOUNDATION },
+  'mixrelay-engine': { layer: 'domain', allows: [...FOUNDATION, ...MODELS, ...CONTRACTS] },
   'mixrelay-control-server': { layer: 'service', allows: [...FOUNDATION, ...MODELS, ...CONTRACTS] },
   // The table's known exception: plugin descriptors and editor frames live in the protocol.
   'mixrelay-processor-host': { layer: 'service', allows: [...FOUNDATION, ...MODELS, 'mixrelay-control-protocol', ...PLUGIN_FORMATS] },
@@ -70,20 +85,30 @@ export const CRATES = {
 /** Layer of each registered crate. */
 export const LAYERS = Object.fromEntries(Object.entries(CRATES).map(([name, row]) => [name, row.layer]));
 
-function allowed(from, to) {
-  const { allows } = CRATES[from];
-  if (allows === ALL_BUT_APPS) return !['app', 'test'].includes(CRATES[to].layer);
+function allowed(from, to, crates) {
+  const { allows } = crates[from];
+  if (allows === ALL_BUT_APPS) return !['app', 'test'].includes(crates[to].layer);
   return allows.includes(to);
 }
 
-/** Why `from -> to` is forbidden, or undefined when the table allows it. */
-export function violation(from, to, kind) {
-  if (CRATES[from] === undefined) return `${from} has no row in scripts/check-crate-layers.mjs (docs/architecture.md table)`;
-  if (CRATES[to] === undefined) return `${to} has no row in scripts/check-crate-layers.mjs (docs/architecture.md table)`;
-  if (CRATES[to].layer === 'test') return kind === 'dev' ? undefined : 'test support is a dev-dependency only';
-  if (CRATES[to].layer === 'app') return 'nothing depends on an app';
-  if (allowed(from, to)) return undefined;
+/**
+ * Why `from -> to` is forbidden, or undefined when the table allows it. Tests pass `crates`
+ * to check rows that are not in the workspace yet.
+ */
+export function violation(from, to, kind, crates = CRATES) {
+  if (crates[from] === undefined) return `${from} has no row in scripts/check-crate-layers.mjs (docs/architecture.md table)`;
+  if (crates[to] === undefined) return `${to} has no row in scripts/check-crate-layers.mjs (docs/architecture.md table)`;
+  if (crates[to].layer === 'test') return kind === 'dev' ? undefined : 'test support is a dev-dependency only';
+  if (crates[to].layer === 'app') return 'nothing depends on an app';
+  if (allowed(from, to, crates)) return undefined;
   return `not in ${from}'s allowed dependencies in docs/architecture.md`;
+}
+
+/** Why a `kind` dependency on a workspace crate may not enable `features`, or undefined. */
+export function featureViolation(kind, features) {
+  const test = features.filter((feature) => feature.startsWith('test-'));
+  if (kind === 'dev' || test.length === 0) return undefined;
+  return `test feature ${test.join(', ')} is for dev-dependencies only`;
 }
 
 /** Forbidden dependencies and unregistered or stale crates in `cargo metadata` output. */
@@ -99,6 +124,8 @@ export function violations(metadata) {
       const kind = dependency.kind === 'dev' ? 'dev' : dependency.kind === 'build' ? 'build' : 'normal';
       const reason = violation(item.name, dependency.name, kind);
       if (reason) found.push(`${item.name} -> ${dependency.name} (${kind}): ${reason}`);
+      const featureReason = featureViolation(kind, dependency.features ?? []);
+      if (featureReason) found.push(`${item.name} -> ${dependency.name} (${kind}): ${featureReason}`);
     }
   }
   for (const name of Object.keys(CRATES)) {
