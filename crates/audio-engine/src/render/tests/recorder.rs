@@ -4,8 +4,8 @@ use parking_lot::Mutex;
 
 use super::*;
 
-/// What one fake sink received. Capacity is reserved up front so capture
-/// stays allocation-free inside measured callbacks.
+/// What one fake sink received. Capacity is reserved up front so capture stays
+/// allocation-free inside measured callbacks; locking is fine in this single-threaded fake.
 #[derive(Debug)]
 struct SinkLog {
     samples: Mutex<Vec<f32>>,
@@ -31,7 +31,7 @@ struct PreparedSink {
 #[derive(Default)]
 struct FakeSinks {
     prepared: Mutex<Vec<PreparedSink>>,
-    refusal: Option<String>,
+    refusal: Option<RecordingSinkError>,
 }
 
 impl FakeSinks {
@@ -42,8 +42,12 @@ impl FakeSinks {
     }
 }
 
-impl RecordingSinkFactory for FakeSinks {
-    fn prepare(&self, session: &str, channels: u16) -> Result<Box<dyn RecordingSink>, String> {
+impl RecordingSinks for FakeSinks {
+    fn prepare(
+        &self,
+        session: &str,
+        channels: u16,
+    ) -> Result<Box<dyn RecordingSink>, RecordingSinkError> {
         if let Some(refusal) = &self.refusal {
             return Err(refusal.clone());
         }
@@ -111,13 +115,13 @@ fn each_recorder_node_gets_a_sink_keyed_by_node_and_channel_count() {
 #[test]
 fn a_refused_sink_fails_preparation_with_its_diagnostic() {
     let sinks = FakeSinks {
-        refusal: Some("channels are locked".into()),
+        refusal: Some(RecordingSinkError("session limit reached".into())),
         ..FakeSinks::default()
     };
     let mut processor = BlockProcessor::new(recorder_plan()).unwrap();
     assert_eq!(
         processor.attach_recorders(&sinks).unwrap_err(),
-        "channels are locked"
+        RecordingSinkError("session limit reached".into())
     );
 }
 

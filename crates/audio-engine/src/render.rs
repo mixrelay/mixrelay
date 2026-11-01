@@ -27,7 +27,7 @@ mod kernels;
 mod ownership;
 mod prepare;
 mod recording;
-pub use recording::{RecordingSink, RecordingSinkFactory};
+pub use recording::{RecordingSink, RecordingSinkError, RecordingSinks, recording_session_key};
 mod route_delay;
 mod routing;
 mod schedule;
@@ -38,13 +38,6 @@ pub use compensation::{CompensationState, HostedLatencySource};
 use kernels::{KernelResources, apply_kernel};
 use routing::{RouteOp, apply_routes};
 use schedule::RenderSchedule;
-
-/// Stable transport identity for a recorder's channel geometry. An inactive
-/// replacement can coexist with the previous plan until publication or rollback.
-#[must_use]
-pub fn recording_session_key(node: &NodeId, channels: u16) -> String {
-    format!("{}#recorder-channels={channels}", node.as_str())
-}
 
 type HostedProcessors = Box<[Box<dyn HostedAudioProcessor>]>;
 type PreparedRenderPlan = (RenderPlan, HostedProcessors);

@@ -1,11 +1,10 @@
 //! Connects the engine's recording ports to the file recorder sessions.
-use mixrelay_audio_engine::{RecordingSink, RecordingSinkFactory};
+use mixrelay_audio_engine::{RecordingSink, RecordingSinkError, RecordingSinks};
 use mixrelay_audio_recorder::{RecorderRegistry, RecorderTap};
 
-/// The recorder registry as the engine's recording sink factory.
+/// The recorder registry as the engine's recording sinks.
 pub(super) struct FileRecordingSinks<'a>(pub(super) &'a RecorderRegistry);
 
-#[derive(Debug)]
 struct TapSink(RecorderTap);
 
 impl RecordingSink for TapSink {
@@ -14,10 +13,16 @@ impl RecordingSink for TapSink {
     }
 }
 
-impl RecordingSinkFactory for FileRecordingSinks<'_> {
-    fn prepare(&self, session: &str, channels: u16) -> Result<Box<dyn RecordingSink>, String> {
-        let tap = self.0.prepare(session, channels)?;
-        Ok(Box::new(TapSink(tap)))
+impl RecordingSinks for FileRecordingSinks<'_> {
+    fn prepare(
+        &self,
+        session: &str,
+        channels: u16,
+    ) -> Result<Box<dyn RecordingSink>, RecordingSinkError> {
+        match self.0.prepare(session, channels) {
+            Ok(tap) => Ok(Box::new(TapSink(tap))),
+            Err(reason) => Err(RecordingSinkError(reason)),
+        }
     }
 }
 
@@ -81,12 +86,10 @@ mod tests {
     }
 
     #[test]
-    fn refused_sessions_keep_the_recorder_diagnostic() {
+    fn a_refused_session_is_a_sink_error() {
         let registry = RecorderRegistry::default();
-        assert_eq!(
-            FileRecordingSinks(&registry).prepare("", 2).unwrap_err(),
-            "invalid recorder identity or channel count"
-        );
+        let error = FileRecordingSinks(&registry).prepare("", 2).err();
+        assert!(error.is_some_and(|RecordingSinkError(reason)| !reason.is_empty()));
     }
 
     #[test]
@@ -141,7 +144,11 @@ mod tests {
         registry
             .command(&key(2), request(RecorderAction::Record, Some(&path)))
             .unwrap();
-        current.process_block(2, &[], &mut []).unwrap();
+        // The adapter adds nothing to the audio thread: recording stays allocation-free.
+        let measured = allocation_counter::measure(|| {
+            current.process_block(2, &[], &mut []).unwrap();
+        });
+        assert_eq!(measured.count_total, 0);
         let mut replacement = recorder(&registry, 2);
         drop(current);
         registry.reap_unused().unwrap();
@@ -158,5 +165,6 @@ mod tests {
         registry.reap_unused().unwrap();
         let reader = mixrelay_test_support::rf64::open(path).unwrap();
         assert_eq!(reader.duration(), 4);
+        assert_eq!(reader.spec().sample_rate, 48_000);
     }
 }

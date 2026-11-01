@@ -5,8 +5,8 @@ use mixrelay_audio_graph::{ExecutionPlan, NodeConfig};
 
 use super::{
     BlockProcessor, CompensationState, DelayBank, ExternalBinding, ExternalBuffers,
-    HostedProcessorFactory, HostedProcessors, HostedRack, RecordingSinkFactory, RenderFormat,
-    RenderPlan, RenderPlanError, buffers, effects, history, input_timeline, prepare,
+    HostedProcessorFactory, HostedProcessors, HostedRack, RecordingSinkError, RecordingSinks,
+    RenderFormat, RenderPlan, RenderPlanError, buffers, effects, history, input_timeline, prepare,
     recording_session_key, sample_count,
 };
 
@@ -259,10 +259,13 @@ impl BlockProcessor {
     }
 
     /// Attaches app-owned recording sinks while preparing an inactive processor.
-    /// Starting and stopping takes stays with the app's control plane.
+    /// The app's control plane decides when a sink records.
     /// # Errors
-    /// Returns an error if a surviving recorder's channel contract cannot be retained.
-    pub fn attach_recorders(&mut self, sinks: &dyn RecordingSinkFactory) -> Result<(), String> {
+    /// Returns the first sink that could not be prepared; no sink is attached then.
+    pub fn attach_recorders(
+        &mut self,
+        sinks: &dyn RecordingSinks,
+    ) -> Result<(), RecordingSinkError> {
         self.recorders = self
             .plan
             .recorder_bindings
