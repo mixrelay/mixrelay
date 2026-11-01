@@ -28,12 +28,12 @@ pub const MAX_BUNDLE_PAYLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 ///
 /// # Errors
 /// Returns [`StateError`] for invalid manifest or reference bounds, duplicate or unsorted
-/// references, missing/corrupt store blobs, or reader/writer failures.
+/// references, missing/corrupt source payloads, or reader/writer failures.
 pub fn write_bundle(
     mut writer: impl Write,
     manifest: &[u8],
     references: &[StateRef],
-    source: &impl StateBlobSource,
+    source: &(impl StateBlobSource + ?Sized),
 ) -> Result<(), StateError> {
     let total_payload = validate_manifest_and_references(manifest, references)?;
     if total_payload > MAX_BUNDLE_PAYLOAD_BYTES {
@@ -75,9 +75,9 @@ pub fn write_bundle(
 /// references, truncated/corrupt payloads, trailing bytes, or reader/sink failures.
 pub fn read_bundle(
     reader: impl Read,
-    sink: &impl StateBlobSink,
+    sink: &(impl StateBlobSink + ?Sized),
 ) -> Result<(Vec<u8>, Vec<StateRef>), StateError> {
-    read_frames(reader, &mut |payload, reference| {
+    read_frames(reader, |payload, reference| {
         sink.store_verified(payload, reference)
     })
 }
@@ -87,16 +87,14 @@ pub fn read_bundle(
 /// # Errors
 /// Returns the same errors as [`read_bundle`], apart from sink failures.
 pub fn preview_bundle(reader: impl Read) -> Result<(Vec<u8>, Vec<StateRef>), StateError> {
-    read_frames(reader, &mut |payload, reference| {
+    read_frames(reader, |payload, reference| {
         verify_payload_stream(payload, reference)
     })
 }
 
-type PayloadHandler<'a> = dyn FnMut(&mut dyn Read, &StateRef) -> Result<(), StateError> + 'a;
-
 fn read_frames(
     mut reader: impl Read,
-    payload: &mut PayloadHandler<'_>,
+    mut payload: impl FnMut(&mut dyn Read, &StateRef) -> Result<(), StateError>,
 ) -> Result<(Vec<u8>, Vec<StateRef>), StateError> {
     let mut magic = [0_u8; 8];
     read_framing(&mut reader, &mut magic)?;
@@ -151,7 +149,15 @@ fn read_frames(
                 reason: "combined payload exceeds the maximum bundle size",
             })?;
 
-        payload(&mut reader, &reference)?;
+        // The handler sees only this payload, and must read all of it, so the next frame
+        // header starts where the framing expects it.
+        let mut bounded = (&mut reader).take(byte_length);
+        payload(&mut bounded, &reference)?;
+        if bounded.limit() != 0 {
+            return Err(StateError::InvalidBundle {
+                reason: "a payload was not read to its declared length",
+            });
+        }
         references.push(reference);
     }
     let mut trailing = [0_u8; 1];

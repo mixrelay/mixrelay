@@ -123,9 +123,11 @@ fn the_filesystem_store_writes_a_path_free_bundle_and_interns_it_elsewhere() {
 
     let mut archive = Vec::new();
     write_bundle(&mut archive, b"manifest", &entries, &source).unwrap();
-    let (_, references) = read_bundle(Cursor::new(&archive), &target).unwrap();
+    let (manifest, references) = read_bundle(Cursor::new(&archive), &target).unwrap();
 
-    for reference in &references {
+    assert_eq!(manifest, b"manifest");
+    assert_eq!(references, entries);
+    for reference in &entries {
         target.verify(reference).unwrap();
     }
     let path_bytes = source.root().as_os_str().as_encoded_bytes();
@@ -267,4 +269,31 @@ fn a_bad_later_frame_keeps_only_the_payloads_verified_before_it() {
     assert!(read_bundle(Cursor::new(archive), &target).is_err());
     assert!(target.contains(&frames[0].0));
     assert!(!target.contains(&frames[1].0));
+}
+
+/// Claims success without reading, as a careless deduplicating sink might.
+struct SkippingSink;
+
+impl StateBlobSink for SkippingSink {
+    fn store_verified(&self, _: &mut dyn Read, _: &StateRef) -> Result<(), StateError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_sink_must_read_each_payload_to_its_length() {
+    let source = MemoryBlobs::default();
+    let reference = source.put(b"payload");
+    let mut archive = Vec::new();
+    write_bundle(
+        &mut archive,
+        b"m",
+        std::slice::from_ref(&reference),
+        &source,
+    )
+    .unwrap();
+    assert!(matches!(
+        read_bundle(Cursor::new(archive), &SkippingSink),
+        Err(StateError::InvalidBundle { .. })
+    ));
 }

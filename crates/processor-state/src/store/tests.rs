@@ -261,6 +261,19 @@ fn failed_stream_write_removes_its_private_staging_file() {
 }
 
 #[test]
+fn a_full_length_payload_with_the_wrong_digest_is_not_published() {
+    let (_temporary, store) = test_store();
+    let reference = StateRef::new("0".repeat(64), 1).unwrap();
+    let mut payload = &b"x"[..];
+    assert!(matches!(
+        crate::StateBlobSink::store_verified(&store, &mut payload, &reference),
+        Err(StateError::Integrity)
+    ));
+    assert!(store.verify(&reference).is_err());
+    assert_eq!(fs::read_dir(store.root()).unwrap().count(), 0);
+}
+
+#[test]
 fn temporary_files_are_created_with_exclusive_private_permissions() {
     let (_temporary, store) = test_store();
     let directory = store.open_directory(true).unwrap();

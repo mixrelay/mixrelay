@@ -106,7 +106,7 @@ impl StateStore {
         bytes
             .try_reserve_exact(capacity)
             .map_err(|_| StateError::Allocation)?;
-        self.copy_verified(reference, &mut bytes)?;
+        self.copy_payload(reference, &mut bytes)?;
         Ok(bytes)
     }
 
@@ -186,7 +186,8 @@ impl StateStore {
 
 impl StateBlobSource for StateStore {
     fn verify(&self, reference: &StateRef) -> Result<(), StateError> {
-        Self::verify(self, reference)
+        // The inherent method of the same name, not this one.
+        StateStore::verify(self, reference)
     }
 
     fn copy_verified(
