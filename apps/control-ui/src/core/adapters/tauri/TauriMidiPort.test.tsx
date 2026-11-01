@@ -8,6 +8,7 @@ import {
   sameControl,
   sameTarget,
 } from '../../domain/midi';
+import { InvalidResponseError } from '../decode';
 import { midiStatus, TauriMidiPort } from './TauriMidiPort';
 
 const control = {
@@ -125,7 +126,10 @@ it('rejects malformed native data instead of presenting invented actionable stat
     { ...raw, bindings: [{ ...binding, stepDb: 4 }] },
     { ...raw, snapshot: { graphs: [{ id: null, nodes: [] }] } },
   ];
-  for (const value of invalid) expect(() => midiStatus(value)).toThrow();
+  for (const value of invalid) expect(() => midiStatus(value)).toThrow(InvalidResponseError);
+  expect(() =>
+    midiStatus({ ...raw, bindings: [{ ...binding, control: { ...control, number: 128 } }] }),
+  ).toThrow('invalid response at midi.bindings[0].control.number');
   expect(() => midiAction('delete')).toThrow('Invalid MIDI action');
   expect(() => midiMode('guess')).toThrow('Invalid MIDI mode');
 });

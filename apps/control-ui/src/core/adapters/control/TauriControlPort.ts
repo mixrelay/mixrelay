@@ -1,5 +1,4 @@
-import { Channel, invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { Channel } from '@tauri-apps/api/core';
 import {
   TelemetryHub,
   type TelemetryStreamListener,
@@ -53,6 +52,12 @@ import {
   unknownValue,
 } from '../decode';
 import {
+  type NativeInvoke,
+  type NativeListen,
+  tauriInvoke,
+  tauriListen,
+} from '../tauri/nativeInvoke';
+import {
   audioDevices,
   capturableApplications,
   deviceAppActivity,
@@ -75,8 +80,6 @@ import {
 import { decodeReply, refusal } from './responses';
 import { TelemetryDecoder } from './telemetryCodec';
 
-/** Native replies are untyped until decoded. */
-type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 /** The native side keeps its end; the webview only receives windows (decoded or packed) and
  * an end marker. */
 type MessageChannel = { onmessage: (message: unknown) => void };
@@ -126,7 +129,7 @@ export class TauriControlPort implements ControlPort {
   public onWorkspaceFile(
     listener: (action: 'new' | 'open' | 'save' | 'save_as') => void,
   ): Promise<() => void> {
-    return listen<string>('workspace-file', ({ payload }) => {
+    return this.listen('workspace-file', (payload) => {
       if (payload === 'new' || payload === 'open' || payload === 'save' || payload === 'save_as')
         listener(payload);
     });
@@ -217,9 +220,10 @@ export class TauriControlPort implements ControlPort {
     return this.call(graphApplyResponse, 'control_reconfigure_session', { request });
   }
   public constructor(
-    private readonly invokeCommand: Invoke = invoke,
+    private readonly invokeCommand: NativeInvoke = tauriInvoke,
     private readonly createChannel: () => MessageChannel = () => new Channel<unknown>(),
     scheduler: Scheduler = timerScheduler,
+    private readonly listen: NativeListen = tauriListen,
   ) {
     this.telemetry = new TelemetryHub((listener) => this.openTelemetry(listener), scheduler);
   }

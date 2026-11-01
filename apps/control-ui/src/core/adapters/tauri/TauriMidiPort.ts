@@ -4,103 +4,113 @@ import {
   type MidiControl,
   type MidiDevice,
   type MidiStatus,
-  midiAction,
-  midiMode,
+  midiActions,
+  midiModes,
 } from '../../domain/midi';
 import type { MidiCommand, MidiPort } from '../../ports/MidiPort';
+import {
+  array,
+  boolean,
+  type Decoder,
+  InvalidResponseError,
+  literal,
+  nonNegativeInteger,
+  nullable,
+  number,
+  object,
+  string,
+  tagged,
+} from '../decode';
 import { type NativeInvoke, type NativeListen, tauriInvoke, tauriListen } from './nativeInvoke';
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-function object(value: unknown): Record<string, unknown> {
-  if (!isObject(value)) throw new Error('Invalid MIDI response');
-  return value;
-}
-function string(value: unknown): string {
-  if (typeof value !== 'string') throw new Error('Invalid MIDI text');
-  return value;
-}
-function array(value: unknown): unknown[] {
-  if (!Array.isArray(value)) throw new Error('Invalid MIDI list');
-  return value;
-}
-function integer(value: unknown, max: number): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > max)
-    throw new Error('Invalid MIDI number');
-  return value;
-}
-function device(value: unknown): MidiDevice {
-  const entry = object(value);
-  return { id: string(entry.id), name: string(entry.name) };
-}
-function control(value: unknown): MidiControl {
-  const entry = object(value);
-  if (entry.kind !== 'note' && entry.kind !== 'cc') throw new Error('Invalid MIDI kind');
-  return {
-    device: device(entry.device),
-    channel: integer(entry.channel, 15),
-    kind: entry.kind,
-    number: integer(entry.number, 127),
+function atMost(max: number): Decoder<number> {
+  return (value, path) => {
+    const decoded = nonNegativeInteger(value, path);
+    if (decoded > max) throw new InvalidResponseError(path, `an integer up to ${max}`);
+    return decoded;
   };
 }
-function target(value: unknown) {
-  const entry = object(value);
-  return { graphId: string(entry.graphId), nodeId: string(entry.nodeId) };
+
+/** The gain range the desktop clamps MIDI bindings to. */
+const gain: Decoder<number> = (value, path) => {
+  const db = number(value, path);
+  if (db < -60 || db > 12) throw new InvalidResponseError(path, 'a gain from -60 to 12 dB');
+  return db;
+};
+
+const device = object<MidiDevice>({ id: string, name: string });
+
+const control = object<MidiControl>({
+  device,
+  channel: atMost(15),
+  kind: literal('note', 'cc'),
+  number: atMost(127),
+});
+
+const binding = object<MidiBinding>({
+  control,
+  target: object({ graphId: string, nodeId: string }),
+  action: literal(...midiActions),
+  mode: literal(...midiModes),
+  stepDb: literal(0.5, 1, 2, 3),
+  graphName: string,
+  nodeName: string,
+  minDb: gain,
+  maxDb: gain,
+});
+
+const learn = tagged<MidiStatus['learn']>('state', {
+  idle: object({ state: literal('idle') }),
+  waiting: object({ state: literal('waiting') }),
+  captured: object({ state: literal('captured'), control }),
+});
+
+interface NativeMidiStatus {
+  mapMode: boolean;
+  bindings: MidiBinding[];
+  devices: MidiDevice[];
+  unavailable: string | null;
+  learn: MidiStatus['learn'];
+  /** The open graphs whose nodes can be mapped; null while no graph is available. */
+  snapshot: {
+    graphs: { id: string; name: string; nodes: { nodeId: string; label: string | null }[] }[];
+  } | null;
 }
-function gain(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < -60 || value > 12)
-    throw new Error('Invalid MIDI range');
-  return value;
-}
-function binding(value: unknown): MidiBinding {
-  const entry = object(value);
-  if (typeof entry.stepDb !== 'number' || ![0.5, 1, 2, 3].includes(entry.stepDb))
-    throw new Error('Invalid MIDI step');
-  return {
-    control: control(entry.control),
-    target: target(entry.target),
-    action: midiAction(entry.action),
-    mode: midiMode(entry.mode),
-    stepDb: entry.stepDb,
-    graphName: string(entry.graphName),
-    nodeName: string(entry.nodeName),
-    minDb: gain(entry.minDb),
-    maxDb: gain(entry.maxDb),
-  };
-}
-function learn(value: unknown): MidiStatus['learn'] {
-  const entry = object(value);
-  if (entry.state === 'captured') return { state: 'captured', control: control(entry.control) };
-  if (entry.state === 'idle' || entry.state === 'waiting') return { state: entry.state };
-  throw new Error('Invalid MIDI learn state');
-}
+
+const nativeMidiStatus = object<NativeMidiStatus>({
+  mapMode: boolean,
+  bindings: array(binding),
+  devices: array(device),
+  unavailable: nullable(string),
+  learn,
+  snapshot: nullable(
+    object({
+      graphs: array(
+        object({
+          id: string,
+          name: string,
+          nodes: array(object({ nodeId: string, label: nullable(string) })),
+        }),
+      ),
+    }),
+  ),
+});
+
 export function midiStatus(value: unknown): MidiStatus {
-  const entry = object(value);
-  const targets: MidiStatus['targets'] = [];
-  if (entry.snapshot !== null)
-    for (const value of array(object(entry.snapshot).graphs)) {
-      const graph = object(value);
-      const graphId = string(graph.id);
-      const graphName = string(graph.name);
-      for (const value of array(graph.nodes)) {
-        const node = object(value);
-        const nodeId = string(node.nodeId);
-        targets.push({
-          target: { graphId, nodeId },
-          label: `${graphName} / ${node.label === null ? '' : string(node.label)}`,
-        });
-      }
-    }
-  if (typeof entry.mapMode !== 'boolean') throw new Error('Invalid MIDI map mode');
+  const { snapshot, ...status } = nativeMidiStatus(value, 'midi');
   return {
-    mapMode: entry.mapMode,
-    targetsAvailable: entry.snapshot !== null,
-    bindings: array(entry.bindings).map(binding),
-    devices: array(entry.devices).map(device),
-    unavailable: entry.unavailable === null ? null : string(entry.unavailable),
-    learn: learn(entry.learn),
-    targets,
+    mapMode: status.mapMode,
+    targetsAvailable: snapshot !== null,
+    bindings: status.bindings,
+    devices: status.devices,
+    unavailable: status.unavailable,
+    learn: status.learn,
+    targets: (snapshot?.graphs ?? []).flatMap((graph) =>
+      graph.nodes.map((node) => ({
+        target: { graphId: graph.id, nodeId: node.nodeId },
+        label: `${graph.name} / ${node.label ?? ''}`,
+      })),
+    ),
   };
 }
 export class TauriMidiPort implements MidiPort {

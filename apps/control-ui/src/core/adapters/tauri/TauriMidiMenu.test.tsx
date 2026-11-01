@@ -16,11 +16,11 @@ it('binds the native Cmd/Ctrl+M menu event and releases it without late callback
   const close = port.subscribeMapToggle(listener);
   await act(async () => {});
   expect(native.listen).toHaveBeenCalledWith('midi-map-toggle', expect.any(Function));
-  native.listen.mock.calls[0]?.[1]();
+  native.listen.mock.calls[0]?.[1]({ payload: null });
   expect(listener).toHaveBeenCalledOnce();
   close();
   expect(stop).toHaveBeenCalledOnce();
-  native.listen.mock.calls[0]?.[1]();
+  native.listen.mock.calls[0]?.[1]({ payload: null });
   expect(listener).toHaveBeenCalledOnce();
 });
 it('cleans up registration that completes after its editor owner closes', async () => {
