@@ -1,3 +1,4 @@
+import { timerScheduler } from '../../core/adapters/browser/timers';
 import { waitForPushedRevision } from '../../core/application/graph/waitForPushedRevision';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
 
@@ -57,7 +58,14 @@ export class GraphReadback {
 
   async waitForRevision(revision: number, signal: AbortSignal) {
     if (this.port.subscribeState)
-      return waitForPushedRevision(this.port, revision, signal, this.timeoutMs, this.failure);
+      return waitForPushedRevision(
+        this.port,
+        revision,
+        signal,
+        this.timeoutMs,
+        timerScheduler,
+        this.failure,
+      );
     const deadline = Date.now() + this.timeoutMs;
     while (true) {
       signal.throwIfAborted();

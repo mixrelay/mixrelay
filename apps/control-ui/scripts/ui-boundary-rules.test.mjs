@@ -442,9 +442,21 @@ test('only composition roots, tests and stories choose adapters', () => {
     [],
   );
   assert.deepEqual(layer('main.tsx', "import { X } from './core/adapters/browser/storage';"), []);
-  // Core view modules may use browser adapters for presentation defaults such as timers.
+  // Core view modules may use adapters for presentation defaults such as timers.
   assert.deepEqual(
     layer('core/history/useUndoHistory.ts', "import { t } from '../adapters/browser/timers';"),
     [],
+  );
+  // Browser timers are the one ambient implementation features may default to.
+  assert.deepEqual(
+    layer(
+      'features/a/Queue.ts',
+      "import { timerScheduler } from '../../core/adapters/browser/timers';",
+    ),
+    [],
+  );
+  assert.equal(
+    layer('features/a/Queue.ts', "import { s } from '../../core/adapters/browser/storage';").length,
+    1,
   );
 });

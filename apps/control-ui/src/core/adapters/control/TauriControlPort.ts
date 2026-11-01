@@ -1,5 +1,9 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import {
+  TelemetryHub,
+  type TelemetryStreamListener,
+} from '../../application/telemetry/TelemetryHub';
 import type {
   GraphCatalog,
   GraphCatalogRequest,
@@ -38,7 +42,9 @@ import type {
 import type { MixRelayStatus, VirtualEndpointFormatRequest } from '../../domain/control/status';
 import type { ControlPort } from '../../ports/control/ControlPort';
 import type { MeterTelemetryListener, StateListener } from '../../ports/control/TelemetryPort';
-import { TelemetryDecoder, TelemetryHub } from './telemetry';
+import type { Scheduler } from '../../ports/Scheduler';
+import { timerScheduler } from '../browser/timers';
+import { TelemetryDecoder } from './telemetryCodec';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type MeterMessage = MeterTelemetry | ArrayBuffer | { ended: true };
@@ -57,7 +63,7 @@ interface ControlProxyResponse {
 }
 
 export class TauriControlPort implements ControlPort {
-  private telemetry = new TelemetryHub((listener) => this.openTelemetry(listener));
+  private readonly telemetry: TelemetryHub;
   public subscribeState(listener: StateListener) {
     return this.telemetry.subscribeState(listener);
   }
@@ -183,7 +189,10 @@ export class TauriControlPort implements ControlPort {
   public constructor(
     private readonly invokeCommand: Invoke = invoke,
     private readonly createChannel: () => MessageChannel = () => new Channel<MeterMessage>(),
-  ) {}
+    scheduler: Scheduler = timerScheduler,
+  ) {
+    this.telemetry = new TelemetryHub((listener) => this.openTelemetry(listener), scheduler);
+  }
 
   public applyGraph(document: GraphApplyRequest): Promise<GraphApplyResponse> {
     return this.call('control_apply_graph', { document });
@@ -216,7 +225,7 @@ export class TauriControlPort implements ControlPort {
 
   /** Each consumed window returns one credit, so a stalled webview receives nothing more
    * instead of accumulating messages natively. Windows can arrive before the id does. */
-  private async openTelemetry(listener: MeterTelemetryListener): Promise<() => void> {
+  private async openTelemetry(listener: TelemetryStreamListener): Promise<() => void> {
     const channel = this.createChannel();
     let id: number | undefined;
     let owed = 0;

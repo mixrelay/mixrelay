@@ -273,6 +273,9 @@ const viewPackages =
 // Only composition roots choose port implementations; tests, stories and test support
 // may build fakes.
 const compositionRoots = /^(?:app\/|screens\/|test-support\/|main\.tsx$)/u;
+// Browser timers have one implementation and no configuration. Inner layers receive a
+// Scheduler or Clock; view and feature code pass these as the default.
+const ambientAdapters = new Set(['core/adapters/browser/timers']);
 
 function coreLayer(filename) {
   const match = /^core\/(domain|ports|application|adapters)\//u.exec(filename);
@@ -345,7 +348,9 @@ function checkLayers(filename, ast, violations) {
     const target = resolveSource(filename, source);
     const message = layer
       ? layerViolation(layer, target)
-      : target.module?.startsWith('core/adapters/') && !compositionRoots.test(filename)
+      : target.module?.startsWith('core/adapters/') &&
+          !ambientAdapters.has(target.module) &&
+          !compositionRoots.test(filename)
         ? 'Port implementations are chosen by the app and screen composition roots.'
         : undefined;
     if (message) issue(violations, node, 'layer', message);

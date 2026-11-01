@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { packedTelemetry } from '../../../test-support/controlTelemetry';
+import { timerScheduler } from '../browser/timers';
 import { openHttpTelemetry } from './httpTelemetry';
 
 beforeEach(() => vi.useFakeTimers());
@@ -18,7 +19,7 @@ function stream(engine: string | null = 'a') {
   if (engine) headers.set('X-MixRelay-Engine', engine);
   const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(body, { headers }));
   const listener = { window: vi.fn(), ended: vi.fn() };
-  const open = () => openHttpTelemetry('/engine', request, listener);
+  const open = () => openHttpTelemetry('/engine', request, listener, timerScheduler);
   const send = (data: unknown) =>
     feed.enqueue(new TextEncoder().encode(`event: telemetry\ndata: ${JSON.stringify(data)}\n\n`));
   return { feed, cancel, request, listener, open, send };
@@ -80,7 +81,7 @@ it.each([new Response(null, { status: 503 }), new Response(null)])(
   async (response) => {
     const request = vi.fn<typeof fetch>().mockResolvedValue(response);
     await expect(
-      openHttpTelemetry('', request, { window: vi.fn(), ended: vi.fn() }),
+      openHttpTelemetry('', request, { window: vi.fn(), ended: vi.fn() }, timerScheduler),
     ).rejects.toThrow('telemetry unavailable');
   },
 );
@@ -93,7 +94,7 @@ it('aborts a stalled open at its deadline and retires a read resolved during can
       }),
   );
   const rejected = expect(
-    openHttpTelemetry('', request, { window: vi.fn(), ended: vi.fn() }),
+    openHttpTelemetry('', request, { window: vi.fn(), ended: vi.fn() }, timerScheduler),
   ).rejects.toThrow('aborted');
   await vi.advanceTimersByTimeAsync(5000);
   await rejected;

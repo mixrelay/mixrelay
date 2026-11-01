@@ -1,3 +1,4 @@
+import { TelemetryHub } from '../../application/telemetry/TelemetryHub';
 import type {
   GraphCatalog,
   GraphCatalogRequest,
@@ -31,8 +32,9 @@ import type {
 import type { MixRelayStatus, VirtualEndpointFormatRequest } from '../../domain/control/status';
 import type { ControlPort } from '../../ports/control/ControlPort';
 import type { MeterTelemetryListener, StateListener } from '../../ports/control/TelemetryPort';
+import type { Scheduler } from '../../ports/Scheduler';
+import { timerScheduler } from '../browser/timers';
 import { openHttpTelemetry } from './httpTelemetry';
-import { TelemetryHub } from './telemetry';
 
 // The engine listens only on a user-owned Unix socket. In the browser development surface,
 // `vite dev` forwards this same-origin path to it; Tauri uses native IPC instead.
@@ -48,9 +50,7 @@ const READ_TIMEOUT_MS = 5000;
 const MAX_OPERATION_ID_LENGTH = 128;
 
 export class HttpControlPort implements ControlPort {
-  private telemetry = new TelemetryHub((listener) =>
-    openHttpTelemetry(this.origin, this.request, listener),
-  );
+  private readonly telemetry: TelemetryHub;
   public subscribeState(listener: StateListener) {
     return this.telemetry.subscribeState(listener);
   }
@@ -159,7 +159,13 @@ export class HttpControlPort implements ControlPort {
   public constructor(
     private readonly origin = LOCAL_CONTROL_ORIGIN,
     private readonly request: typeof fetch = fetch,
-  ) {}
+    scheduler: Scheduler = timerScheduler,
+  ) {
+    this.telemetry = new TelemetryHub(
+      (listener) => openHttpTelemetry(this.origin, this.request, listener, scheduler),
+      scheduler,
+    );
+  }
 
   public applyGraph(document: GraphApplyRequest): Promise<GraphApplyResponse> {
     return this.json('/api/v1/graph', {
