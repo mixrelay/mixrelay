@@ -1,5 +1,6 @@
 //! Prepared reaper ownership when no process has been spawned.
 use super::*;
+use mixrelay_time::{Instant, ManualClock};
 
 #[test]
 fn unused_worker_exits_when_its_handoff_closes() {
@@ -36,8 +37,10 @@ impl StartupChild for FakeChild {
     }
 }
 
-fn clock() -> mixrelay_time::ManualClock {
-    mixrelay_time::ManualClock::new(mixrelay_time::Instant::from_origin(Duration::ZERO))
+const START: Instant = Instant::from_origin(Duration::ZERO);
+
+fn clock() -> ManualClock {
+    ManualClock::new(START)
 }
 
 #[test]
@@ -47,26 +50,50 @@ fn a_child_that_leaves_within_the_grace_is_not_killed() {
         exits_after: Some(3),
         ..FakeChild::default()
     };
-    drain_or_kill(&mut child, &clock).unwrap();
+    assert_eq!(drain_or_kill(&mut child, &clock).unwrap(), Cleanup::Exited);
     assert!(!child.killed);
-    assert_eq!(
-        clock
-            .now()
-            .duration_since(mixrelay_time::Instant::from_origin(Duration::ZERO)),
-        READY_EXIT_POLL * 3
-    );
+    assert_eq!(clock.now().duration_since(START), READY_EXIT_POLL * 3);
 }
 
 #[test]
 fn a_child_still_running_at_the_grace_deadline_is_killed_then() {
     let clock = clock();
     let mut child = FakeChild::default();
-    drain_or_kill(&mut child, &clock).unwrap();
+    assert_eq!(drain_or_kill(&mut child, &clock).unwrap(), Cleanup::Killed);
     assert!(child.killed);
-    assert_eq!(
-        clock.now(),
-        mixrelay_time::Instant::from_origin(STARTUP_FAILURE_GRACE)
-    );
+    assert_eq!(clock.now(), Instant::from_origin(STARTUP_FAILURE_GRACE));
+}
+
+/// Its first probe takes half a poll interval, so later poll steps end half an interval
+/// past each whole interval and the last full step would overshoot the deadline.
+struct SlowFirstProbe {
+    clock: ManualClock,
+    probed: bool,
+}
+
+impl StartupChild for SlowFirstProbe {
+    fn has_exited(&mut self) -> io::Result<bool> {
+        if !self.probed {
+            self.probed = true;
+            self.clock.advance(READY_EXIT_POLL / 2);
+        }
+        Ok(false)
+    }
+
+    fn kill(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn the_last_wait_stops_at_the_grace_deadline() {
+    let clock = clock();
+    let mut child = SlowFirstProbe {
+        clock: clock.clone(),
+        probed: false,
+    };
+    drain_or_kill(&mut child, &clock).unwrap();
+    assert_eq!(clock.now(), Instant::from_origin(STARTUP_FAILURE_GRACE));
 }
 
 #[test]
@@ -80,6 +107,7 @@ fn a_failed_exit_probe_kills_at_once_and_reports_both_failures() {
     let error = drain_or_kill(&mut child, &clock).unwrap_err();
     assert!(child.killed);
     assert_eq!(child.probes, 1);
+    assert_eq!(clock.now(), START);
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     assert_eq!(error.to_string(), "probe; kill owned startup child: kill");
 }

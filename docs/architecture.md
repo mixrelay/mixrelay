@@ -11,7 +11,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 | 기반 | `mixrelay-audio-io`(crates/audio-io) | 장치·스트림·형식·클럭 모델, FIFO·residence·클럭 브리지, 백엔드 trait | 없음 |
 | 기반 | `mixrelay-pcm-ring`(native/pcm-ring) | 단일 생산자·단일 소비자 PCM 링 | 없음 |
 | 기반 | `mixrelay-realtime`(crates/realtime) | 실시간 스레드 정책, 호스트 시각 | 없음 |
-| 기반 | `mixrelay-time`(crates/time) | 단조 시각·deadline 값, 시각 읽기(`MonotonicClock`)·시간 대기(`Sleeper`) port와 표준 라이브러리 구현 `StdClock`. 조립 지점만 `StdClock`을 만든다 | 없음 |
+| 기반 | `mixrelay-time`(crates/time) | 단조 시각·deadline 값, 시각 읽기(`MonotonicClock`)·시간 대기(`Sleeper`) port와 표준 라이브러리 구현 `StdClock`. 판단 코드는 port를 주입받고 제품 경로의 진입점만 `StdClock`을 만든다 | 없음 |
 | 기반 | `mixrelay-local-socket`(crates/local-socket) | 사용자 소유 Unix 소켓, peer 확인 | 없음 |
 | 기반 | `mixrelay-licensing`(crates/licensing) | 라이선스 확인·저장 | 없음 |
 | 기반 | `mixrelay-processor-state`(crates/processor-state) | 플러그인 상태 저장 형식 | 없음 |

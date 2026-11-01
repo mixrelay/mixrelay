@@ -124,7 +124,7 @@ fn wait_for_owned_child(handoff: &Handoff) {
 
 /// The calls startup cleanup makes on the child it owns.
 trait StartupChild {
-    /// Whether the child has exited.
+    /// Whether the child has exited. On a real `Child` a positive probe also reaps it.
     fn has_exited(&mut self) -> io::Result<bool>;
     fn kill(&mut self) -> io::Result<()>;
 }
@@ -140,22 +140,39 @@ impl StartupChild for Child {
 }
 
 pub(super) fn after_startup_failure(mut child: Child, reaper: Reaper) -> io::Result<()> {
-    let result = drain_or_kill(&mut child, &StdClock::new());
-    reaper.schedule(child);
-    result
+    match drain_or_kill(&mut child, &StdClock::new()) {
+        // The probe already reaped it; dropping the reaper closes its unused worker.
+        Ok(Cleanup::Exited) => Ok(()),
+        Ok(Cleanup::Killed) => {
+            reaper.schedule(child);
+            Ok(())
+        }
+        Err(error) => {
+            reaper.schedule(child);
+            Err(error)
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Cleanup {
+    /// The child left within the grace.
+    Exited,
+    /// The child was killed and still has to be reaped.
+    Killed,
 }
 
 /// Gives a child whose startup failed `STARTUP_FAILURE_GRACE` to leave on its own, then
-/// kills it. A failed exit probe ends the grace early. The caller still reaps the child.
+/// kills it. A failed exit probe ends the grace early.
 fn drain_or_kill(
     child: &mut impl StartupChild,
     clock: &(impl MonotonicClock + Sleeper),
-) -> io::Result<()> {
+) -> io::Result<Cleanup> {
     let deadline = Deadline::after(clock.now(), STARTUP_FAILURE_GRACE);
     let mut cleanup_error = None;
     loop {
         match child.has_exited() {
-            Ok(true) => return Ok(()),
+            Ok(true) => return Ok(Cleanup::Exited),
             Ok(false) => {}
             Err(error) => {
                 cleanup_error = Some(error);
@@ -171,7 +188,7 @@ fn drain_or_kill(
     if let Err(error) = child.kill() {
         combine_error(&mut cleanup_error, &error, "kill owned startup child");
     }
-    cleanup_error.map_or(Ok(()), Err)
+    cleanup_error.map_or(Ok(Cleanup::Killed), Err)
 }
 
 fn combine_error(slot: &mut Option<io::Error>, error: &io::Error, operation: &str) {

@@ -13,10 +13,7 @@ pub(super) fn wait(reader: impl Read + Send + 'static) -> io::Result<()> {
     wait_with_timeout(reader, HANDSHAKE_TIMEOUT)
 }
 
-pub(super) fn wait_with_timeout(
-    mut reader: impl Read + Send + 'static,
-    timeout: Duration,
-) -> io::Result<()> {
+fn wait_with_timeout(mut reader: impl Read + Send + 'static, timeout: Duration) -> io::Result<()> {
     let (sender, receiver) = mpsc::channel();
     thread::Builder::new()
         .name("mixrelay-engine-ready".into())
@@ -43,7 +40,7 @@ pub(super) fn wait_with_timeout(
 }
 
 /// Accepts exactly the readiness acknowledgement as the first bytes of `reader`.
-pub(super) fn read_ready(reader: &mut impl Read) -> io::Result<()> {
+fn read_ready(reader: &mut impl Read) -> io::Result<()> {
     let mut acknowledgement = [0; crate::READY.len()];
     reader.read_exact(&mut acknowledgement)?;
     if acknowledgement != *crate::READY {
@@ -54,3 +51,6 @@ pub(super) fn read_ready(reader: &mut impl Read) -> io::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

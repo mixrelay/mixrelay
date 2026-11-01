@@ -3,8 +3,8 @@
 //! Domain and application services read time through [`MonotonicClock`] and wait through
 //! [`Sleeper`], so their tests drive time explicitly instead of waiting for real time to
 //! pass. `StdClock` implements both ports over the standard library's monotonic clock for
-//! composition roots, and the `test-util` feature provides a manually advanced `ManualClock`
-//! for tests.
+//! product entry points, and the `test-util` feature provides a manually advanced
+//! `ManualClock` for tests.
 mod clock;
 mod deadline;
 mod instant;
