@@ -1,50 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-import {
-  clampParameter,
-  isLogarithmicRange,
-  parameterAtPosition,
-  parameterPosition,
-  snapParameter,
-  steppedParameterKey,
-  useCapturedPointerDrag,
-} from './parameterValue';
-
-const gain = { minimum: -60, maximum: 12, step: 0.5 };
-const frequency = { minimum: 20, maximum: 20_000, step: 1, scale: 'logarithmic' as const };
-
-it('uses a logarithmic scale only for a positive, non-empty range', () => {
-  expect(isLogarithmicRange(frequency)).toBe(true);
-  expect(isLogarithmicRange({ ...frequency, scale: 'linear' })).toBe(false);
-  expect(isLogarithmicRange({ ...frequency, minimum: 0 })).toBe(false);
-  expect(isLogarithmicRange({ ...frequency, maximum: 20 })).toBe(false);
-});
-
-it('snaps to the public step from the minimum without float noise and clamps', () => {
-  expect(clampParameter(99, gain)).toBe(12);
-  expect(snapParameter(-5.74, gain)).toBe(-5.5);
-  expect(snapParameter(0.1 + 0.2, { minimum: 0, maximum: 1, step: 0.1 })).toBe(0.3);
-  expect(snapParameter(-80, gain)).toBe(-60);
-});
-
-it('maps positions linearly or logarithmically and back', () => {
-  expect(parameterPosition(-24, gain)).toBe(0.5);
-  expect(parameterAtPosition(0.5, gain)).toBe(-24);
-  expect(parameterPosition(632.455532, frequency)).toBeCloseTo(0.5, 6);
-  expect(parameterAtPosition(0.5, frequency)).toBeCloseTo(632.455532, 5);
-  expect(parameterPosition(1e9, frequency)).toBe(1);
-});
-
-it('steps by one unit, ten units or to the ends, keeping Left/Right for text carets', () => {
-  expect(steppedParameterKey('ArrowUp', 0, gain)).toBe(0.5);
-  expect(steppedParameterKey('ArrowLeft', 0, gain)).toBe(-0.5);
-  expect(steppedParameterKey('PageDown', 0, gain)).toBe(-5);
-  expect(steppedParameterKey('Home', 0, gain)).toBe(-60);
-  expect(steppedParameterKey('End', 0, gain)).toBe(12);
-  expect(steppedParameterKey('ArrowRight', 0, gain, 'vertical')).toBeUndefined();
-  expect(steppedParameterKey('ArrowDown', 0, gain, 'vertical')).toBe(-0.5);
-  expect(steppedParameterKey('Enter', 0, gain)).toBeUndefined();
-});
+import { useCapturedPointerDrag } from './useCapturedPointerDrag';
 
 function DragProbe({
   disabled,

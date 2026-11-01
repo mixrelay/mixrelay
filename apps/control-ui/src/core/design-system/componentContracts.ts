@@ -2085,7 +2085,7 @@ export const componentContracts: readonly ComponentContract[] = [
     tokens:
       'AudioNodeCard .parameterList/.knobGroup(subgrid 라벨 높이 공유); 필드 규격은 ParameterField/Knob/ValueSlider.',
     interaction:
-      '각 입력이 Tab 대상; 노브·숫자·슬라이더 키보드 규칙은 parameterValue 공통 모듈. nodrag/nowheel로 그래프 조작과 분리.',
+      '각 입력이 Tab 대상; 노브·숫자·슬라이더 키보드 규칙은 core/domain/parameters 공통 모듈. nodrag/nowheel로 그래프 조작과 분리.',
     source: 'apps/control-ui/src/core/ui/AudioNodeParameterGrid.tsx',
     api: "export interface AudioNodeParameterControl extends ParameterFieldControl {\n  section?: 'main' | 'options';\n  precise?: boolean;\n}\n\nexport function AudioNodeParameterGrid({\n  controls,\n  disabled,\n  onChange,\n}: {\n  controls: readonly AudioNodeParameterControl[];\n  disabled: boolean;\n  onChange: (parameterId: string, value: number) => void;\n})",
     consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],

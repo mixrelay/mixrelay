@@ -289,7 +289,7 @@ Storybook `Core/Audio Nodes/Frame`의 Default·Multichannel·Off·Recording·Fai
 
 #### 공통 연속값 계산
 
-`Knob`, `ValueSlider`, `NumericValueControl`은 `core/ui/parameterValue.ts`의 범위/로그 계산, step 맞춤, 키보드 step 표, 포인터 capture 드래그 수명 주기를 공유한다. `NumericValueControl`은 커서 이동을 위해 좌우 방향키를 키보드 step 표에서 제외한다. 컴포넌트별 드래그 감도는 아래 각 계약을 따른다.
+`Knob`, `ValueSlider`, `NumericValueControl`은 `core/domain/parameters`의 범위/로그 계산·step 맞춤·키보드 step 표(`parameterRange.ts`)와 드래그·휠 변환(`parameterGesture.ts`)을 공유하고, `GraphicEqualizer`까지 `core/ui/useCapturedPointerDrag.ts`의 포인터 capture 드래그 수명 주기를 공유한다. `NumericValueControl`은 커서 이동을 위해 좌우 방향키를 키보드 step 표에서 제외한다. 컴포넌트별 드래그 감도는 아래 각 계약을 따른다.
 
 #### Knob과 조밀한 오디오 파라미터
 

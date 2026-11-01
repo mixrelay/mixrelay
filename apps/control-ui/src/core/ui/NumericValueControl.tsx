@@ -1,14 +1,13 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Input, NumberField } from 'react-aria-components';
-import styles from './NumericValueControl.module.css';
+import { numericDragValue, wheelSteps } from '../domain/parameters/parameterGesture';
 import {
-  clampParameter,
-  isLogarithmicRange,
   type ParameterRange,
   snapParameter,
   steppedParameterKey,
-  useCapturedPointerDrag,
-} from './parameterValue';
+} from '../domain/parameters/parameterRange';
+import styles from './NumericValueControl.module.css';
+import { useCapturedPointerDrag } from './useCapturedPointerDrag';
 
 export interface NumericValueControlProps {
   label: string;
@@ -45,13 +44,11 @@ function useValueDrag(props: NumericValueControlProps) {
       if (active.y === event.clientY) return;
       event.preventDefault();
       event.stopPropagation();
-      const pixels = active.y - event.clientY;
-      // Log ranges move by a continuous ratio (240px per decade span); Shift and linear
-      // ranges move in public steps, Shift at one tenth. Only the reported value snaps.
-      active.value = clampParameter(
-        isLogarithmicRange(rangeOf(props)) && !event.shiftKey
-          ? active.value * (props.maximum / props.minimum) ** (pixels / 240)
-          : active.value + pixels * props.step * (event.shiftKey ? 0.1 : 1),
+      // Only the reported value snaps; the dragged value stays continuous.
+      active.value = numericDragValue(
+        active.value,
+        active.y - event.clientY,
+        event.shiftKey,
         rangeOf(props),
       );
       active.y = event.clientY;
@@ -79,11 +76,10 @@ function useValueWheel(props: NumericValueControlProps) {
       const options = current.current;
       if (options.disabled || event.deltaY === 0) return;
       options.onActivate?.();
-      remainder.current += Math.sign(-event.deltaY) * (event.shiftKey ? 0.1 : 1);
-      const wholeSteps = Math.trunc(Number(remainder.current.toPrecision(12)));
-      if (!wholeSteps) return;
-      remainder.current -= wholeSteps;
-      pending.current = normalize(pending.current + wholeSteps * options.step, options);
+      const turned = wheelSteps(remainder.current, event.deltaY, event.shiftKey);
+      remainder.current = turned.remainder;
+      if (!turned.steps) return;
+      pending.current = normalize(pending.current + turned.steps * options.step, options);
       options.onChange(pending.current);
     };
     element.addEventListener('wheel', wheel, { passive: false });

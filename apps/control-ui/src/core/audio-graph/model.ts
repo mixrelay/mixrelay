@@ -3,6 +3,7 @@ import type { GraphEdge, GraphNode, GraphPort, GraphTopology } from '../domain/g
 import { nodeWidths } from '../theme/tokens';
 import type { NodeChoiceControl } from '../ui/AudioNodeCard';
 import type { EndpointControl } from '../ui/AudioNodeEndpointOptions';
+import type { AudioNodeParameterControl } from '../ui/AudioNodeParameterGrid';
 import type { DeviceAppActivityProps } from '../ui/DeviceAppActivity';
 import type { DynamicsMeterContract } from '../ui/DynamicsMeter';
 import type { GraphicEqualizerContract } from '../ui/GraphicEqualizer';
@@ -75,24 +76,6 @@ export interface AudioGraphMeterBank {
   label?: string;
   nodeId: string;
   portId: string;
-}
-
-export interface AudioNodeParameterControl {
-  id: string;
-  label: string;
-  description?: string;
-  section?: 'main' | 'options';
-  maximum: number;
-  minimum: number;
-  step: number;
-  suffix: string;
-  value: number;
-  scale?: 'linear' | 'logarithmic';
-  choices?: readonly { value: number; label: string; description?: string }[];
-  precise?: boolean;
-  presentation?: 'slider' | 'knob';
-  group?: { id: string; label: string };
-  endpoints?: { minimum: string; maximum: string };
 }
 
 /** A graph node with its presentation; topology rules see only its ID and ports. */

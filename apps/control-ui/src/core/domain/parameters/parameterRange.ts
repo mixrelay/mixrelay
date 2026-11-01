@@ -1,6 +1,4 @@
-import { type PointerEvent, useCallback, useEffect, useRef } from 'react';
-
-/** Continuous parameter range shared by Knob, ValueSlider and NumericValueControl. */
+/** Continuous parameter range shared by every continuous control. */
 export interface ParameterRange {
   minimum: number;
   maximum: number;
@@ -66,46 +64,35 @@ export function steppedParameterKey(
   return changes[key];
 }
 
-/** Pointer-captured vertical drag. Capture is released on pointer up/cancel, loss of
- * capture, disabling and unmount; no window listeners or timers are created. */
-export function useCapturedPointerDrag<State>({
-  disabled,
-  begin,
-  update,
-}: {
-  disabled?: boolean;
-  /** Return undefined to ignore the press. */
-  begin: (event: PointerEvent<HTMLDivElement>) => State | undefined;
-  update: (state: State, event: PointerEvent<HTMLDivElement>) => void;
-}) {
-  const drag = useRef<{ pointer: number; element: HTMLDivElement; state: State } | null>(null);
-  const finish = useCallback(() => {
-    const active = drag.current;
-    drag.current = null;
-    if (active?.element.hasPointerCapture?.(active.pointer))
-      active.element.releasePointerCapture(active.pointer);
-  }, []);
-  useEffect(() => {
-    if (disabled) finish();
-    return finish;
-  }, [disabled, finish]);
-  const end = (event: PointerEvent<HTMLDivElement>) => {
-    if (drag.current?.pointer === event.pointerId) finish();
-  };
+/** An integer slider that stands for a range. A linear range is its own slider; a
+ * logarithmic one gets enough integer positions that, where the curve is steepest, one
+ * position is no more than one public step. */
+export interface SliderScale {
+  minValue: number;
+  maxValue: number;
+  step: number;
+  toSlider(value: number): number;
+  /** The snapped parameter value at a slider position. */
+  fromSlider(position: number): number;
+}
+
+export function sliderScale(range: ParameterRange): SliderScale {
+  const { minimum, maximum, step } = range;
+  if (!isLogarithmicRange(range))
+    return {
+      minValue: minimum,
+      maxValue: maximum,
+      step,
+      toSlider: (value) => value,
+      fromSlider: (position) => position,
+    };
+  const resolution = Math.ceil((Math.log(maximum / minimum) * maximum) / step);
   return {
-    onPointerDown(event: PointerEvent<HTMLDivElement>) {
-      if (disabled || event.button !== 0 || drag.current) return;
-      const state = begin(event);
-      if (state === undefined) return;
-      event.currentTarget.setPointerCapture(event.pointerId);
-      drag.current = { pointer: event.pointerId, element: event.currentTarget, state };
-    },
-    onPointerMove(event: PointerEvent<HTMLDivElement>) {
-      const active = drag.current;
-      if (active?.pointer === event.pointerId) update(active.state, event);
-    },
-    onPointerUp: end,
-    onPointerCancel: end,
-    onLostPointerCapture: finish,
+    minValue: 0,
+    maxValue: resolution,
+    step: 1,
+    toSlider: (value) => parameterPosition(value, range) * resolution,
+    fromSlider: (position) =>
+      snapParameter(parameterAtPosition(position / resolution, range), range),
   };
 }

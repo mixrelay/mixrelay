@@ -1,12 +1,4 @@
-import {
-  type KeyboardEvent,
-  type PointerEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type KeyboardEvent, type ReactNode, useState } from 'react';
 import {
   equalizerPlot,
   frequencyPosition,
@@ -18,6 +10,7 @@ import {
 import styles from './GraphicEqualizer.module.css';
 import { NumericValueControl } from './NumericValueControl';
 import type { ParameterFieldControl } from './ParameterField';
+import { useCapturedPointerDrag } from './useCapturedPointerDrag';
 
 export interface GraphicEqualizerContract {
   bands: readonly { id: string; label: string; frequencyId: string; gainId: string; qId: string }[];
@@ -47,57 +40,37 @@ function resolveBands(props: Props): ResolvedBand[] {
     return frequency && gain && q ? [{ id: band.id, label: band.label, frequency, gain, q }] : [];
   });
 }
+/** Dragging a band's handle moves its frequency and gain together, as one batch. */
 function useGraphDrag(props: Props, bands: ResolvedBand[], select: (id: string) => void) {
-  const capture = useRef<{ element: HTMLDivElement; pointer: number; band: ResolvedBand } | null>(
-    null,
-  );
-  const finish = useCallback(() => {
-    const active = capture.current;
-    capture.current = null;
-    if (active?.element.hasPointerCapture(active.pointer))
-      active.element.releasePointerCapture(active.pointer);
-  }, []);
-  useEffect(() => {
-    if (props.disabled) finish();
-    return finish;
-  }, [props.disabled, finish]);
-  const move = (event: PointerEvent<HTMLDivElement>) => {
-    const active = capture.current;
-    if (!active || active.pointer !== event.pointerId) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    props.onParametersChange?.([
-      {
-        id: active.band.frequency.id,
-        value: plotFrequency(((event.clientX - bounds.left) / bounds.width) * equalizerPlot.width),
-      },
-      {
-        id: active.band.gain.id,
-        value: plotGain(((event.clientY - bounds.top) / bounds.height) * equalizerPlot.height),
-      },
-    ]);
-  };
-  const start = (event: PointerEvent<HTMLDivElement>) => {
-    if (props.disabled || !props.onParametersChange || event.button !== 0 || capture.current)
-      return;
-    const target = (event.target as Element).closest<HTMLButtonElement>('[data-band]');
-    const band = bands.find((item) => item.id === target?.dataset.band);
-    if (!band || !target) return;
-    event.preventDefault();
-    select(band.id);
-    target.focus();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    capture.current = { element: event.currentTarget, pointer: event.pointerId, band };
-  };
-  const end = (event: PointerEvent<HTMLDivElement>) => {
-    if (capture.current?.pointer === event.pointerId) finish();
-  };
-  return {
-    onPointerDown: start,
-    onPointerMove: move,
-    onPointerUp: end,
-    onPointerCancel: end,
-    onLostPointerCapture: finish,
-  };
+  return useCapturedPointerDrag<ResolvedBand>({
+    disabled: props.disabled,
+    begin(event) {
+      if (!props.onParametersChange) return undefined;
+      // A pointer event on the plot targets the plot or an element inside it, never text.
+      const target = (event.target as Element).closest<HTMLElement>('[data-band]');
+      const band = bands.find((item) => item.id === target?.dataset.band);
+      if (!band || !target) return undefined;
+      event.preventDefault();
+      select(band.id);
+      target.focus();
+      return band;
+    },
+    update(band, event) {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      props.onParametersChange?.([
+        {
+          id: band.frequency.id,
+          value: plotFrequency(
+            ((event.clientX - bounds.left) / bounds.width) * equalizerPlot.width,
+          ),
+        },
+        {
+          id: band.gain.id,
+          value: plotGain(((event.clientY - bounds.top) / bounds.height) * equalizerPlot.height),
+        },
+      ]);
+    },
+  });
 }
 function handleBandKey(event: KeyboardEvent<HTMLButtonElement>, props: Props, band: ResolvedBand) {
   if (props.disabled) return;
