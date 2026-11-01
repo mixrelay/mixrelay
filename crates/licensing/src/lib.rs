@@ -4,11 +4,13 @@
 //! The desktop owns purchase UI and Driver lifecycle. Licensing never stops running audio.
 
 mod client;
+mod clock;
 mod credentials;
 mod entitlement;
 mod response;
 
 pub use client::{LicenseClient, LicenseHttp, LicenseHttpResponse};
+pub use clock::{SystemUtcClock, UtcClock};
 pub use credentials::{
     StoredLicense, clear_local_license, has_local_paid_access, read_local_license,
     write_local_license,
