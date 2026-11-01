@@ -7,7 +7,7 @@ use secrecy::{ExposeSecret as _, SecretString};
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use crate::{
-    Activation, LicenseError, ProductIdentity,
+    Activation, LicenseError, ProductIdentity, SystemUtcClock, UtcClock,
     response::{self, Activated, License},
 };
 
@@ -22,6 +22,7 @@ const MAX_RESPONSE_BYTES: usize = 65_536;
 pub struct LicenseClient {
     http: Arc<dyn LicenseHttp>,
     product: ProductIdentity,
+    clock: Arc<dyn UtcClock>,
 }
 
 /// A bounded HTTP reply. Provider bodies stay inside the licensing boundary.
@@ -119,6 +120,7 @@ impl LicenseClient {
                 client,
                 origin: ORIGIN.into(),
             }),
+            Arc::new(SystemUtcClock),
         ))
     }
 
@@ -136,13 +138,27 @@ impl LicenseClient {
                 client: http_client()?,
                 origin: SANDBOX_ORIGIN.into(),
             }),
+            Arc::new(SystemUtcClock),
         ))
     }
 
-    /// Bind the public product to an injected, bounded HTTP transport.
+    /// Bind the public product to an injected, bounded HTTP transport, judging licence
+    /// expiry at `clock`'s time.
     #[must_use]
-    pub fn with_http(product: ProductIdentity, http: Arc<dyn LicenseHttp>) -> Self {
-        Self { http, product }
+    pub fn with_http(
+        product: ProductIdentity,
+        http: Arc<dyn LicenseHttp>,
+        clock: Arc<dyn UtcClock>,
+    ) -> Self {
+        Self {
+            http,
+            product,
+            clock,
+        }
+    }
+
+    fn check(&self, license: &License) -> Result<(), LicenseError> {
+        license.check(self.product, self.clock.now())
     }
 
     /// Activate a new seat after checking the key's product without consuming a seat.
@@ -163,7 +179,7 @@ impl LicenseClient {
     ) -> Result<Activation, LicenseError> {
         check_argument(name)?;
         let checked = self.license(key, None).await?;
-        checked.check(self.product)?;
+        self.check(&checked)?;
         // Polar disallows remote activations when the benefit has no activation limit.
         // Keep the readable device label locally; no remote mutation can be duplicated.
         if checked.limit_activations.is_none() {
@@ -179,9 +195,7 @@ impl LicenseClient {
             .map_err(uncertain_activation)?;
         let activated: Activated =
             serde_json::from_slice(&reply.body).map_err(|_| LicenseError::ActivationUncertain)?;
-        activated
-            .license_key
-            .check(self.product)
+        self.check(&activated.license_key)
             .map_err(uncertain_activation)?;
         let instance = &activated.instance;
         response::check_id(&instance.id).map_err(uncertain_activation)?;
@@ -204,7 +218,7 @@ impl LicenseClient {
         if let Some(label) = instance.strip_prefix(LOCAL_DEVICE) {
             check_argument(label)?;
             let checked = self.license(key, None).await?;
-            checked.check(self.product)?;
+            self.check(&checked)?;
             if checked.limit_activations.is_some() {
                 return Err(LicenseError::InvalidResponse);
             }
@@ -216,12 +230,12 @@ impl LicenseClient {
             Err(LicenseError::Revoked) => {
                 // Polar uses the same 404 for missing keys and missing activations.
                 let key_only = self.license(key, None).await?;
-                key_only.check(self.product)?;
+                self.check(&key_only)?;
                 return Err(LicenseError::ActivationDeactivated);
             }
             Err(error) => return Err(error),
         };
-        checked.check(self.product)?;
+        self.check(&checked)?;
         let activation = checked
             .activation
             .as_ref()

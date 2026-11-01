@@ -61,7 +61,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 - 앱 크레이트는 부품을 조립하고 OS·프로세스 수명을 연결한다. 여러 앱이 쓰거나 테스트할 가치가 있는 로직은 계약·서비스 부품 크레이트로, 엔진의 판단·정책은 `mixrelay-engine`으로 옮긴다.
 - 새 코드를 둘 곳:
   - 엔진의 판단·정책(도메인·애플리케이션 서비스)과 그 port → `mixrelay-engine`. `apps/service`에 두지 않는다
-  - 시각 읽기·시간 대기 → `mixrelay-time`의 `MonotonicClock`·`Sleeper`를 주입받는다
+  - 시각 읽기·시간 대기 → `mixrelay-time`의 `MonotonicClock`·`Sleeper`를 주입받는다. 만료일처럼 달력 시각이 필요한 판단은 그 판단을 하는 크레이트가 wall clock port를 정의한다(라이선스 만료: `mixrelay-licensing`의 `UtcClock`)
   - 장치·OS에 무관한 오디오 처리 → `audio-engine`, `audio-graph`, `audio-io`
   - 프로세스 사이 메시지 형식 → `control-protocol`(편집 앱 ↔ 엔진), `driver-control`(↔ Driver 서비스)
   - CoreAudio·PipeWire 호출 → 해당 OS 어댑터. 엔진 쪽 OS 연결은 `mixrelay-engine` port를 구현하는 엔진 어댑터에 둔다. 아직 옮기지 않은 연결은 `apps/service`의 `macos_devices`·`linux_*`에 있다

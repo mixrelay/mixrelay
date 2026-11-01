@@ -61,6 +61,7 @@ mixrelay-audio-graph = { path = "../../../crates/audio-graph" }
 
 
 [dev-dependencies]
+time = "0.3.55"
 # Virtual time exercises delayed native shutdown without sleeping in tests.
 tokio = { workspace = true, features = ["test-util"] }
 mixrelay-test-support = { path = "../../../crates/test-support" }

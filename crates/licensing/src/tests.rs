@@ -1,4 +1,5 @@
-//! Exercise the real JSON transport against a bounded loopback HTTP server.
+//! Licence policy runs against queued HTTP replies; the real JSON transport runs against a
+//! bounded loopback HTTP server.
 use super::*;
 use std::sync::Arc;
 use tokio::{
@@ -106,7 +107,7 @@ async fn server(replies: Vec<Reply>) -> (LicenseClient, Requests, tokio::task::J
                 .to_owned();
             let fields = serde_json::from_slice(&bytes[header_end..header_end + length]).unwrap();
             captured.lock().await.push(Request { path, fields });
-            // Zero simulates the server committing a mutation then losing the connection.
+            // Zero simulates the server receiving a request then losing the connection.
             if reply.status != 0 {
                 let response = format!(
                     "HTTP/1.1 {} Test\r\nContent-Type: application/json\r\nPolar-Version: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -129,9 +130,79 @@ async fn server(replies: Vec<Reply>) -> (LicenseClient, Requests, tokio::task::J
         origin,
     };
     (
-        LicenseClient::with_http(product(), Arc::new(http)),
+        LicenseClient::with_http(product(), Arc::new(http), Arc::new(SystemUtcClock)),
         requests,
         task,
+    )
+}
+
+/// Answers each request with the next queued reply and records it like the loopback server.
+struct QueuedHttp {
+    replies: std::sync::Mutex<std::collections::VecDeque<Reply>>,
+    requests: Requests,
+}
+
+impl LicenseHttp for QueuedHttp {
+    fn post<'a>(
+        &'a self,
+        operation: &'a str,
+        fields: Vec<(&'a str, &'a str)>,
+    ) -> Pin<Box<dyn Future<Output = Result<LicenseHttpResponse, LicenseError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.requests.lock().await.push(Request {
+                path: format!("/v1/customer-portal/license-keys/{operation}"),
+                fields: fields
+                    .into_iter()
+                    .map(|(name, value)| (name.to_owned(), serde_json::Value::from(value)))
+                    .collect::<serde_json::Map<_, _>>()
+                    .into(),
+            });
+            let reply = self
+                .replies
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("a queued reply");
+            assert_eq!(
+                reply.version, API_VERSION,
+                "the real transport rejects other versions; test them on the loopback server"
+            );
+            // Zero stands for a request the provider received before the connection was lost.
+            if reply.status == 0 {
+                return Err(LicenseError::Unavailable);
+            }
+            Ok(LicenseHttpResponse {
+                status: reply.status,
+                body: reply.body.into_bytes(),
+            })
+        })
+    }
+}
+
+/// Fails the test when dropped with replies nobody requested.
+struct Queue(Arc<QueuedHttp>);
+
+impl Drop for Queue {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            assert!(self.0.replies.lock().unwrap().is_empty(), "unused replies");
+        }
+    }
+}
+
+fn queued(replies: Vec<Reply>) -> (LicenseClient, Requests, Queue) {
+    queued_at(replies, Arc::new(SystemUtcClock))
+}
+
+fn queued_at(replies: Vec<Reply>, clock: Arc<dyn UtcClock>) -> (LicenseClient, Requests, Queue) {
+    let http = Arc::new(QueuedHttp {
+        replies: std::sync::Mutex::new(replies.into()),
+        requests: Requests::default(),
+    });
+    (
+        LicenseClient::with_http(product(), http.clone(), clock),
+        http.requests.clone(),
+        Queue(http),
     )
 }
 
@@ -201,11 +272,10 @@ async fn activation_prevalidates_product_and_records_intent_before_one_mutation(
 async fn unlimited_keys_keep_a_readable_local_device_and_never_create_remote_activations() {
     let mut unlimited = license(None);
     unlimited["limit_activations"] = serde_json::Value::Null;
-    let (client, requests, task) = server(vec![
+    let (client, requests, _queue) = queued(vec![
         Reply::json(200, &unlimited),
         Reply::json(200, &unlimited),
-    ])
-    .await;
+    ]);
     let activation = client
         .activate(&key(), "Studio Mac", || panic!("no remote mutation"))
         .await
@@ -222,7 +292,6 @@ async fn unlimited_keys_keep_a_readable_local_device_and_never_create_remote_act
         .deactivate(&key(), activation.instance_id())
         .await
         .unwrap();
-    task.await.unwrap();
     let requests = requests.lock().await;
     assert_eq!(requests.len(), 2);
     assert!(requests.iter().all(|r| r.path.ends_with("/validate")
@@ -235,35 +304,32 @@ async fn foreign_keys_and_failed_intent_never_consume_a_seat() {
     for field in ["organization_id", "benefit_id"] {
         let mut wrong = license(None);
         wrong[field] = OTHER.into();
-        let (client, requests, task) = server(vec![Reply::json(200, &wrong)]).await;
+        let (client, requests, _queue) = queued(vec![Reply::json(200, &wrong)]);
         assert_eq!(
             client
                 .activate(&key(), "Mac", || panic!("foreign key"))
                 .await,
             Err(LicenseError::WrongProduct)
         );
-        task.await.unwrap();
         assert_eq!(requests.lock().await.len(), 1);
     }
-    let (client, requests, task) = server(vec![Reply::json(200, &license(None))]).await;
+    let (client, requests, _queue) = queued(vec![Reply::json(200, &license(None))]);
     assert_eq!(
         client
             .activate(&key(), "Mac", || Err(LicenseError::StorageUnavailable))
             .await,
         Err(LicenseError::StorageUnavailable)
     );
-    task.await.unwrap();
     assert_eq!(requests.lock().await.len(), 1);
 }
 
 #[tokio::test]
 async fn validation_requires_granted_status_exact_activation_and_product_binding() {
-    let (client, _, task) = server(vec![Reply::json(200, &license(Some(SEAT)))]).await;
+    let (client, _, _queue) = queued(vec![Reply::json(200, &license(Some(SEAT)))]);
     assert_eq!(
         client.validate(&key(), SEAT).await.unwrap().instance_id(),
         SEAT
     );
-    task.await.unwrap();
     for field in [
         "id",
         "organization_id",
@@ -274,9 +340,8 @@ async fn validation_requires_granted_status_exact_activation_and_product_binding
     ] {
         let mut malformed = license(Some(SEAT));
         malformed.as_object_mut().unwrap().remove(field);
-        let (client, _, task) = server(vec![Reply::json(200, &malformed)]).await;
+        let (client, _, _queue) = queued(vec![Reply::json(200, &malformed)]);
         assert!(client.validate(&key(), SEAT).await.is_err(), "{field}");
-        task.await.unwrap();
     }
     for (field, value, expected) in [
         (
@@ -327,13 +392,12 @@ async fn validation_requires_granted_status_exact_activation_and_product_binding
     ] {
         let mut body = license(Some(SEAT));
         body[field] = value;
-        let (client, _, task) = server(vec![Reply::json(200, &body)]).await;
+        let (client, _, _queue) = queued(vec![Reply::json(200, &body)]);
         assert_eq!(
             client.validate(&key(), SEAT).await,
             Err(expected),
             "{field}"
         );
-        task.await.unwrap();
     }
 }
 
@@ -344,27 +408,23 @@ async fn not_found_disabled_revoked_and_expired_are_conclusive_but_not_network_e
         "License key is no longer active.",
         "License key has expired.",
     ] {
-        let (client, _, task) = server(vec![
+        let (client, _, _queue) = queued(vec![
             Reply::json(404, &not_found(detail)),
             Reply::json(404, &not_found(detail)),
-        ])
-        .await;
+        ]);
         assert_eq!(
             client.validate(&key(), SEAT).await,
             Err(LicenseError::Revoked)
         );
-        task.await.unwrap();
     }
-    let (client, _, task) = server(vec![
+    let (client, _, _queue) = queued(vec![
         Reply::json(404, &not_found("Not found")),
         Reply::json(200, &license(None)),
-    ])
-    .await;
+    ]);
     assert_eq!(
         client.validate(&key(), SEAT).await,
         Err(LicenseError::ActivationDeactivated)
     );
-    task.await.unwrap();
     for (status, body, expected) in [
         (400, "invalid", LicenseError::RequestFailed),
         (403, "invalid", LicenseError::RequestFailed),
@@ -377,16 +437,14 @@ async fn not_found_disabled_revoked_and_expired_are_conclusive_but_not_network_e
         (200, "{}", LicenseError::InvalidResponse),
         (200, "invalid", LicenseError::InvalidResponse),
     ] {
-        let (client, requests, task) = server(vec![Reply {
+        let (client, requests, _queue) = queued(vec![Reply {
             status,
             body: body.into(),
             version: API_VERSION,
-        }])
-        .await;
+        }]);
         let result = client.validate(&key(), SEAT).await;
         assert_eq!(result, Err(expected));
         assert!(!format!("{result:?}").contains(KEY));
-        task.await.unwrap();
         assert_eq!(requests.lock().await.len(), 1);
     }
 }
@@ -394,10 +452,9 @@ async fn not_found_disabled_revoked_and_expired_are_conclusive_but_not_network_e
 #[tokio::test]
 async fn deactivation_accepts_only_204_or_confirmed_absence_and_keeps_uncertain_failures() {
     for reply in [Reply::empty(204), Reply::json(404, &not_found("Not found"))] {
-        let (client, requests, task) =
-            server(vec![Reply::json(200, &license(Some(SEAT))), reply]).await;
+        let (client, requests, _queue) =
+            queued(vec![Reply::json(200, &license(Some(SEAT))), reply]);
         assert_eq!(client.deactivate(&key(), SEAT).await, Ok(()));
-        task.await.unwrap();
         let requests = requests.lock().await;
         assert_eq!(
             requests[1].path,
@@ -408,13 +465,11 @@ async fn deactivation_accepts_only_204_or_confirmed_absence_and_keeps_uncertain_
             serde_json::json!({"key":KEY,"organization_id":ORG,"activation_id":SEAT})
         );
     }
-    let (client, _, task) = server(vec![
+    let (client, _, _queue) = queued(vec![
         Reply::json(404, &not_found("Not found")),
         Reply::json(200, &license(None)),
-    ])
-    .await;
+    ]);
     assert_eq!(client.deactivate(&key(), SEAT).await, Ok(()));
-    task.await.unwrap();
     for (reply, expected) in [
         (Reply::empty(0), LicenseError::Unavailable),
         (Reply::empty(429), LicenseError::RateLimited),
@@ -424,9 +479,8 @@ async fn deactivation_accepts_only_204_or_confirmed_absence_and_keeps_uncertain_
         ),
         (Reply::empty(503), LicenseError::Unavailable),
     ] {
-        let (client, _, task) = server(vec![Reply::json(200, &license(Some(SEAT))), reply]).await;
+        let (client, _, _queue) = queued(vec![Reply::json(200, &license(Some(SEAT))), reply]);
         assert_eq!(client.deactivate(&key(), SEAT).await, Err(expected));
-        task.await.unwrap();
     }
 }
 
@@ -449,35 +503,89 @@ async fn uncertain_mutations_never_retry_and_cannot_return_unbound_activations()
             LicenseError::Rejected,
         ),
     ] {
-        let (client, requests, task) = server(vec![Reply::json(200, &license(None)), reply]).await;
+        let (client, requests, _queue) = queued(vec![Reply::json(200, &license(None)), reply]);
         assert_eq!(
             client.activate(&key(), "Mac", || Ok(())).await,
             Err(expected)
         );
-        task.await.unwrap();
         assert_eq!(requests.lock().await.len(), 2);
     }
 }
 
 #[tokio::test]
-async fn oversized_replies_and_unsupported_api_versions_never_revoke_or_grant() {
-    for reply in [
-        Reply {
-            status: 200,
-            body: "x".repeat(65_537),
-            version: API_VERSION,
-        },
-        Reply {
-            status: 404,
-            body: not_found("Not found").to_string(),
-            version: "2027-01",
-        },
+async fn the_real_transport_maps_lost_connections_limits_and_versions_without_revoking() {
+    let other = |status, body: String| Reply {
+        status,
+        body,
+        version: "2027-01",
+    };
+    for (reply, expected) in [
+        (Reply::empty(0), LicenseError::Unavailable),
+        (
+            Reply {
+                status: 200,
+                body: "x".repeat(65_537),
+                version: API_VERSION,
+            },
+            LicenseError::InvalidResponse,
+        ),
+        (
+            other(404, not_found("Not found").to_string()),
+            LicenseError::RequestFailed,
+        ),
+        // A proxy's refusal carries no API version and still keeps its meaning.
+        (other(503, String::new()), LicenseError::Unavailable),
+        (other(429, String::new()), LicenseError::RateLimited),
     ] {
         let (client, _, task) = server(vec![reply]).await;
-        assert!(matches!(
-            client.validate(&key(), SEAT).await,
-            Err(LicenseError::InvalidResponse | LicenseError::RequestFailed)
-        ));
+        assert_eq!(client.validate(&key(), SEAT).await, Err(expected));
         task.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn an_oversized_reply_from_any_transport_is_invalid() {
+    let (client, _, _queue) = queued(vec![Reply::json(
+        200,
+        &serde_json::json!({"x": "x".repeat(65_537)}),
+    )]);
+    assert_eq!(
+        client.validate(&key(), SEAT).await,
+        Err(LicenseError::InvalidResponse)
+    );
+}
+
+struct FixedClock(time::OffsetDateTime);
+
+impl UtcClock for FixedClock {
+    fn now(&self) -> time::OffsetDateTime {
+        self.0
+    }
+}
+
+#[tokio::test]
+async fn a_licence_expires_exactly_at_its_expiry_time_on_the_given_clock() {
+    let at = |value| {
+        Arc::new(FixedClock(
+            time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+                .unwrap(),
+        ))
+    };
+    for (now, expected) in [
+        ("2030-05-31T23:59:59Z", Ok(SEAT.to_owned())),
+        ("2030-06-01T00:00:00Z", Err(LicenseError::Revoked)),
+        ("2030-06-01T00:00:01Z", Err(LicenseError::Revoked)),
+    ] {
+        let mut body = license(Some(SEAT));
+        body["expires_at"] = "2030-06-01T00:00:00Z".into();
+        let (client, _, _queue) = queued_at(vec![Reply::json(200, &body)], at(now));
+        assert_eq!(
+            client
+                .validate(&key(), SEAT)
+                .await
+                .map(|activation| activation.instance_id().to_owned()),
+            expected,
+            "{now}"
+        );
     }
 }

@@ -33,7 +33,12 @@ pub(super) struct Activated {
 }
 
 impl License {
-    pub(super) fn check(&self, expected: ProductIdentity) -> Result<(), LicenseError> {
+    /// Accepts only a granted, unexpired licence for `expected`, judged at `now`.
+    pub(super) fn check(
+        &self,
+        expected: ProductIdentity,
+        now: OffsetDateTime,
+    ) -> Result<(), LicenseError> {
         if self.organization_id != expected.organization.to_string()
             || self.benefit_id != expected.benefit.to_string()
         {
@@ -48,7 +53,7 @@ impl License {
         if let Some(value) = &self.expires_at {
             let expiry = OffsetDateTime::parse(value, &Rfc3339)
                 .map_err(|_| LicenseError::InvalidResponse)?;
-            if expiry <= OffsetDateTime::now_utc() {
+            if expiry <= now {
                 return Err(LicenseError::Revoked);
             }
         }

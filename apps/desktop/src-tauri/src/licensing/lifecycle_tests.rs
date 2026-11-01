@@ -80,9 +80,19 @@ fn http(
             )
             .unwrap(),
             http.clone(),
+            Arc::new(StartClock),
         ),
         http,
     )
+}
+
+/// Licence expiry is judged at the same `START` the entitlement store begins at.
+struct StartClock;
+
+impl mixrelay_licensing::UtcClock for StartClock {
+    fn now(&self) -> time::OffsetDateTime {
+        time::OffsetDateTime::from_unix_timestamp(START.cast_signed()).unwrap()
+    }
 }
 fn valid(flag: &str, instance: Option<&str>) -> (u16, serde_json::Value) {
     let license = serde_json::json!({"id":"70000000-0000-4000-8000-000000000007",
