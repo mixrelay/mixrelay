@@ -1,5 +1,5 @@
 //! Controller child startup, ownership loss and readiness failures.
-use super::readiness::wait_with_timeout;
+use super::readiness::{read_ready, wait_with_timeout};
 use super::*;
 use std::{
     io::{Cursor, Read},
@@ -9,14 +9,19 @@ use std::{
 
 #[test]
 fn readiness_requires_the_exact_acknowledgement() {
-    assert!(wait_with_timeout(Cursor::new(*crate::READY), Duration::from_secs(1)).is_ok());
-    let error = wait_with_timeout(Cursor::new(b"MRREADY"), Duration::from_secs(1))
-        .expect_err("short acknowledgement must fail");
+    assert!(read_ready(&mut Cursor::new(*crate::READY)).is_ok());
+    let error =
+        read_ready(&mut Cursor::new(b"MRREADY")).expect_err("short acknowledgement must fail");
     assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
 
-    let error = wait_with_timeout(Cursor::new(b"MRREADY!"), Duration::from_secs(1))
-        .expect_err("wrong acknowledgement must fail");
+    let error =
+        read_ready(&mut Cursor::new(b"MRREADY!")).expect_err("wrong acknowledgement must fail");
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn the_reader_thread_delivers_its_result() {
+    assert!(wait_with_timeout(Cursor::new(*crate::READY), Duration::from_secs(1)).is_ok());
 }
 
 #[test]

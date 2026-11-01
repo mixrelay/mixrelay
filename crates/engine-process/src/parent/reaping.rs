@@ -4,8 +4,10 @@ use std::{
     process::Child,
     sync::{Arc, Condvar, Mutex},
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+use mixrelay_time::{Deadline, MonotonicClock, Sleeper, StdClock};
 
 // A startup failure closes the lease before allowing a short cooperative drain.
 const STARTUP_FAILURE_GRACE: Duration = Duration::from_millis(500);
@@ -120,33 +122,55 @@ fn wait_for_owned_child(handoff: &Handoff) {
     }
 }
 
+/// The calls startup cleanup makes on the child it owns.
+trait StartupChild {
+    /// Whether the child has exited.
+    fn has_exited(&mut self) -> io::Result<bool>;
+    fn kill(&mut self) -> io::Result<()>;
+}
+
+impl StartupChild for Child {
+    fn has_exited(&mut self) -> io::Result<bool> {
+        Ok(self.try_wait()?.is_some())
+    }
+
+    fn kill(&mut self) -> io::Result<()> {
+        Child::kill(self)
+    }
+}
+
 pub(super) fn after_startup_failure(mut child: Child, reaper: Reaper) -> io::Result<()> {
-    let deadline = Instant::now() + STARTUP_FAILURE_GRACE;
-    let mut probe_error = None;
+    let result = drain_or_kill(&mut child, &StdClock::new());
+    reaper.schedule(child);
+    result
+}
+
+/// Gives a child whose startup failed `STARTUP_FAILURE_GRACE` to leave on its own, then
+/// kills it. A failed exit probe ends the grace early. The caller still reaps the child.
+fn drain_or_kill(
+    child: &mut impl StartupChild,
+    clock: &(impl MonotonicClock + Sleeper),
+) -> io::Result<()> {
+    let deadline = Deadline::after(clock.now(), STARTUP_FAILURE_GRACE);
+    let mut cleanup_error = None;
     loop {
-        match child.try_wait() {
-            Ok(Some(_)) => return Ok(()),
-            Ok(None) => {}
+        match child.has_exited() {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
             Err(error) => {
-                probe_error = Some(error);
+                cleanup_error = Some(error);
                 break;
             }
         }
-        let now = Instant::now();
-        if now >= deadline {
+        let now = clock.now();
+        if deadline.has_passed(now) {
             break;
         }
-        thread::sleep((deadline - now).min(READY_EXIT_POLL));
+        clock.sleep_until(deadline.min(Deadline::after(now, READY_EXIT_POLL)));
     }
-
-    let mut cleanup_error = probe_error;
-    match child.kill() {
-        Ok(()) => {}
-        Err(error) => {
-            combine_error(&mut cleanup_error, &error, "kill owned startup child");
-        }
+    if let Err(error) = child.kill() {
+        combine_error(&mut cleanup_error, &error, "kill owned startup child");
     }
-    reaper.schedule(child);
     cleanup_error.map_or(Ok(()), Err)
 }
 

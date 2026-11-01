@@ -42,7 +42,8 @@ pub(super) fn wait_with_timeout(
     }
 }
 
-fn read_ready(reader: &mut impl Read) -> io::Result<()> {
+/// Accepts exactly the readiness acknowledgement as the first bytes of `reader`.
+pub(super) fn read_ready(reader: &mut impl Read) -> io::Result<()> {
     let mut acknowledgement = [0; crate::READY.len()];
     reader.read_exact(&mut acknowledgement)?;
     if acknowledgement != *crate::READY {
