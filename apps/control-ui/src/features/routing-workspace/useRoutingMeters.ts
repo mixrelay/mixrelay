@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
-
 import { AudioMeterStore } from '../../core/audio-meter/AudioMeterStore';
-import type { ControlPort, MeterSnapshot, MeterTelemetry } from '../../core/control-port/types';
+import type { MeterSnapshot, MeterTelemetry } from '../../core/domain/control/meters';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 
 const POLL_MS = 50;
 const RETRY_MS = 500;

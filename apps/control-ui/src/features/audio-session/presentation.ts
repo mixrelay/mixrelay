@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next';
-import type { AudioSessionStatus, MixRelayStatus } from '../../core/control-port/types';
+import type { AudioSessionStatus, MixRelayStatus } from '../../core/domain/control/status';
 import type { StatusTone } from '../../core/ui/StatusBadge';
 import { getDriverPresentation } from '../driver-status/presentation';
 

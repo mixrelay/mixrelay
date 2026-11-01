@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import type { ControlPort } from '../../core/control-port/types';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { GraphCatalogController } from './GraphCatalogController';
 
 export function useGraphCatalog(controlPort: ControlPort) {

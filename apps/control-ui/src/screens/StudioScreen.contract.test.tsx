@@ -1,13 +1,11 @@
+import { StorybookMockControlPort } from '../core/adapters/fake/StorybookMockControlPort';
+import { ControlPortError } from '../core/domain/control/errors';
+import type { VirtualEndpointSpec } from '../core/domain/control/status';
+import type { ControlPort } from '../core/ports/control/ControlPort';
 import '../test-support/integration';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
-import {
-  type ControlPort,
-  ControlPortError,
-  type VirtualEndpointSpec,
-} from '../core/control-port/types';
 import { I18nProvider, i18n } from '../core/i18n';
 import { FeatureAccess } from '../core/licensing/FeatureAccess';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';

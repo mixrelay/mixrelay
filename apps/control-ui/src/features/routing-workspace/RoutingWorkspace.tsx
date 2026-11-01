@@ -19,21 +19,23 @@ import {
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
 import { audioGraphNodeTitle, normalizeAudioGraphNodeSize } from '../../core/audio-graph/model';
 import type { PlaceGraphNodes } from '../../core/audio-graph/nodePlacement';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import type {
   AudioDeviceDescriptor,
-  AudioSessionStatus,
   CapturableApplication,
-  ControlPort,
-  ExternalProcessorDescriptor,
+} from '../../core/domain/control/inventory';
+import type { ExternalProcessorDescriptor } from '../../core/domain/control/processors';
+import type {
+  AudioSessionStatus,
   FailedProcessorInstance,
-  RuntimeGraphDocument,
   VirtualEndpointSettings,
   VirtualEndpointSpec,
-} from '../../core/control-port/types';
-import { ControlPortError } from '../../core/control-port/types';
+} from '../../core/domain/control/status';
 import { type HistoryStep, useUndoHistory } from '../../core/history/useUndoHistory';
 import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
 import { MidiContext, MidiGraphContext } from '../../core/midi/MidiPort';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import type { EndpointControl } from '../../core/ui/AudioNodeEndpointOptions';
 import { InlineNotice } from '../../core/ui/InlineNotice';
 import { NodeMuteButton, NodePowerButton } from '../../core/ui/NodeSignalControls';
@@ -118,7 +120,7 @@ export interface RoutingWorkspaceProps {
   onProblemsChange?: (summary: WorkspaceProblemSummary) => void;
   failedProcessors?: FailedProcessorInstance[];
   catalogRevision?: number;
-  processorTimings?: import('../../core/control-port/types').ProcessorTiming[];
+  processorTimings?: import('../../core/domain/control/status').ProcessorTiming[];
   graphId?: string;
   interactionDisabled?: boolean;
   sessionDocument?: RuntimeGraphDocument;
@@ -1565,7 +1567,7 @@ type NodeRenderInputs = Pick<
 function useNodeRenderers(
   props: WorkspaceViewProps,
   t: TFunction,
-  snapshot: import('../../core/control-port/types').GraphNodeControls | null,
+  snapshot: import('../../core/domain/control/graph').GraphNodeControls | null,
   model: AudioGraphModel | null,
   editors: ReturnType<typeof useProcessorEditors>,
 ) {
@@ -1748,7 +1750,7 @@ function nodeSignalControls(
   props: NodeRenderInputs,
   node: AudioGraphNode,
   t: TFunction,
-  snapshot: import('../../core/control-port/types').GraphNodeControls | null,
+  snapshot: import('../../core/domain/control/graph').GraphNodeControls | null,
 ) {
   const control = node.runtime?.control ?? { enabled: true, muted: false };
   const recoveryOnly = usesRecoveryControls(node, props.mapping);

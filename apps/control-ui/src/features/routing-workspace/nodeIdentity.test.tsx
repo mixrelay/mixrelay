@@ -1,8 +1,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type { RuntimeGraphDocument } from '../../core/control-port/types';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import { removeGraphItems } from '../../core/domain/graph/topology';
 import { useUndoHistory } from '../../core/history/useUndoHistory';
 import { advance, eventually } from '../../test-support/fakeTimerQueries';

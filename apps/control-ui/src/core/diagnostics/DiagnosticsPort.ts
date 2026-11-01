@@ -1,4 +1,4 @@
-import type { ExternalProcessorDiagnostic } from '../control-port/types';
+import type { ExternalProcessorDiagnostic } from '../domain/control/processors';
 
 /** Editor facts added to the native support report. Codes and counts only: no names or paths. */
 export interface SupportReportContext {

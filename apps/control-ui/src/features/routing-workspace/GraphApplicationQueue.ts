@@ -1,15 +1,14 @@
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import {
-  type ControlPort,
-  ControlPortError,
-  type GraphLayout,
-  type GraphLayoutResponse,
-  type NodeControlRequest,
-  type NodeControlResponse,
-  type ProcessorParameterChange,
-  type ProcessorRetryRequest,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import type { GraphLayout, GraphLayoutResponse } from '../../core/domain/control/catalog';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type {
+  NodeControlRequest,
+  NodeControlResponse,
+  ProcessorParameterChange,
+  ProcessorRetryRequest,
+  RuntimeGraphDocument,
+} from '../../core/domain/control/graph';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { acknowledgedNodeControl } from './controlReconciliation';
 import { GraphReadback, pauseGraphObservation } from './GraphReadback';
 import { audioGraphToRuntimeGraph } from './model';

@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
-import type {
-  ControlPort,
-  DeviceAppActivity,
-  VirtualEndpointSettings,
-} from '../../core/control-port/types';
+import type { DeviceAppActivity } from '../../core/domain/control/inventory';
+import type { VirtualEndpointSettings } from '../../core/domain/control/status';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { structuralShare } from '../../core/structuralShare';
 
 export type DeviceActivityObservation =

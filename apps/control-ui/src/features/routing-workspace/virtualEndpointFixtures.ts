@@ -1,8 +1,8 @@
+import type { NativeDeviceFormats } from '../../core/domain/control/nativeFormat';
 import type {
-  NativeDeviceFormats,
   VirtualEndpointSettings,
   VirtualEndpointSpec,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/status';
 
 export const unknownNativeFormats: NativeDeviceFormats = {
   render: { current: null, supported: [] },
@@ -44,48 +44,49 @@ export const virtualPolicy: VirtualEndpointSettings = {
 export const duplexReference = { render: true, capture: true };
 
 /** Native UID intentionally differs from the graph endpoint ID. */
-export const deviceActivitySession: import('../../core/control-port/types').AudioSessionStatus = {
-  format: { sampleRate: 48000, blockFrames: 128 },
-  clockAuthority: 'device',
-  observedDeviceSampleRate: 48000,
-  issue: null,
-  transportLatencyFrames: 128,
-  capabilities: {
-    backend: 'core_audio',
-    supportedSampleRates: [48000],
-    supportedBlockFrames: [128],
-    canReconfigureLive: true,
-    hardwareInput: true,
-    hardwareOutput: true,
-    virtualEndpoint: true,
-    applicationCapture: true,
-    sampleRateConversion: false,
-    driftCorrection: false,
-  },
-  virtualEndpointSettings: {
-    ...virtualPolicy,
-    devices: [
-      {
-        nativeDeviceIds: ['native-mixrelay-device'],
-        nativeFormats: unknownNativeFormats,
-        spec: {
-          ...virtualSpec,
-          id: 'default-virtual-io',
-          displayName: 'MixRelay Virtual I/O',
-          render: { channels: 2, channelLayout: 'stereo' },
-          capture: { channels: 2, channelLayout: 'stereo' },
+export const deviceActivitySession: import('../../core/domain/control/status').AudioSessionStatus =
+  {
+    format: { sampleRate: 48000, blockFrames: 128 },
+    clockAuthority: 'device',
+    observedDeviceSampleRate: 48000,
+    issue: null,
+    transportLatencyFrames: 128,
+    capabilities: {
+      backend: 'core_audio',
+      supportedSampleRates: [48000],
+      supportedBlockFrames: [128],
+      canReconfigureLive: true,
+      hardwareInput: true,
+      hardwareOutput: true,
+      virtualEndpoint: true,
+      applicationCapture: true,
+      sampleRateConversion: false,
+      driftCorrection: false,
+    },
+    virtualEndpointSettings: {
+      ...virtualPolicy,
+      devices: [
+        {
+          nativeDeviceIds: ['native-mixrelay-device'],
+          nativeFormats: unknownNativeFormats,
+          spec: {
+            ...virtualSpec,
+            id: 'default-virtual-io',
+            displayName: 'MixRelay Virtual I/O',
+            render: { channels: 2, channelLayout: 'stereo' },
+            capture: { channels: 2, channelLayout: 'stereo' },
+          },
+          observedSampleRate: 48000,
+          supportedSampleRates: [48000],
+          canSetSampleRate: false,
         },
-        observedSampleRate: 48000,
-        supportedSampleRates: [48000],
-        canSetSampleRate: false,
-      },
-    ],
-  },
-};
+      ],
+    },
+  };
 
 export const deviceActivityFixture: Record<
   string,
-  import('../../core/control-port/types').DeviceAppActivity[]
+  import('../../core/domain/control/inventory').DeviceAppActivity[]
 > = {
   'native-mixrelay-device': [
     {

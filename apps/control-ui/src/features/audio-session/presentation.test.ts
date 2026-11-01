@@ -3,7 +3,7 @@ import type {
   AudioSessionStatus,
   DriverState,
   MixRelayStatus,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/status';
 import { i18n } from '../../core/i18n';
 import { getAudioSessionPresentation, getEnginePresentation } from './presentation';
 

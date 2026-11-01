@@ -1,4 +1,4 @@
-import type { ControlPort } from '../../core/control-port/types';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 
 /** Only native release/activation acknowledgements finish a switch, never local button intent. */
 export async function waitForEnginePower(

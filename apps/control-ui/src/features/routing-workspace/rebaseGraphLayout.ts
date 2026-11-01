@@ -1,4 +1,4 @@
-import type { GraphLayout } from '../../core/control-port/types';
+import type { GraphLayout } from '../../core/domain/control/catalog';
 
 function fields<T extends object>(base: T | undefined, local: T, remote: T): T {
   return Object.fromEntries(

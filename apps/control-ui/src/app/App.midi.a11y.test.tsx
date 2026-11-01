@@ -1,9 +1,9 @@
+import { StorybookMockControlPort } from '../core/adapters/fake/StorybookMockControlPort';
 import '../test-support/integration';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
 import { expect, it } from 'vitest';
-import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
 import { I18nProvider, i18n } from '../core/i18n';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import { midiBinding, midiFixture, midiPortFixture } from '../features/midi/midiFixtures';

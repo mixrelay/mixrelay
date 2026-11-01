@@ -5,7 +5,7 @@ import type {
   GraphApplyResponse,
   ProcessorParameterChange,
   RuntimeGraphDocument,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/graph';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { changedProcessorParameters, updateRoutingNodeParameter } from './model';
 

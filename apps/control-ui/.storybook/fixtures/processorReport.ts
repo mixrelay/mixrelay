@@ -1,5 +1,8 @@
-import type { StorybookControlState } from '../../src/core/control-port/StorybookMockControlPort';
-import type { ExternalProcessorDescriptor, ProviderPorts } from '../../src/core/control-port/types';
+import type { StorybookControlState } from '../../src/core/adapters/fake/StorybookMockControlPort';
+import type {
+  ExternalProcessorDescriptor,
+  ProviderPorts,
+} from '../../src/core/domain/control/processors';
 
 export const processorReportPorts: ProviderPorts = {
   layoutId: 'layout-v1:stereo',

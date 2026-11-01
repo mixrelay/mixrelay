@@ -1,4 +1,4 @@
-import type { NativeStreamFormat } from '../control-port/types';
+import type { NativeStreamFormat } from '../domain/control/nativeFormat';
 
 export function nativeFormatKey(format: NativeStreamFormat): string {
   return `${format.sampleRate}:${format.channels}:${format.sampleFormat}`;

@@ -1,33 +1,6 @@
-import type {
-  GraphNodeControls,
-  GraphRuntimeStatus,
-  MeterTelemetry,
-  MeterTelemetryListener,
-  MixRelayStatus,
-  ProcessorEditorStatus,
-} from './types';
+import type { ControlStateSnapshot, ControlTelemetry } from '../../domain/control/state';
+import type { MeterTelemetryListener, StateListener } from '../../ports/control/TelemetryPort';
 
-export interface ControlStateSnapshot {
-  generation: number;
-  status: MixRelayStatus;
-  graph: GraphRuntimeStatus;
-  controls: {
-    revision: number;
-    activeRevision: number;
-    structureGeneration: number;
-    graphs: { id: string; nodes: GraphNodeControls['nodes'] }[];
-  } | null;
-  editors: ProcessorEditorStatus[];
-}
-export interface ControlTelemetry extends MeterTelemetry {
-  state?: ControlStateSnapshot | null;
-}
-/** Undefined state invalidates cached observations. The incarnation names the last
- * observed engine; only a fresh snapshot can confirm a pending graph revision. */
-export type StateListener = (
-  state: ControlStateSnapshot | undefined,
-  engineIncarnation?: string,
-) => void;
 type Listener = Partial<MeterTelemetryListener> & { state?: StateListener };
 type Source = (listener: MeterTelemetryListener) => Promise<() => void>;
 
@@ -233,14 +206,4 @@ function unpack(
       nodes,
     },
   };
-}
-
-export function graphControls(
-  state: ControlStateSnapshot | undefined,
-  graphId: string,
-): GraphNodeControls | undefined {
-  const graph = state?.controls?.graphs.find((graph) => graph.id === graphId);
-  return graph && state?.controls
-    ? { graphId, revision: state.controls.revision, nodes: graph.nodes }
-    : undefined;
 }

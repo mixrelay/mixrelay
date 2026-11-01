@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { controlState, packedTelemetry } from '../../test-support/controlTelemetry';
+import { controlState, packedTelemetry } from '../../../test-support/controlTelemetry';
+import type { ControlPort } from '../../ports/control/ControlPort';
 import { HttpControlPort } from './HttpControlPort';
 import { TauriControlPort } from './TauriControlPort';
-import type { ControlPort } from './types';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());

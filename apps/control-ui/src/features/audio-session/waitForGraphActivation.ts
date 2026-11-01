@@ -1,4 +1,4 @@
-import type { ControlPort } from '../../core/control-port/types';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 
 /** Wait for native adoption after a format write. Cancellation stops further reads;
  * deadline or control failures propagate so the caller retains its existing document. */

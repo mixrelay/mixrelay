@@ -1,4 +1,4 @@
-import type { RuntimeGraphEdge } from '../control-port/types';
+import type { NodeControlState, RuntimeGraphEdge } from '../domain/control/graph';
 import type { GraphEdge, GraphNode, GraphPort, GraphTopology } from '../domain/graph/topology';
 import { nodeWidths } from '../theme/tokens';
 import type { NodeChoiceControl } from '../ui/AudioNodeCard';
@@ -105,7 +105,7 @@ export interface AudioGraphNode extends GraphNode {
   position: AudioGraphPosition;
   size?: AudioGraphNodeSize;
   runtime?: {
-    control?: import('../control-port/types').NodeControlState;
+    control?: NodeControlState;
     /** Unresolved presentation retains the original nullable label, not its fallback title. */
     label?: string | null;
     binding?: { nodeId: string; side: 'source' | 'sink' };

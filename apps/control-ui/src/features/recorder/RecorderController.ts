@@ -1,10 +1,10 @@
-import {
-  type ControlPort,
-  ControlPortError,
-  type RecorderRequest,
-  type RecorderSettings,
-  type RecorderStatus,
-} from '../../core/control-port/types';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type {
+  RecorderRequest,
+  RecorderSettings,
+  RecorderStatus,
+} from '../../core/domain/control/recorder';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 
 interface RecorderSnapshot {
   status: RecorderStatus | null;

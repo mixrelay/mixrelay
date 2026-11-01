@@ -1,4 +1,4 @@
-import type { NativeDeviceFormats, NativeSampleFormat } from '../control-port/types';
+import type { NativeDeviceFormats, NativeSampleFormat } from '../domain/control/nativeFormat';
 
 export const sampleFormatLabels: Record<NativeSampleFormat, string> = {
   signed16: '16-bit PCM',

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type { RuntimeGraphDocument } from '../../core/control-port/types';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import { i18n } from '../../core/i18n';
 import { RoutingWorkspace } from './RoutingWorkspace';
 

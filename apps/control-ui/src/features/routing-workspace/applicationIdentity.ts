@@ -1,7 +1,7 @@
 import type {
   CapturableApplication,
   RuntimeApplicationSelector,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/inventory';
 
 /** Presentation identity follows the selected source, never a display name or a current PID guess. */
 export function applicationSelectorKey(selector: unknown): string | undefined {

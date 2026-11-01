@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import type { DriverState } from '../../core/control-port/types';
+import type { DriverState } from '../../core/domain/control/status';
 import { ActionButton } from '../../core/ui/ActionButton';
 import styles from './DriverInstallNotice.module.css';
 

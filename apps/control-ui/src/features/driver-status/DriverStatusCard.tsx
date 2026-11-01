@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { DriverState } from '../../core/control-port/types';
+import type { DriverState } from '../../core/domain/control/status';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { Panel } from '../../core/ui/Panel';
 import { StatusBadge } from '../../core/ui/StatusBadge';

@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
 import { useCatalogTitle, useGraphCatalog } from './useGraphCatalog';
 
 afterEach(() => vi.useRealTimers());

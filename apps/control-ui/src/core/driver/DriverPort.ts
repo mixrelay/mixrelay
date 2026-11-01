@@ -1,9 +1,5 @@
-import type {
-  NativeSampleFormat,
-  NativeStreamFormat,
-  VirtualEndpointSettings,
-  VirtualEndpointSpec,
-} from '../control-port/types';
+import type { NativeSampleFormat, NativeStreamFormat } from '../domain/control/nativeFormat';
+import type { VirtualEndpointSettings, VirtualEndpointSpec } from '../domain/control/status';
 
 export type NativeDirection = 'render' | 'capture';
 

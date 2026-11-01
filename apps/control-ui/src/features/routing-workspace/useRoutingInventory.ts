@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 
-import type { ControlPort } from '../../core/control-port/types';
 import { useSharedState } from '../../core/structuralShare';
 
 export const INVENTORY_POLL_MS = 5_000;

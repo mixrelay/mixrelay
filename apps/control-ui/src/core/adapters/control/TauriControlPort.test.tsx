@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-
+import { ControlPortError } from '../../domain/control/errors';
+import type { RuntimeGraphDocument } from '../../domain/control/graph';
 import { HttpControlPort } from './HttpControlPort';
 import { createLocalControlPort } from './localControlPort';
 import { TauriControlPort } from './TauriControlPort';
-import { ControlPortError, type RuntimeGraphDocument } from './types';
 
 const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 3, schemaVersion: 2 };
 

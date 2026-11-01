@@ -1,10 +1,7 @@
-import {
-  type ControlPort,
-  ControlPortError,
-  type GraphCatalog,
-  type GraphCatalogAction,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import type { GraphCatalog, GraphCatalogAction } from '../../core/domain/control/catalog';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 
 export interface GraphCatalogState {
   catalog: GraphCatalog | null;

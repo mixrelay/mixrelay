@@ -1,4 +1,5 @@
 import { expect, it, vi } from 'vitest';
+import { TauriControlPort } from './TauriControlPort';
 
 const native = vi.hoisted(() => ({
   invoke: vi.fn().mockResolvedValue(3),
@@ -7,8 +8,6 @@ const native = vi.hoisted(() => ({
   },
 }));
 vi.mock('@tauri-apps/api/core', () => native);
-
-import { TauriControlPort } from './TauriControlPort';
 
 it('creates a native channel for pushed meters by default', async () => {
   const port = new TauriControlPort();

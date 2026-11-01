@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type { AudioSessionStatus, MixRelayStatus } from '../../core/control-port/types';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
+import type { AudioSessionStatus, MixRelayStatus } from '../../core/domain/control/status';
 import { i18n } from '../../core/i18n';
 import { en } from '../../core/i18n/locales/en';
 import { koKR } from '../../core/i18n/locales/ko-KR';

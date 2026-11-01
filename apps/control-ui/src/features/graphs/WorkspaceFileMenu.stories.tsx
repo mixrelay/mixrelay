@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, userEvent, within } from 'storybook/test';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
 import { i18n } from '../../core/i18n';
 import { WorkspaceFileMenu } from './WorkspaceFileMenu';
 

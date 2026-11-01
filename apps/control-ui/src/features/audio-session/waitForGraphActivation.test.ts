@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ControlPort } from '../../core/control-port/types';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { waitForGraphActivation } from './waitForGraphActivation';
 
 afterEach(() => vi.useRealTimers());

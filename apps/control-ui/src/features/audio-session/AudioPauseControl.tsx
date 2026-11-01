@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type {
-  ControlPort,
-  MixRelayStatus,
-  RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type { MixRelayStatus } from '../../core/domain/control/status';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { InlineNotice } from '../../core/ui/InlineNotice';
 import { TransportButton } from '../../core/ui/TransportButton';
 import styles from './AudioPauseControl.module.css';

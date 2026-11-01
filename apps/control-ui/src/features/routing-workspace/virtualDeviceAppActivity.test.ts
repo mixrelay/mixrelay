@@ -1,6 +1,6 @@
 import { assert, expect, it } from 'vitest';
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
-import type { DeviceAppActivity } from '../../core/control-port/types';
+import type { DeviceAppActivity } from '../../core/domain/control/inventory';
 import { i18n } from '../../core/i18n';
 import { presentVirtualDeviceAppActivity } from './virtualDeviceAppActivity';
 import { virtualPolicy, virtualSpec } from './virtualEndpointFixtures';

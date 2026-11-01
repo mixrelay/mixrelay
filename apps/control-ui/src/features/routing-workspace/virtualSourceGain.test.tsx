@@ -1,8 +1,7 @@
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import type { RuntimeGraphDocument } from '../../core/control-port/types';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import { useUndoHistory } from '../../core/history/useUndoHistory';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';

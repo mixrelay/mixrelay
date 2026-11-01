@@ -1,4 +1,4 @@
-import type { NativeDeviceFormats, NativeSampleFormat } from '../control-port/types';
+import type { NativeDeviceFormats, NativeSampleFormat } from '../domain/control/nativeFormat';
 import { sampleFormatLabels, sharedDevicePcm } from '../driver/sharedDeviceFormat';
 import { SelectField } from './SelectField';
 

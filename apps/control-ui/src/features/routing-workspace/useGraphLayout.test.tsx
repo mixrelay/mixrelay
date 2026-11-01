@@ -2,7 +2,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import type { ControlPort, GraphLayoutResponse } from '../../core/control-port/types';
+import type { GraphLayoutResponse } from '../../core/domain/control/catalog';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { useGraphLayout } from './useGraphLayout';
 
 function model(): AudioGraphModel {

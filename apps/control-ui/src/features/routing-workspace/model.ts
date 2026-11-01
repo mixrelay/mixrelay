@@ -6,21 +6,25 @@ import type {
 } from '../../core/audio-graph/model';
 import { graphNodeDefaultWidth } from '../../core/audio-graph/model';
 import type {
-  CapturableApplication,
-  ExternalProcessorDescriptor,
   ProcessorParameterChange,
+  RuntimeChannelRoute,
+  RuntimeGraphDocument,
+  RuntimeGraphEdge,
+  RuntimeGraphNode,
+} from '../../core/domain/control/graph';
+import type { CapturableApplication } from '../../core/domain/control/inventory';
+import type {
+  ExternalProcessorDescriptor,
   ProviderBus,
   ProviderBusKind,
   ProviderChannelFormat,
   ProviderNodeConfig,
   ProviderPorts,
-  RuntimeChannelRoute,
-  RuntimeGraphDocument,
-  RuntimeGraphEdge,
-  RuntimeGraphNode,
+} from '../../core/domain/control/processors';
+import type {
   VirtualEndpointSettings,
   VirtualEndpointSpec,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/status';
 import { addGraphNode, connectGraph } from '../../core/domain/graph/topology';
 import { nodeInsertionGap } from '../../core/theme/tokens';
 import { applicationInventorySelection, applicationSelectorKey } from './applicationIdentity';

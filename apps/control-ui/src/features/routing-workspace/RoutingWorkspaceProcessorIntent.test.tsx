@@ -1,14 +1,12 @@
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
+import type { GraphApplyResponse } from '../../core/domain/control/graph';
+import type { ProcessorParameterUpdateResponse } from '../../core/domain/control/processors';
 import { ProblemsTarget } from '../../test-support/ProblemsTarget';
 import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { expect, it, vi } from 'vitest';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type {
-  GraphApplyResponse,
-  ProcessorParameterUpdateResponse,
-} from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { StudioScreen } from '../../screens/StudioScreen';

@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
-import type { RuntimeGraphDocument } from '../../core/control-port/types';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import { useUndoHistory } from '../../core/history/useUndoHistory';
 import { effectLabelsFromWords, effectTranslations } from '../../core/i18n/effects';
 import {

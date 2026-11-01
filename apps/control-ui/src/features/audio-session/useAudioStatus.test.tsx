@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-import type { ControlPort, MixRelayStatus } from '../../core/control-port/types';
+import type { MixRelayStatus } from '../../core/domain/control/status';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { controlState, statePush } from '../../test-support/controlTelemetry';
 import { useAudioStatus } from './useAudioStatus';
 

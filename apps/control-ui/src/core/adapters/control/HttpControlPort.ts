@@ -1,31 +1,38 @@
+import type {
+  GraphCatalog,
+  GraphCatalogRequest,
+  GraphLayoutRequest,
+  GraphLayoutResponse,
+} from '../../domain/control/catalog';
+import { ControlPortError, type ProtocolErrorBody } from '../../domain/control/errors';
+import type {
+  GraphApplyRequest,
+  GraphApplyResponse,
+  GraphNodeControls,
+  GraphRuntimeStatus,
+  NodeControlRequest,
+  NodeControlResponse,
+  ProcessorRetryRequest,
+  RuntimeGraphDocument,
+} from '../../domain/control/graph';
+import type { MeterSnapshot } from '../../domain/control/meters';
+import type {
+  ExternalProcessorCatalog,
+  ProcessorEditorFrame,
+  ProcessorEditorInput,
+  ProcessorEditorStatus,
+  ProcessorParameterUpdateResponse,
+} from '../../domain/control/processors';
+import type {
+  RecorderRequest,
+  RecorderSettings,
+  RecorderStatus,
+} from '../../domain/control/recorder';
+import type { MixRelayStatus, VirtualEndpointFormatRequest } from '../../domain/control/status';
+import type { ControlPort } from '../../ports/control/ControlPort';
+import type { MeterTelemetryListener, StateListener } from '../../ports/control/TelemetryPort';
 import { openHttpTelemetry } from './httpTelemetry';
-import { type StateListener, TelemetryHub } from './telemetry';
-import {
-  type ControlPort,
-  ControlPortError,
-  type ExternalProcessorCatalog,
-  type GraphApplyRequest,
-  type GraphApplyResponse,
-  type GraphCatalog,
-  type GraphCatalogRequest,
-  type GraphLayoutRequest,
-  type GraphLayoutResponse,
-  type GraphRuntimeStatus,
-  type MeterSnapshot,
-  type MixRelayStatus,
-  type NodeControlResponse,
-  type ProcessorEditorFrame,
-  type ProcessorEditorInput,
-  type ProcessorEditorStatus,
-  type ProcessorParameterUpdateResponse,
-  type ProcessorRetryRequest,
-  type ProtocolErrorBody,
-  type RecorderRequest,
-  type RecorderSettings,
-  type RecorderStatus,
-  type RuntimeGraphDocument,
-  type VirtualEndpointFormatRequest,
-} from './types';
+import { TelemetryHub } from './telemetry';
 
 // The engine listens only on a user-owned Unix socket. In the browser development surface,
 // `vite dev` forwards this same-origin path to it; Tauri uses native IPC instead.
@@ -47,7 +54,7 @@ export class HttpControlPort implements ControlPort {
   public subscribeState(listener: StateListener) {
     return this.telemetry.subscribeState(listener);
   }
-  public subscribeMeters(listener: import('./types').MeterTelemetryListener) {
+  public subscribeMeters(listener: MeterTelemetryListener) {
     return this.telemetry.subscribeMeters(listener);
   }
   public async recordingSettings(_graphId: string, _nodeId: string): Promise<RecorderSettings> {
@@ -65,13 +72,13 @@ export class HttpControlPort implements ControlPort {
   ): Promise<RecorderSettings> {
     return this.recordingSettings(graphId, nodeId);
   }
-  public getNodeControls(graphId: string): Promise<import('./types').GraphNodeControls> {
+  public getNodeControls(graphId: string): Promise<GraphNodeControls> {
     return this.json(`/api/v1/graphs/${encodeURIComponent(graphId)}/nodes/controls`);
   }
   public updateNodeControl(
     graphId: string,
     nodeId: string,
-    request: import('./types').NodeControlRequest,
+    request: NodeControlRequest,
   ): Promise<NodeControlResponse> {
     return this.json(
       `/api/v1/graphs/${encodeURIComponent(graphId)}/nodes/${encodeURIComponent(nodeId)}/control`,

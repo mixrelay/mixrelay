@@ -1,10 +1,8 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { ProcessorParameterUpdateResponse } from '../../core/domain/control/processors';
 
-import {
-  ControlPortError,
-  type ProcessorParameterUpdateResponse,
-} from '../../core/control-port/types';
 import { useProcessorParameterPublisher } from './useProcessorParameterPublisher';
 
 const response: ProcessorParameterUpdateResponse = {

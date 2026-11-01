@@ -1,4 +1,4 @@
-import type { RuntimeGraphDocument } from '../../core/control-port/types';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 
 function same(a: unknown, b: unknown): boolean {
   if (a === b) return true;

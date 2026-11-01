@@ -1,7 +1,7 @@
 import { type Ref, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { MixRelayStatus } from '../core/control-port/types';
 import { type DiagnosticsPort, scanFailureCounts } from '../core/diagnostics/DiagnosticsPort';
+import type { MixRelayStatus } from '../core/domain/control/status';
 import { ActionButton } from '../core/ui/ActionButton';
 import { ContentSection } from '../core/ui/ContentSection';
 import { Dialog } from '../core/ui/Dialog';

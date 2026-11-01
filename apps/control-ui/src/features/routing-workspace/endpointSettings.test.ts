@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import type { RuntimeGraphDocument, VirtualEndpointSettings } from '../../core/control-port/types';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type { VirtualEndpointSettings } from '../../core/domain/control/status';
 import { addRoutingNode, audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
 import { unknownNativeFormats, virtualPolicy, virtualSpec } from './virtualEndpointFixtures';
 

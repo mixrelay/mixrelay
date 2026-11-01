@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-
+import { ControlPortError } from '../../domain/control/errors';
+import type { RuntimeGraphDocument } from '../../domain/control/graph';
 import { HttpControlPort } from './HttpControlPort';
-import { ControlPortError, type RuntimeGraphDocument } from './types';
 
 /** Reads carry a deadline; mutations (asserted with their exact init) carry none. */
 const read = { signal: expect.any(AbortSignal) };

@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { expect, it, vi } from 'vitest';
-
 import { TauriControlPort } from './TauriControlPort';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));

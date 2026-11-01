@@ -1,5 +1,5 @@
-import type { ControlPort } from '../../core/control-port/types';
-import { waitForPushedRevision } from '../../core/control-port/waitForPushedRevision';
+import { waitForPushedRevision } from '../../core/application/graph/waitForPushedRevision';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 
 const OBSERVATION_MS = 200;
 type ReadPort = Pick<

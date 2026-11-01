@@ -1,7 +1,10 @@
 import { renderHook } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import type { ExternalProcessorDescriptor, ProviderPorts } from '../../core/control-port/types';
+import type {
+  ExternalProcessorDescriptor,
+  ProviderPorts,
+} from '../../core/domain/control/processors';
 import { connectGraphBatch } from '../../core/domain/graph/topology';
 import { i18n } from '../../core/i18n';
 import { addRoutingNode, changeProcessorLayout, defaultPresentation } from './model';

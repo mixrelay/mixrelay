@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import {
-  ControlPortError,
-  type RecorderSettings,
-  type RecorderStatus,
-} from '../../core/control-port/types';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { RecorderSettings, RecorderStatus } from '../../core/domain/control/recorder';
 import { RecorderController, recordingDuration } from './RecorderController';
 
 const stopped: RecorderStatus = {

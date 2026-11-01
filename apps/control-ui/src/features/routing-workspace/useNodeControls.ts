@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { graphControls } from '../../core/control-port/telemetry';
-import type { ControlPort, GraphNodeControls } from '../../core/control-port/types';
+import type { GraphNodeControls } from '../../core/domain/control/graph';
+import { graphControls } from '../../core/domain/control/state';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { useSharedState } from '../../core/structuralShare';
 import type { GraphApplicationQueue } from './GraphApplicationQueue';
 

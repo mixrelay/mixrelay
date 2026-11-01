@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { packedTelemetry } from '../../test-support/controlTelemetry';
+import { packedTelemetry } from '../../../test-support/controlTelemetry';
 import { openHttpTelemetry } from './httpTelemetry';
 
 beforeEach(() => vi.useFakeTimers());

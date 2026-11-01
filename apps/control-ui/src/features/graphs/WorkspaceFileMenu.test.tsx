@@ -1,8 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type { ControlPort } from '../../core/control-port/types';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
 import { I18nProvider, i18n, supportedLocales } from '../../core/i18n';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { WorkspaceFileMenu } from './WorkspaceFileMenu';
 

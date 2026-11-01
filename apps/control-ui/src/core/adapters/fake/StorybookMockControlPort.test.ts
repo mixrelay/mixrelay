@@ -1,7 +1,6 @@
 import { assert, describe, expect, it } from 'vitest';
-
+import type { ProcessorRetryRequest, RuntimeGraphDocument } from '../../domain/control/graph';
 import { type StorybookControlState, StorybookMockControlPort } from './StorybookMockControlPort';
-import type { ProcessorRetryRequest, RuntimeGraphDocument } from './types';
 
 function fixture(graph?: RuntimeGraphDocument) {
   const state: StorybookControlState = {
@@ -362,7 +361,7 @@ it('returns isolated native activity fixtures and observed empty by default', as
 
 it('catalog deletion undo and redo preserve graph/node identities and reject absent history', async () => {
   const { port } = fixture();
-  const mutate = async (action: import('./types').GraphCatalogAction) => {
+  const mutate = async (action: import('../../domain/control/catalog').GraphCatalogAction) => {
     const catalog = await port.getGraphCatalog();
     return port.mutateGraphCatalog({
       ...action,

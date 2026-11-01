@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { RuntimeGraphDocument, RuntimeGraphNode } from '../../core/control-port/types';
+import type { RuntimeGraphDocument, RuntimeGraphNode } from '../../core/domain/control/graph';
 import { rebaseGraphEdit } from './rebaseGraphEdit';
 
 const node = (id: string, config: unknown = {}): RuntimeGraphNode => ({

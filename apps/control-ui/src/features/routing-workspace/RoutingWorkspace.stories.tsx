@@ -6,12 +6,9 @@ import { processorReportState } from '../../../.storybook/fixtures/processorRepo
 import {
   type StorybookControlState,
   StorybookMockControlPort,
-} from '../../core/control-port/StorybookMockControlPort';
-import {
-  ControlPortError,
-  type GraphApplyResponse,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+} from '../../core/adapters/fake/StorybookMockControlPort';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { GraphApplyResponse, RuntimeGraphDocument } from '../../core/domain/control/graph';
 import { i18n } from '../../core/i18n';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { ContentSection } from '../../core/ui/ContentSection';

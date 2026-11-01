@@ -2,14 +2,12 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, userEvent, within } from 'storybook/test';
 import { builtinEffectsFixture } from '../../.storybook/fixtures/builtinEffects';
 import { processorReportState } from '../../.storybook/fixtures/processorReport';
+import { StorybookMockControlPort } from '../core/adapters/fake/StorybookMockControlPort';
 import quickTimeIcon from '../core/audio-graph/fixtures/quicktime-player.png';
-import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
-import type {
-  MixRelayStatus,
-  NativeSampleFormat,
-  RuntimeGraphDocument,
-} from '../core/control-port/types';
-import { ControlPortError } from '../core/control-port/types';
+import { ControlPortError } from '../core/domain/control/errors';
+import type { RuntimeGraphDocument } from '../core/domain/control/graph';
+import type { NativeSampleFormat } from '../core/domain/control/nativeFormat';
+import type { MixRelayStatus } from '../core/domain/control/status';
 import { i18n } from '../core/i18n';
 import type { LicensingPort } from '../core/licensing/LicensingPort';
 import { readyDriver } from '../features/driver-status/driverFixtures';

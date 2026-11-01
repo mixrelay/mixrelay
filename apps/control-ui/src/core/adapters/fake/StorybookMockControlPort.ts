@@ -1,31 +1,42 @@
-import {
-  type AudioDeviceDescriptor,
-  type CapturableApplication,
-  type ControlPort,
-  ControlPortError,
-  type ExternalProcessorCatalog,
-  type GraphApplyRequest,
-  type GraphApplyResponse,
-  type GraphCatalog,
-  type GraphCatalogRequest,
-  type GraphLayout,
-  type GraphLayoutRequest,
-  type GraphLayoutResponse,
-  type GraphRuntimeStatus,
-  type MeterSnapshot,
-  type MixRelayStatus,
-  type NodeControlResponse,
-  type ProcessorEditorFrame,
-  type ProcessorEditorInput,
-  type ProcessorEditorStatus,
-  type ProcessorParameterUpdateResponse,
-  type ProcessorRetryRequest,
-  type RecorderRequest,
-  type RecorderSettings,
-  type RecorderStatus,
-  type RuntimeGraphDocument,
-  type RuntimeGraphNode,
-} from './types';
+import type {
+  GraphCatalog,
+  GraphCatalogRequest,
+  GraphLayout,
+  GraphLayoutRequest,
+  GraphLayoutResponse,
+} from '../../domain/control/catalog';
+import { ControlPortError } from '../../domain/control/errors';
+import type {
+  GraphApplyRequest,
+  GraphApplyResponse,
+  GraphNodeControls,
+  GraphRuntimeStatus,
+  NodeControlRequest,
+  NodeControlResponse,
+  ProcessorRetryRequest,
+  RuntimeGraphDocument,
+  RuntimeGraphNode,
+} from '../../domain/control/graph';
+import type {
+  AudioDeviceDescriptor,
+  CapturableApplication,
+  DeviceAppActivity,
+} from '../../domain/control/inventory';
+import type { MeterSnapshot } from '../../domain/control/meters';
+import type {
+  ExternalProcessorCatalog,
+  ProcessorEditorFrame,
+  ProcessorEditorInput,
+  ProcessorEditorStatus,
+  ProcessorParameterUpdateResponse,
+} from '../../domain/control/processors';
+import type {
+  RecorderRequest,
+  RecorderSettings,
+  RecorderStatus,
+} from '../../domain/control/recorder';
+import type { MixRelayStatus } from '../../domain/control/status';
+import type { ControlPort } from '../../ports/control/ControlPort';
 
 /** The engine's revision conflict: a 409 the graph writer recognises as a definite rejection. */
 function staleRevision(parameters: Record<string, unknown>) {
@@ -42,7 +53,7 @@ function nodeGain(node: RuntimeGraphNode): number | undefined {
 }
 
 export interface StorybookControlState {
-  deviceAppActivity?: Record<string, import('./types').DeviceAppActivity[]>;
+  deviceAppActivity?: Record<string, DeviceAppActivity[]>;
   layout?: GraphLayout;
   applications?: CapturableApplication[];
   audioDevices?: AudioDeviceDescriptor[];
@@ -81,7 +92,7 @@ export class StorybookMockControlPort implements ControlPort {
     this.recorderSettings.set(JSON.stringify([graphId, nodeId]), { ...settings });
     return { ...settings };
   }
-  public async getNodeControls(graphId: string): Promise<import('./types').GraphNodeControls> {
+  public async getNodeControls(graphId: string): Promise<GraphNodeControls> {
     const document =
       graphId === this.activeGraph.id ? this.state.graph : this.savedGraphs.get(graphId)?.document;
     if (!document) throw new Error('graph_invalid');
@@ -101,7 +112,7 @@ export class StorybookMockControlPort implements ControlPort {
   public async updateNodeControl(
     graphId: string,
     nodeId: string,
-    request: import('./types').NodeControlRequest,
+    request: NodeControlRequest,
   ): Promise<NodeControlResponse> {
     const target = this.state.graph.nodes.find((node) => node.id === nodeId);
     if (
@@ -465,9 +476,7 @@ export class StorybookMockControlPort implements ControlPort {
     return this.state.applications ?? [];
   }
 
-  public async getVirtualDeviceAppActivity(): Promise<
-    Record<string, import('./types').DeviceAppActivity[]>
-  > {
+  public async getVirtualDeviceAppActivity(): Promise<Record<string, DeviceAppActivity[]>> {
     return structuredClone(this.state.deviceAppActivity ?? {});
   }
 

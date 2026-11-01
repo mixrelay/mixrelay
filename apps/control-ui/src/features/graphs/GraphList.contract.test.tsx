@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { expect, it, vi } from 'vitest';
-import type { GraphCatalog } from '../../core/control-port/types';
+import type { GraphCatalog } from '../../core/domain/control/catalog';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import type { ConfirmationDialog } from '../../core/ui/ConfirmationDialog';

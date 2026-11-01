@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import type { ControlPort, ProcessorEditorStatus } from '../../core/control-port/types';
+import type { ProcessorEditorStatus } from '../../core/domain/control/processors';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { structuralShare } from '../../core/structuralShare';
 
 export const EDITOR_POLL_MS = 250;

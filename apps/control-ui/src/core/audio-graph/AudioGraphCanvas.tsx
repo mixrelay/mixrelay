@@ -1,3 +1,4 @@
+import type { ProcessorEditorFailure, ProcessorEditorStatus } from '../domain/control/processors';
 import {
   type ChannelConnectionRequest,
   mapChannelConnections,
@@ -58,7 +59,6 @@ import {
 import { useTranslation } from 'react-i18next';
 import { AudioMeterProvider } from '../audio-meter/AudioMeterProvider';
 import type { AudioMeterStore } from '../audio-meter/AudioMeterStore';
-import type { ProcessorEditorFailure, ProcessorEditorStatus } from '../control-port/types';
 import { useStructuralShare } from '../structuralShare';
 import { AudioNodeCard } from '../ui/AudioNodeCard';
 import type { EndpointUpdate } from '../ui/AudioNodeEndpointOptions';

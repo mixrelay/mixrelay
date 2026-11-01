@@ -2,8 +2,8 @@ import type { TFunction } from 'i18next';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PlaceGraphNodes } from '../../core/audio-graph/nodePlacement';
+import type { ExternalProcessorDiagnostic } from '../../core/domain/control/processors';
 
-import type { ExternalProcessorDiagnostic } from '../../core/control-port/types';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { Dialog } from '../../core/ui/Dialog';
 import { DisclosureList, type DisclosureListItem } from '../../core/ui/DisclosureList';

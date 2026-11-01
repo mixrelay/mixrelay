@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import type { FailedProcessorInstance } from '../../core/control-port/types';
+import type { FailedProcessorInstance } from '../../core/domain/control/status';
 
 export function presentProcessorFailures(
   model: AudioGraphModel,

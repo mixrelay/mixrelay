@@ -1,6 +1,8 @@
-import type { ControlPort, GraphRuntimeStatus } from './types';
+import type { GraphRuntimeStatus } from '../../domain/control/graph';
+import type { GraphPort } from '../../ports/control/GraphPort';
+import type { TelemetryPort } from '../../ports/control/TelemetryPort';
 
-type Port = Pick<ControlPort, 'subscribeState' | 'getGraphStatus'>;
+type Port = Pick<TelemetryPort, 'subscribeState'> & Pick<GraphPort, 'getGraphStatus'>;
 
 /** Pending mutations wait for fresh state from the same engine. Reads run before the
  * first push; a stream interruption waits for reconnection within the original deadline. */

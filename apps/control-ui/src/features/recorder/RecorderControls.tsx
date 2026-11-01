@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
-  ControlPort,
   RecorderEncoding,
   RecorderRequest,
   RecorderStatus,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/recorder';
 import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { InlineNotice } from '../../core/ui/InlineNotice';
 import { NodeOptionsSection } from '../../core/ui/NodeOptionsSection';
 import { NodeTransportRow } from '../../core/ui/NodeTransportRow';

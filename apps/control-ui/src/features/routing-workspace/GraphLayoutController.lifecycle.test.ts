@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ControlPort, GraphLayout, GraphLayoutResponse } from '../../core/control-port/types';
+import type { GraphLayout, GraphLayoutResponse } from '../../core/domain/control/catalog';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { GraphLayoutController } from './GraphLayoutController';
 
 const layout = (x: number): GraphLayout => ({ positions: { input: { x, y: 10 } } });

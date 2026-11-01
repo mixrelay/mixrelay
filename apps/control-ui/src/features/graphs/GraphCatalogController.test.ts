@@ -1,10 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import {
-  type ControlPort,
-  ControlPortError,
-  type GraphCatalog,
-} from '../../core/control-port/types';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
+import type { GraphCatalog } from '../../core/domain/control/catalog';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { GraphCatalogController } from './GraphCatalogController';
 
 function fixture() {

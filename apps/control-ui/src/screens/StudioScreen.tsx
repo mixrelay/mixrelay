@@ -10,10 +10,11 @@ import {
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ControlPort, RuntimeGraphDocument } from '../core/control-port/types';
 import type { DiagnosticsPort } from '../core/diagnostics/DiagnosticsPort';
+import type { RuntimeGraphDocument } from '../core/domain/control/graph';
 import { usePaidFeatures } from '../core/licensing/FeatureAccess';
 import { MidiContext, MidiPanelContext } from '../core/midi/MidiPort';
+import type { ControlPort } from '../core/ports/control/ControlPort';
 import { useNativeGraphListCommand } from '../core/shell/useNativeGraphListCommand';
 import { shellBreakpoints } from '../core/theme/tokens';
 import { ActionButton } from '../core/ui/ActionButton';
@@ -561,7 +562,7 @@ function driverRoutingActions(session: DriverSession | undefined) {
     ) => {
       void session?.changeDevice(endpointId, update);
     },
-    create: async (spec: import('../core/control-port/types').VirtualEndpointSpec) => {
+    create: async (spec: import('../core/domain/control/status').VirtualEndpointSpec) => {
       const snapshot = await session?.mutate({ action: 'create', spec });
       return snapshot?.settings.devices.find((device) => device.spec.id === spec.id)?.spec ?? null;
     },

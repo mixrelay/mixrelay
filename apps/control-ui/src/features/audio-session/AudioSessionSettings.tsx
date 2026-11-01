@@ -1,11 +1,9 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  type AudioSessionStatus,
-  type ControlPort,
-  ControlPortError,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type { AudioSessionStatus } from '../../core/domain/control/status';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { InlineNotice } from '../../core/ui/InlineNotice';
 import { InlineSelect } from '../../core/ui/InlineSelect';

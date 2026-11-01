@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
-import { localControlPort } from '../core/control-port/localControlPort';
-import type { ControlPort } from '../core/control-port/types';
+import { localControlPort } from '../core/adapters/control/localControlPort';
 import type { DiagnosticsPort } from '../core/diagnostics/DiagnosticsPort';
 import { localDiagnosticsPort } from '../core/diagnostics/TauriDiagnosticsPort';
 import type { DriverPort } from '../core/driver/DriverPort';
@@ -10,6 +9,7 @@ import type { LicensingPort } from '../core/licensing/LicensingPort';
 import { localLicensingPort } from '../core/licensing/TauriLicensingPort';
 import type { MidiPort } from '../core/midi/MidiPort';
 import { localMidiPort } from '../core/midi/TauriMidiPort';
+import type { ControlPort } from '../core/ports/control/ControlPort';
 import type { RuntimePort } from '../core/runtime/RuntimePort';
 import { localRuntimePort } from '../core/runtime/TauriRuntimePort';
 import { localUpdatesPort } from '../core/updates/TauriUpdatesPort';

@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ControlPort, GraphNodeControls } from '../../core/control-port/types';
+import type { GraphNodeControls } from '../../core/domain/control/graph';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { controlState, statePush } from '../../test-support/controlTelemetry';
 import type { GraphApplicationQueue } from './GraphApplicationQueue';
 import { useNodeControls } from './useNodeControls';

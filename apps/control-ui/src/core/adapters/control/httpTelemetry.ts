@@ -1,5 +1,5 @@
+import type { MeterTelemetryListener } from '../../ports/control/TelemetryPort';
 import { TelemetryDecoder } from './telemetry';
-import type { MeterTelemetryListener } from './types';
 
 class EventParser {
   private buffer = '';

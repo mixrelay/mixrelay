@@ -1,4 +1,4 @@
-import type { ControlPort } from '../../core/control-port/types';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 
 // First-use consent has a two-minute engine bound; allow ten seconds for its terminal reply.
 const PERMISSION_LIMIT_MS = 130_000;

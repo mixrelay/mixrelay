@@ -1,37 +1,44 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { type StateListener, TelemetryDecoder, TelemetryHub } from './telemetry';
-
-import {
-  type AudioDeviceDescriptor,
-  type CapturableApplication,
-  type ControlPort,
-  ControlPortError,
-  type ExternalProcessorCatalog,
-  type GraphApplyRequest,
-  type GraphApplyResponse,
-  type GraphCatalog,
-  type GraphCatalogRequest,
-  type GraphLayoutRequest,
-  type GraphLayoutResponse,
-  type GraphRuntimeStatus,
-  type MeterSnapshot,
-  type MeterTelemetry,
-  type MeterTelemetryListener,
-  type MixRelayStatus,
-  type NodeControlResponse,
-  type ProcessorEditorFrame,
-  type ProcessorEditorInput,
-  type ProcessorEditorStatus,
-  type ProcessorParameterUpdateResponse,
-  type ProcessorRetryRequest,
-  type ProtocolErrorBody,
-  type RecorderRequest,
-  type RecorderSettings,
-  type RecorderStatus,
-  type RuntimeGraphDocument,
-  type VirtualEndpointFormatRequest,
-} from './types';
+import type {
+  GraphCatalog,
+  GraphCatalogRequest,
+  GraphLayoutRequest,
+  GraphLayoutResponse,
+} from '../../domain/control/catalog';
+import { ControlPortError, type ProtocolErrorBody } from '../../domain/control/errors';
+import type {
+  GraphApplyRequest,
+  GraphApplyResponse,
+  GraphNodeControls,
+  GraphRuntimeStatus,
+  NodeControlRequest,
+  NodeControlResponse,
+  ProcessorRetryRequest,
+  RuntimeGraphDocument,
+} from '../../domain/control/graph';
+import type {
+  AudioDeviceDescriptor,
+  CapturableApplication,
+  DeviceAppActivity,
+} from '../../domain/control/inventory';
+import type { MeterSnapshot, MeterTelemetry } from '../../domain/control/meters';
+import type {
+  ExternalProcessorCatalog,
+  ProcessorEditorFrame,
+  ProcessorEditorInput,
+  ProcessorEditorStatus,
+  ProcessorParameterUpdateResponse,
+} from '../../domain/control/processors';
+import type {
+  RecorderRequest,
+  RecorderSettings,
+  RecorderStatus,
+} from '../../domain/control/recorder';
+import type { MixRelayStatus, VirtualEndpointFormatRequest } from '../../domain/control/status';
+import type { ControlPort } from '../../ports/control/ControlPort';
+import type { MeterTelemetryListener, StateListener } from '../../ports/control/TelemetryPort';
+import { TelemetryDecoder, TelemetryHub } from './telemetry';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type MeterMessage = MeterTelemetry | ArrayBuffer | { ended: true };
@@ -57,13 +64,13 @@ export class TauriControlPort implements ControlPort {
   public subscribeMeters(listener: MeterTelemetryListener) {
     return this.telemetry.subscribeMeters(listener);
   }
-  public getNodeControls(graphId: string): Promise<import('./types').GraphNodeControls> {
+  public getNodeControls(graphId: string): Promise<GraphNodeControls> {
     return this.call('control_get_node_controls', { graphId });
   }
   public updateNodeControl(
     graphId: string,
     nodeId: string,
-    request: import('./types').NodeControlRequest,
+    request: NodeControlRequest,
   ): Promise<NodeControlResponse> {
     return this.call('control_update_node_control', { graphId, nodeId, request });
   }
@@ -320,9 +327,7 @@ export class TauriControlPort implements ControlPort {
     }
   }
 
-  public getVirtualDeviceAppActivity(): Promise<
-    Record<string, import('./types').DeviceAppActivity[]>
-  > {
+  public getVirtualDeviceAppActivity(): Promise<Record<string, DeviceAppActivity[]>> {
     return this.invokeCommand('list_device_app_activity');
   }
 

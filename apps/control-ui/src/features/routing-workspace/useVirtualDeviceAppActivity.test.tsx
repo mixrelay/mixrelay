@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, assert, beforeEach, expect, it, vi } from 'vitest';
-import type { ControlPort, DeviceAppActivity } from '../../core/control-port/types';
+import type { DeviceAppActivity } from '../../core/domain/control/inventory';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { useVirtualDeviceAppActivity } from './useVirtualDeviceAppActivity';
 import { virtualPolicy } from './virtualEndpointFixtures';
 

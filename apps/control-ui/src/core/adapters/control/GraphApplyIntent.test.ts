@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { GraphApplyRequest, RuntimeGraphDocument } from '../../domain/control/graph';
+import { StorybookMockControlPort } from '../fake/StorybookMockControlPort';
 import { HttpControlPort } from './HttpControlPort';
-import { StorybookMockControlPort } from './StorybookMockControlPort';
 import { TauriControlPort } from './TauriControlPort';
-import type { GraphApplyRequest, RuntimeGraphDocument } from './types';
 
 const graph: RuntimeGraphDocument = {
   schemaVersion: 2,

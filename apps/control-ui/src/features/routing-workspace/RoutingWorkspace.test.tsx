@@ -1,3 +1,12 @@
+import type { GraphLayoutResponse } from '../../core/domain/control/catalog';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type {
+  ExternalProcessorDescriptor,
+  ProviderPorts,
+} from '../../core/domain/control/processors';
+import type { AudioSessionStatus } from '../../core/domain/control/status';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { ProblemsTarget } from '../../test-support/ProblemsTarget';
 import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -7,15 +16,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioGraphNodeMenuItem } from '../../core/audio-graph/AudioGraphCanvas';
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
-import {
-  type AudioSessionStatus,
-  type ControlPort,
-  ControlPortError,
-  type ExternalProcessorDescriptor,
-  type GraphLayoutResponse,
-  type ProviderPorts,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { GraphApplicationError } from './GraphApplicationQueue';

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import {
-  type ControlPort,
-  ControlPortError,
-  type GraphCatalog,
-  type GraphLayout,
-  type GraphLayoutResponse,
-} from '../../core/control-port/types';
+import type {
+  GraphCatalog,
+  GraphLayout,
+  GraphLayoutResponse,
+} from '../../core/domain/control/catalog';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { GraphLayoutController } from './GraphLayoutController';
 import { rebaseGraphLayout } from './rebaseGraphLayout';
 

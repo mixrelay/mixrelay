@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import {
-  ControlPortError,
-  type GraphApplyResponse,
-  type ProcessorRetryRequest,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type {
+  GraphApplyResponse,
+  ProcessorRetryRequest,
+  RuntimeGraphDocument,
+} from '../../core/domain/control/graph';
 import { GRAPH_APPLICATION_TIMEOUT_MS, GraphApplicationQueue } from './GraphApplicationQueue';
 import { runtimeGraphToAudioGraph } from './model';
 

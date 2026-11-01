@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import type { MixRelayStatus } from '../../core/control-port/types';
+import type { MixRelayStatus } from '../../core/domain/control/status';
 import styles from './AudioSessionControl.module.css';
 import {
   AudioSessionAlerts,

@@ -3,10 +3,9 @@ import {
   type ControlStateSnapshot,
   type ControlTelemetry,
   graphControls,
-  TelemetryDecoder,
-  TelemetryHub,
-} from './telemetry';
-import type { MeterTelemetryListener } from './types';
+} from '../../domain/control/state';
+import type { MeterTelemetryListener } from '../../ports/control/TelemetryPort';
+import { TelemetryDecoder, TelemetryHub } from './telemetry';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());

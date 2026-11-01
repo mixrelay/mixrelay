@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import {
-  ControlPortError,
-  type GraphApplyRequest,
-  type GraphApplyResponse,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type {
+  GraphApplyRequest,
+  GraphApplyResponse,
+  RuntimeGraphDocument,
+} from '../../core/domain/control/graph';
 import { controlState, statePush } from '../../test-support/controlTelemetry';
 import { GRAPH_APPLICATION_TIMEOUT_MS, GraphApplicationQueue } from './GraphApplicationQueue';
 import { addRoutingNode, runtimeGraphToAudioGraph } from './model';

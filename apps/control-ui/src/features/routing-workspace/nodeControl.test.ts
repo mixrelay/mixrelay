@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import { ControlPortError, type RuntimeGraphDocument } from '../../core/control-port/types';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import { acknowledgedNodeControl } from './controlReconciliation';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';

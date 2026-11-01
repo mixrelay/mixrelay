@@ -1,9 +1,11 @@
+import { StorybookMockControlPort } from '../core/adapters/fake/StorybookMockControlPort';
+import type { RuntimeGraphDocument } from '../core/domain/control/graph';
+import type { MixRelayStatus } from '../core/domain/control/status';
+import type { ControlPort } from '../core/ports/control/ControlPort';
 import '../test-support/integration';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
-import type { ControlPort, MixRelayStatus, RuntimeGraphDocument } from '../core/control-port/types';
 import type { DriverPort } from '../core/driver/DriverPort';
 import { I18nProvider, i18n, resolveLocale } from '../core/i18n';
 import type { LicensingPort } from '../core/licensing/LicensingPort';

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-
+import { ControlPortError } from '../../domain/control/errors';
+import type { RuntimeGraphDocument } from '../../domain/control/graph';
 import { StorybookMockControlPort } from './StorybookMockControlPort';
-import { ControlPortError, type RuntimeGraphDocument } from './types';
 
 function graph(): RuntimeGraphDocument {
   return {

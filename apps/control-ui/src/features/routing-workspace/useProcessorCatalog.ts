@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-
 import type {
-  ControlPort,
   ExternalProcessorCatalog,
   ExternalProcessorDescriptor,
   ExternalProcessorDiagnostic,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/processors';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 
 const PATHS_KEY = 'mixrelay.processorPaths.v1';
 type CatalogAction = 'initial' | 'scan' | 'directory';

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { moveAudioGraphNode } from '../../core/audio-graph/model';
-import type { GraphLayoutResponse, RuntimeGraphDocument } from '../../core/control-port/types';
+import type { GraphLayoutResponse } from '../../core/domain/control/catalog';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { addRoutingNode, audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
 

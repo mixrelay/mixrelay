@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ControlPort } from '../../core/control-port/types';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { HierarchicalMenuButton } from '../../core/ui/HierarchicalMenu';
 
 type Action = 'new' | 'open' | 'save' | 'save_as';

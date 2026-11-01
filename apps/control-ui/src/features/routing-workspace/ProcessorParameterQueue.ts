@@ -1,8 +1,5 @@
-import {
-  type ControlPort,
-  ControlPortError,
-  type ProtocolErrorCode,
-} from '../../core/control-port/types';
+import { ControlPortError, type ProtocolErrorCode } from '../../core/domain/control/errors';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 
 export interface PendingProcessorParameter {
   expectedRevision: number;

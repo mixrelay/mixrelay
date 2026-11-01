@@ -3,7 +3,7 @@ import { createInstance } from 'i18next';
 import type { ComponentProps } from 'react';
 import { I18nextProvider } from 'react-i18next';
 import { expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
 import { I18nProvider } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import type { HierarchicalMenuButton } from '../../core/ui/HierarchicalMenu';

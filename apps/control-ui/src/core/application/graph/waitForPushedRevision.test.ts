@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ControlStateSnapshot, StateListener } from './telemetry';
+import type { ControlStateSnapshot } from '../../domain/control/state';
+import type { StateListener } from '../../ports/control/TelemetryPort';
 import { waitForPushedRevision } from './waitForPushedRevision';
 
 beforeEach(() => vi.useFakeTimers());

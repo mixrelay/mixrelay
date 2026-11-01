@@ -1,5 +1,5 @@
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import type { RuntimeGraphEdge } from '../../core/control-port/types';
+import type { RuntimeGraphEdge } from '../../core/domain/control/graph';
 import type { GraphEdge } from '../../core/domain/graph/topology';
 
 /** A missing processor descriptor changes visibility, not the authoritative routes.

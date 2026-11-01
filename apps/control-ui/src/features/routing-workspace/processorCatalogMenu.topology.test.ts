@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { ExternalProcessorDescriptor, ProviderPorts } from '../../core/control-port/types';
+import type {
+  ExternalProcessorDescriptor,
+  ProviderPorts,
+} from '../../core/domain/control/processors';
 import { i18n } from '../../core/i18n';
 import {
   createProcessorMenuItems,
