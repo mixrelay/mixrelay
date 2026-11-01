@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import { themePreferenceStorage, themeStorageKey } from './themePreferenceStorage';
+import { themeStorageKey } from '../../domain/appearance';
+import { themePreferenceStorage } from './themePreferenceStorage';
 
 function environment(initial: Record<string, string> = {}) {
   const values = new Map(Object.entries(initial));

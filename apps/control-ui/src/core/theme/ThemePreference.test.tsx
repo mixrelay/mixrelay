@@ -1,14 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import {
-  browserThemePreferenceStorage,
-  themeStorageKey,
-} from '../adapters/browser/themePreferenceStorage';
-import { themePreference } from '../domain/appearance';
+import { browserThemePreferenceStorage } from '../adapters/browser/themePreferenceStorage';
+import { themePreference, themeStorageKey } from '../domain/appearance';
 import { i18n } from '../i18n';
 import { ThemePicker } from '../ui/ThemePicker';
 import { MixRelayProvider, useTheme } from './MixRelayProvider';
 import { themeCss } from './theme';
+
+const browserStorage = browserThemePreferenceStorage();
 
 afterEach(() => {
   localStorage.removeItem(themeStorageKey);
@@ -46,7 +45,7 @@ it('restores an existing host appearance when its provider is removed', () => {
 it('uses system appearance by default and follows OS changes through media CSS', () => {
   localStorage.removeItem(themeStorageKey);
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
     </MixRelayProvider>,
   );
@@ -58,7 +57,7 @@ it('uses system appearance by default and follows OS changes through media CSS',
 it('restores, changes and saves a preference across provider remounts', () => {
   localStorage.setItem(themeStorageKey, 'light');
   const first = render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
     </MixRelayProvider>,
   );
@@ -68,7 +67,7 @@ it('restores, changes and saves a preference across provider remounts', () => {
   expect(localStorage.getItem(themeStorageKey)).toBe('dark');
   first.unmount();
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
     </MixRelayProvider>,
   );
@@ -77,7 +76,7 @@ it('restores, changes and saves a preference across provider remounts', () => {
 
 it('keeps an unsaved workspace edit mounted when appearance changes', () => {
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
       <input aria-label="Draft name" defaultValue="Studio" />
     </MixRelayProvider>,
@@ -91,7 +90,7 @@ it('keeps an unsaved workspace edit mounted when appearance changes', () => {
 
 it('synchronizes saved preferences and clearing storage without reacting to other settings', () => {
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
     </MixRelayProvider>,
   );
@@ -120,7 +119,7 @@ it('treats unknown preferences and inaccessible storage as system while allowing
   expect(storage.read()).toBe('system');
   expect(() => storage.write('dark')).not.toThrow();
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
     </MixRelayProvider>,
   );
@@ -152,7 +151,7 @@ it('lets Storybook control appearance without changing the saved app choice', ()
 it('keeps pseudo appearance labels usable through the shared locale provider', async () => {
   await i18n.changeLanguage('pseudo');
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <ThemePicker />
     </MixRelayProvider>,
   );
@@ -167,7 +166,7 @@ it('exposes one keyboard trigger and checked appearance choices, then returns fo
   await i18n.changeLanguage('en');
   localStorage.removeItem(themeStorageKey);
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <ThemePicker />
     </MixRelayProvider>,
   );
@@ -217,4 +216,17 @@ it('keeps an uncontrolled preference in the supplied store instead of local stor
   expect(localStorage.getItem(themeStorageKey)).toBeNull();
   view.unmount();
   expect(changed).toBeUndefined();
+});
+
+it('keeps an uncontrolled choice for this session only when no store is given', () => {
+  localStorage.setItem(themeStorageKey, 'light');
+  render(
+    <MixRelayProvider>
+      <Consumer />
+    </MixRelayProvider>,
+  );
+  expect(document.documentElement).toHaveAttribute('data-theme', 'system');
+  fireEvent.click(screen.getByRole('button', { name: 'system' }));
+  expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+  expect(localStorage.getItem(themeStorageKey)).toBe('light');
 });

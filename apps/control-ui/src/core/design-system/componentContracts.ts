@@ -2197,13 +2197,13 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid: 'Feature별 theme CSS 복사나 palette override를 만들지 않는다.',
     anatomy: 'I18nProvider → ThemeContext → generated themeCss + children.',
     states:
-      'theme 미지정 시 store(기본 브라우저 localStorage)의 저장 preference/기본 system; 제어 theme시 onThemeChange callback만 요청. store 구독으로 다른 창의 변경을 동기화.',
+      'theme 미지정 시 store의 저장 preference/기본 system. store가 없으면 이번 세션만 유지하며 앱은 브라우저 저장소를 연결한다. 제어 theme시 onThemeChange callback만 요청. store 구독으로 다른 창의 변경을 동기화.',
     tokens:
       'tokens.ts → theme.ts CSS 전체; html data-theme; Globals/Fonts; OS prefers-color-scheme.',
     interaction:
       'provider 자체 Tab 없음. locale은 resolved language; pseudo는 React Aria en. 테마 변경 의미는 ThemePicker가 소유.',
     source: 'apps/control-ui/src/core/theme/MixRelayProvider.tsx',
-    api: "const browserStore = browserThemePreferenceStorage();\n\nexport function MixRelayProvider({\n  children,\n  theme,\n  onThemeChange,\n  store = browserStore,\n}: PropsWithChildren<{\n  theme?: ThemePreference;\n  onThemeChange?: (value: ThemePreference) => void;\n  /** Where an uncontrolled preference is kept; the page's local storage by default. */\n  store?: ThemePreferenceStore;\n}>)",
+    api: 'const sessionOnly: ThemePreferenceStore = {\n  read: () => defaultThemePreference,\n  write: () => undefined,\n  subscribe: () => () => undefined,\n};\n\nexport function MixRelayProvider({\n  children,\n  theme,\n  onThemeChange,\n  store = sessionOnly,\n}: PropsWithChildren<{\n  theme?: ThemePreference;\n  onThemeChange?: (value: ThemePreference) => void;\n  /** Where an uncontrolled preference is kept between sessions. */\n  store?: ThemePreferenceStore;\n}>)',
     consumers: ['apps/control-ui/src/main.tsx'],
     tests: [
       'apps/control-ui/src/core/theme/MixRelayProvider.test.tsx',
@@ -2229,7 +2229,7 @@ export const componentContracts: readonly ComponentContract[] = [
     tokens: '없음. 서체 선택은 Fonts.css의 html lang 규칙이 소비한다.',
     interaction: 'Tab 없음. 언어가 바뀌면 보조 기술과 지역 서체가 같은 lang을 사용한다.',
     source: 'apps/control-ui/src/core/i18n/index.tsx',
-    api: 'export const i18n = createI18n(browserLanguages(navigator), initReactI18next);\n\nexport function I18nProvider({\n  children,\n  instance = i18n,\n}: PropsWithChildren<{ instance?: I18n }>)',
+    api: 'export const i18n = createI18n([], initReactI18next);\n\nexport function I18nProvider({\n  children,\n  instance = i18n,\n}: PropsWithChildren<{ instance?: I18n }>)',
     consumers: ['apps/control-ui/src/main.tsx'],
     tests: ['apps/control-ui/src/core/i18n/DocumentLanguage.test.tsx'],
     storyId: 'core-playgrounds-i18nprovider--playground',

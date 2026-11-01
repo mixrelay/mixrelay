@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { themeStorageKey } from '../adapters/browser/themePreferenceStorage';
+import { themeStorageKey } from '../domain/appearance';
 import { themeCss } from './theme';
 import { themeBootstrapScript, themeDocumentTags } from './themeDocument';
 

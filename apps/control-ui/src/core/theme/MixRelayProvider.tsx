@@ -9,8 +9,7 @@ import {
 } from 'react';
 import { I18nProvider } from 'react-aria-components';
 import { useTranslation } from 'react-i18next';
-import { browserThemePreferenceStorage } from '../adapters/browser/themePreferenceStorage';
-import type { ThemePreference } from '../domain/appearance';
+import { defaultThemePreference, type ThemePreference } from '../domain/appearance';
 import type { ThemePreferenceStore } from '../ports/ThemePreferenceStore';
 import { themeCss } from './theme';
 
@@ -21,18 +20,23 @@ const ThemeContext = createContext<{
 
 export const useTheme = () => useContext(ThemeContext);
 
-const browserStore = browserThemePreferenceStorage();
+/** Without a store the choice lasts for this session only; the app passes its storage. */
+const sessionOnly: ThemePreferenceStore = {
+  read: () => defaultThemePreference,
+  write: () => undefined,
+  subscribe: () => () => undefined,
+};
 
 /** App and Storybook share one visual owner; React Aria supplies behavior only. */
 export function MixRelayProvider({
   children,
   theme,
   onThemeChange,
-  store = browserStore,
+  store = sessionOnly,
 }: PropsWithChildren<{
   theme?: ThemePreference;
   onThemeChange?: (value: ThemePreference) => void;
-  /** Where an uncontrolled preference is kept; the page's local storage by default. */
+  /** Where an uncontrolled preference is kept between sessions. */
   store?: ThemePreferenceStore;
 }>) {
   const [savedPreference, setSavedPreference] = useState(() => store.read());

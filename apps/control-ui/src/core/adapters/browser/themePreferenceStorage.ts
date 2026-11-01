@@ -1,7 +1,5 @@
-import { defaultThemePreference, themePreference } from '../../domain/appearance';
+import { defaultThemePreference, themePreference, themeStorageKey } from '../../domain/appearance';
 import type { ThemePreferenceStore } from '../../ports/ThemePreferenceStore';
-
-export const themeStorageKey = 'mixrelay.theme';
 
 /** The page facilities the store uses. `storage` is a getter because reading
  * `localStorage` itself throws where site data is blocked. */

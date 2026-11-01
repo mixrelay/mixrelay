@@ -1,5 +1,8 @@
-import { themeStorageKey } from '../adapters/browser/themePreferenceStorage';
-import { defaultThemePreference, explicitColorSchemes } from '../domain/appearance';
+import {
+  defaultThemePreference,
+  explicitColorSchemes,
+  themeStorageKey,
+} from '../domain/appearance';
 import { themeCss } from './theme';
 
 /** Runs before first paint: applies the saved preference so a choice that differs from

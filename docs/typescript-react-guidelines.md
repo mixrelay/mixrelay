@@ -10,7 +10,7 @@
 ## 구조를 만들거나 옮길 때
 - Feature는 Core를, Screen은 Feature와 Core를, App은 그 모두를 import한다. 역방향(Core가 Feature를, Feature가 Screen·App을 import)은 금지한다. React Aria·React Flow는 Core만 직접 쓴다. Core는 디자인 시스템과 함께 도메인 규칙, IO 포트와 그 구현, 테마 토큰을 소유한다.
 - Core 안은 계층으로 나눈다. `core/domain`은 프레임워크 없는 타입과 규칙(그래프 토폴로지, 엔진 프로토콜 계약 등), `core/ports`는 Core가 소비하는 IO 인터페이스(엔진 기능별 포트, 시계·스케줄러, 네이티브 셸, 저장소), `core/application`은 포트만으로 동작하는 조정 로직(실행 취소 기록, 텔레메트리, revision 대기), `core/adapters`는 HTTP·Tauri·브라우저 API로 포트를 구현한다. 나머지 Core 폴더는 컴포넌트·훅·테마를 담는 UI 계층이다.
-- `domain`은 `domain`만, `ports`는 `domain`·`ports`만, `application`은 그 둘과 `application`만 import하고 어떤 패키지도 import하지 않는다. `adapters`는 React·React Aria·React Flow·react-i18next와 Core UI 계층을 import하지 않는다. 포트 구현은 App·Screen 조합 지점(`app/`, `screens/`, `main.tsx`)에서 고르고, 기능 코드는 포트 인터페이스만 받는다. 테스트·스토리·`test-support`는 가짜 구현을 만들 수 있다. `check:boundaries`가 이 방향을 검사한다.
+- `domain`은 `domain`만, `ports`는 `domain`·`ports`만, `application`은 그 둘과 `application`만 import하고 어떤 패키지도 import하지 않는다. `adapters`는 React·React Aria·React Flow·react-i18next와 Core UI 계층을 import하지 않는다. 포트 구현은 App·Screen 조합 지점(`app/`, `screens/`, `main.tsx`)에서 고르고, Core UI 계층과 기능 코드는 포트 인터페이스만 받는다. 예외는 설정이 없는 브라우저 타이머(`core/adapters/browser/timers`) 하나다. Core 훅, 기능 코드, 어댑터 생성자는 이를 `Scheduler`·`Clock`의 기본값으로 쓸 수 있고, 안쪽 계층은 항상 주입받는다. 테스트와 스토리는 가짜 구현을 만들 수 있으며 `test-support`는 테스트, 스토리, 다른 `test-support` 모듈에서만 import한다. `check:boundaries`가 이 방향을 검사한다.
 - 기능 폴더는 서로 import하지 않는다. 둘 이상의 기능이 쓰는 타입·로직은 Core로 옮기고, 기능의 조합은 Screen이나 App에서 한다. 테스트도 같은 방향을 지킨다(기능 테스트가 `app/App`을 렌더하지 않는다).
 - barrel(`index.ts` 재노출) 파일과 경로 별칭을 만들지 않고 모듈을 직접 import한다([Vite](https://vite.dev/guide/performance)). named export만 쓴다(Storybook 스토리 제외).
 - 한 파일은 한 컴포넌트나 한 책임을 갖는다. 파일이 여러 책임을 갖거나 수백 줄을 넘기 시작하면 하위 컴포넌트·훅·순수 모듈로 나눈다.

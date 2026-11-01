@@ -20,6 +20,13 @@ it('starts in the first supported preferred language and falls back to English',
   expect(createI18n([]).language).toBe('en');
 });
 
+it('switches language synchronously, so the app can choose it right before rendering', () => {
+  const instance = createI18n([]);
+  void instance.changeLanguage('ja');
+  expect(instance.language).toBe('ja');
+  expect(instance.t('theme.system')).toBe(createI18n(['ja']).t('theme.system'));
+});
+
 it('keeps instances independent of each other and of the application instance', async () => {
   const before = i18n.language;
   const first = createI18n(['fr']);

@@ -442,11 +442,17 @@ test('only composition roots, tests and stories choose adapters', () => {
     [],
   );
   assert.deepEqual(layer('main.tsx', "import { X } from './core/adapters/browser/storage';"), []);
-  // Core view modules may use adapters for presentation defaults such as timers.
+  // Core view modules follow the same rule: only the ambient browser timers.
   assert.deepEqual(
     layer('core/history/useUndoHistory.ts', "import { t } from '../adapters/browser/timers';"),
     [],
   );
+  for (const source of [
+    "import { TauriControlPort } from '../adapters/control/TauriControlPort';",
+    "import { s } from '../adapters/browser/themePreferenceStorage';",
+    "export { s } from '../adapters/browser/languages';",
+  ])
+    assert.equal(layer('core/ui/Foo.tsx', source).length, 1, source);
   // Browser timers are the one ambient implementation features may default to.
   assert.deepEqual(
     layer(
@@ -459,4 +465,32 @@ test('only composition roots, tests and stories choose adapters', () => {
     layer('features/a/Queue.ts', "import { s } from '../../core/adapters/browser/storage';").length,
     1,
   );
+});
+
+test('test support is reachable from tests, stories and other test support only', () => {
+  const fake = "import { fakeEngineFetch } from '../../test-support/fakeEngine';";
+  for (const filename of ['features/a/b.ts', 'core/ui/Foo.tsx', 'core/domain/x.ts', 'app/App.tsx'])
+    assert.equal(
+      layer(filename, filename.startsWith('app/') ? fake.replace('../../', '../') : fake).length,
+      1,
+      filename,
+    );
+  assert.deepEqual(layer('features/a/b.test.ts', fake), []);
+  assert.deepEqual(layer('features/a/b.stories.tsx', fake), []);
+  assert.deepEqual(
+    layer('test-support/fakeNativeShell.tsx', "import { x } from './fakeEngine';"),
+    [],
+  );
+});
+
+test('every import form is checked, including template literals and import-equals', () => {
+  for (const source of [
+    'const m = import(`../../ui/Knob`);',
+    'import knob = require("../../ui/Knob");',
+    'const m = require(`react`);',
+  ])
+    assert.equal(layer('core/domain/graph/topology.ts', source).length, 1, source);
+  // A computed specifier cannot be resolved statically and is not reported.
+  const computed = ['const m = import(`../$', '{name}`);'].join('');
+  assert.deepEqual(layer('core/domain/graph/topology.ts', computed), []);
 });

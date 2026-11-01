@@ -270,11 +270,10 @@ const innerLayers = ['domain', 'ports', 'application'];
 // Adapters implement ports against the platform, never against the view.
 const viewPackages =
   /^(?:react(?:-dom)?(?:$|\/)|react-aria-components|@xyflow\/react|react-i18next)/u;
-// Only composition roots choose port implementations; tests, stories and test support
-// may build fakes.
-const compositionRoots = /^(?:app\/|screens\/|test-support\/|main\.tsx$)/u;
+// Only composition roots choose port implementations.
+const compositionRoots = /^(?:app\/|screens\/|main\.tsx$)/u;
 // Browser timers have one implementation and no configuration. Inner layers receive a
-// Scheduler or Clock; view and feature code pass these as the default.
+// Scheduler or Clock; Core view hooks, features and adapters may default to these.
 const ambientAdapters = new Set(['core/adapters/browser/timers']);
 
 function coreLayer(filename) {
@@ -290,14 +289,24 @@ const declarations = new Set([
   'ImportExpression',
 ]);
 
-/** The module named by an import or export, `import()`, `require()` or `import('…').T`. */
+/** A string literal or a template literal without substitutions. */
+function staticString(node) {
+  if (node?.type === 'StringLiteral') return node.value;
+  if (node?.type === 'TemplateLiteral' && node.expressions.length === 0)
+    return node.quasis[0]?.value.cooked;
+  return undefined;
+}
+
+/** The module named by an import or export, `import()`, `require()`, `import x = require()`
+ * or `import('…').T`. */
 function moduleSource(node) {
-  if (declarations.has(node.type)) return node.source?.value;
-  if (node.type === 'TSImportType') return node.argument?.literal?.value ?? node.argument?.value;
+  if (declarations.has(node.type)) return staticString(node.source);
+  if (node.type === 'TSImportType') return staticString(node.argument?.literal ?? node.argument);
+  if (node.type === 'TSExternalModuleReference') return staticString(node.expression);
   const call =
     node.type === 'CallExpression' &&
     (node.callee.type === 'Import' || node.callee.name === 'require');
-  return call ? node.arguments[0]?.value : undefined;
+  return call ? staticString(node.arguments[0]) : undefined;
 }
 
 function moduleSources(ast) {
@@ -320,39 +329,47 @@ function resolveSource(filename, source) {
   return { module: parts.join('/') };
 }
 
-function layerViolation(layer, target) {
-  if (innerLayers.includes(layer)) {
-    if (target.package) return `${layer} modules cannot import packages (${target.package}).`;
-    const allowed = innerLayers.slice(0, innerLayers.indexOf(layer) + 1);
-    const imported = coreLayer(target.module);
-    return allowed.includes(imported)
-      ? undefined
-      : `${layer} modules import only ${allowed.join(', ')} (not ${target.module}).`;
-  }
-  if (layer === 'adapters') {
-    if (target.package)
-      return viewPackages.test(target.package)
-        ? `adapters cannot import view packages (${target.package}).`
-        : undefined;
-    return coreLayer(target.module) === 'ui' || !target.module.startsWith('core/')
-      ? `adapters import only domain, ports, application and adapters (not ${target.module}).`
+function innerLayerViolation(layer, target) {
+  if (target.package) return `${layer} modules cannot import packages (${target.package}).`;
+  const allowed = innerLayers.slice(0, innerLayers.indexOf(layer) + 1);
+  return allowed.includes(coreLayer(target.module))
+    ? undefined
+    : `${layer} modules import only ${allowed.join(', ')} (not ${target.module}).`;
+}
+
+function adapterViolation(target) {
+  if (target.package)
+    return viewPackages.test(target.package)
+      ? `adapters cannot import view packages (${target.package}).`
       : undefined;
-  }
-  return undefined;
+  return coreLayer(target.module) === 'ui' || !target.module.startsWith('core/')
+    ? `adapters import only domain, ports, application and adapters (not ${target.module}).`
+    : undefined;
+}
+
+/** Core view code and everything outside Core reach adapters only through a composition
+ * root, apart from the ambient allowlist. */
+function compositionViolation(filename, target) {
+  return target.module?.startsWith('core/adapters/') &&
+    !ambientAdapters.has(target.module) &&
+    !compositionRoots.test(filename)
+    ? 'Port implementations are chosen by the app and screen composition roots.'
+    : undefined;
+}
+
+function layerViolation(filename, target) {
+  if (target.module?.startsWith('test-support/') && !filename.startsWith('test-support/'))
+    return 'Test support is for tests and stories only.';
+  const layer = coreLayer(filename);
+  if (innerLayers.includes(layer)) return innerLayerViolation(layer, target);
+  if (layer === 'adapters') return adapterViolation(target);
+  return compositionViolation(filename, target);
 }
 
 function checkLayers(filename, ast, violations) {
   if (/\.(?:test|stories)\.tsx?$/u.test(filename)) return;
-  const layer = coreLayer(filename);
   for (const { node, source } of moduleSources(ast)) {
-    const target = resolveSource(filename, source);
-    const message = layer
-      ? layerViolation(layer, target)
-      : target.module?.startsWith('core/adapters/') &&
-          !ambientAdapters.has(target.module) &&
-          !compositionRoots.test(filename)
-        ? 'Port implementations are chosen by the app and screen composition roots.'
-        : undefined;
+    const message = layerViolation(filename, resolveSource(filename, source));
     if (message) issue(violations, node, 'layer', message);
   }
 }
