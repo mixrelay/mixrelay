@@ -261,7 +261,6 @@ export class GraphApplicationQueue {
 
   /** Retries one failed processor through the graph writer without replacing its draft. */
   async retryFailedProcessor(target: ProcessorRetryTarget): Promise<NodeControlResult> {
-    const retryProcessor = this.port.retryProcessor;
     const source = this.document ?? this.callbacks.getDocument();
     if (!source) return { state: 'rejected', code: 'node_not_found' };
     const rejection = this.processorRetryRejection(source, target);
@@ -274,7 +273,7 @@ export class GraphApplicationQueue {
     this.callbacks.error(null);
     const attempt = { accepted: false, sent: false };
     try {
-      return await this.runProcessorRetry(source, target, signal, attempt, retryProcessor);
+      return await this.runProcessorRetry(source, target, signal, attempt);
     } catch (error) {
       return this.handleProcessorRetryError(error, signal, target.graphId, attempt);
     } finally {
@@ -287,7 +286,6 @@ export class GraphApplicationQueue {
     target: ProcessorRetryTarget,
     signal: AbortSignal,
     attempt: { accepted: boolean; sent: boolean },
-    retryProcessor: GraphPort['retryProcessor'],
   ): Promise<NodeControlResult> {
     if (this.callbacks.beforeApply) await this.readback.bound(this.callbacks.beforeApply(), signal);
     signal.throwIfAborted();
@@ -299,7 +297,7 @@ export class GraphApplicationQueue {
     };
     const clientOperationId = crypto.randomUUID();
     const response = await this.waitForRequest(
-      retryProcessor.call(this.port, { ...request, clientOperationId }),
+      this.port.retryProcessor({ ...request, clientOperationId }),
       signal,
       clientOperationId,
     );

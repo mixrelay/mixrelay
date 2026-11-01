@@ -11,16 +11,16 @@ function shell() {
   return { api, shell: new TauriNativeShell(api) };
 }
 
-it('binds the About and graph list menu events', async () => {
+it('binds the About and graph list menu events without passing their payloads on', async () => {
   const { api, shell: native } = shell();
   const about = vi.fn();
   const toggle = vi.fn();
   await native.onAbout(about);
   await native.onGraphListToggle(toggle);
-  expect(api.listen.mock.calls).toEqual([
-    ['app-about', about],
-    ['graph-list-toggle', toggle],
-  ]);
+  expect(api.listen.mock.calls.map(([event]) => event)).toEqual(['app-about', 'graph-list-toggle']);
+  for (const [, listener] of api.listen.mock.calls) listener('payload');
+  expect(about).toHaveBeenCalledWith();
+  expect(toggle).toHaveBeenCalledWith();
 });
 
 it('sends menu language and graph list label commands', async () => {

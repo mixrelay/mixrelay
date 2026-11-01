@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GraphLayout, GraphLayoutResponse } from '../../core/domain/control/catalog';
-import { catalogOf, graphWithNodes } from '../../test-support/unexpectedPort';
+import { catalogOf, graphWithNodes } from '../../test-support/portDefaults';
 
 /** Every node the layouts in this file place. */
 const layoutGraph = graphWithNodes(['a', 'b', 'concurrent', 'fresh', 'input', 'output']);

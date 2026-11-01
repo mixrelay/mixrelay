@@ -8,7 +8,7 @@ import type {
   NodeControlResponse,
   RuntimeGraphDocument,
 } from '../../core/domain/control/graph';
-import { graphWriterDefaults } from '../../test-support/unexpectedPort';
+import { graphWriterDefaults } from '../../test-support/portDefaults';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { runtimeGraphToAudioGraph } from './model';
 

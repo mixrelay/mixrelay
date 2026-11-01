@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { moveAudioGraphNode } from '../../core/audio-graph/model';
 import type { GraphLayoutResponse } from '../../core/domain/control/catalog';
 import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
-import { graphWriterDefaults } from '../../test-support/unexpectedPort';
+import { graphWriterDefaults } from '../../test-support/portDefaults';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { addRoutingNode, audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
 

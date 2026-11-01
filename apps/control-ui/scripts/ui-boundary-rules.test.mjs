@@ -467,6 +467,14 @@ test('only composition roots, tests and stories choose adapters', () => {
   );
 });
 
+test('only adapters import platform APIs', () => {
+  const platform = "import { invoke } from '@tauri-apps/api/core';";
+  for (const filename of ['features/a/b.ts', 'core/ui/Foo.tsx', 'screens/S.tsx', 'app/App.tsx'])
+    assert.equal(layer(filename, platform).length, 1, filename);
+  assert.deepEqual(layer('core/adapters/tauri/TauriX.ts', platform), []);
+  assert.deepEqual(layer('features/a/b.test.ts', platform), []);
+});
+
 test('test support is reachable from tests, stories and other test support only', () => {
   const fake = "import { fakeEngineFetch } from '../../test-support/fakeEngine';";
   for (const filename of ['features/a/b.ts', 'core/ui/Foo.tsx', 'core/domain/x.ts', 'app/App.tsx'])
@@ -490,6 +498,11 @@ test('every import form is checked, including template literals and import-equal
     'const m = require(`react`);',
   ])
     assert.equal(layer('core/domain/graph/topology.ts', source).length, 1, source);
+  assert.equal(
+    layer('features/a/b.ts', "const m = import.meta.glob('../../core/adapters/control/*.ts');")
+      .length,
+    1,
+  );
   // A computed specifier cannot be resolved statically and is not reported.
   const computed = ['const m = import(`../$', '{name}`);'].join('');
   assert.deepEqual(layer('core/domain/graph/topology.ts', computed), []);

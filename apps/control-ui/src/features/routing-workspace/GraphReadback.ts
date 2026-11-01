@@ -3,6 +3,7 @@ import { waitForPushedRevision } from '../../core/application/graph/waitForPushe
 import type { GraphPort } from '../../core/ports/control/GraphPort';
 import type { TelemetryPort } from '../../core/ports/control/TelemetryPort';
 import type { WorkspacePort } from '../../core/ports/control/WorkspacePort';
+import type { Scheduler } from '../../core/ports/Scheduler';
 
 /** The engine capabilities this module uses. */
 type EngineControl = GraphPort & WorkspacePort & TelemetryPort;
@@ -55,6 +56,7 @@ export class GraphReadback {
     private readonly port: ReadPort,
     private readonly timeoutMs: number,
     private readonly failure: (code: string) => Error,
+    private readonly scheduler: Scheduler = timerScheduler,
   ) {}
 
   bound<T>(request: Promise<T>, signal: AbortSignal, timeoutMs = this.timeoutMs) {
@@ -68,7 +70,7 @@ export class GraphReadback {
         revision,
         signal,
         this.timeoutMs,
-        timerScheduler,
+        this.scheduler,
         this.failure,
       );
     const deadline = Date.now() + this.timeoutMs;

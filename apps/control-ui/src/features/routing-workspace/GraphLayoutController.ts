@@ -1,15 +1,14 @@
 import type { GraphLayout, GraphLayoutResponse } from '../../core/domain/control/catalog';
 import { ControlPortError, hasErrorCode } from '../../core/domain/control/errors';
 import type { WorkspacePort } from '../../core/ports/control/WorkspacePort';
+import { runtimeGraphToAudioGraph } from './model';
+import { rebaseGraphLayout } from './rebaseGraphLayout';
 
 /** Layout reads and writes, fenced by the catalog's active graph. */
 export type LayoutPort = Pick<
   WorkspacePort,
   'getGraphCatalog' | 'getGraphLayout' | 'setGraphLayout'
 >;
-
-import { runtimeGraphToAudioGraph } from './model';
-import { rebaseGraphLayout } from './rebaseGraphLayout';
 
 export interface LayoutState {
   layout: GraphLayout;
@@ -171,16 +170,12 @@ export class GraphLayoutController {
     return true;
   }
 
-  private async write(
-    generation: number,
-    graphId: string,
-    writer: WorkspacePort['setGraphLayout'],
-  ) {
+  private async write(generation: number, graphId: string) {
     if (generation !== this.generation || this.state.loading) return;
     const layout = this.state.layout;
     const response = this.validate(
       await bounded(
-        writer.call(this.port, graphId, {
+        this.port.setGraphLayout(graphId, {
           expectedLayoutRevision: this.revision,
           layout,
         }),
@@ -192,16 +187,12 @@ export class GraphLayoutController {
     this.patch({ dirty: this.state.layout !== layout, error: false });
   }
 
-  private async saveAttempt(
-    generation: number,
-    graphId: string,
-    writer: WorkspacePort['setGraphLayout'],
-  ) {
+  private async saveAttempt(generation: number, graphId: string) {
     const deadline = Date.now() + 10_000;
     let retried = false;
     while (true) {
       try {
-        await this.write(generation, graphId, writer);
+        await this.write(generation, graphId);
         return;
       } catch (error) {
         if (!(await this.recoverRejectedWrite(error, generation, deadline, retried))) return;
@@ -242,12 +233,11 @@ export class GraphLayoutController {
   private async save() {
     this.cancelTimer();
     const graphId = this.graphId;
-    const writer = this.port.setGraphLayout;
     if (!this.enabled || this.state.saving || this.state.loading || !this.state.dirty) return;
     const generation = this.generation;
     this.patch({ saving: true });
     try {
-      await this.saveAttempt(generation, graphId, writer);
+      await this.saveAttempt(generation, graphId);
     } catch {
       if (generation === this.generation) this.patch({ error: true });
     } finally {

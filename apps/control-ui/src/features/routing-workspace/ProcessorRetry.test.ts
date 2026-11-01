@@ -6,7 +6,7 @@ import type {
   ProcessorRetryRequest,
   RuntimeGraphDocument,
 } from '../../core/domain/control/graph';
-import { graphWriterDefaults } from '../../test-support/unexpectedPort';
+import { graphWriterDefaults } from '../../test-support/portDefaults';
 import { GRAPH_APPLICATION_TIMEOUT_MS, GraphApplicationQueue } from './GraphApplicationQueue';
 import { runtimeGraphToAudioGraph } from './model';
 

@@ -6,8 +6,6 @@ import type {
 } from '../../core/domain/control/recorder';
 import type { RecorderPort } from '../../core/ports/control/RecorderPort';
 
-type RecorderControlPort = RecorderPort;
-
 interface RecorderSnapshot {
   status: RecorderStatus | null;
   settings: RecorderSettings | null;
@@ -33,7 +31,7 @@ export class RecorderController {
   private commandError: string | null = null;
 
   public constructor(
-    private readonly port: RecorderControlPort,
+    private readonly port: RecorderPort,
     private readonly graphId: string,
     private readonly nodeId: string,
   ) {}

@@ -8,7 +8,7 @@ import type {
 import type { AudioSessionStatus } from '../../core/domain/control/status';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { ProblemsTarget } from '../../test-support/ProblemsTarget';
-import { catalogOf, engineDefaults } from '../../test-support/unexpectedPort';
+import { catalogOf, engineDefaults } from '../../test-support/portDefaults';
 import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';

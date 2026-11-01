@@ -29,11 +29,11 @@ export class TauriNativeShell implements NativeShellPort {
   }
 
   onAbout(listener: () => void) {
-    return this.api.listen('app-about', listener);
+    return this.api.listen('app-about', () => listener());
   }
 
   onGraphListToggle(listener: () => void) {
-    return this.api.listen('graph-list-toggle', listener);
+    return this.api.listen('graph-list-toggle', () => listener());
   }
 
   async setGraphListVisible(visible: boolean) {

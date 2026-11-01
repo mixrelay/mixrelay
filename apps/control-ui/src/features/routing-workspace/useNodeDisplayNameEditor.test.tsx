@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
-import { unexpected } from '../../test-support/unexpectedPort';
+import { unexpected } from '../../test-support/portDefaults';
 import { GraphLayoutController } from './GraphLayoutController';
 import type { useGraphLayout } from './useGraphLayout';
 import { presentNodeDisplayNames, useNodeDisplayNameEditor } from './useNodeDisplayNameEditor';
@@ -22,7 +22,11 @@ const model: AudioGraphModel = {
 };
 function fixture() {
   const controller = new GraphLayoutController(
-    { getGraphLayout: vi.fn(), setGraphLayout: vi.fn() } as never,
+    {
+      getGraphCatalog: unexpected('getGraphCatalog'),
+      getGraphLayout: unexpected('getGraphLayout'),
+      setGraphLayout: unexpected('setGraphLayout'),
+    },
     'graph',
   );
   return {

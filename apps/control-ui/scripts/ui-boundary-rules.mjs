@@ -272,6 +272,8 @@ const viewPackages =
   /^(?:react(?:-dom)?(?:$|\/)|react-aria-components|@xyflow\/react|react-i18next)/u;
 // Only composition roots choose port implementations.
 const compositionRoots = /^(?:app\/|screens\/|main\.tsx$)/u;
+// Platform APIs are reached through the adapters that implement ports with them.
+const platformPackages = /^@tauri-apps\//u;
 // Browser timers have one implementation and no configuration. Inner layers receive a
 // Scheduler or Clock; Core view hooks, features and adapters may default to these.
 const ambientAdapters = new Set(['core/adapters/browser/timers']);
@@ -297,15 +299,26 @@ function staticString(node) {
   return undefined;
 }
 
-/** The module named by an import or export, `import()`, `require()`, `import x = require()`
- * or `import('…').T`. */
+/** `import.meta.glob(…)`, whose pattern names the modules it loads. */
+function isImportMetaGlob(callee) {
+  return (
+    callee.type === 'MemberExpression' &&
+    callee.object.type === 'MetaProperty' &&
+    callee.property.name === 'glob'
+  );
+}
+
+/** The module named by an import or export, `import()`, `require()`, `import x = require()`,
+ * `import('…').T` or the pattern of `import.meta.glob()`. */
 function moduleSource(node) {
   if (declarations.has(node.type)) return staticString(node.source);
   if (node.type === 'TSImportType') return staticString(node.argument?.literal ?? node.argument);
   if (node.type === 'TSExternalModuleReference') return staticString(node.expression);
   const call =
     node.type === 'CallExpression' &&
-    (node.callee.type === 'Import' || node.callee.name === 'require');
+    (node.callee.type === 'Import' ||
+      node.callee.name === 'require' ||
+      isImportMetaGlob(node.callee));
   return call ? staticString(node.arguments[0]) : undefined;
 }
 
@@ -348,8 +361,12 @@ function adapterViolation(target) {
 }
 
 /** Core view code and everything outside Core reach adapters only through a composition
- * root, apart from the ambient allowlist. */
+ * root, apart from the ambient allowlist, and never import platform APIs themselves. */
 function compositionViolation(filename, target) {
+  if (target.package)
+    return platformPackages.test(target.package)
+      ? `Only adapters import platform APIs (${target.package}).`
+      : undefined;
   return target.module?.startsWith('core/adapters/') &&
     !ambientAdapters.has(target.module) &&
     !compositionRoots.test(filename)

@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { ControlPortError } from '../../core/domain/control/errors';
 import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
-import { graphWriterDefaults } from '../../test-support/unexpectedPort';
+import { graphWriterDefaults } from '../../test-support/portDefaults';
 import { acknowledgedNodeControl } from './controlReconciliation';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';

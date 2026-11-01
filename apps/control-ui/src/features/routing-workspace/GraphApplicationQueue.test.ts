@@ -6,7 +6,7 @@ import type {
   RuntimeGraphDocument,
 } from '../../core/domain/control/graph';
 import { controlState, statePush } from '../../test-support/controlTelemetry';
-import { graphWriterDefaults } from '../../test-support/unexpectedPort';
+import { graphWriterDefaults } from '../../test-support/portDefaults';
 import { GRAPH_APPLICATION_TIMEOUT_MS, GraphApplicationQueue } from './GraphApplicationQueue';
 import { addRoutingNode, runtimeGraphToAudioGraph } from './model';
 import { virtualSpec } from './virtualEndpointFixtures';

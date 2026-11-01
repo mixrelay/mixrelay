@@ -9,6 +9,13 @@ export function unexpected(name: string) {
   });
 }
 
+/** A port method the engine does not offer in this test; callers may poll it and see it fail. */
+export function unavailable(name: string) {
+  return vi.fn(async (..._args: unknown[]): Promise<never> => {
+    throw new Error(`${name} unavailable`);
+  });
+}
+
 /** A graph of plain gain nodes, so a layout for those node IDs survives node pruning. */
 export function graphWithNodes(ids: readonly string[]): RuntimeGraphDocument {
   return {
@@ -56,7 +63,7 @@ export function engineDefaults(
   return {
     ...graphWriterDefaults(getGraph, selected),
     mutateGraphCatalog: unexpected('mutateGraphCatalog'),
-    getNodeControls: unexpected('getNodeControls'),
+    getNodeControls: unavailable('getNodeControls'),
     getGraphLayout: vi.fn(async () => structuredClone({ ...layout, graphId: selected() })),
     setGraphLayout: vi.fn(async (_graphId: string, request: GraphLayoutRequest) => {
       layout = {
