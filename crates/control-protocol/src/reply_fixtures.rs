@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 
 use crate::{
     AppStatus, ControlStateSnapshot, DriverState, EngineControlSnapshot, EnginePauseReason,
-    EnginePowerStatus, FailedProcessor, GraphCatalogEntry, GraphCatalogResponse,
+    EnginePowerStatus, ErrorCode, FailedProcessor, GraphCatalogEntry, GraphCatalogResponse,
     GraphControlSnapshot, GraphLayout, GraphNodePosition, GraphNodeSize, GraphPendingReason,
     GraphRuntimeStatus, GraphViewport, NodeControlCapabilities, NodeControlDescriptor,
     NodeControlSnapshot, PROTOCOL_VERSION, ProcessorEditorState, ProcessorEditorStatus,
@@ -450,6 +450,39 @@ fn telemetry_state_variants() -> BTreeMap<String, Value> {
     ])
 }
 
+/// Every refusal code the engine sends, so the UI can check the codes it interprets exist.
+fn error_codes() -> Value {
+    variants(&every_variant!(ErrorCode {
+        DriverNotInstalled,
+        DriverNotLoaded,
+        DriverPermissionInvalid,
+        DriverVersionMismatch,
+        AudioDeviceDisconnected,
+        AudioPermissionPending,
+        AudioPermissionDenied,
+        BufferUnderrun,
+        BufferOverrun,
+        AudioSourceUnavailable,
+        PairingRequired,
+        Unauthorized,
+        ControlUnavailable,
+        EngineReplaced,
+        InvalidOperationId,
+        GraphInvalid,
+        GraphRevisionStale,
+        GraphExchangeBusy,
+        GraphBindingUnsupported,
+        NodeNotFound,
+        NodeDisabled,
+        ProcessorUnavailable,
+        RecorderFailed,
+        FeatureLimit,
+        AudioSessionUnsupported,
+        AudioSessionProcessorStateUnavailable,
+        AudioSessionReconfigureFailed,
+    }))
+}
+
 #[test]
 fn engine_reply_fixtures_match_the_serialized_contracts() {
     let stale: Vec<_> = [
@@ -459,6 +492,7 @@ fn engine_reply_fixtures_match_the_serialized_contracts() {
         stale("catalog", &catalog()),
         stale("telemetry-state", &telemetry_state()),
         stale("telemetry-state.variants", &telemetry_state_variants()),
+        stale("error-codes", &error_codes()),
     ]
     .into_iter()
     .flatten()

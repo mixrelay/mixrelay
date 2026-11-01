@@ -19,8 +19,6 @@ export const protocolErrorCodes = [
   'graph_exchange_busy',
   'graph_invalid',
   'graph_revision_stale',
-  'processor_instance_stale',
-  'processor_not_failed',
   'processor_unavailable',
 ] as const;
 export type ProtocolErrorCode = (typeof protocolErrorCodes)[number];

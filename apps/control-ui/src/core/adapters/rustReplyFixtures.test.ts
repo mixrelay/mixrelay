@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
+import { protocolErrorCodes } from '../domain/control/errors';
 import {
   controlStateSnapshot,
   graphCatalog,
@@ -49,8 +50,13 @@ it('decodes every reply fixture without changing it', async () => {
   }
 });
 
+/** Fixtures that list contract values instead of holding a reply. */
+const valueLists = ['error-codes'];
+
 it('has a decoder for every reply fixture the Rust owners write', () => {
-  const names = fixtureNames().filter((name) => !name.endsWith(variantSuffix));
+  const names = fixtureNames().filter(
+    (name) => !name.endsWith(variantSuffix) && !valueLists.includes(name),
+  );
   expect(names.sort()).toEqual(Object.keys(decoders).sort());
 });
 
@@ -88,4 +94,10 @@ it('names every field the Rust owners send, apart from the ones the UI ignores',
     for (const path of await unnamedFields(() => decode(fixture(name))))
       unnamed.add(path.replace(/\[\d+\]/gu, '[]'));
   expect([...unnamed].sort()).toEqual([...ignoredFields].sort());
+});
+
+it('interprets only refusal codes that the engine or the desktop sends', () => {
+  // The desktop reports a failed or malformed engine exchange with this code itself.
+  const sent = new Set([...(fixture('error-codes') as string[]), 'control_request_failed']);
+  expect(protocolErrorCodes.filter((code) => !sent.has(code))).toEqual([]);
 });

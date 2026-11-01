@@ -99,10 +99,15 @@ const definiteRejectionCodes = [
   'invalid_operation_id',
   'node_disabled',
   'node_not_found',
-  'processor_instance_stale',
-  'processor_not_failed',
   'processor_unavailable',
 ] as const satisfies readonly ProtocolErrorCode[];
+/** The same refusals when this queue decides them itself, plus local-only ones: a stale
+ * catalog revision and a retry whose failed processor is already gone. */
+const definiteLocalRejectionCodes: readonly string[] = [
+  ...definiteRejectionCodes,
+  'graph_catalog_revision_stale',
+  'processor_instance_stale',
+];
 
 function definiteNodeRejection(error: unknown) {
   if (error instanceof ControlPortError) {
@@ -117,9 +122,7 @@ function definiteNodeRejection(error: unknown) {
       return true;
   }
   return (
-    (error instanceof GraphApplicationError &&
-      (error.code === 'graph_catalog_revision_stale' ||
-        definiteRejectionCodes.some((code) => code === error.code))) ||
+    (error instanceof GraphApplicationError && definiteLocalRejectionCodes.includes(error.code)) ||
     hasErrorCode(error, ...definiteRejectionCodes)
   );
 }
