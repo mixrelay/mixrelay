@@ -18,8 +18,8 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 | 기반 | `mixrelay-engine-process`(crates/engine-process) | 엔진 프로세스 수명·소유권 | 없음 |
 | 기반 | `mixrelay-midi-control`(crates/midi-control) | MIDI 바인딩·학습 입력 mailbox·pick-up·볼륨 발행 주기 정책 | 없음 |
 | 모델 | `mixrelay-audio-graph` | 그래프 문서, 검증, 실행 계획 컴파일 | 기반 |
-| 모델 | `mixrelay-audio-recorder` | 녹음 파일·작업자 | 기반 |
-| 모델 | `mixrelay-audio-engine` | 블록 처리, 렌더 계획, 지연 보상·측정 | 기반, `audio-graph`, `audio-recorder` |
+| 모델 | `mixrelay-audio-recorder` | 녹음 파일·작업자. 엔진과 서로 모르고 앱이 엔진의 녹음 port에 연결한다 | 기반 |
+| 모델 | `mixrelay-audio-engine` | 블록 처리, 렌더 계획, 지연 보상·측정, 녹음 sink port | 기반, `audio-graph` |
 | 계약 | `mixrelay-control-protocol` | 편집 앱 ↔ 엔진 제어 메시지 | 기반, 모델 |
 | 계약 | `mixrelay-driver-control` | 엔진·앱 ↔ Driver 서비스 제어, 지연 권한 | 기반 |
 | 도메인 | `mixrelay-engine`(crates/engine) | 엔진 도메인 타입, 도메인·애플리케이션 서비스, 이 서비스가 쓰는 port trait | 기반, 모델, 계약(서비스 부품과는 서로 의존하지 않음) |

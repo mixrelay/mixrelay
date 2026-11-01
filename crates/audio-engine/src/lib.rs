@@ -17,6 +17,7 @@ pub use render::{
     ArrivalError, BlockProcessor, CompensationState, CycleAdmission, ExternalBinding,
     ExternalControlState, ExternalIo, HostedAudioProcessor, HostedLatencySource,
     HostedProcessorFactory, HostedProcessorPrepareRequest, MeterBinding, ProcessBlockError,
-    RenderPlan, RenderPlanError, recording_session_key,
+    RecordingSink, RecordingSinkError, RecordingSinks, RenderPlan, RenderPlanError,
+    recording_session_key,
 };
 pub use runtime_control::{RuntimeControlBank, RuntimeControlError, RuntimeControlUpdate};

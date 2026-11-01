@@ -8,7 +8,6 @@ use mixrelay_audio_graph::{
 use mixrelay_audio_io::VirtualEndpointId;
 use mixrelay_audio_io::pcm::sanitize_samples;
 use mixrelay_audio_io::process::SampleFaults;
-use mixrelay_audio_recorder::RecorderTap;
 use thiserror::Error;
 
 use crate::runtime_control::{ControlValue, RuntimeControlBank};
@@ -27,6 +26,8 @@ mod input_timeline;
 mod kernels;
 mod ownership;
 mod prepare;
+mod recording;
+pub use recording::{RecordingSink, RecordingSinkError, RecordingSinks, recording_session_key};
 mod route_delay;
 mod routing;
 mod schedule;
@@ -37,13 +38,6 @@ pub use compensation::{CompensationState, HostedLatencySource};
 use kernels::{KernelResources, apply_kernel};
 use routing::{RouteOp, apply_routes};
 use schedule::RenderSchedule;
-
-/// Stable transport identity for a recorder's channel geometry. An inactive
-/// replacement can coexist with the previous plan until publication or rollback.
-#[must_use]
-pub fn recording_session_key(node: &NodeId, channels: u16) -> String {
-    format!("{}#recorder-channels={channels}", node.as_str())
-}
 
 type HostedProcessors = Box<[Box<dyn HostedAudioProcessor>]>;
 type PreparedRenderPlan = (RenderPlan, HostedProcessors);
@@ -258,7 +252,7 @@ impl RenderPlan {
 }
 
 pub struct BlockProcessor {
-    recorders: Box<[RecorderTap]>,
+    recorders: Box<[Box<dyn RecordingSink>]>,
     cycle_tracker: mixrelay_audio_io::process::CycleTracker,
     plan: Arc<RenderPlan>,
     arena: Box<[f32]>,

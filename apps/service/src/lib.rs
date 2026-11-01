@@ -41,6 +41,7 @@ mod node_control;
 mod node_control_snapshot;
 mod recorder_control;
 mod recorder_sessions;
+mod recording_sinks;
 mod runtime_node_control;
 use mixrelay_audio_engine::{
     BlockProcessor, ExternalBinding, MeterBinding, PeakMeterBank, ProcessorConfigurationError,

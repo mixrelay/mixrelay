@@ -5,7 +5,7 @@ use crate::default_peak_meter_bank;
 use crate::{
     Arc, BlockProcessor, CatalogNodeResolver, ErrorCode, ExecutionPlan, ExternalProcessorFactory,
     GraphCompiler, NodeConfig, PeakMeterBank, ProcessorCatalog, ProtocolError, RenderPlan,
-    RenderPlanError, recorder_sessions,
+    RenderPlanError, recorder_sessions, recording_sinks::FileRecordingSinks,
 };
 
 pub(super) trait ProcessorFactory: Send + Sync {
@@ -63,7 +63,7 @@ impl ProcessorFactory for BuiltInProcessorFactory {
                 .map_err(PrepareProcessorError::Render)?
         };
         processor
-            .attach_recorders(&self.recorders)
+            .attach_recorders(&FileRecordingSinks(&self.recorders))
             .map_err(PrepareProcessorError::Recorder)?;
         Ok(Box::new(processor))
     }
@@ -72,12 +72,12 @@ impl ProcessorFactory for BuiltInProcessorFactory {
 #[derive(Debug)]
 pub(super) enum PrepareProcessorError {
     Render(RenderPlanError),
-    Recorder(String),
+    Recorder(mixrelay_audio_engine::RecordingSinkError),
 }
 
 pub(super) fn prepare_error(error: PrepareProcessorError) -> ProtocolError {
     match error {
-        PrepareProcessorError::Recorder(reason) => recorder_sessions::recorder_error(reason),
+        PrepareProcessorError::Recorder(error) => recorder_sessions::recorder_error(error.0),
         PrepareProcessorError::Render(error) => ProtocolError {
             code: ErrorCode::GraphInvalid,
             parameters: serde_json::json!({ "renderError": error.to_string() }),

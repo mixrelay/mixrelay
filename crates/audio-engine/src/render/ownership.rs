@@ -2,13 +2,12 @@
 use std::{fmt, sync::Arc};
 
 use mixrelay_audio_graph::{ExecutionPlan, NodeConfig};
-use mixrelay_audio_recorder::RecorderRegistry;
 
 use super::{
     BlockProcessor, CompensationState, DelayBank, ExternalBinding, ExternalBuffers,
-    HostedProcessorFactory, HostedProcessors, HostedRack, RenderFormat, RenderPlan,
-    RenderPlanError, buffers, effects, history, input_timeline, prepare, recording_session_key,
-    sample_count,
+    HostedProcessorFactory, HostedProcessors, HostedRack, RecordingSinkError, RecordingSinks,
+    RenderFormat, RenderPlan, RenderPlanError, buffers, effects, history, input_timeline, prepare,
+    recording_session_key, sample_count,
 };
 
 impl fmt::Debug for BlockProcessor {
@@ -259,17 +258,20 @@ impl BlockProcessor {
         self.hosted.adopt(&mut previous.hosted);
     }
 
-    /// Attaches app-owned recording sessions while preparing an inactive processor.
-    /// File creation and recording transitions are explicit control-plane operations.
+    /// Attaches app-owned recording sinks while preparing an inactive processor.
+    /// The app's control plane decides when a sink records.
     /// # Errors
-    /// Returns an error if a surviving recorder's channel contract cannot be retained.
-    pub fn attach_recorders(&mut self, registry: &RecorderRegistry) -> Result<(), String> {
+    /// Returns the first sink that could not be prepared; no sink is attached then.
+    pub fn attach_recorders(
+        &mut self,
+        sinks: &dyn RecordingSinks,
+    ) -> Result<(), RecordingSinkError> {
         self.recorders = self
             .plan
             .recorder_bindings
             .iter()
             .map(|binding| {
-                registry.prepare(
+                sinks.prepare(
                     &recording_session_key(&binding.node_id, binding.channels),
                     binding.channels,
                 )
