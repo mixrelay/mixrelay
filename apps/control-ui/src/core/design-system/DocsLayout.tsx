@@ -1,9 +1,9 @@
 import type { PropsWithChildren } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { ThemePreference } from '../domain/appearance';
 import { I18nProvider, resolveLocale } from '../i18n';
 import { MixRelayProvider } from '../theme/MixRelayProvider';
-import type { ThemePreference } from '../theme/tokens';
 import { ThemePicker } from '../ui/ThemePicker';
 import styles from './DocsLayout.module.css';
 

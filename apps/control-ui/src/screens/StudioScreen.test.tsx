@@ -1,13 +1,13 @@
 import { StorybookMockControlPort } from '../core/adapters/fake/StorybookMockControlPort';
 import type { RuntimeGraphDocument } from '../core/domain/control/graph';
 import type { AudioSessionStatus } from '../core/domain/control/status';
+import { MidiContext, MidiPanelContext } from '../core/midi/MidiContext';
 import type { ControlPort } from '../core/ports/control/ControlPort';
 import '../test-support/integration';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '../core/i18n';
 import { FeatureAccess } from '../core/licensing/FeatureAccess';
-import { MidiContext, MidiPanelContext } from '../core/midi/MidiPort';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import type { DriverSession } from '../features/driver-status/useDriverSession';
 import {

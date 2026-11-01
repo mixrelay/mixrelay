@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useContext, useId, useLayoutEffect } from 'react';
 import { Button } from 'react-aria-components';
 import { createPortal } from 'react-dom';
-import { MidiContext } from '../midi/MidiPort';
+import { MidiContext } from '../midi/MidiContext';
 import styles from './AudioNodeCard.module.css';
 import { Tooltip } from './Tooltip';
 import { useElementBounds } from './useElementBounds';

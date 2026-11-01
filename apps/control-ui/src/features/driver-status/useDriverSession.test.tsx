@@ -1,7 +1,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { DriverPort, DriverSnapshot } from '../../core/driver/DriverPort';
+import type { DriverSnapshot } from '../../core/domain/driver';
 import { i18n } from '../../core/i18n';
+import type { DriverPort } from '../../core/ports/DriverPort';
 import { readyDriver } from './driverFixtures';
 import { useDriverSession } from './useDriverSession';
 

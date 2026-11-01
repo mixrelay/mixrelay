@@ -1,11 +1,8 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RuntimeConnectStage, RuntimeStatus } from '../../core/domain/runtime';
 import { I18nProvider, i18n } from '../../core/i18n';
-import type {
-  RuntimeConnectStage,
-  RuntimePort,
-  RuntimeStatus,
-} from '../../core/runtime/RuntimePort';
+import type { RuntimePort } from '../../core/ports/RuntimePort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { advance, eventually, find } from '../../test-support/fakeTimerQueries';
 import { RuntimeConnection } from './RuntimeConnection';

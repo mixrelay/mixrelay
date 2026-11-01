@@ -3,7 +3,6 @@ import { protocolFixtures as fixtures } from '../../../test-support/protocolFixt
 import { ControlPortError } from '../../domain/control/errors';
 import type { RuntimeGraphDocument } from '../../domain/control/graph';
 import { HttpControlPort } from './HttpControlPort';
-import { createLocalControlPort } from './localControlPort';
 import { TauriControlPort } from './TauriControlPort';
 
 const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 3, schemaVersion: 2 };
@@ -207,11 +206,6 @@ describe('TauriControlPort graph operations', () => {
       vi.fn().mockResolvedValue({ status: 503, body: offlineBody }),
     );
     await expect(offline.getStatus()).rejects.toEqual(new ControlPortError(503, offlineBody));
-  });
-
-  it('selects HTTP for browsers and IPC for the packaged app', () => {
-    expect(createLocalControlPort(false)).toBeInstanceOf(HttpControlPort);
-    expect(createLocalControlPort(true)).toBeInstanceOf(TauriControlPort);
   });
 });
 

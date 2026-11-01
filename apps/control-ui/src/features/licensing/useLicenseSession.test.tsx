@@ -1,7 +1,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { LicensingStatus } from '../../core/domain/licensing';
+import type { LicensingPort } from '../../core/ports/LicensingPort';
 
-import type { LicensingPort, LicensingStatus } from '../../core/licensing/LicensingPort';
 import { useLicenseSession } from './useLicenseSession';
 
 const free: LicensingStatus = {

@@ -1,15 +1,14 @@
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import type {
-  MidiAction,
-  MidiBinding,
-  MidiCommand,
-  MidiControl,
-  MidiDevice,
-  MidiMode,
-  MidiPort,
-  MidiStatus,
-} from './MidiPort';
+import { removableSubscription } from '../../application/subscription';
+import {
+  type MidiBinding,
+  type MidiControl,
+  type MidiDevice,
+  type MidiStatus,
+  midiAction,
+  midiMode,
+} from '../../domain/midi';
+import type { MidiCommand, MidiPort } from '../../ports/MidiPort';
+import { type NativeInvoke, type NativeListen, tauriInvoke, tauriListen } from './nativeInvoke';
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -48,22 +47,6 @@ function control(value: unknown): MidiControl {
 function target(value: unknown) {
   const entry = object(value);
   return { graphId: string(entry.graphId), nodeId: string(entry.nodeId) };
-}
-export function midiAction(value: unknown): MidiAction {
-  if (
-    value === 'power' ||
-    value === 'mute' ||
-    value === 'volume' ||
-    value === 'record' ||
-    value === 'pause' ||
-    value === 'stop'
-  )
-    return value;
-  throw new Error('Invalid MIDI action');
-}
-export function midiMode(value: unknown): MidiMode {
-  if (value === 'absolute' || value === 'twos_complement' || value === 'offset64') return value;
-  throw new Error('Invalid MIDI mode');
 }
 function gain(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < -60 || value > 12)
@@ -122,32 +105,23 @@ export function midiStatus(value: unknown): MidiStatus {
 }
 export class TauriMidiPort implements MidiPort {
   constructor(
-    private invokeCommand: (
-      name: string,
-      args?: Record<string, unknown>,
-    ) => Promise<unknown> = invoke,
-    private listenToggle: (listener: () => void) => Promise<() => void> = (listener) =>
-      listen('midi-map-toggle', listener),
+    private readonly invokeCommand: NativeInvoke = tauriInvoke,
+    private readonly listen: NativeListen = tauriListen,
   ) {}
   subscribeMapToggle(listener: () => void) {
     let active = true;
-    let stop: (() => void) | undefined;
-    void this.listenToggle(() => {
-      if (active) listener();
-    })
-      .then((unsubscribe) => {
-        if (active) stop = unsubscribe;
-        else unsubscribe();
-      })
-      .catch((error: unknown) => console.error('MIDI menu listener failed', error));
+    const remove = removableSubscription(
+      this.listen('midi-map-toggle', () => {
+        if (active) listener();
+      }),
+      (error) => console.error('MIDI menu listener failed', error),
+    );
     return () => {
       active = false;
-      stop?.();
+      remove();
     };
   }
   async command(name: MidiCommand, args?: Record<string, unknown>): Promise<MidiStatus> {
     return midiStatus(await this.invokeCommand(name, args));
   }
 }
-export const localMidiPort: MidiPort | null =
-  '__TAURI_INTERNALS__' in window ? new TauriMidiPort() : null;

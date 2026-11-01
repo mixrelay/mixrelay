@@ -1,68 +1,54 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { version } from '../../../package.json';
+import { fakeNativeShell } from '../../test-support/fakeNativeShell';
 import { useAppInformation } from './useAppInformation';
 
-const native = vi.hoisted(() => ({ isTauri: vi.fn(), getVersion: vi.fn(), listen: vi.fn() }));
-vi.mock('@tauri-apps/api/app', () => ({ getVersion: native.getVersion }));
-vi.mock('@tauri-apps/api/core', () => ({ isTauri: native.isTauri }));
-vi.mock('@tauri-apps/api/event', () => ({ listen: native.listen }));
-
-beforeEach(() => {
-  vi.resetAllMocks();
-  native.isTauri.mockReturnValue(true);
-  native.getVersion.mockResolvedValue('1.2.3');
-  native.listen.mockResolvedValue(vi.fn());
-});
-
 it('reads the installed version and opens the latest About callback from the native menu', async () => {
-  const stop = vi.fn();
-  native.listen.mockResolvedValue(stop);
+  const native = fakeNativeShell('1.2.3');
   const first = vi.fn();
   const latest = vi.fn();
   const view = renderHook(({ open }) => useAppInformation(open, true), {
     initialProps: { open: first },
+    wrapper: native.Provider,
   });
   await waitFor(() => expect(view.result.current).toBe('1.2.3'));
-  expect(native.listen).toHaveBeenCalledWith('app-about', expect.any(Function));
+  await waitFor(() => expect(native.listening('about')).toBe(1));
   view.rerender({ open: latest });
-  act(() => native.listen.mock.calls[0]?.[1]());
+  act(() => native.fire('about'));
   expect(latest).toHaveBeenCalledOnce();
   expect(first).not.toHaveBeenCalled();
   view.unmount();
-  expect(stop).toHaveBeenCalledOnce();
+  expect(native.removals.about).toHaveBeenCalledOnce();
 });
 
 it('releases a native listener that finishes registering after unmount', async () => {
-  let register: (stop: () => void) => void = () => {};
-  native.listen.mockReturnValue(
-    new Promise<() => void>((resolve) => {
-      register = resolve;
-    }),
-  );
-  const view = renderHook(() => useAppInformation(vi.fn(), true));
+  const native = fakeNativeShell();
+  const release = native.hold();
+  const view = renderHook(() => useAppInformation(vi.fn(), true), { wrapper: native.Provider });
   view.unmount();
-  const stop = vi.fn();
-  await act(async () => register(stop));
-  expect(stop).toHaveBeenCalledOnce();
+  await act(async () => release());
+  expect(native.removals.about).toHaveBeenCalledOnce();
+  expect(native.listening('about')).toBe(0);
 });
 
-it('uses the build version in the browser without calling native APIs', () => {
-  native.isTauri.mockReturnValue(false);
-  const view = renderHook(() => useAppInformation(vi.fn(), true));
-  expect(view.result.current).toBe(version);
-  expect(native.getVersion).not.toHaveBeenCalled();
-  expect(native.listen).not.toHaveBeenCalled();
+it('uses the build version without a native shell or while disabled', () => {
+  expect(renderHook(() => useAppInformation(vi.fn(), true)).result.current).toBe(version);
+  const native = fakeNativeShell();
+  renderHook(() => useAppInformation(vi.fn(), false), { wrapper: native.Provider });
+  expect(native.shell.version).not.toHaveBeenCalled();
+  expect(native.shell.onAbout).not.toHaveBeenCalled();
 });
 
 it('keeps product information usable when native version and listener requests fail', async () => {
+  const native = fakeNativeShell();
   const versionError = new Error('Native version unavailable');
   const listenerError = new Error('Native menu unavailable');
-  native.getVersion.mockRejectedValue(versionError);
-  native.listen.mockRejectedValue(listenerError);
+  native.shell.version.mockRejectedValue(versionError);
+  native.shell.onAbout.mockRejectedValue(listenerError);
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   try {
-    const view = renderHook(() => useAppInformation(vi.fn(), true));
+    const view = renderHook(() => useAppInformation(vi.fn(), true), { wrapper: native.Provider });
     await waitFor(() => expect(errors).toHaveBeenCalledTimes(2));
     expect(view.result.current).toBe(version);
     expect(errors).toHaveBeenCalledWith('Could not read app version', versionError);
@@ -70,4 +56,14 @@ it('keeps product information usable when native version and listener requests f
   } finally {
     errors.mockRestore();
   }
+});
+
+it('ignores a version that arrives after unmount', async () => {
+  const native = fakeNativeShell();
+  const reply = Promise.withResolvers<string>();
+  native.shell.version.mockReturnValue(reply.promise);
+  const view = renderHook(() => useAppInformation(vi.fn(), true), { wrapper: native.Provider });
+  view.unmount();
+  await act(async () => reply.resolve('9.9.9'));
+  expect(view.result.current).toBe(version);
 });

@@ -10,11 +10,11 @@ import {
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { DiagnosticsPort } from '../core/diagnostics/DiagnosticsPort';
 import type { RuntimeGraphDocument } from '../core/domain/control/graph';
 import { usePaidFeatures } from '../core/licensing/FeatureAccess';
-import { MidiContext, MidiPanelContext } from '../core/midi/MidiPort';
+import { MidiContext, MidiPanelContext } from '../core/midi/MidiContext';
 import type { ControlPort } from '../core/ports/control/ControlPort';
+import type { DiagnosticsPort } from '../core/ports/DiagnosticsPort';
 import { useNativeGraphListCommand } from '../core/shell/useNativeGraphListCommand';
 import { shellBreakpoints } from '../core/theme/tokens';
 import { ActionButton } from '../core/ui/ActionButton';

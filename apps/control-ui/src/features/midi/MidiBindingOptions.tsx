@@ -1,6 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import type { MidiBinding } from '../../core/midi/MidiPort';
-import { midiAction, midiMode } from '../../core/midi/TauriMidiPort';
+import { type MidiBinding, midiAction, midiMode } from '../../core/domain/midi';
 import { SelectField } from '../../core/ui/SelectField';
 import { Stack } from '../../core/ui/Stack';
 import { Text } from '../../core/ui/Text';

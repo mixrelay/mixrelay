@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react';
 import wordmarkManifest from '../../../../../branding/identity/wordmark/manifest.json';
+import type { ColorScheme } from '../domain/appearance';
 import fontSources from '../theme/fonts/sources.json';
 import {
   border,
   brandColors,
   brandSizes,
-  type ColorScheme,
   fontFamily,
   fontWeight,
   layers,

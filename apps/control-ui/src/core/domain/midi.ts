@@ -1,7 +1,8 @@
-import { createContext, type ReactNode } from 'react';
+export const midiActions = ['power', 'mute', 'volume', 'record', 'pause', 'stop'] as const;
+export type MidiAction = (typeof midiActions)[number];
+export const midiModes = ['absolute', 'twos_complement', 'offset64'] as const;
+export type MidiMode = (typeof midiModes)[number];
 
-export type MidiAction = 'power' | 'mute' | 'volume' | 'record' | 'pause' | 'stop';
-export type MidiMode = 'absolute' | 'twos_complement' | 'offset64';
 export interface MidiDevice {
   id: string;
   name: string;
@@ -44,28 +45,18 @@ export interface MidiStatus {
   learn: MidiLearn;
   targets: { target: MidiTarget; label: string }[];
 }
-export type MidiCommand =
-  | 'midi_status'
-  | 'midi_map'
-  | 'midi_learn'
-  | 'midi_cancel'
-  | 'midi_save'
-  | 'midi_remove';
-export interface MidiPort {
-  command(name: MidiCommand, args?: Record<string, unknown>): Promise<MidiStatus>;
-  subscribeMapToggle?(listener: () => void): () => void;
+
+export function midiAction(value: unknown): MidiAction {
+  const action = midiActions.find((candidate) => candidate === value);
+  if (action === undefined) throw new Error('Invalid MIDI action');
+  return action;
 }
-export const MidiContext = createContext<{
-  active: boolean;
-  status: MidiStatus | null;
-  selected: MidiAssignment | null;
-  toggle: () => void;
-  assign: (assignment: MidiAssignment) => void;
-  remove: (binding: MidiBinding) => void;
-} | null>(null);
-export const MidiPanelContext = createContext<ReactNode>(null);
-export const MidiGraphContext = createContext<{ graphId: string; graphName: string } | null>(null);
-export const MidiNodeContext = createContext<{ nodeId: string; nodeName: string } | null>(null);
+
+export function midiMode(value: unknown): MidiMode {
+  const mode = midiModes.find((candidate) => candidate === value);
+  if (mode === undefined) throw new Error('Invalid MIDI mode');
+  return mode;
+}
 
 export const sameControl = (a: MidiControl, b: MidiControl) =>
   a.device.id === b.device.id &&

@@ -16,9 +16,3 @@ export interface ProductUpdate {
   downloads: UpdateDownload[];
   notesUrl: string | null;
 }
-
-/** Desktop checks and installer opening stay behind the native catalog boundary. */
-export interface UpdatesPort {
-  check(): Promise<ProductUpdate[]>;
-  openDownload(product: UpdateProduct, url: string): Promise<void>;
-}

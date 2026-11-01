@@ -35,7 +35,7 @@ import type {
 } from '../../core/domain/control/status';
 import { useUndoHistory } from '../../core/history/useUndoHistory';
 import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
-import { MidiContext, MidiGraphContext } from '../../core/midi/MidiPort';
+import { MidiContext, MidiGraphContext } from '../../core/midi/MidiContext';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
 import type { EndpointControl } from '../../core/ui/AudioNodeEndpointOptions';
 import { InlineNotice } from '../../core/ui/InlineNotice';

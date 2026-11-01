@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-
+import type { LicensingStatus } from '../../core/domain/licensing';
 import { formattingLocale } from '../../core/i18n';
 import { LicensingKeyField } from '../../core/licensing/LicensingFields';
-import type { LicensingPort, LicensingStatus } from '../../core/licensing/LicensingPort';
+import type { LicensingPort } from '../../core/ports/LicensingPort';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { FormActions } from '../../core/ui/FormActions';
 import { Stack } from '../../core/ui/Stack';

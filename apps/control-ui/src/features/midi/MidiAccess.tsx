@@ -1,12 +1,8 @@
 import { type ReactNode, useContext, useEffect, useEffectEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  type MidiAssignment,
-  type MidiBinding,
-  MidiContext,
-  MidiPanelContext,
-  type MidiPort,
-} from '../../core/midi/MidiPort';
+import type { MidiAssignment, MidiBinding } from '../../core/domain/midi';
+import { MidiContext, MidiPanelContext } from '../../core/midi/MidiContext';
+import type { MidiPort } from '../../core/ports/MidiPort';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { ContentSection } from '../../core/ui/ContentSection';
 import { InlineNotice } from '../../core/ui/InlineNotice';
@@ -125,7 +121,7 @@ function MidiPanel({
   onClose,
 }: {
   session: ReturnType<typeof useMidiSession>;
-  status: import('../../core/midi/MidiPort').MidiStatus;
+  status: import('../../core/domain/midi').MidiStatus;
   selected: MidiAssignment | null;
   onSelect: (assignment: MidiAssignment) => void;
   onChange: (identity: MidiBinding, binding: MidiBinding) => Promise<boolean>;

@@ -1,5 +1,5 @@
-import type { NativeSampleFormat, NativeStreamFormat } from '../domain/control/nativeFormat';
-import type { VirtualEndpointSettings, VirtualEndpointSpec } from '../domain/control/status';
+import type { NativeSampleFormat, NativeStreamFormat } from './control/nativeFormat';
+import type { VirtualEndpointSettings, VirtualEndpointSpec } from './control/status';
 
 export type NativeDirection = 'render' | 'capture';
 
@@ -25,9 +25,3 @@ export type DriverAction =
     };
 
 export type DriverCommand = DriverAction & { expectedRevision: number };
-
-/** This owner controls free devices independently of graph/audio licensing. */
-export interface DriverPort {
-  getSnapshot(): Promise<DriverSnapshot>;
-  mutate(command: DriverCommand): Promise<DriverSnapshot>;
-}

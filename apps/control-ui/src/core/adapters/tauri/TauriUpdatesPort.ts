@@ -1,7 +1,7 @@
-import { invoke } from '@tauri-apps/api/core';
-import { array, integer, literal, nullable, object, string } from '../adapters/decode';
-
-import type { ProductUpdate, UpdateDownload, UpdateProduct, UpdatesPort } from './UpdatesPort';
+import type { ProductUpdate, UpdateDownload, UpdateProduct } from '../../domain/updates';
+import type { UpdatesPort } from '../../ports/UpdatesPort';
+import { array, integer, literal, nullable, object, string } from '../decode';
+import { type NativeInvoke, tauriInvoke } from './nativeInvoke';
 
 const productUpdates = array(
   object<ProductUpdate>({
@@ -23,15 +23,13 @@ const productUpdates = array(
 );
 
 export class TauriUpdatesPort implements UpdatesPort {
+  constructor(private readonly invoke: NativeInvoke = tauriInvoke) {}
+
   async check(): Promise<ProductUpdate[]> {
-    return productUpdates(await invoke('updates_check'), 'updates_check');
+    return productUpdates(await this.invoke('updates_check'), 'updates_check');
   }
 
   async openDownload(product: UpdateProduct, url: string): Promise<void> {
-    await invoke('updates_open_download', { product, url });
+    await this.invoke('updates_open_download', { product, url });
   }
 }
-
-/** Browser and LAN clients never query the external update service. */
-export const localUpdatesPort: UpdatesPort | null =
-  '__TAURI_INTERNALS__' in window ? new TauriUpdatesPort() : null;

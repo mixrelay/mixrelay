@@ -1,10 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type {
-  RuntimeConnectStage,
-  RuntimePort,
-  RuntimeStatus,
-} from '../../core/runtime/RuntimePort';
+import type { RuntimeConnectStage, RuntimeStatus } from '../../core/domain/runtime';
+import type { RuntimePort } from '../../core/ports/RuntimePort';
 import { useRuntimeConnection } from './useRuntimeConnection';
 
 function port() {

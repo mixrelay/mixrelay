@@ -1,3 +1,4 @@
+import type { ColorScheme } from '../domain/appearance';
 // Visual values belong to MixRelay. Carbon informs the roles and contracts.
 export const fontFamily = '"IBM Plex Sans", var(--font-sans-region), sans-serif';
 export const monoFontFamily = '"IBM Plex Mono", var(--font-sans-region), monospace';
@@ -160,8 +161,6 @@ export const palette = {
   },
 } as const;
 
-export type ColorScheme = 'light' | 'dark';
-export type ThemePreference = ColorScheme | 'system';
 // Brand source color stays fixed. External app icons retain their own ownership.
 export const logoColor = palette.red[500];
 // The approved brand identity (app icon, symbols, wordmark) owns its own values, so a

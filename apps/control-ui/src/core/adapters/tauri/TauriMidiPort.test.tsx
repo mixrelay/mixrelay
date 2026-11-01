@@ -1,6 +1,14 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { bindingTarget, controlKey, disconnected, sameControl, sameTarget } from './MidiPort';
-import { midiAction, midiMode, midiStatus, TauriMidiPort } from './TauriMidiPort';
+import {
+  bindingTarget,
+  controlKey,
+  disconnected,
+  midiAction,
+  midiMode,
+  sameControl,
+  sameTarget,
+} from '../../domain/midi';
+import { midiStatus, TauriMidiPort } from './TauriMidiPort';
 
 const control = {
   device: { id: 'uid:42', name: 'Controller' },
@@ -121,18 +129,15 @@ it('rejects malformed native data instead of presenting invented actionable stat
   expect(() => midiAction('delete')).toThrow('Invalid MIDI action');
   expect(() => midiMode('guess')).toThrow('Invalid MIDI mode');
 });
-it('the desktop adapter invokes through Tauri when native authority is present', async () => {
+it('the desktop adapter invokes through Tauri by default', async () => {
   const invoke = vi.fn().mockResolvedValue(raw);
   Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
-  vi.resetModules();
-  const { localMidiPort } = await import('./TauriMidiPort');
-  expect(localMidiPort).not.toBeNull();
-  await localMidiPort?.command('midi_cancel', {});
+  await new TauriMidiPort().command('midi_cancel', {});
   expect(invoke).toHaveBeenCalledWith('midi_cancel', {}, undefined);
 });
 
 it('shows musical note labels and distinguishes every target/action sharing a hardware control', async () => {
-  const { bindingKey, shortControl, bindingLabel } = await import('./MidiPort');
+  const { bindingKey, shortControl, bindingLabel } = await import('../../domain/midi');
   const status = midiStatus(raw);
   const saved = status.bindings[0];
   if (!saved) throw new Error('mapping required');

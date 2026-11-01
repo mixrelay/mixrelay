@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { expect, it, vi } from 'vitest';
 import type { GraphCatalog } from '../../core/domain/control/catalog';
-import { MidiContext } from '../../core/midi/MidiPort';
+import { MidiContext } from '../../core/midi/MidiContext';
 import { midiAssignment } from './midiFixtures';
 import { useMidiGraphSelection } from './useMidiGraphSelection';
 

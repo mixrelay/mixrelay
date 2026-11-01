@@ -1,4 +1,4 @@
-import type { ThemePreference } from './tokens';
+import type { ThemePreference } from '../domain/appearance';
 
 export const themeStorageKey = 'mixrelay.theme';
 

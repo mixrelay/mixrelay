@@ -1,9 +1,8 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppInformation } from '../../core/app-info/useAppInformation';
-
 import { LicensingDialog } from '../../core/licensing/LicensingFields';
-import type { LicensingPort } from '../../core/licensing/LicensingPort';
+import type { LicensingPort } from '../../core/ports/LicensingPort';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { AppInformationButton } from '../../core/ui/AppInformationButton';
 import { InlineNotice } from '../../core/ui/InlineNotice';

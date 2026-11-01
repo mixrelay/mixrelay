@@ -1,3 +1,4 @@
+import type { ThemePreference } from '../domain/appearance';
 import './Globals.css';
 import {
   createContext,
@@ -16,7 +17,6 @@ import {
   themePreference,
   themeStorageKey,
 } from './themePreference';
-import type { ThemePreference } from './tokens';
 
 const ThemeContext = createContext<{
   preference: ThemePreference;

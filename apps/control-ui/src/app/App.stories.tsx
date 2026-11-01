@@ -9,7 +9,7 @@ import type { RuntimeGraphDocument } from '../core/domain/control/graph';
 import type { NativeSampleFormat } from '../core/domain/control/nativeFormat';
 import type { MixRelayStatus } from '../core/domain/control/status';
 import { i18n } from '../core/i18n';
-import type { LicensingPort } from '../core/licensing/LicensingPort';
+import type { LicensingPort } from '../core/ports/LicensingPort';
 import { readyDriver } from '../features/driver-status/driverFixtures';
 import { midiBinding, midiFixture, midiPortFixture } from '../features/midi/midiFixtures';
 import { App } from './App';

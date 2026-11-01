@@ -12,7 +12,7 @@ import {
   reconnectGraph,
   removeGraphItems,
 } from '../domain/graph/topology';
-import { MidiContext, MidiNodeContext } from '../midi/MidiPort';
+import { MidiContext, MidiNodeContext } from '../midi/MidiContext';
 import '@xyflow/react/dist/base.css';
 
 import {
