@@ -19,6 +19,7 @@ members = [
   "crates/control-protocol",
   "crates/control-server",
   "crates/driver-control",
+  "crates/engine",
   "crates/engine-process",
   "crates/licensing",
   "crates/local-socket",
