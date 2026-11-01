@@ -38,6 +38,11 @@ function checkAnchor(page, reference) {
 
 const manualLanguages = readdirSync(resolve(directory, 'manual'), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
 assert.ok(manualLanguages.includes('en') && manualLanguages.includes('ko'), 'English and Korean manual sources exist');
+const decimalCommaLanguages = new Set(['de', 'fr', 'it', 'pt', 'ru']);
+function confirmedPrices(page) {
+  const separator = decimalCommaLanguages.has(page.match(/^manual\/([^/]+)\//)?.[1]) ? ',' : '.';
+  return [`US$19${separator}99`, `US$29${separator}99`];
+}
 const englishChapters = pages.filter((page) => page.startsWith('manual/en/')).map((page) => basename(page));
 const requiredChapters = ['index', 'installation', 'first-launch', 'workspace', 'devices', 'app-capture', 'recording', 'effects', 'plugins', 'stream-deck', 'midi', 'licensing', 'updates', 'uninstall', 'troubleshooting', 'support'].map((slug) => `${slug}.html`);
 assert.deepEqual(englishChapters, [...requiredChapters].sort(), 'all requested manual chapters exist');
@@ -120,8 +125,8 @@ for (const [page, html] of sources) {
   }
   assert.doesNotMatch(html, /14일|평가판\s*·|영구 무료 기능 요금제는 없습니다|기간이 끝난 뒤 계속 사용하려면 구매가 필요/, `${page}: no obsolete trial policy`);
   assert.doesNotMatch(html, /그래프·매핑 저장 및 불러오기는 유료 기능|유료 라이선스로 추가 기능과 저장·복원/, `${page}: no obsolete paid-only saving policy`);
-  for (const price of html.matchAll(/US\$\d+(?:\.\d+)?/g)) {
-    assert.ok(['US$19', 'US$29'].includes(price[0]), `${page}: only confirmed early-adopter and 1.0 prices`);
+  for (const price of html.matchAll(/US\$\d+(?:[.,]\d+)?/g)) {
+    assert.ok(confirmedPrices(page).includes(price[0]), `${page}: only confirmed early-adopter and 1.0 prices`);
   }
 }
 
@@ -180,7 +185,7 @@ const pricingPages = ['index.html', ...['en', 'ko'].map((language) => `legal/${l
   ...manualLanguages.map((language) => `manual/${language}/licensing.html`)];
 for (const page of pricingPages) {
   const html = sources.get(page);
-  assert.deepEqual([...html.matchAll(/US\$\d+/g)].map((match) => match[0]), ['US$19', 'US$29'], `${page}: early-adopter price followed by the future 1.0 price`);
+  assert.deepEqual([...html.matchAll(/US\$\d+(?:[.,]\d+)?/g)].map((match) => match[0]), confirmedPrices(page),`${page}: early-adopter price followed by the future 1.0 price`);
   for (const version of ['1.0', '0.x', '1.x', '2.0']) assert.ok(html.includes(version), `${page}: pricing and update rights include ${version}`);
   assert.doesNotMatch(html, /<(?:del|s|strike)\b|line-through|\d+\s*%/i, `${page}: plain pricing without strikethrough or percentage discounts`);
 }
