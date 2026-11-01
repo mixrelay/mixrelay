@@ -183,7 +183,7 @@ export class HttpControlPort implements ControlPort {
   public constructor(
     private readonly origin = LOCAL_CONTROL_ORIGIN,
     private readonly request: typeof fetch = fetch,
-    scheduler: Scheduler = timerScheduler,
+    private readonly scheduler: Scheduler = timerScheduler,
   ) {
     this.telemetry = new TelemetryHub(
       (listener) => openHttpTelemetry(this.origin, this.request, listener, scheduler),
@@ -342,7 +342,9 @@ export class HttpControlPort implements ControlPort {
     const path = `/api/v1/operations/${encodeURIComponent(operationId)}`;
     const request = this.request;
     for (;;) {
-      await new Promise<void>((resolve) => setTimeout(resolve, OPERATION_POLL_INTERVAL_MS));
+      await new Promise<void>((resolve) =>
+        this.scheduler.after(OPERATION_POLL_INTERVAL_MS, resolve),
+      );
       const response = await request(`${this.origin}${path}`, {
         method: 'GET',
         signal: AbortSignal.timeout(OPERATION_POLL_TIMEOUT_MS),
