@@ -33,7 +33,7 @@ const documentationFiles = [
   'usr/share/doc/mix-relay-driver/third-party/truce-rack/LICENSE-MIT',
   'usr/share/doc/mix-relay-driver/third-party/truce-rack/LICENSE-APACHE',
 ];
-const binaries = ['mixrelay-desktop', 'mixrelay-engine-service', 'mixrelay-driver-service'];
+const binaries = ['mixrelay-desktop', 'mixrelay-service', 'mixrelay-driver-service'];
 const lifecycleHooks = Object.fromEntries(Object.entries({
   preinst: 'driver-before-change.sh', prerm: 'driver-pre-remove.sh',
   postinst: 'driver-after-install.sh', postrm: 'driver-after-remove.sh',
@@ -229,7 +229,7 @@ rm -f '${proc}/125/exe'`,
   };
   for (const deleted of ['', ' (deleted)']) {
     symlinkSync(`/usr/bin/mixrelay-desktop${deleted}`, join(proc, '123/exe'));
-    symlinkSync(`/usr/bin/mixrelay-engine-service${deleted}`, join(proc, '124/exe'));
+    symlinkSync(`/usr/bin/mixrelay-service${deleted}`, join(proc, '124/exe'));
     symlinkSync(`/usr/bin/mixrelay-driver-service${deleted}`, join(proc, '125/exe'));
     writeFileSync(calls, '');
     const result = runHook('driver-before-change.sh', ['upgrade']);
@@ -247,7 +247,7 @@ rm -f '${proc}/125/exe'`,
     assert.ok(readFileSync(calls, 'utf8').split('\n').every(line => !line.includes('KILL')));
   }
   rmSync(join(proc, '123/exe'));
-  symlinkSync('/home/test/development/mixrelay-engine-service', join(proc, '124/exe'));
+  symlinkSync('/home/test/development/mixrelay-service', join(proc, '124/exe'));
   assert.equal(runHook('driver-before-change.sh', ['upgrade']).status, 0);
   assert.equal(readFileSync(userFile, 'utf8'), '{"preserved":true}');
 });
@@ -529,7 +529,7 @@ test('ELF machine, class, byte order, and header validity must match package arc
   ]) {
     assert.throws(() => validatePackage({
       ...data,
-      elfHeaders: { ...data.elfHeaders, 'usr/bin/mixrelay-engine-service': invalidHeader },
+      elfHeaders: { ...data.elfHeaders, 'usr/bin/mixrelay-service': invalidHeader },
     }), /ELF|architecture/);
   }
   assert.throws(() => validatePackage({ ...data, elfHeaders: {} }), /Missing extracted ELF header/);

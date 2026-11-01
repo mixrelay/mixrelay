@@ -52,7 +52,7 @@ which prepares the HOST Cargo static libraries needed by native fixtures:
 
 ```sh
 node scripts/lab/native-check.mjs cargo test -p mixrelay-process-tap -p mixrelay-macos-transport
-node scripts/lab/native-check.mjs cargo test -p mixrelay-engine-service --bin mixrelay-engine-service native_callback_and_hal_contracts -- --exact --nocapture
+node scripts/lab/native-check.mjs cargo test -p mixrelay-service --bin mixrelay-service native_callback_and_hal_contracts -- --exact --nocapture
 ```
 
 The engine contract test runs the native callback, HAL, application-clock, and

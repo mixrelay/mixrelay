@@ -26,7 +26,7 @@ final class InstalledApplicationTests: XCTestCase {
         XCTAssertFalse(PermissionPrompt.isOwner("com.apple.tccd"))
         XCTAssertTrue(PermissionPrompt.isOwner("com.apple.UserNotificationCenter"))
         XCTAssertLessThan(PermissionPrompt.priority("com.apple.UserNotificationCenter"), PermissionPrompt.priority("com.apple.controlcenter"))
-        XCTAssertTrue(PermissionPrompt.belongsToQualification(["Microphone", "mixrelay-engine-service wants access"]))
+        XCTAssertTrue(PermissionPrompt.belongsToQualification(["Microphone", "mixrelay-service wants access"]))
         XCTAssertTrue(PermissionPrompt.belongsToQualification(["MRRoundTripProbe wants access"]))
         XCTAssertTrue(PermissionPrompt.belongsToQualification(["MRSourceControl wants access"]))
         XCTAssertFalse(PermissionPrompt.belongsToQualification(["Another app wants access", "OK"]))

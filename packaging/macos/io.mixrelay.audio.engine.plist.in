@@ -16,7 +16,7 @@
   <dict><key>io.mixrelay.audio.engine</key><true/></dict>
   <key>ProcessType</key><string>Interactive</string>
   <key>ProgramArguments</key>
-  <array><string>/Library/Application Support/MixRelay/bin/mixrelay-engine-service</string></array>
+  <array><string>/Library/Application Support/MixRelay/bin/mixrelay-service</string></array>
   <key>RunAtLoad</key><false/>
   <key>StandardErrorPath</key><string>__MIXRELAY_SERVICE_HOME__/Library/Logs/MixRelay/engine.stderr.log</string>
   <key>StandardOutPath</key><string>__MIXRELAY_SERVICE_HOME__/Library/Logs/MixRelay/engine.stdout.log</string>

@@ -15,7 +15,7 @@ import time
 
 
 APP = Path('/usr/bin/mixrelay-desktop')
-ENGINE = Path('/usr/bin/mixrelay-engine-service')
+ENGINE = Path('/usr/bin/mixrelay-service')
 UNIT = 'mixrelay-driver.service'
 
 

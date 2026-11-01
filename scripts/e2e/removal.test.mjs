@@ -97,3 +97,22 @@ test('a failed native removal remains fatal and preserves the error log', (t) =>
     /active processes rejected removal/,
   );
 });
+
+test('removal fails while an executable from before the engine rename remains', (t) => {
+  for (const [os, format, stale] of [
+    ['macos', 'pkg', '/Library/Application Support/MixRelay/bin/mixrelay-engine-service'],
+    ['linux', 'deb', '/usr/bin/mixrelay-engine-service'],
+  ]) {
+    assert.throws(
+      () =>
+        removeInstalled(
+          os,
+          format,
+          fixture(t),
+          (program) => (program === 'codesign' ? '\nTeamIdentifier=ABCDE12345\n' : 'done'),
+          (path) => path === stale,
+        ),
+      (error) => error.message.endsWith(`left installed product artifacts: ${stale}`),
+    );
+  }
+});

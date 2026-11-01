@@ -363,7 +363,7 @@ export function preparePayload({ manager, hal, driver, engine, uninstaller, outp
   copyTree(fsApi, uninstaller, join(output, UNINSTALLER_PATH.slice(1)), output);
   copyTree(fsApi, hal, halTarget, output);
   copyTree(fsApi, driver, driverTarget, output);
-  copyTree(fsApi, engine, join(output, "Library/Application Support/MixRelay/bin/mixrelay-engine-service"), output);
+  copyTree(fsApi, engine, join(output, "Library/Application Support/MixRelay/bin/mixrelay-service"), output);
   ensureDirectories(fsApi, output, dirname(plistTarget));
   fsApi.writeFileSync(plistTarget, launchdTemplate(), "utf8");
   fsApi.writeFileSync(join(output, "templates/io.mixrelay.audio.engine.plist.in"), readFileSync(new URL("../packaging/macos/io.mixrelay.audio.engine.plist.in", import.meta.url), "utf8"), "utf8");
@@ -376,7 +376,7 @@ export function preparePayload({ manager, hal, driver, engine, uninstaller, outp
       productDirectory: PRODUCT_DIRECTORY,
       manager: MANAGER_DESTINATION,
       driver: DRIVER_DESTINATION,
-      engine: "/Library/Application Support/MixRelay/bin/mixrelay-engine-service",
+      engine: "/Library/Application Support/MixRelay/bin/mixrelay-service",
       engineLaunchd: "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist",
       hal: HAL_DESTINATION,
       launchd: LAUNCHD_DESTINATION,
@@ -387,7 +387,7 @@ export function preparePayload({ manager, hal, driver, engine, uninstaller, outp
         { path: UNINSTALLER_PATH, owner: "root:wheel", mode: "0755" },
         { path: MANAGER_DESTINATION, owner: "root:wheel", mode: "0755" },
         { path: DRIVER_DESTINATION, owner: "root:wheel", mode: "0755" },
-        { path: "/Library/Application Support/MixRelay/bin/mixrelay-engine-service", owner: "root:wheel", mode: "0755" },
+        { path: "/Library/Application Support/MixRelay/bin/mixrelay-service", owner: "root:wheel", mode: "0755" },
         { path: "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist", owner: "root:wheel", mode: "0644" },
         { path: HAL_DESTINATION, owner: "root:wheel", modePolicy: "not-group-or-other-writable" },
         { path: LAUNCHD_DESTINATION, owner: "root:wheel", mode: "0644" },
@@ -406,7 +406,7 @@ export function preparePayload({ manager, hal, driver, engine, uninstaller, outp
       { kind: "removal-launchd", target: "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist", template: "templates/io.mixrelay.driver.removal.plist" },
       { kind: "hal", source: hal, target: HAL_DESTINATION, identifier: halInfo.identifier, architectures: EXPECTED_ARCHITECTURES, files: treeManifest(fsApi, hal) },
       { kind: "driver", source: driver, target: DRIVER_DESTINATION, architectures: driverArchitectures, sha256: sha256(fsApi, driver) },
-      { kind: "engine", source: engine, target: "/Library/Application Support/MixRelay/bin/mixrelay-engine-service", architectures: EXPECTED_ARCHITECTURES, sha256: sha256(fsApi, engine) },
+      { kind: "engine", source: engine, target: "/Library/Application Support/MixRelay/bin/mixrelay-service", architectures: EXPECTED_ARCHITECTURES, sha256: sha256(fsApi, engine) },
       { kind: "engine-template", target: "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist", template: "templates/io.mixrelay.audio.engine.plist.in" },
       { kind: "launchd-template", target: LAUNCHD_DESTINATION, template: "templates/io.mixrelay.audio.driver.plist.in" },
     ],

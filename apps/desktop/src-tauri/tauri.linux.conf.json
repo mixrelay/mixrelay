@@ -6,7 +6,7 @@
     ],
     "externalBin": [
       "binaries/mixrelay-driver-service",
-      "binaries/mixrelay-engine-service"
+      "binaries/mixrelay-service"
     ],
     "linux": {
       "deb": {

@@ -296,7 +296,7 @@ test("relative target directory is shared by Tauri, engine hook and Debian inspe
   const plan = buildPlan({
     profile: "release", target: "aarch64-unknown-linux-gnu", platform: "linux", env: buildEnvironment,
   });
-  assert.equal(plan.output, `${expectedRoot}/aarch64-unknown-linux-gnu/release/mixrelay-engine-service`);
+  assert.equal(plan.output, `${expectedRoot}/aarch64-unknown-linux-gnu/release/mixrelay-service`);
 });
 
 test("Debian package discovery ignores other bundles and rejects non-regular artifacts", () => {

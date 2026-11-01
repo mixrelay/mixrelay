@@ -35,7 +35,7 @@ function satisfiesAudioMinimum(term, name, minimum) {
   }
   return true;
 }
-const executables = ['usr/bin/mixrelay-desktop', 'usr/bin/mixrelay-engine-service', 'usr/bin/mixrelay-driver-service'];
+const executables = ['usr/bin/mixrelay-desktop', 'usr/bin/mixrelay-service', 'usr/bin/mixrelay-driver-service'];
 const wirePlumberFiles = [
   'usr/share/wireplumber/scripts/mixrelay-source-mute.lua',
   'usr/share/wireplumber/wireplumber.conf.d/90-mixrelay-source-mute.conf',

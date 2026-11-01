@@ -29,10 +29,15 @@ fi
 
 repo_root="${0:A:h:h}"
 minimum_macos="$(node "$repo_root/scripts/macos-minimum.mjs")"
-engine_entitlements="$repo_root/native/macos/engine-service/Engine.entitlements.plist"
+engine_entitlements="$repo_root/native/macos/service/Engine.entitlements.plist"
 if [[ "$codesign_identity" != "-" && ! -f "$engine_entitlements" ]]; then
   print -u2 "Engine release entitlements are missing: $engine_entitlements"
   exit 1
+fi
+engine_info_plist="$repo_root/native/macos/service/Info.plist"
+if [[ "$codesign_identity" != "-" ]]; then
+  # Sign with the bundle identity the binary embeds, so the two cannot drift.
+  engine_identifier="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$engine_info_plist")"
 fi
 target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 if [[ "$target_dir" != /* ]]; then
@@ -80,16 +85,16 @@ if (( ! prebuilt )); then
     cargo build \
       --locked \
       --release \
-      -p mixrelay-engine-service \
+      -p mixrelay-service \
       --target "$target" \
       --target-dir "$target_dir"
   done
 fi
 
 universal_release_dir="$target_dir/universal-apple-darwin/release"
-universal_binary="$universal_release_dir/mixrelay-engine-service"
-arm64_binary="$target_dir/aarch64-apple-darwin/release/mixrelay-engine-service"
-x86_64_binary="$target_dir/x86_64-apple-darwin/release/mixrelay-engine-service"
+universal_binary="$universal_release_dir/mixrelay-service"
+arm64_binary="$target_dir/aarch64-apple-darwin/release/mixrelay-service"
+x86_64_binary="$target_dir/x86_64-apple-darwin/release/mixrelay-service"
 
 if [[ -d "$universal_binary" || -L "$universal_binary" ]]; then
   print -u2 "Universal engine destination must be a regular file path: $universal_binary"
@@ -112,8 +117,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-temporary_dir="$(mktemp -d "$universal_release_dir/.mixrelay-engine-service-universal.XXXXXX")"
-temporary_binary="$temporary_dir/mixrelay-engine-service"
+temporary_dir="$(mktemp -d "$universal_release_dir/.mixrelay-service-universal.XXXXXX")"
+temporary_binary="$temporary_dir/mixrelay-service"
 
 xcrun lipo \
   -create \
@@ -165,7 +170,7 @@ else
     --sign "$codesign_identity" \
     --options runtime \
     --timestamp \
-    --identifier mixrelay-engine-service \
+    --identifier "$engine_identifier" \
     --entitlements "$engine_entitlements" \
     "$temporary_binary"
 fi

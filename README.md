@@ -26,11 +26,13 @@ channel counts do not require separate installations. Virtual devices support
 - `apps/control-ui`: responsive React control surface shared by desktop and LAN clients
 - `apps/desktop`: Tauri application wrapper and desktop tray lifecycle
 - `crates/audio-graph`: versioned graph contract and deterministic execution-plan compiler
-- `crates/audio-engine`: real-time engine policy and domain state
+- `crates/engine`: engine domain types, domain and application services, and the ports they use
+- `crates/audio-engine`: real-time block processing, render planning, and latency compensation
+- `crates/time`: monotonic clock and timed-wait ports for platform-neutral code
 - `crates/processor-host`: isolated AU/VST3/CLAP/LV2 discovery, DSP workers, and native editor broker
 - `crates/control-protocol`: stable machine-readable control contract
 - `crates/control-server`: local HTTP control service; loopback-only by default
-- `apps/engine-service`: platform audio backend, graph lifecycle, and control service process
+- `apps/service`: platform audio backend, graph lifecycle, and control service process
 - `native/macos/hal-driver`: isolated AudioServerPlugIn implementation boundary
 - `packaging`: platform-specific service, driver, and installer boundaries
 

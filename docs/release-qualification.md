@@ -418,6 +418,15 @@ scenario baseline does not establish the other product requirements as verified.
 `candidate-linux-x64-arch` 아티팩트를 사용한다. Arch 파일은
 `mix-relay-0.1.0-1-x86_64.pkg.tar.zst` 형태다. 이 값들은 실행 예시이며 기본값으로 고정하지 않는다.
 
+baseline은 엔진 실행 파일이 `bin/mixrelay-service`(macOS 코드 신원 `io.mixrelay.service`)로
+바뀐 뒤의 소스로 만든 것이어야 한다. 그 전 설치는 엔진 launchd 정의만 같은 경로에 남아
+설치기가 부분 설치로 보고 거부하므로 macOS 업그레이드가 실패한다. 위 예시 baseline도 모두
+그 전 후보다. 업그레이드 시나리오는 생략할 수 없으므로, 변경 후 첫 검증 전에 변경 이후의
+`main` 커밋으로 baseline을 먼저 만든다. Linux 실행은 그 커밋에서 `Build Linux release
+candidates once per CPU`를 실행해 얻고, macOS는 같은 커밋의 깨끗한 checkout에서 서명·공증한
+PKG와 `source-revision.txt`를 `qa-install-<짧은 SHA>` draft에 첨부한다. 이 두 값을
+`baseline_linux_build_run`·`baseline_macos_candidate_tag`로 넘긴다.
+
 진단 워크플로의 예시 입력은 후보 태그 `qa-install-03652c5`, 후보 Linux 실행
 `39979549280`, baseline 태그 `qa-install-8582d15`, baseline Linux 실행 `39939576577`이다.
 워크플로 화면에서 해당 입력을 지정하고 `targets`를 비우면 hosted 대상 전체를 실행한다.

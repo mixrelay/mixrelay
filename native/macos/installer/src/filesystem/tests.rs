@@ -41,7 +41,7 @@ impl Fixture {
             launchd: root.join("sources/io.mixrelay.audio.driver.plist"),
             remover: root.join("sources/Uninstall MixRelay.app"),
             removal_launchd: root.join("sources/io.mixrelay.driver.removal.plist"),
-            runtime_engine: root.join("sources/mixrelay-engine-service"),
+            runtime_engine: root.join("sources/mixrelay-service"),
             runtime_launchd: root.join("sources/io.mixrelay.audio.engine.plist"),
             user_data: user_data.join("graphs.json"),
             root,

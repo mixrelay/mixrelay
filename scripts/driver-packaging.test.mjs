@@ -10,7 +10,7 @@ const read = path => readFileSync(resolve(root, path), 'utf8');
 const config = JSON.parse(read('apps/desktop/src-tauri/tauri.linux.conf.json'));
 
 test('Linux package owns the device service and its user-session activation contract', () => {
-  assert.deepEqual(config.bundle.externalBin, ['binaries/mixrelay-driver-service', 'binaries/mixrelay-engine-service']);
+  assert.deepEqual(config.bundle.externalBin, ['binaries/mixrelay-driver-service', 'binaries/mixrelay-service']);
   for (const format of ['deb', 'rpm']) {
     const files = config.bundle.linux[format].files;
     assert.ok(files['/usr/lib/systemd/user/mixrelay-driver.service']);
@@ -52,7 +52,7 @@ test('Driver preparation publishes actual matching service/version inputs withou
   assert.match(copies[0][1], /binaries\/mixrelay-driver-service-aarch64-unknown-linux-gnu$/);
   assert.ok(commands[0][1].includes('--locked'));
   assert.ok(commands[0][1].includes('mixrelay-driver-service'));
-  assert.ok(!commands[0][1].includes('mixrelay-engine-service'));
+  assert.ok(!commands[0][1].includes('mixrelay-service'));
   fsApi.readFileSync = path => path.endsWith('Cargo.toml') ? '[workspace.package]\nversion = "1.2.4"\n' : '{"version":"1.2.3"}';
   assert.throws(() => prepareDriverPackage({ args: ['--target', 'aarch64-unknown-linux-gnu'], rootDir: '/project', env: {}, fsApi }), /versions must match/);
 });
@@ -163,7 +163,7 @@ test('Linux service packaging makes a restrictive build output executable for or
 test('macOS device service ownership, autostart and optional cleanup preserve App boundaries', () => {
   const contract = read('native/macos/installer/src/contract.rs');
   assert.match(contract, /include!\(concat!\(env!\("OUT_DIR"\), "\/product_paths\.rs"\)\)/);
-  assert.match(contract, /bin\/mixrelay-engine-service/);
+  assert.match(contract, /bin\/mixrelay-service/);
   const launchd = read('packaging/macos/io.mixrelay.audio.driver.plist.in');
   assert.match(launchd, /<key>KeepAlive<\/key><true\/>/);
   assert.match(launchd, /<key>RunAtLoad<\/key><true\/>/);

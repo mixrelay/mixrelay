@@ -2,7 +2,7 @@
 
 MixRelay is one `mix-relay` DEB/RPM/Arch product. One public `mixrelay-desktop`
 application includes the editor, background audio and virtual-device management.
-The package always includes `mixrelay-driver-service` and `mixrelay-engine-service`;
+The package always includes `mixrelay-driver-service` and `mixrelay-service`;
 there is no Driver choice, separate manager or separate update catalog.
 All components use the Cargo workspace version. The unreleased product stays at 0.1.0.
 
@@ -80,6 +80,12 @@ Removing the previous version during an upgrade does not stop the new service.
 Removal reloads user service definitions after deleting the unit and autostart
 entry. Arch's package-scoped PreTransaction hook uses AbortOnFail to reject
 active-process upgrade/removal before file changes.
+
+The hooks recognize only the current executable names. A package built before the
+engine executable became `/usr/bin/mixrelay-service` runs `/usr/bin/mixrelay-engine-service`,
+which they neither wait for nor treat as active. Before upgrading such an install, quit
+MixRelay from its status menu and confirm that `mixrelay-engine-service` has exited, or
+remove the old package first. No migration exists for the old name.
 
 Device settings are stored at `$XDG_CONFIG_HOME/mixrelay-driver/drivers.json`, or
 under `~/.config/mixrelay-driver` when `XDG_CONFIG_HOME` is unset. Installation and

@@ -77,7 +77,7 @@ try {
       // Packaging runs spawnSync commands for up to 30 minutes each, so it runs as an owned
       // child that an interruption can stop. It prints the same result or error as before.
       const stage = {
-        payload: { manager: join(bundles, 'MixRelay.app'), hal: join(release, 'hal/MixRelayHAL.driver'), driver: join(release, 'mixrelay-driver-service'), engine: join(release, 'mixrelay-engine-service'), uninstaller: join(bundles, 'Uninstall MixRelay.app'), output: payload },
+        payload: { manager: join(bundles, 'MixRelay.app'), hal: join(release, 'hal/MixRelayHAL.driver'), driver: join(release, 'mixrelay-driver-service'), engine: join(release, 'mixrelay-service'), uninstaller: join(bundles, 'Uninstall MixRelay.app'), output: payload },
         packages: { payload, installerCli: join(release, 'mixrelay-macos-installer'), payloadChecker: join(release, 'mixrelay-macos-payload-check'), teamId, version, signingIdentity: installer, output, notarization, skipNotarization },
       };
       await packageReleaseArtifacts(owned, stage, env);

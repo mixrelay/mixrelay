@@ -113,7 +113,7 @@ capture('coreaudio-devices.txt', 'system_profiler', ['SPAudioDataType', '-json']
 capture('coreaudio-probe.txt', 'zsh', ['scripts/probe-macos-roundtrip.sh', '--list']);
 for (const [role, path] of [
   ['desktop', '/Applications/MixRelay/MixRelay.app'],
-  ['engine', '/Library/Application Support/MixRelay/bin/mixrelay-engine-service'],
+  ['engine', '/Library/Application Support/MixRelay/bin/mixrelay-service'],
   ['driver', '/Library/Application Support/MixRelay/bin/mixrelay-driver-service'],
 ]) capture(`${role}-entitlements.txt`, 'codesign', ['-d', '--entitlements', ':-', path]);
 capture('desktop-windows.txt', 'osascript', ['-e',

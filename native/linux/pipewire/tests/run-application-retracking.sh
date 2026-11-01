@@ -319,9 +319,9 @@ if [[ ${MIXRELAY_LAB_LIFECYCLE_TEST:-0} == 1 ]]; then
     test_command=("$lab/lifecycle-fixture")
 elif [[ "$test_name" == native_device_boundary_probe ]]; then
     [[ "$observe_buffers" == 0 && "$profile_graph" == 0 ]] || exit 2
-    cargo build --locked "${test_profile_args[@]}" -p mixrelay-engine-service --bin mixrelay-engine-service
+    cargo build --locked "${test_profile_args[@]}" -p mixrelay-service --bin mixrelay-service
     test_command=(node "$workspace/scripts/lab/linux-device-probe.mjs"
-        "$cargo_target_dir/$artifact_profile/mixrelay-engine-service" "$lab/device-fixture" "$lab/device-evidence")
+        "$cargo_target_dir/$artifact_profile/mixrelay-service" "$lab/device-fixture" "$lab/device-evidence")
 elif [[ "$test_name" == native_pipewire_connection_lifecycle || "$test_name" == native_graph_driver_drains_before_processor_drop_and_releases_resources ]]; then
     test_command=(env "MIXRELAY_LAB_APPLICATION_FIXTURE=$lab/application-fixture" cargo test --locked --features native-lab "${test_profile_args[@]}" -p mixrelay-pipewire --lib "$test_name" -- --nocapture --test-threads=1)
 elif [[ "$test_name" == native_driver_* ]]; then
@@ -335,7 +335,7 @@ elif [[ "$test_name" == native_driver_* ]]; then
     printf 'driver_native_test=%s\ndriver_native_listed_count=1\n' "$test_filter"
     test_command=(env "MIXRELAY_LAB_APPLICATION_FIXTURE=$lab/application-fixture" cargo "${observer_args[@]}" test --locked --features native-lab "${test_profile_args[@]}" -p mixrelay-linux-driver --lib "$test_filter" -- --exact --nocapture --test-threads=1)
 elif [[ "$test_name" == native_linux_service_* ]]; then
-    test_command=(env "MIXRELAY_LAB_APPLICATION_FIXTURE=$lab/application-fixture" cargo test --locked --features native-lab "${test_profile_args[@]}" -p mixrelay-engine-service --test linux_service_lifecycle "$test_name" -- --nocapture --test-threads=1)
+    test_command=(env "MIXRELAY_LAB_APPLICATION_FIXTURE=$lab/application-fixture" cargo test --locked --features native-lab "${test_profile_args[@]}" -p mixrelay-service --test linux_service_lifecycle "$test_name" -- --nocapture --test-threads=1)
 else
     test_environment=("MIXRELAY_LAB_APPLICATION_FIXTURE=$lab/application-fixture")
     if [[ "$test_name" == native_application_forward_lease_keeps_capture_pcm_and_restores_owned_state ||
@@ -345,7 +345,7 @@ else
     test_filter=$test_name
     exact_args=()
     if [[ "$test_name" == native_application_forward_lease_keeps_capture_pcm_and_restores_owned_state ]]; then
-        mapfile -t listed_tests < <(cargo test --locked --features native-lab "${test_profile_args[@]}" -p mixrelay-engine-service --bin mixrelay-engine-service -- --list |
+        mapfile -t listed_tests < <(cargo test --locked --features native-lab "${test_profile_args[@]}" -p mixrelay-service --bin mixrelay-service -- --list |
             awk -v test_name="$test_name" '$0 ~ (test_name ": test$") { print }')
         [[ ${#listed_tests[@]} == 1 ]] || {
             printf 'Forward/WP ACK test must be listed exactly once; found %s\n' "${#listed_tests[@]}" >&2
@@ -355,7 +355,7 @@ else
         exact_args=(--exact)
         printf 'forward_native_test=%s\nforward_native_listed_count=1\n' "$test_filter"
     fi
-    test_command=(env "${test_environment[@]}" cargo "${observer_args[@]}" test --locked --features native-lab "${test_profile_args[@]}" -p mixrelay-engine-service --bin mixrelay-engine-service "$test_filter" -- "${exact_args[@]}" --nocapture --test-threads=1)
+    test_command=(env "${test_environment[@]}" cargo "${observer_args[@]}" test --locked --features native-lab "${test_profile_args[@]}" -p mixrelay-service --bin mixrelay-service "$test_filter" -- "${exact_args[@]}" --nocapture --test-threads=1)
 fi
 test_exit_code=0
 if ! start_test_session "$lab/test-session-id" "${test_command[@]}"; then

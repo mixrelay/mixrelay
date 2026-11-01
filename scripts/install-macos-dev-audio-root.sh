@@ -7,7 +7,7 @@ if [[ "$(uname -s)" != "Darwin" || "$(id -u)" != "0" ]]; then
 fi
 
 if (( $# != 3 )); then
-  print -u2 "usage: $0 <driver-bundle> <engine-service-binary> <launch-daemon-plist>"
+  print -u2 "usage: $0 <driver-bundle> <service-binary> <launch-daemon-plist>"
   exit 1
 fi
 

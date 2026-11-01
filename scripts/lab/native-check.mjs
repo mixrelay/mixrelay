@@ -32,7 +32,7 @@ function needsNativeFixtures(args) {
   }
   if (options.includes("--workspace") || options.includes("--all") || packages.length === 0) return true;
   if (packages.includes("mixrelay-macos-test-support")) return true;
-  return packages.includes("mixrelay-engine-service")
+  return packages.includes("mixrelay-service")
     && (["test", "llvm-cov"].includes(options[0])
       || options.some(option => ["--all-targets", "--tests", "--benches", "--examples"].includes(option)));
 }

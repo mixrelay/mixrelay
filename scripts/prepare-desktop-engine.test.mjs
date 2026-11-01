@@ -30,7 +30,7 @@ test("Linux config bundles the internal Driver runtime and matching engine sidec
   const linux = JSON.parse(readFileSync(join(root, "apps/desktop/src-tauri/tauri.linux.conf.json"), "utf8"));
   assert.deepEqual(linux.bundle.externalBin, [
     "binaries/mixrelay-driver-service",
-    "binaries/mixrelay-engine-service",
+    "binaries/mixrelay-service",
   ]);
 });
 
@@ -83,7 +83,7 @@ test("macOS is a no-op and does not invoke Cargo or create an engine payload", (
 
 test("dev builds the target-specific Cargo output and copies sidecar plus target/debug engine", () => {
   const target = "x86_64-unknown-linux-gnu";
-  const output = join(root, "target", target, "debug", "mixrelay-engine-service");
+  const output = join(root, "target", target, "debug", "mixrelay-service");
   const fsApi = fakeFs(output);
   const calls = [];
   const result = prepareDesktopEngine({
@@ -97,14 +97,14 @@ test("dev builds the target-specific Cargo output and copies sidecar plus target
   assert.ok(calls[0].args.includes("--locked"));
   assert.deepEqual(calls[0].args.slice(-2), ["--target", target]);
   assert.equal(fsApi.copies.length, 2);
-  assert.equal(fsApi.copies[0].destination, join(root, "apps/desktop/src-tauri/binaries", `mixrelay-engine-service-${target}`));
-  assert.equal(fsApi.copies[1].destination, join(root, "target/debug/mixrelay-engine-service"));
-  assert.equal(result.devAdjacent, join(root, "target/debug/mixrelay-engine-service"));
+  assert.equal(fsApi.copies[0].destination, join(root, "apps/desktop/src-tauri/binaries", `mixrelay-service-${target}`));
+  assert.equal(fsApi.copies[1].destination, join(root, "target/debug/mixrelay-service"));
+  assert.equal(result.devAdjacent, join(root, "target/debug/mixrelay-service"));
 });
 
 test("Linux release stages only the Tauri sidecar input", () => {
   const target = "aarch64-unknown-linux-gnu";
-  const output = join(root, "target", target, "release", "mixrelay-engine-service");
+  const output = join(root, "target", target, "release", "mixrelay-service");
   const fsApi = fakeFs(output);
   const result = prepareDesktopEngine({
     args: ["--profile=release", `--target=${target}`],
@@ -114,14 +114,14 @@ test("Linux release stages only the Tauri sidecar input", () => {
   });
   assert.equal(fsApi.copies.length, 1);
   assert.equal(fsApi.copies[0].source, output);
-  assert.equal(fsApi.copies[0].destination, join(root, "apps/desktop/src-tauri/binaries", `mixrelay-engine-service-${target}`));
+  assert.equal(fsApi.copies[0].destination, join(root, "apps/desktop/src-tauri/binaries", `mixrelay-service-${target}`));
   assert.equal(result.devAdjacent, undefined);
   assert.ok(result.command.includes("--release"));
 });
 
 test("engine build receives the same target directory environment used for locating its output", () => {
   const env = { CARGO_TARGET_DIR: "target/custom", TAURI_ENV_TARGET_TRIPLE: "aarch64-unknown-linux-gnu" };
-  const output = join(root, "target/custom/aarch64-unknown-linux-gnu/release/mixrelay-engine-service");
+  const output = join(root, "target/custom/aarch64-unknown-linux-gnu/release/mixrelay-service");
   let observed;
   const result = prepareDesktopEngine({
     env,

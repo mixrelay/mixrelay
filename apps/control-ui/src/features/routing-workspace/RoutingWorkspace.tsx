@@ -81,6 +81,7 @@ import {
   audioOutputItemId,
   createNodeMenuItems,
   RESCAN_PROCESSORS_ITEM_ID,
+  SYSTEM_AUDIO_EXCLUDED_BUNDLE_IDS,
   SYSTEM_AUDIO_ITEM_ID,
 } from './routingNodeMenus';
 import { useGraphLayout } from './useGraphLayout';
@@ -238,7 +239,7 @@ function useRoutingNodeCreation(options: RoutingNodeCreationOptions) {
                 title: t('studioGraph.nodes.systemAudio.name'),
                 selector: {
                   match: 'all_except',
-                  bundle_ids: ['io.mixrelay.desktop', 'mixrelay-engine-service'],
+                  bundle_ids: [...SYSTEM_AUDIO_EXCLUDED_BUNDLE_IDS],
                 },
               }
             : null
