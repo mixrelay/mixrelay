@@ -18,6 +18,7 @@ if [[ ! "$1" =~ "$uid_pattern" || "$1" == "io.mixrelay.audio.endpoint.0000000000
 fi
 
 repo_root="${0:A:h:h}"
+minimum_macos="$(node "$repo_root/scripts/macos-minimum.mjs")"
 mkdir -p "$repo_root/target/native-tests"
 smoke_root="$(mktemp -d "$repo_root/target/native-tests/installed-duplex.XXXXXX")"
 smoke_binary="$smoke_root/MRInstalledDuplexSmoke"
@@ -33,7 +34,7 @@ trap 'exit 143' TERM
 
 clang \
   -std=c17 \
-  -mmacosx-version-min=14.2 \
+  "-mmacosx-version-min=$minimum_macos" \
   -Wall \
   -Wextra \
   -Wpedantic \

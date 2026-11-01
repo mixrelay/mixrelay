@@ -30,7 +30,7 @@ fn build_macos_service() {
         .include(&hal_include)
         .flag("-std=c17")
         .flag("-fblocks")
-        .flag("-mmacosx-version-min=14.2")
+        .flag("-mmacosx-version-min=15.0")
         .warnings_into_errors(true)
         .files(&sources)
         .compile("mixrelay_engine_service_native");
@@ -57,7 +57,7 @@ fn build_macos_service() {
         .file(format!("{engine_root}/src/MRMicrophonePermission.m"))
         .flag("-fobjc-arc")
         .flag("-fblocks")
-        .flag("-mmacosx-version-min=14.2")
+        .flag("-mmacosx-version-min=15.0")
         .warnings_into_errors(true)
         .compile("mixrelay_microphone_permission");
     println!("cargo:rerun-if-changed={engine_root}/src/MRMicrophonePermission.m");

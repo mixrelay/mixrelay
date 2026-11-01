@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "product": "mix-relay",
   "minimums": {
-    "macos": "14.2",
+    "macos": "15.0",
     "linux": {
       "pipewire": "1.2.0",
       "wireplumber": "0.5.0",
@@ -46,13 +46,6 @@
   ],
   "codeChecks": {
     "macos": [
-      {
-        "id": "macos-14-arm64",
-        "os": "macos",
-        "version": "14",
-        "arch": "arm64",
-        "runner": "macos-14"
-      },
       {
         "id": "macos-15-arm64",
         "os": "macos",
@@ -132,18 +125,6 @@
     ]
   },
   "qualificationTargets": [
-    {
-      "id": "macos-14-arm64",
-      "os": "macos",
-      "version": "14",
-      "versionMatch": "major",
-      "arch": "arm64",
-      "artifact": "macos-universal-pkg",
-      "execution": {
-        "kind": "github-hosted",
-        "runner": "macos-14"
-      }
-    },
     {
       "id": "macos-15-arm64",
       "os": "macos",
@@ -379,10 +360,6 @@
     }
   ],
   "macosArchitectures": {
-    "14": [
-      "arm64",
-      "x64"
-    ],
     "15": [
       "arm64",
       "x64"

@@ -2,7 +2,7 @@
 
 macOS adapter for the existing MixRelay node controls. No public HTTP service,
 account, network configuration, or duplicate audio engine is required.
-Requires macOS 14.2+, MixRelay running, and Stream Deck 7.1+ (Node.js SDK 3.x requires 7.1; the DRM baseline is 6.9).
+Requires macOS 15.0+, MixRelay running, and Stream Deck 7.1+ (Node.js SDK 3.x requires 7.1; the DRM baseline is 6.9).
 
 ## Build and install
 

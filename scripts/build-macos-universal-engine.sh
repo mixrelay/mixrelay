@@ -28,6 +28,7 @@ if [[ "$codesign_identity" != "-" ]]; then
 fi
 
 repo_root="${0:A:h:h}"
+minimum_macos="$(node "$repo_root/scripts/macos-minimum.mjs")"
 engine_entitlements="$repo_root/native/macos/engine-service/Engine.entitlements.plist"
 if [[ "$codesign_identity" != "-" && ! -f "$engine_entitlements" ]]; then
   print -u2 "Engine release entitlements are missing: $engine_entitlements"
@@ -61,7 +62,7 @@ for target in aarch64-apple-darwin x86_64-apple-darwin; do
 done
 
 export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
-export MACOSX_DEPLOYMENT_TARGET=14.2
+export MACOSX_DEPLOYMENT_TARGET="$minimum_macos"
 compiler="$(xcrun --sdk macosx --find clang)"
 export CC_aarch64_apple_darwin="$compiler"
 export CC_x86_64_apple_darwin="$compiler"

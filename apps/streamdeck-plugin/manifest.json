@@ -15,7 +15,7 @@
   "OS": [
     {
       "Platform": "mac",
-      "MinimumVersion": "14.2"
+      "MinimumVersion": "15.0"
     }
   ],
   "Nodejs": {

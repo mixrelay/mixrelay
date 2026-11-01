@@ -1,3 +1,4 @@
+import { MINIMUM_MACOS } from './macos-minimum.mjs';
 import { UNINSTALLER_BUNDLE_NAME } from "./macos-install-contract.mjs";
 import * as fs from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -53,7 +54,7 @@ export function buildRemovalApp({executable, helper, output, version, identity})
       CFBundleDisplayName:'Uninstall MixRelay',CFBundleExecutable:'mixrelay-driver-uninstaller',
       CFBundlePackageType:'APPL',CFBundleShortVersionString:version,CFBundleVersion:version,
       CFBundleIconFile:'icon.icns',CFBundleDevelopmentRegion:'en',CFBundleLocalizations:languages.map(l=>l.language),
-      LSMinimumSystemVersion:'14.2',NSHighResolutionCapable:true,MixRelaySigningTeam:team,
+      LSMinimumSystemVersion:MINIMUM_MACOS,NSHighResolutionCapable:true,MixRelaySigningTeam:team,
     };
     const plist = join(app,'Contents/Info.plist');
     fs.writeFileSync(plist,JSON.stringify(info));

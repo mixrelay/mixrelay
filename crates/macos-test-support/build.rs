@@ -121,7 +121,7 @@ fn build(root: &Path, name: &str, test: &str, libraries: &FixtureLibraries) {
             "-Werror",
             "-g",
             "-fsanitize=address,undefined",
-            "-mmacosx-version-min=14.2",
+            "-mmacosx-version-min=15.0",
         ])
         .args([
             "-I",

@@ -228,7 +228,7 @@ Linux는 정확한 캡처의 native 건강 상태와 실제 PCM 진행이 모두
 제어 작업의 완료 시간까지 고정 상한으로 약속하지 않는다. Off인 앱·물리 입력의 큐는
 미사용 블록과 첫 재활성화 읽기에서 정리해 Off 기간의 과거 PCM을 재생하지 않는다.
 UI·API·Stream Deck·MIDI 컨트롤러는 같은 제어 경로를 사용한다. macOS Stream Deck 플러그인은 그래프·노드별 전원·음소거·볼륨·녹음을 제어한다.
-macOS 14.2+와 Stream Deck 7.1+가 필요하다. DRM의 하한은 6.9지만 최신 Node.js SDK 3.x의 지원 하한은 7.1이다.
+macOS 15.0+와 Stream Deck 7.1+가 필요하다. DRM의 하한은 6.9지만 최신 Node.js SDK 3.x의 지원 하한은 7.1이다.
 플러그인 신원은 `com.rawsector.mixrelay`, 동작은 `.power`·`.mute`·`.volume`·`.recording`, 제작자는 `rawsector`다.
 SDKVersion 3·Node.js 24를 사용하며 플러그인 코드는 실행 중 매니페스트를 읽거나 배포 자원을 수정하지 않는다.
 설정은 변경 즉시 저장하고 실패한 키·다이얼 조작은 `showAlert`로 알린다. 확인된 상태의 표시 갱신은 초당 10회 이하로 합친다.
@@ -488,9 +488,11 @@ CI 행렬·설치본 시험 대상·공통 시나리오·배포 파일 대응과
 환경별 필수 조합은 [생성된 환경표](validation/supported-environments.md), 실행·배포 절차는
 [릴리스 검증](release-qualification.md)에 둔다. 지원 대상과 실제 통과 결과를 구별한다.
 
-- Apple Silicon은 macOS 14.2 이상, Intel은 macOS 14.2–26의 Apple 지원 모델을 대상으로 같은 Universal PKG를 사용한다.
+- Apple Silicon은 macOS 15.0 이상, Intel은 macOS 15.0–26의 Apple 지원 모델을 대상으로 같은 Universal PKG를 사용한다.
   [macOS 27 공식 호환 모델](https://support.apple.com/en-us/127255)은 Apple Silicon 전용이므로 Intel 27 조합은 지원 대상에 넣지 않는다.
   앱 오디오 캡처(process tap) API가 14.2부터 제공된다.
+  빌드 최소 버전의 원본은 `apps/desktop/src-tauri/tauri.conf.json`의 `bundle.macOS.minimumSystemVersion`이다.
+  JS·shell 빌드 도구는 `scripts/macos-minimum.mjs`로 이 값을 읽고, Rust·Xcode 프로젝트의 고정값은 스크립트 회귀 검사로 대조한다.
   계약의 최소 버전을 `apps/desktop/src-tauri/tauri.conf.json`의 `minimumSystemVersion`과 대조하며,
   모든 native 빌드 대상과 설치기의 `allowed-os-versions`가 같은 값을 쓰고 설치기가 더 낮은 OS를 거부한다.
 - 상한은 강제하지 않는다. macOS 27을 지원 계약의 검증 대상에 포함하며, 배포 전 해당 후보의 설치본 검사를 완료한다.
@@ -502,11 +504,14 @@ CI 행렬·설치본 시험 대상·공통 시나리오·배포 파일 대응과
   CI 소스 검사는 이 행렬을 읽으며, 출시 전 설치본 검증은 같은 CPU의 동일 최종 파일을 각 배포판에서 시험한다.
   RPM은 빌드 설정만 있고 지원 배포판·수락 결과가 없어 현재 출시 후보에는 포함하지 않는다.
 
-설치본 검증 대상 13개 조합에서 파일 SHA-256·소스 커밋·계약 해시·CI 실행과 실제 환경을 기록한다.
-GitHub-hosted macOS 6개 조합과 Linux runner 안의 전체 OS VM 7개 조합을 실행한다.
-macOS 14.2는 process tap API에 따른 최소 지원 버전이다. 출시 검증은 각 hosted 주 버전의
-제공 패치를 대표 환경으로 사용하며, 실제 패치와 CPU를 명시한다. 정확히 14.2에서의 시험은
-출시 필수 조건으로 요구하지 않는다. macOS 14 Intel과 관측 패치보다 낮은 패치는 미검증으로 기록한다.
+설치본 검증 대상 12개 조합에서 파일 SHA-256·소스 커밋·계약 해시·CI 실행과 실제 환경을 기록한다.
+GitHub-hosted macOS 5개 조합과 Linux runner 안의 전체 OS VM 7개 조합을 실행한다.
+v0.1.0의 최소 지원 버전은 macOS 15.0이다(제품 책임자 결정, 2026-11-01).
+GitHub가 2026-11-02에 macOS 14 hosted runner를 종료하므로 해당 주 버전의 출시 검증을 계속할 수 없다.
+지원하는 각 hosted 주 버전의 설치본 검증이 출시 조건이므로 macOS 14는 지원 대상에서 제외한다.
+process tap API 자체는 macOS 14.2부터 제공되며 제품 지원 하한과 구별한다.
+출시 검증은 macOS 15·26의 Apple Silicon·Intel과 27의 Apple Silicon에서 제공 패치를 대표 환경으로 사용한다.
+실제 패치와 CPU를 명시하며, 관측한 패치보다 낮은 지원 패치의 직접 검증 여부는 별도로 기록한다.
 전용 QA 기기나 self-hosted runner는 요구하지 않는다.
 모든 패치 버전·데스크톱 환경·플러그인 조합을 실행했다는 뜻은 아니다. rolling은 실행 때의 버전·커널·의존성과
 패키지 목록 해시를 기록한다. 필수 시나리오의 미구현·미실행·실패·정리 실패는 배포 gate를 통과하지 못한다.

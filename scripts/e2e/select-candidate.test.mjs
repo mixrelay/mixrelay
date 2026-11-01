@@ -37,7 +37,7 @@ test('selects the same final bytes and source for every hosted target', t => {
   assert.equal(candidate.sourceRevision, source);
   assert.equal(candidate.artifacts.length, 5);
   validateCandidate(candidate, output);
-  assert.equal(matrix.include.length, 13);
+  assert.equal(matrix.include.length, 12);
   writeFileSync(join(output, 'x64.deb'), 'modified after build');
   assert.throws(() => validateCandidate(candidate, output), /bytes changed/);
 });
@@ -73,7 +73,7 @@ test('limits diagnosis to explicitly selected hosted targets without accepting u
   assert.deepEqual(selectCandidate(f.inputs, f.output, ['macos-27-arm64']).include.map(target => target.id), ['macos-27-arm64']);
   const invalid = fixture(t);
   assert.throws(() => selectCandidate(invalid.inputs, invalid.output, ['invented-os']), /Unknown or unavailable/);
-  assert.throws(() => selectCandidate(invalid.inputs, invalid.output, ['macos-14-2-arm64']), /Unknown or unavailable/);
+  assert.throws(() => selectCandidate(invalid.inputs, invalid.output, ['macos-15-0-arm64']), /Unknown or unavailable/);
   assert.throws(() => selectCandidate(invalid.inputs, invalid.output, ['macos-27-arm64', 'macos-27-arm64']), /Duplicate/);
 });
 
