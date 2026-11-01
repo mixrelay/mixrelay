@@ -73,11 +73,29 @@ export function record<T>(decoder: Decoder<T>): Decoder<Record<string, T>> {
   };
 }
 
+let unnamedFieldSink: ((path: string) => void) | undefined;
+
+/** Runs `decode` and lists the fields no contract named. Decoding keeps such fields, so only
+ * this shows a field the sender renamed; contract tests compare the list with what they expect. */
+export async function unnamedFields(decode: () => unknown): Promise<string[]> {
+  const found: string[] = [];
+  unnamedFieldSink = (path) => found.push(path);
+  try {
+    await decode();
+  } finally {
+    unnamedFieldSink = undefined;
+  }
+  return found;
+}
+
 /** Decodes every field the contract names. Fields it does not name are kept unchanged, so a
  * document the UI edits and sends back never loses what a newer engine added. */
 export function object<T>(fields: { [Key in keyof T]-?: Decoder<T[Key]> }): Decoder<T> {
   return (value, path) => {
     if (!isRecord(value)) return fail(path, 'an object');
+    if (unnamedFieldSink)
+      for (const key of Object.keys(value))
+        if (!Object.hasOwn(fields, key)) unnamedFieldSink(`${path}.${key}`);
     const result: Record<string, unknown> = { ...value };
     for (const [key, decoder] of Object.entries<Decoder<unknown>>(fields)) {
       const decoded = decoder(value[key], `${path}.${key}`);

@@ -12,6 +12,7 @@ import {
   record,
   string,
   tagged,
+  unnamedFields,
 } from './decode';
 
 const failure = (run: () => unknown) => {
@@ -91,4 +92,17 @@ it('selects a tagged variant by its tag and rejects an unknown or missing tag', 
   expect(failure(() => mapping({ mode: 'toString' }, 'm'))).toBe('m.mode');
   expect(failure(() => mapping('auto', 'm'))).toBe('m.mode');
   expect(failure(() => mapping({ mode: 'explicit', routes: [-1] }, 'm'))).toBe('m.routes[0]');
+});
+
+it('lists the fields no contract named, only while asked', async () => {
+  const pair = object({ id: string, inner: object({ id: string }) });
+  const value = { id: 'a', extra: 1, inner: { id: 'b', renamed: 2 } };
+  await expect(unnamedFields(() => pair(value, 'p'))).resolves.toEqual([
+    'p.extra',
+    'p.inner.renamed',
+  ]);
+  await expect(unnamedFields(() => pair({ id: 1 }, 'p'))).rejects.toThrow(InvalidResponseError);
+  // A failed run stops collecting, so ordinary decoding never pays for it.
+  expect(pair(value, 'p')).toEqual(value);
+  await expect(unnamedFields(() => undefined)).resolves.toEqual([]);
 });

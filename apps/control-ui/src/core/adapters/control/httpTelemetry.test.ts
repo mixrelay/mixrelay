@@ -97,6 +97,21 @@ it('keeps metering through a started stream whose state snapshot is unreadable',
   error.mockRestore();
 });
 
+it('starts metering when the opening snapshot itself is unreadable', async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  const source = stream(null);
+  const opening = source.open();
+  source.send({ ...packedTelemetry(), state: { generation: -1 } });
+  await opening;
+  source.send({ ...packedTelemetry(), sequence: 2, state: { generation: -1 } });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(source.listener.window).toHaveBeenCalledTimes(2);
+  expect(source.listener.window.mock.calls[0]?.[0].state).toBeUndefined();
+  expect(source.listener.ended).not.toHaveBeenCalled();
+  expect(error).toHaveBeenCalledOnce();
+  error.mockRestore();
+});
+
 it.each([new Response(null, { status: 503 }), new Response(null)])(
   'rejects unavailable HTTP or body',
   async (response) => {

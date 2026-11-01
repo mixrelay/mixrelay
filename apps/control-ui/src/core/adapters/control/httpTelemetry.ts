@@ -46,7 +46,8 @@ export async function openHttpTelemetry(
         const engine = response.headers.get('X-MixRelay-Engine');
         if (engine && engine !== packet.engineIncarnation)
           throw new Error('telemetry engine changed');
-        if (!started && !packet.state) throw new Error('missing initial snapshot');
+        if (!started && !packet.state && !decoder.snapshotRejected)
+          throw new Error('missing initial snapshot');
         listener.window(packet);
         started = true;
         cancelStartup();

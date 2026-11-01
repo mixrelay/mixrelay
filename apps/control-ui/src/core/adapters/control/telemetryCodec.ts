@@ -66,6 +66,12 @@ export class TelemetryDecoder {
 
   constructor(private readonly report: TelemetryReport = consoleReport) {}
 
+  /** Whether this stream carried a snapshot that broke its contract. Such a window still
+   * counts as the stream's opening snapshot. */
+  get snapshotRejected(): boolean {
+    return this.stateRejected;
+  }
+
   /** A window the native channel already parsed, with unpacked meters. */
   window(message: unknown): ControlTelemetry {
     const window = meterTelemetry(message, 'telemetry window');
