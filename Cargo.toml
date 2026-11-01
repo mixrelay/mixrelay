@@ -15,6 +15,7 @@ members = [
   "crates/processor-host",
   "crates/processor-state",
   "crates/realtime",
+  "crates/time",
   "crates/control-protocol",
   "crates/control-server",
   "crates/driver-control",
