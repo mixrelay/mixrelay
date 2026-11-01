@@ -42,7 +42,7 @@ fn main() -> anyhow::Result<()> {
             root.join("templates/io.mixrelay.driver.removal.plist"),
         ),
         (
-            root.join("Library/Application Support/MixRelay/bin/mixrelay-engine-service"),
+            root.join("Library/Application Support/MixRelay/bin/mixrelay-service"),
             root.join("templates/io.mixrelay.audio.engine.plist.in"),
         ),
     );

@@ -208,7 +208,7 @@ if true; then
     step "Compile release binaries ($target)"
     cargo build --locked --release --target "$target" \
       -p mixrelay-macos-installer \
-      -p mixrelay-engine-service \
+      -p mixrelay-service \
       -p mixrelay-driver-service \
       -p mixrelay-desktop \
       --bins --features mixrelay-desktop/custom-protocol

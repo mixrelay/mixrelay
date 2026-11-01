@@ -18,7 +18,7 @@ for (const format of ['pkg', 'deb', 'arch']) {
 
   test(`${format} cannot use configuration in another payload file`, () => {
     const archive = installerFixtureBytes(format, 'Unconfigured desktop', {
-      extraEntries: { 'public-config.txt': marker, 'usr/bin/mixrelay-engine-service': marker },
+      extraEntries: { 'public-config.txt': marker, 'usr/bin/mixrelay-service': marker },
     });
     assert.throws(() => assertInstallerLicensing(archive, format, polarEnvironment), /missing Polar payment configuration/);
   });

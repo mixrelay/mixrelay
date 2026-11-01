@@ -147,7 +147,7 @@ function fixture(t) {
   mkdirSync(join(payload, "Library/Application Support/MixRelay/bin"), { recursive: true });
   mkdirSync(join(payload, "templates"), { recursive: true });
   writeFileSync(driver, "universal driver fixture");
-  const engine = join(payload, "Library/Application Support/MixRelay/bin/mixrelay-engine-service");
+  const engine = join(payload, "Library/Application Support/MixRelay/bin/mixrelay-service");
   writeFileSync(engine, "universal engine fixture");
   chmodSync(engine, 0o755);
   writeFileSync(join(payload, "templates/io.mixrelay.audio.engine.plist.in"), "engine template fixture");
@@ -166,7 +166,7 @@ function fixture(t) {
       manager: "/Applications/MixRelay/MixRelay.app",
       uninstaller: "/Applications/MixRelay/Uninstall MixRelay.app",
       removalLaunchd: "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist",
-      engine: "/Library/Application Support/MixRelay/bin/mixrelay-engine-service",
+      engine: "/Library/Application Support/MixRelay/bin/mixrelay-service",
       engineLaunchd: "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist",
       hal: "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver",
       driver: "/Library/Application Support/MixRelay/bin/mixrelay-driver-service",
@@ -402,7 +402,7 @@ test("builds one installation/update package with an independently installed rem
   assert.match(installPostinstall, /\/bin\/rm -rf "\$stage"/);
   assert.match(installPostinstall, /check_shared_application_support_dir "\$3\/Library\/Application Support"/);
   const installCommand = installPostinstall.replace(/[ \t]*\\\n[ \t]*/g, " ").split("\n").find(line => line.startsWith('"$cli" install '));
-  assert.equal(installCommand, `"$cli" install ${TEAM} "$stage/payload/Applications/MixRelay/MixRelay.app" "$stage/payload/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver" "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-driver-service" "$stage/payload/templates/io.mixrelay.audio.driver.plist.in" "$stage/payload/Applications/MixRelay/Uninstall MixRelay.app" "$stage/payload/templates/io.mixrelay.driver.removal.plist" "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-engine-service" "$stage/payload/templates/io.mixrelay.audio.engine.plist.in" --reload-coreaudio`);
+  assert.equal(installCommand, `"$cli" install ${TEAM} "$stage/payload/Applications/MixRelay/MixRelay.app" "$stage/payload/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver" "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-driver-service" "$stage/payload/templates/io.mixrelay.audio.driver.plist.in" "$stage/payload/Applications/MixRelay/Uninstall MixRelay.app" "$stage/payload/templates/io.mixrelay.driver.removal.plist" "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-service" "$stage/payload/templates/io.mixrelay.audio.engine.plist.in" --reload-coreaudio`);
   assert.doesNotMatch(installPostinstall, /--delete-user-data/);
   assert.match(installPreinstall, /unexpected file in interrupted package inputs/);
   assert.match(installPreinstall, /private package staging inode changed; left it untouched/);
@@ -1019,7 +1019,7 @@ test("rejects symlinked payloads, unprepared manifests and nonempty output befor
       manager: "/Applications/MixRelay/MixRelay.app",
       uninstaller: "/Applications/MixRelay/Uninstall MixRelay.app",
       removalLaunchd: "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist",
-      engine: "/Library/Application Support/MixRelay/bin/mixrelay-engine-service",
+      engine: "/Library/Application Support/MixRelay/bin/mixrelay-service",
       engineLaunchd: "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist",
       hal: "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver",
       driver: "/Library/Application Support/MixRelay/bin/mixrelay-driver-service",

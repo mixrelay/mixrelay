@@ -10,7 +10,7 @@ repo_root="${0:A:h:h}"
 build_root="$repo_root/target/macos-dev-audio"
 driver_root="$build_root/hal"
 driver_bundle="$driver_root/MixRelayHAL.driver"
-service_binary="$repo_root/target/debug/mixrelay-engine-service"
+service_binary="$repo_root/target/debug/mixrelay-service"
 service_plist="$build_root/io.mixrelay.audio.engine.plist"
 root_installer="$repo_root/scripts/install-macos-dev-audio-root.sh"
 service_user="$(id -un)"
@@ -22,7 +22,7 @@ service_stderr="$service_log_root/engine.stderr.log"
 
 mkdir -p "$build_root" "$service_log_root"
 cargo run --manifest-path "$repo_root/Cargo.toml" -p mixrelay-hal-bundle -- --output "$driver_root"
-cargo build --manifest-path "$repo_root/Cargo.toml" -p mixrelay-engine-service
+cargo build --manifest-path "$repo_root/Cargo.toml" -p mixrelay-service
 
 plutil -create xml1 "$service_plist"
 plutil -insert Label -string "io.mixrelay.audio.engine" "$service_plist"

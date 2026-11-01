@@ -40,7 +40,7 @@ fn build_macos_audio(identity: &str) {
         .expect("Cargo provides CARGO_MANIFEST_DIR to build scripts");
     let info_plist = std::path::Path::new(&manifest_dir).join(identity);
     let native_root = "../../../native/macos/application-capture";
-    let engine_root = "../../../native/macos/engine-service";
+    let engine_root = "../../../native/macos/service";
     let hal_root = "../../../native/macos/hal-driver";
     let include = format!("{native_root}/include");
     let engine_include = format!("{engine_root}/include");

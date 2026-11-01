@@ -3,8 +3,8 @@ import * as defaultFs from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const ENGINE_BINARY_NAME = "mixrelay-engine-service";
-export const SIDECAR_CONFIG_PATH = "binaries/mixrelay-engine-service";
+export const ENGINE_BINARY_NAME = "mixrelay-service";
+export const SIDECAR_CONFIG_PATH = "binaries/mixrelay-service";
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const PROFILES = new Set(["dev", "release"]);
@@ -125,7 +125,7 @@ export function buildPlan({ profile, target, platform, rootDir = REPO_ROOT, env 
     "--manifest-path",
     join(rootDir, "Cargo.toml"),
     "--package",
-    "mixrelay-engine-service",
+    "mixrelay-service",
   ];
   if (profile === "release") commandArgs.push("--release");
   commandArgs.push("--target", target);

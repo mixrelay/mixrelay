@@ -180,7 +180,7 @@ function validatePayload(fs, root) {
   const manager = join(root, APP_PATH.slice(1));
   const hal = join(root, "Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver");
   const driver = join(root, "Library/Application Support/MixRelay/bin/mixrelay-driver-service");
-  const engine = join(root, "Library/Application Support/MixRelay/bin/mixrelay-engine-service");
+  const engine = join(root, "Library/Application Support/MixRelay/bin/mixrelay-service");
   const engineTemplate = join(root, "templates/io.mixrelay.audio.engine.plist.in");
   const engineMetadata = requirePath(fs, "engine payload", engine, "file");
   requirePath(fs, "engine template", engineTemplate, "file");
@@ -229,7 +229,7 @@ function validatePayload(fs, root) {
     || manifest.installContract?.launchd !== "/Library/LaunchDaemons/io.mixrelay.audio.driver.plist"
     || manifest.installContract?.uninstaller !== UNINSTALLER_PATH
     || manifest.installContract?.removalLaunchd !== "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist"
-    || manifest.installContract?.engine !== "/Library/Application Support/MixRelay/bin/mixrelay-engine-service"
+    || manifest.installContract?.engine !== "/Library/Application Support/MixRelay/bin/mixrelay-service"
     || manifest.installContract?.engineLaunchd !== "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist") {
     throw new Error("payload manifest does not describe the fixed MixRelay install contract");
   }
@@ -479,7 +479,7 @@ check_file "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-dri
 check_file "$stage/payload/templates/io.mixrelay.audio.driver.plist.in"
 check_dir "$stage/payload${UNINSTALLER_PATH}"
 check_file "$stage/payload/templates/io.mixrelay.driver.removal.plist"
-check_file "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-engine-service"
+check_file "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-service"
 check_file "$stage/payload/templates/io.mixrelay.audio.engine.plist.in"
 set +e
 "$cli" install ${teamId} \\
@@ -489,7 +489,7 @@ set +e
   "$stage/payload/templates/io.mixrelay.audio.driver.plist.in" \\
   "$stage/payload${UNINSTALLER_PATH}" \\
   "$stage/payload/templates/io.mixrelay.driver.removal.plist" \\
-  "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-engine-service" \\
+  "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-service" \\
   "$stage/payload/templates/io.mixrelay.audio.engine.plist.in" --reload-coreaudio
 result=$?
 set -e
@@ -677,7 +677,7 @@ function buildInstaller({ fs, run, work, packageRoot, stagingId, paths, installe
   const stagedUninstaller = join(stagedPayload, UNINSTALLER_PATH.slice(1));
   copyWithDitto(fs, run, paths.uninstaller, stagedUninstaller, packageRoot);
   requiredBundleRoots.push(stagedManager, stagedHal, stagedUninstaller);
-  copyWithDitto(fs, run, paths.engine, join(stagedPayload, "Library/Application Support/MixRelay/bin/mixrelay-engine-service"), packageRoot);
+  copyWithDitto(fs, run, paths.engine, join(stagedPayload, "Library/Application Support/MixRelay/bin/mixrelay-service"), packageRoot);
   copyWithDitto(fs, run, paths.engineTemplate, join(stagedPayload, "templates/io.mixrelay.audio.engine.plist.in"), packageRoot);
   copyWithDitto(fs, run, paths.driver, join(stagedPayload, "Library/Application Support/MixRelay/bin/mixrelay-driver-service"), packageRoot);
   copyWithDitto(fs, run, paths.template, join(stagedPayload, "templates/io.mixrelay.audio.driver.plist.in"), packageRoot);

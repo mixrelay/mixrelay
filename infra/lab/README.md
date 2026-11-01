@@ -107,7 +107,7 @@ Driver Ready·엔진 health와 실제 렌더 스크린샷을 남기고 시험 �
 로그인의 Secret Service도 준비한다. 이 도구가 키체인이나 사용자 암호를 설정하지는 않는다.
 
 ```sh
-node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-engine-service --features native-lab --bin mixrelay-engine-service EXACT_NATIVE_TEST -- --exact --test-threads=1
+node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-service --features native-lab --bin mixrelay-service EXACT_NATIVE_TEST -- --exact --test-threads=1
 node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-linux-driver --features native-lab --lib EXACT_NATIVE_TEST -- --exact --test-threads=1
 node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-pipewire --features native-lab --lib EXACT_NATIVE_TEST -- --exact --test-threads=1
 node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-audio-recorder --features native-lab --lib ffmpeg_decodes -- --test-threads=1

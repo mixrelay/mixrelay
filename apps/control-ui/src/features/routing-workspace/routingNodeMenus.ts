@@ -16,6 +16,15 @@ export const ADD_PROCESSOR_DIRECTORY_ITEM_ID = 'add-processor-directory';
 export const RESCAN_PROCESSORS_ITEM_ID = 'rescan-processors';
 export const PROCESSOR_SCAN_REPORT_ITEM_ID = 'processor-scan-report';
 export const SYSTEM_AUDIO_ITEM_ID = 'system-audio';
+/**
+ * macOS bundle identities of MixRelay's own processes. System Audio excludes them so it
+ * never captures the product's own output. `scripts/macos-identity.test.mjs` checks them
+ * against the app and engine bundle definitions.
+ */
+export const SYSTEM_AUDIO_EXCLUDED_BUNDLE_IDS: readonly string[] = [
+  'io.mixrelay.desktop',
+  'io.mixrelay.service',
+];
 export function audioInputItemId(device: AudioDeviceDescriptor): string {
   return `audio-input:${device.uid}`;
 }

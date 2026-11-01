@@ -470,7 +470,7 @@ mod tests {
 
     #[test]
     fn diagnostic_details_are_preserved_in_every_language() {
-        let diagnostic = "mixrelay-engine-service /tmp/声音: exit code 2";
+        let diagnostic = "mixrelay-service /tmp/声音: exit code 2";
         for locale in LOCALES {
             let message = detail(locale, Text::BundledEngineStartFailed, diagnostic);
             assert_eq!(

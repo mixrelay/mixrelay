@@ -67,7 +67,7 @@ links. An existing product folder must be root-owned and not group/other writabl
 - `/Applications/MixRelay/MixRelay.app` (`io.mixrelay.desktop`)
 - `/Applications/MixRelay/Uninstall MixRelay.app`
 - `/Library/Application Support/MixRelay/bin/mixrelay-driver-service`
-- `/Library/Application Support/MixRelay/bin/mixrelay-engine-service`
+- `/Library/Application Support/MixRelay/bin/mixrelay-service` (`io.mixrelay.service`)
 - `/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver` (`io.mixrelay.audio.driver`)
 - `/Library/LaunchDaemons/io.mixrelay.audio.driver.plist`
 - `/Library/LaunchDaemons/io.mixrelay.audio.engine.plist`
@@ -77,6 +77,13 @@ The package has one fixed component, `customize="never"`, no optional Driver,
 no removal choice and no Installer plug-in. Its signed native transaction verifies
 all inputs and each present installed target. A missing owned component can be
 repaired; foreign code at an expected path is rejected.
+
+An installation made before the engine moved to `bin/mixrelay-service` (its code identity was
+then `mixrelay-engine-service`) cannot be upgraded in place. Its engine launchd definition
+remains while the engine executable is at the old path, so the installer reports the runtime
+as partial and refuses the installation. Remove such an installation with its own
+`/Applications/MixRelay/Uninstall MixRelay.app`, then install. The installer has no migration
+for the old path.
 
 App data and the runtime's control socket live under `io.mixrelay.desktop`, device
 settings under `io.mixrelay.driver`.

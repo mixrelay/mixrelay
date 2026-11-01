@@ -22,7 +22,7 @@ fi
 repo_root="${0:A:h:h}"
 minimum_macos="$(node "$repo_root/scripts/macos-minimum.mjs")"
 source_file="$repo_root/native/macos/hal-driver/tests/MRRoundTripProbe.c"
-permission_source="$repo_root/native/macos/engine-service/src/MRMicrophonePermission.m"
+permission_source="$repo_root/native/macos/service/src/MRMicrophonePermission.m"
 activity_source="$repo_root/native/macos/hal-driver/tests/MRProbeActivity.m"
 trace_source="$repo_root/native/macos/hal-driver/tests/MRProbeHalTrace.c"
 trace_header="${trace_source%.c}.h"

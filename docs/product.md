@@ -614,7 +614,7 @@ Driver 실행부·엔진·가상 장치 종료, 명시적 재연결 전 중지 �
 | E5 | 녹음 / recorder transport·RecordingStream | 4초 packet 저장량, 부분 byte 쓰기 뒤 완전한 frame prefix 확정, flush→truncate→header finalize 책임 분리 | 47개 파일 회귀·저장량 회귀 완료 | 원래 쓰기 오류와 후속 정리 오류 보존, Failed 유지 |
 | E6 | Linux / PipeWire stream·graph driver | 입력 저장과 출력 quantum 분리. queue 반환·clock 교체·frame budget 실패를 개별 owner에 고정하고 제어측 회수 | Ubuntu ARM Rust·C callback·ASan/UBSan 회귀 완료 | Rust·실제 C callback fixture·ASan/UBSan·서비스 recovery 검증 |
 | E7 | 플러그인 격리 / processor-host | scan/probe와 인스턴스별 child 수명, READY 이후 native hang 감독, 부모 EOF 감시, 원시 native 오류·형식 관찰, 실패한 candidate의 control owner 보존 | 196개 회귀 완료 | crash·abort·hang·late reply 때 독립 peer PCM 유지, 정확한 dry fallback·재시도·child 회수 |
-| E8 | 엔진 조립 / engine-service·session | native 계약·DSP 준비·그래프 게시·제어·저장 거래와 session format/status/telemetry 소유자 분리. Linux pause 위임 보강 | session 45개 회귀 완료 | 기존 거래 순서·rollback·의존 방향 유지, 중복 실행 소유자 제거 |
+| E8 | 엔진 조립 / service·session | native 계약·DSP 준비·그래프 게시·제어·저장 거래와 session format/status/telemetry 소유자 분리. Linux pause 위임 보강 | session 45개 회귀 완료 | 기존 거래 순서·rollback·의존 방향 유지, 중복 실행 소유자 제거 |
 | E9 | 종료 / engine-process·worker completion | child 시작 전 reaper 준비, 마지막 실행 계측 발행, typed worker 결과로 control admission 종료, 모든 독립 owner 정리 오류 보존 | reaper 15개·공통/macOS·Linux 소스 회귀 완료 | 정상 drain과 실패 종료 모두 정확한 child·오디오 owner 회수 |
 | E10 | AU / render·transport·activation | 현재 입력 block extent만 callback에 노출, 정지 후 refcon 수명 유지, native OSStatus·geometry typed 오류 전달 | 35개 회귀·strict clippy 완료 | 정상·오류 경로 RT 할당 0, 렌더 뒤 PCM borrow 철회 |
 | E11 | VST3 / module·instance·event exchange | 필수 module hook 검증, COM 이벤트·포인터 저장소 준비, checked bus 범위와 typed 오류 전달 | 111개 회귀·strict clippy 완료 | 잘못된 native 이벤트·geometry의 무할당 거절, 출력 이벤트 전달 |

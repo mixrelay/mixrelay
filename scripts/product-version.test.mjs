@@ -10,7 +10,7 @@ test('all release entry points share the Cargo product version', () => {
   assert.equal(desktop.identifier, 'io.mixrelay.desktop');
   assert.equal(desktop.productName, 'MixRelay');
   const linux = JSON.parse(readFileSync(new URL('../apps/desktop/src-tauri/tauri.linux.conf.json', import.meta.url)));
-  assert.deepEqual(linux.bundle.externalBin, ['binaries/mixrelay-driver-service', 'binaries/mixrelay-engine-service']);
+  assert.deepEqual(linux.bundle.externalBin, ['binaries/mixrelay-driver-service', 'binaries/mixrelay-service']);
   for (const format of ['deb', 'rpm']) {
     const config = linux.bundle.linux[format];
     assert.equal(config.recommends, undefined);

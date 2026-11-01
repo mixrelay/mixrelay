@@ -55,7 +55,7 @@ agreement.
 ```sh
 cargo run -p mixrelay-hal-bundle -- --output target/macos-hal
 node scripts/lab/native-check.mjs cargo test -p mixrelay-hal-core -p mixrelay-macos-transport
-node scripts/lab/native-check.mjs cargo test -p mixrelay-engine-service --bin mixrelay-engine-service native_callback_and_hal_contracts -- --exact --nocapture
+node scripts/lab/native-check.mjs cargo test -p mixrelay-service --bin mixrelay-service native_callback_and_hal_contracts -- --exact --nocapture
 ```
 
 The Cargo-owned builder compiles arm64 and x86_64 release archives, links only
@@ -122,8 +122,8 @@ native PCM codecs, with no graph server or session changes:
 MIXRELAY_TEST_DRIVER_UID='io.mixrelay.audio.endpoint.<exact-32-lowercase-hex-id>' \
 MIXRELAY_TEST_DRIVER_CHANNELS=32 MIXRELAY_TEST_DRIVER_FORMAT=signed24 \
 MIXRELAY_TEST_SOAK_SECONDS=60 \
-node scripts/lab/native-check.mjs cargo test -p mixrelay-engine-service \
-  --bin mixrelay-engine-service \
+node scripts/lab/native-check.mjs cargo test -p mixrelay-service \
+  --bin mixrelay-service \
   macos_devices::device_tests::installed_driver::installed_driver_pcm_soak \
   -- --exact --ignored --nocapture --test-threads=1
 ```

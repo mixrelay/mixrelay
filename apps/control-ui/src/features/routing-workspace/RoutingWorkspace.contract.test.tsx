@@ -252,7 +252,7 @@ it.each(['core_audio', 'pipe_wire'] as const)(
       config: {
         selector: {
           match: 'all_except',
-          bundle_ids: ['io.mixrelay.desktop', 'mixrelay-engine-service'],
+          bundle_ids: ['io.mixrelay.desktop', 'io.mixrelay.service'],
         },
         sourcePlayback: 'preserve',
         stream: { channels: 2, channelLayout: 'stereo' },

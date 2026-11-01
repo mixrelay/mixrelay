@@ -55,11 +55,15 @@ function compileTone(output, index) {
   return resolve(executable);
 }
 
+// macOS bundle identities of MixRelay's own processes, which System Audio excludes.
+// scripts/macos-identity.test.mjs checks them against the app and engine bundles.
+export const SELF_BUNDLE_IDS = Object.freeze(['io.mixrelay.desktop', 'io.mixrelay.service']);
+
 export function systemCaptureGraph(document, graphId) {
   return { ...document, revision: document.revision + 1, expectedGraphId: graphId,
     nodes: [{ id: 'qa-system', type: 'application_capture', label: null,
       control: { enabled: true, muted: false }, config: {
-      selector: { match: 'all_except', bundle_ids: ['io.mixrelay.desktop', 'mixrelay-engine-service'] },
+      selector: { match: 'all_except', bundle_ids: [...SELF_BUNDLE_IDS] },
       stream: { channels: 2, channelLayout: 'stereo' }, sourcePlayback: 'preserve', gainDb: 0,
     } }, { id: 'qa-system-recorder', type: 'recorder', label: null,
       control: { enabled: true, muted: false }, config: { channels: 2 } }],
