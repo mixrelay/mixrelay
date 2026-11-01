@@ -24,7 +24,7 @@ MixRelay의 Rust 코드에 적용하는 규칙이다. 작업에 해당하는 조
 
 ## 설계·의존을 정할 때
 - 판단 로직은 입출력 없이 데이터를 받아 결과를 돌려주는 순수한 core로 두고, OS·소켓·파일·시계를 다루는 껍질은 얇게 둔다(functional core / imperative shell, MS M-IMPL-IO).
-- OS·장치·시계·IPC·프로세스 조회는 주입 가능한 경계 뒤에 둔다(MS M-MOCKABLE-SYSCALLS). 기존 경계: `mixrelay-time`의 `MonotonicClock`·`Sleeper`, `macos_devices::host::Host`, `audio-io`의 `*Backend`, `device_io` `Backend`·`ListenerBackend`, `transport::ProcessInspection`, `GraphResourceBackend`. 입출력 타입에 실제 OS에 연결하는 `Default`를 두지 않는다.
+- OS·장치·시계·IPC·프로세스 조회는 주입 가능한 경계 뒤에 둔다(MS M-MOCKABLE-SYSCALLS). 기존 경계: `mixrelay-time`의 `MonotonicClock`·`Sleeper`(단조 시각), `mixrelay-licensing`의 `UtcClock`(달력 시각), `macos_devices::host::Host`, `audio-io`의 `*Backend`, `device_io` `Backend`·`ListenerBackend`, `transport::ProcessInspection`, `GraphResourceBackend`. 입출력 타입에 실제 OS에 연결하는 `Default`를 두지 않는다.
 - 주입 방법은 구체 타입 → 제네릭 → `dyn` 순으로 고른다. 경계 하나에 trait 하나를 두고 trait을 작게 유지한다(MS M-DI-HIERARCHY).
 - C 브리지와 `extern "C"` 함수는 ABI 변환만 하고 정책은 안전한 Rust에 둔다(MS M-FFI-TRANSLATES).
 - 상태를 가진 전역 `static`(`Mutex`·`OnceLock`·전역 원자 변수)을 새로 만들지 않는다. 상태는 소유자를 통해 전달한다. 성능용 캐시처럼 정확성에 영향이 없는 것만 예외다(MS M-AVOID-STATICS).

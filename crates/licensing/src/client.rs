@@ -120,6 +120,7 @@ impl LicenseClient {
                 client,
                 origin: ORIGIN.into(),
             }),
+            Arc::new(SystemUtcClock),
         ))
     }
 
@@ -137,23 +138,23 @@ impl LicenseClient {
                 client: http_client()?,
                 origin: SANDBOX_ORIGIN.into(),
             }),
+            Arc::new(SystemUtcClock),
         ))
     }
 
-    /// Bind the public product to an injected, bounded HTTP transport.
+    /// Bind the public product to an injected, bounded HTTP transport, judging licence
+    /// expiry at `clock`'s time.
     #[must_use]
-    pub fn with_http(product: ProductIdentity, http: Arc<dyn LicenseHttp>) -> Self {
+    pub fn with_http(
+        product: ProductIdentity,
+        http: Arc<dyn LicenseHttp>,
+        clock: Arc<dyn UtcClock>,
+    ) -> Self {
         Self {
             http,
             product,
-            clock: Arc::new(SystemUtcClock),
+            clock,
         }
-    }
-
-    /// Judge licence expiry at `clock`'s time instead of the system's.
-    #[must_use]
-    pub fn with_clock(self, clock: Arc<dyn UtcClock>) -> Self {
-        Self { clock, ..self }
     }
 
     fn check(&self, license: &License) -> Result<(), LicenseError> {
