@@ -53,7 +53,8 @@ impl DriverClient {
             .timeout(Duration::from_secs(5))
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+            .build()
+            .map_err(transport_error)?;
         Ok(Self {
             client,
             blocking: Arc::default(),
@@ -103,10 +104,11 @@ impl DriverClient {
             .put(format!("{DRIVER_AUTHORITY}{}", crate::LATENCY_ROUTE))
             .json(command)
             .send()
-            .await?;
+            .await
+            .map_err(transport_error)?;
         let status = response.status();
         let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await? {
+        while let Some(chunk) = response.chunk().await.map_err(transport_error)? {
             check_size(bytes.len().saturating_add(chunk.len()))?;
             bytes.extend_from_slice(&chunk);
         }
@@ -117,7 +119,13 @@ impl DriverClient {
     /// # Errors
     /// Returns transport, size, JSON or service rejection errors.
     pub async fn snapshot(&self) -> Result<DriverSnapshot, DriverError> {
-        read_response(self.claim(self.client.get(&self.endpoint)).send().await?).await
+        read_response(
+            self.claim(self.client.get(&self.endpoint))
+                .send()
+                .await
+                .map_err(transport_error)?,
+        )
+        .await
     }
 
     /// Sends one bounded JSON command asynchronously.
@@ -130,7 +138,8 @@ impl DriverClient {
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(command_bytes(command)?)
             .send()
-            .await?;
+            .await
+            .map_err(transport_error)?;
         read_response(response).await
     }
 
@@ -148,7 +157,8 @@ impl DriverClient {
     pub fn snapshot_blocking(&self) -> Result<DriverSnapshot, DriverError> {
         read_blocking_response(
             self.claim_blocking(self.blocking.client(&self.socket_path)?.get(&self.endpoint))
-                .send()?,
+                .send()
+                .map_err(transport_error)?,
         )
     }
 
@@ -161,7 +171,8 @@ impl DriverClient {
             .timeout(command_timeout(command))
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(command_bytes(command)?)
-            .send()?;
+            .send()
+            .map_err(transport_error)?;
         read_blocking_response(response)
     }
 }
@@ -179,14 +190,12 @@ impl lifecycle::DriverRequests for DriverClient {
     }
 }
 
-/// Reqwest failures in the contract's terms; a refused connection reached nothing.
-impl From<reqwest::Error> for DriverError {
-    fn from(error: reqwest::Error) -> Self {
-        if error.is_connect() {
-            Self::NotReachable(error.to_string())
-        } else {
-            Self::Transport(error.to_string())
-        }
+/// A reqwest failure in the contract's terms; a failed connection delivered nothing.
+fn transport_error(error: reqwest::Error) -> DriverError {
+    if error.is_connect() {
+        DriverError::NotReachable(Box::new(error))
+    } else {
+        DriverError::Transport(Box::new(error))
     }
 }
 
@@ -224,7 +233,7 @@ fn command_bytes(command: &DriverCommand) -> Result<Vec<u8>, DriverError> {
 async fn read_response(mut response: reqwest::Response) -> Result<DriverSnapshot, DriverError> {
     let status = response.status();
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await? {
+    while let Some(chunk) = response.chunk().await.map_err(transport_error)? {
         check_size(bytes.len().saturating_add(chunk.len()))?;
         bytes.extend_from_slice(&chunk);
     }

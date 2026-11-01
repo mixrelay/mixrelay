@@ -11,7 +11,7 @@ use super::*;
 /// Answers snapshots and mutations from scripts and records every command it was sent.
 #[derive(Default)]
 struct ScriptedDriver {
-    snapshots: Mutex<VecDeque<DriverSnapshot>>,
+    snapshots: Mutex<VecDeque<Result<DriverSnapshot, DriverError>>>,
     replies: Mutex<VecDeque<Result<DriverSnapshot, DriverError>>>,
     sent: Mutex<Vec<DriverCommand>>,
 }
@@ -23,7 +23,7 @@ impl DriverRequests for ScriptedDriver {
             .lock()
             .pop_front()
             .expect("a scripted snapshot");
-        async move { Ok(snapshot) }
+        async move { snapshot }
     }
 
     fn mutate(
@@ -80,7 +80,7 @@ fn conflict() -> Result<DriverSnapshot, DriverError> {
 }
 
 fn driver(
-    snapshots: impl IntoIterator<Item = DriverSnapshot>,
+    snapshots: impl IntoIterator<Item = Result<DriverSnapshot, DriverError>>,
     replies: impl IntoIterator<Item = Result<DriverSnapshot, DriverError>>,
 ) -> ScriptedDriver {
     ScriptedDriver {
@@ -94,7 +94,7 @@ fn driver(
 async fn each_attempt_reads_a_fresh_revision_after_a_conflict() {
     let ready = |revision| snapshot(revision, DriverState::Ready, false);
     let driver = driver(
-        [ready(1), ready(2), ready(3)],
+        [Ok(ready(1)), Ok(ready(2)), Ok(ready(3))],
         [conflict(), conflict(), Ok(ready(4))],
     );
     assert_eq!(set_active(&driver, true).await.unwrap().revision, 4);
@@ -106,7 +106,7 @@ async fn each_attempt_reads_a_fresh_revision_after_a_conflict() {
 
 #[tokio::test]
 async fn the_third_conflict_is_returned() {
-    let ready = |revision| snapshot(revision, DriverState::Ready, false);
+    let ready = |revision| Ok(snapshot(revision, DriverState::Ready, false));
     let driver = driver(
         [ready(1), ready(2), ready(3)],
         [conflict(), conflict(), conflict()],
@@ -115,13 +115,46 @@ async fn the_third_conflict_is_returned() {
         set_active(&driver, false).await,
         Err(DriverError::Remote { status: 409, .. })
     ));
-    assert_eq!(driver.sent.lock().len(), REVISION_ATTEMPTS);
+    assert_eq!(
+        *driver.sent.lock(),
+        [1, 2, 3].map(|expected_revision| DriverCommand::Deactivate { expected_revision })
+    );
+}
+
+fn unreachable_service() -> Result<DriverSnapshot, DriverError> {
+    Err(DriverError::NotReachable("no socket".into()))
+}
+
+#[tokio::test]
+async fn a_failed_snapshot_is_returned_without_sending_anything() {
+    let driver = driver([unreachable_service()], []);
+    assert!(matches!(
+        set_active(&driver, false).await,
+        Err(DriverError::NotReachable(_))
+    ));
+    assert!(driver.sent.lock().is_empty());
+}
+
+#[tokio::test]
+async fn a_failed_snapshot_after_a_conflict_is_returned() {
+    let driver = driver(
+        [
+            Ok(snapshot(1, DriverState::Ready, false)),
+            unreachable_service(),
+        ],
+        [conflict()],
+    );
+    assert!(matches!(
+        set_active(&driver, true).await,
+        Err(DriverError::NotReachable(_))
+    ));
+    assert_eq!(driver.sent.lock().len(), 1);
 }
 
 #[tokio::test]
 async fn other_failures_are_not_retried() {
     let driver = driver(
-        [snapshot(1, DriverState::Ready, false)],
+        [Ok(snapshot(1, DriverState::Ready, false))],
         [Err(DriverError::Unavailable("native owner".into()))],
     );
     assert!(matches!(
@@ -134,7 +167,7 @@ async fn other_failures_are_not_retried() {
 #[tokio::test]
 async fn stopping_a_driver_with_nothing_installed_sends_nothing() {
     let absent = snapshot(7, DriverState::NotInstalled, false);
-    let driver = driver([absent.clone()], []);
+    let driver = driver([Ok(absent.clone())], []);
     assert_eq!(set_active(&driver, false).await.unwrap(), absent);
     assert!(driver.sent.lock().is_empty());
 }
@@ -143,7 +176,7 @@ async fn stopping_a_driver_with_nothing_installed_sends_nothing() {
 async fn devices_or_activation_still_reach_a_driver_that_is_not_installed() {
     for (active, devices) in [(false, true), (true, false)] {
         let state = snapshot(1, DriverState::NotInstalled, devices);
-        let driver = driver([state.clone()], [Ok(state)]);
+        let driver = driver([Ok(state.clone())], [Ok(state)]);
         set_active(&driver, active).await.unwrap();
         assert_eq!(
             driver.sent.lock().len(),

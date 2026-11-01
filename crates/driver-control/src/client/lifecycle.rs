@@ -1,8 +1,9 @@
 //! Starting and stopping native devices against the service's settings revision.
 use crate::{DriverCommand, DriverError, DriverSnapshot, DriverState};
 
-/// Another settings client may change the revision between reading and sending; this
-/// many attempts each read a fresh revision before a conflict is returned.
+/// Another settings client may change the revision between reading and sending. Three
+/// attempts, each with a fresh revision, ride out a burst of edits from the other
+/// windows without letting a persistent conflict stall the caller.
 const REVISION_ATTEMPTS: usize = 3;
 
 /// The two Driver service requests activation needs.

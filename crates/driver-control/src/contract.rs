@@ -166,6 +166,9 @@ pub trait DriverBackend: Send {
     fn state(&self) -> DriverState;
 }
 
+/// The transport's own error, kept as the source so logs can show the OS cause.
+pub type TransportFailure = Box<dyn std::error::Error + Send + Sync>;
+
 /// Control, native, persistence and transport failures kept distinct for callers.
 #[derive(Debug, Error)]
 pub enum DriverError {
@@ -198,11 +201,12 @@ pub enum DriverError {
     #[error("Driver JSON: {0}")]
     Json(#[from] serde_json::Error),
     /// The Driver service could not be reached, so the request was not delivered.
-    #[error("Driver service is not reachable: {0}")]
-    NotReachable(String),
-    /// The request failed in transport and may or may not have been delivered.
-    #[error("Driver transport: {0}")]
-    Transport(String),
+    #[error("Driver service is not reachable")]
+    NotReachable(#[source] TransportFailure),
+    /// The request failed in transport and may or may not have been delivered, or the
+    /// client could not be built and nothing was sent.
+    #[error("Driver request failed in transport")]
+    Transport(#[source] TransportFailure),
     /// Service rejected a request.
     #[error("Driver service returned {status}: {message}")]
     Remote { status: u16, message: String },
