@@ -1,13 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import {
-  type AudioSessionStatus,
-  ControlPortError,
-  type GraphApplyResponse,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { GraphApplyResponse, RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type { AudioSessionStatus } from '../../core/domain/control/status';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import * as inlineSelectModule from '../../core/ui/InlineSelect';

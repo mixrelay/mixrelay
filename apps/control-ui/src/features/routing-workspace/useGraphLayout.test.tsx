@@ -2,7 +2,13 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import type { ControlPort, GraphLayoutResponse } from '../../core/control-port/types';
+import type { GraphLayoutResponse } from '../../core/domain/control/catalog';
+import { catalogOf, graphWithNodes } from '../../test-support/portDefaults';
+
+/** Every node the layouts in this file place. */
+const layoutGraph = graphWithNodes(['a', 'b', 'concurrent', 'fresh', 'input', 'output']);
+
+import type { LayoutPort } from './GraphLayoutController';
 import { useGraphLayout } from './useGraphLayout';
 
 function model(): AudioGraphModel {
@@ -42,7 +48,11 @@ describe('workspace layout restoration', () => {
   it('loads after the audio model arrives without rewriting saved positions or audio revision', async () => {
     const getGraphLayout = vi.fn().mockResolvedValue(response);
     const setGraphLayout = vi.fn();
-    const port = { getGraphLayout, setGraphLayout } as unknown as ControlPort;
+    const port: LayoutPort = {
+      getGraphLayout,
+      setGraphLayout,
+      getGraphCatalog: vi.fn(async () => catalogOf('a', layoutGraph)),
+    };
     const hook = renderHook(() => {
       const [graph, setGraph] = useState<AudioGraphModel | null>(null);
       return { graph, setGraph, layout: useGraphLayout(port, 'a', graph, setGraph) };
@@ -62,7 +72,11 @@ describe('workspace layout restoration', () => {
     vi.useFakeTimers();
     const getGraphLayout = vi.fn().mockResolvedValue(response);
     const setGraphLayout = vi.fn().mockResolvedValue({ ...response, layoutRevision: 5 });
-    const port = { getGraphLayout, setGraphLayout } as unknown as ControlPort;
+    const port: LayoutPort = {
+      getGraphLayout,
+      setGraphLayout,
+      getGraphCatalog: vi.fn(async () => catalogOf('a', layoutGraph)),
+    };
     const hook = renderHook(() => {
       const [graph, setGraph] = useState<AudioGraphModel | null>(model());
       return useGraphLayout(port, 'a', graph, setGraph);
@@ -100,7 +114,11 @@ it('clamps saved EQ widths below the Core minimum without changing saved audio o
   };
   const getGraphLayout = vi.fn().mockResolvedValue(saved);
   const setGraphLayout = vi.fn();
-  const port = { getGraphLayout, setGraphLayout } as unknown as ControlPort;
+  const port: LayoutPort = {
+    getGraphLayout,
+    setGraphLayout,
+    getGraphCatalog: vi.fn(async () => catalogOf('a', layoutGraph)),
+  };
   const initial = model();
   const eq = initial.nodes[0];
   if (!eq) throw new Error('Expected node');
@@ -125,7 +143,11 @@ it('checkpoints labels per UI identity, resets a label and prunes only removed i
     layoutRevision: 5,
     layout: request.layout,
   }));
-  const port = { getGraphLayout: read, setGraphLayout: write } as unknown as ControlPort;
+  const port: LayoutPort = {
+    getGraphLayout: read,
+    setGraphLayout: write,
+    getGraphCatalog: vi.fn(async () => catalogOf('a', layoutGraph)),
+  };
   const hook = renderHook(() => {
     const [graph, setGraph] = useState<AudioGraphModel | null>(model());
     return useGraphLayout(port, 'a', graph, setGraph);

@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { Button } from 'react-aria-components';
 import { useTranslation } from 'react-i18next';
-import { MidiContext } from '../midi/MidiPort';
+import { MidiContext } from '../midi/MidiContext';
 import { useMidiControl } from '../midi/useMidiControl';
 import { spacing } from '../theme/tokens';
 import { ActionButton } from './ActionButton';

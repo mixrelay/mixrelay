@@ -1,9 +1,11 @@
-import type { ControlPort } from '../../core/control-port/types';
+import type { GraphPort } from '../../core/ports/control/GraphPort';
+
+type ActivationPort = Pick<GraphPort, 'getGraphStatus'>;
 
 /** Wait for native adoption after a format write. Cancellation stops further reads;
  * deadline or control failures propagate so the caller retains its existing document. */
 export async function waitForGraphActivation(
-  controlPort: ControlPort,
+  controlPort: ActivationPort,
   revision: number,
   isCurrent: () => boolean,
 ) {

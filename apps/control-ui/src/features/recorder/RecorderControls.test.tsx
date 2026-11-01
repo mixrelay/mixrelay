@@ -1,11 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
 import type {
   RecorderRequest,
   RecorderSettings,
   RecorderStatus,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/recorder';
 import { I18nProvider, i18n } from '../../core/i18n';
 import { FeatureAccess } from '../../core/licensing/FeatureAccess';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';

@@ -204,3 +204,6 @@ pub enum DriverError {
     #[error("Driver service returned {status}: {message}")]
     Remote { status: u16, message: String },
 }
+
+#[cfg(test)]
+mod tests;

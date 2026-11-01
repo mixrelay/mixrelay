@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { type ComponentProps, useEffect, useState } from 'react';
-import type { NativeDeviceFormats, NativeSampleFormat } from '../control-port/types';
+import type { NativeDeviceFormats, NativeSampleFormat } from '../domain/control/nativeFormat';
 import { NativeSampleFormatField } from './NativeSampleFormatField';
 
 const encodings: NativeSampleFormat[] = ['signed16', 'signed24', 'signed32', 'float32'];

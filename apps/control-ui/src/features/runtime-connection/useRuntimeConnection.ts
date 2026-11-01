@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  RuntimeConnectStage,
-  RuntimePort,
-  RuntimeStatus,
-} from '../../core/runtime/RuntimePort';
+import type { RuntimeConnectStage, RuntimeStatus } from '../../core/domain/runtime';
+import type { RuntimePort } from '../../core/ports/RuntimePort';
 
 type ConnectionState = RuntimeStatus | 'connecting';
 

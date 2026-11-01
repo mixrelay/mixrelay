@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ControlPort, GraphLayout, GraphLayoutResponse } from '../../core/control-port/types';
-import { GraphLayoutController } from './GraphLayoutController';
+import type { GraphLayout, GraphLayoutResponse } from '../../core/domain/control/catalog';
+import { catalogOf, graphWithNodes } from '../../test-support/portDefaults';
+
+/** Every node the layouts in this file place. */
+const layoutGraph = graphWithNodes(['a', 'b', 'concurrent', 'fresh', 'input', 'output']);
+
+import { GraphLayoutController, type LayoutPort } from './GraphLayoutController';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -23,7 +28,11 @@ function fixture() {
   const getGraphLayout = vi.fn().mockResolvedValue(saved(10));
   const setGraphLayout = vi.fn().mockResolvedValue(saved(50, 2));
   const applyGraph = vi.fn();
-  const port = { getGraphLayout, setGraphLayout, applyGraph } as unknown as ControlPort;
+  const port: LayoutPort = {
+    getGraphLayout,
+    setGraphLayout,
+    getGraphCatalog: vi.fn(async () => catalogOf('a', layoutGraph)),
+  };
   return {
     controller: new GraphLayoutController(port, 'a'),
     getGraphLayout,

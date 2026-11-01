@@ -82,7 +82,7 @@ Carbon의 **역할 토큰, 컴포넌트 계약, 상태별 검증**을 차용한�
 
 `theme.ts`는 토큰에서 CSS를 매 빌드마다 자동 재생성해 Provider의 style에 투영한다. 별도 CSS 색 사본을 수작업으로 관리하지 않는다. `MixRelayProvider`의 기본값은 `system`이며 OS의 `prefers-color-scheme` 변경을 CSS 미디어 쿼리로 즉시 따른다. 헤더 Core `ThemePicker`는 시스템·라이트·다크를 checked 메뉴로 제공한다. `mixrelay.theme` 로컬 저장값을 시작 시 복원하고 변경·다른 창의 storage 이벤트를 반영한다. 저장소 접근 실패 때도 해당 세션에서 선택할 수 있다. Storybook의 제어된 `theme`와 toolbar는 앱의 저장값을 쓰지 않는다. Screen과 Feature는 HEX나 테마별 분기를 지정하지 않는다. 커스텀 테마 편집·파일 로딩은 이번 기본 테마 범위에 포함하지 않는다.
 
-빌드된 앱 `index.html`의 `<head>`에는 토큰 테마 CSS와 bootstrap 스크립트가 들어간다. Storybook iframe 문서에는 넣지 않아 Storybook의 제어된 theme가 유지된다. 원본은 `src/core/theme/themeDocument.ts`이며 `vite.config.ts`의 Vite 플러그인이 Vite `runnerImport`로 불러와 주입한다. 저장된 라이트·다크 선택은 첫 화면에서 OS 테마로 깜박이지 않는다. 이후 변경은 계속 `MixRelayProvider`가 소유한다. Core `NativeWindowTheme`은 Tauri 창 테마를 같은 선택과 동기화하고 시스템 선택은 `null`로 전달한다. 데스크톱 capability는 `core:window:allow-set-theme`를 포함한다.
+빌드된 앱 `index.html`의 `<head>`에는 토큰 테마 CSS와 bootstrap 스크립트가 들어간다. Storybook iframe 문서에는 넣지 않아 Storybook의 제어된 theme가 유지된다. 원본은 `src/core/theme/themeDocument.ts`이며 `vite.config.ts`의 Vite 플러그인이 Vite `runnerImport`로 불러와 주입한다. 저장된 라이트·다크 선택은 첫 화면에서 OS 테마로 깜박이지 않는다. 이후 변경은 계속 `MixRelayProvider`가 소유한다. Core `NativeWindowTheme`은 네이티브 셸 포트(`NativeShellPort`)로 창 테마를 같은 선택과 동기화하고, Tauri 어댑터가 시스템 선택을 `null`로 전달한다. 셸 포트는 `app/localPorts.ts`가 환경에 맞게 한 번 고르며 브라우저에서는 없다. 데스크톱 capability는 `core:window:allow-set-theme`를 포함한다.
 
 Storybook `Foundations/Light·Dark`는 역할과 전체 팔레트, `Design Language`는 정보·성공·주의·오류·입력·강한 명령, `App/Workspace/Light·Dark`는 실제 앱 조합을 보여준다. 모든 기존 스토리도 테마 toolbar로 전환할 수 있다. `tokens.test.ts`는 단계 명도 순서·로고 유지·역할 대칭, 기본·hover·pressed 표면 텍스트 4.5:1, 기능 경계·선택·focus 3:1, 강한 명령과 feedback의 대비, 표면 위계(노드/캔버스 1.3, 헤더·사이드바/캔버스 1.1, hover/노드 1.12, 케이블 3:1 이상이되 본문보다 약함), 미터 구간(트랙 대비 3:1, 인접 구간 명도 1.25)과 녹음 표시(노드·hover 3:1), `meterScale`의 -12/-3 dBFS 위치를 검사한다. 실제 브라우저·키보드·좁은 화면·긴 번역 결과와 설치본 검증은 구별한다. React Flow의 고정 다크 배경은 Core 그래프 CSS가 `--xy-background-color → --canvas-background`로 연결한다.
 
@@ -289,7 +289,7 @@ Storybook `Core/Audio Nodes/Frame`의 Default·Multichannel·Off·Recording·Fai
 
 #### 공통 연속값 계산
 
-`Knob`, `ValueSlider`, `NumericValueControl`은 `core/ui/parameterValue.ts`의 범위/로그 계산, step 맞춤, 키보드 step 표, 포인터 capture 드래그 수명 주기를 공유한다. `NumericValueControl`은 커서 이동을 위해 좌우 방향키를 키보드 step 표에서 제외한다. 컴포넌트별 드래그 감도는 아래 각 계약을 따른다.
+`Knob`, `ValueSlider`, `NumericValueControl`은 `core/domain/parameters`의 범위/로그 계산·step 맞춤·키보드 step 표(`parameterRange.ts`)와 드래그·휠 변환(`parameterGesture.ts`)을 공유하고, `GraphicEqualizer`까지 `core/ui/useCapturedPointerDrag.ts`의 포인터 capture 드래그 수명 주기를 공유한다. `NumericValueControl`은 커서 이동을 위해 좌우 방향키를 키보드 step 표에서 제외한다. 컴포넌트별 드래그 감도는 아래 각 계약을 따른다.
 
 #### Knob과 조밀한 오디오 파라미터
 

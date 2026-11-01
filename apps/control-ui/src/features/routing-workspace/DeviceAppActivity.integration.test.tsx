@@ -1,11 +1,11 @@
+import {
+  type StorybookControlState,
+  StorybookMockControlPort,
+} from '../../core/adapters/fake/StorybookMockControlPort';
 import '../../test-support/integration';
 import { act, render, screen } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { afterEach, assert, expect, it, vi } from 'vitest';
-import {
-  type StorybookControlState,
-  StorybookMockControlPort,
-} from '../../core/control-port/StorybookMockControlPort';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { advance, eventually } from '../../test-support/fakeTimerQueries';

@@ -1,4 +1,17 @@
-import { MidiContext, MidiNodeContext } from '../midi/MidiPort';
+import type { ProcessorEditorFailure, ProcessorEditorStatus } from '../domain/control/processors';
+import { planChannelConnections } from '../domain/graph/channelConnections';
+import {
+  canConnectGraph,
+  connectGraphBatch,
+  disconnectGraph,
+  type GraphConnection,
+  reconnectGraph,
+  removeGraphItems,
+} from '../domain/graph/topology';
+import { MidiContext, MidiNodeContext } from '../midi/MidiContext';
+import { useStructuralShare } from '../ui/useStructuralShare';
+import { type AudioGraphEdgeEndpoints, namedAudioPorts } from './portNames';
+import type { SelectedAudioPort } from './portSelection';
 import '@xyflow/react/dist/base.css';
 
 import {
@@ -45,8 +58,6 @@ import {
 import { useTranslation } from 'react-i18next';
 import { AudioMeterProvider } from '../audio-meter/AudioMeterProvider';
 import type { AudioMeterStore } from '../audio-meter/AudioMeterStore';
-import type { ProcessorEditorFailure, ProcessorEditorStatus } from '../control-port/types';
-import { useStructuralShare } from '../structuralShare';
 import { AudioNodeCard } from '../ui/AudioNodeCard';
 import type { EndpointUpdate } from '../ui/AudioNodeEndpointOptions';
 import { audioNodePortTop } from '../ui/audioNodeLayout';
@@ -64,47 +75,35 @@ import { platformModifier } from '../ui/platformShortcut';
 import { Tooltip } from '../ui/Tooltip';
 import styles from './AudioGraphCanvas.module.css';
 import { ChannelConnectionDialog } from './ChannelConnectionDialog';
-import {
-  type ChannelConnectionRequest,
-  mapChannelConnections,
-  planChannelConnections,
-} from './channelConnections';
+import { connectionPreviewPairs, dragConnectionRequest } from './connectionPlanning';
 import {
   focusGraphNode,
   graphContextMenuAnchor,
   openContextMenuFromKeyboard,
   useChannelConnectionRequests,
 } from './graphKeyboard';
+import { type AudioGraphViewport, viewportToRestore, viewportToSave } from './graphViewport';
 import {
-  type AudioGraphConnection,
   type AudioGraphModel,
   type AudioGraphNode,
   type AudioGraphPort,
   audioGraphNodeTitle,
-  canConnectAudioGraph,
-  connectAudioGraphBatch,
-  disconnectAudioGraph,
   graphNodeMinimumWidth,
-  moveAudioGraphNode,
   normalizeAudioGraphNodeSize,
-  reconnectAudioGraph,
-  removeAudioGraphItems,
-  resizeAudioGraphNode,
 } from './model';
+import { applyNodeLayoutChanges } from './nodeChanges';
 import type { PlaceGraphNodes } from './nodePlacement';
 import { PortSelectionFeedback } from './PortSelectionFeedback';
 import {
   type AudioFlowEdge,
   type AudioFlowEdgeLabel,
   type AudioFlowNode,
-  type AudioGraphEdgeEndpoints,
   applyAudioNodeLayers,
-  namedAudioPorts,
   reconcileAudioFlowEdges,
   reconcileAudioFlowNodes,
 } from './reactFlowAdapter';
 import { graphNodeFaceMode, useAudioNodeLayout } from './useAudioNodeLayout';
-import { type SelectedAudioPort, useAudioPortSelection } from './useAudioPortSelection';
+import { useAudioPortSelection } from './useAudioPortSelection';
 import {
   type GraphContextMenuLabels,
   type NodeContextAction,
@@ -157,11 +156,6 @@ export type AudioGraphChangeKind =
   | 'processor_parameter'
   | 'parameter_group'
   | 'runtime';
-export interface AudioGraphViewport {
-  x: number;
-  y: number;
-  zoom: number;
-}
 type CommitGraph = (nextModel: AudioGraphModel, kind: AudioGraphChangeKind) => void;
 type ReconnectEnd = NonNullable<ReactFlowProps<AudioFlowNode, AudioFlowEdge>['onReconnectEnd']>;
 
@@ -452,28 +446,13 @@ function useAudioFlowCollections(
   return { applyEdgeChanges, onNodesChange, edges, nodes: layeredNodes, setEdges, setNodes };
 }
 
-function toGraphConnection(connection: Connection | Edge): AudioGraphConnection {
+function toGraphConnection(connection: Connection | Edge): GraphConnection {
   return {
     sourceNodeId: connection.source,
     sourcePortId: connection.sourceHandle ?? '',
     targetNodeId: connection.target,
     targetPortId: connection.targetHandle ?? '',
   };
-}
-
-function selectedOutputPorts(
-  model: AudioGraphModel,
-  selectedPorts: readonly SelectedAudioPort[],
-  nodeId: string,
-) {
-  const node = model.nodes.find((candidate) => candidate.id === nodeId);
-  if (!node) return [];
-  const selectedIds = new Set(
-    selectedPorts
-      .filter((port) => port.nodeId === nodeId && port.side === 'output')
-      .map((port) => port.portId),
-  );
-  return node.outputPorts.filter((port) => selectedIds.has(port.id));
 }
 
 function portVerticalOffset(
@@ -489,74 +468,6 @@ function portVerticalOffset(
   // React Flow applies viewport zoom to the whole connection layer. Use measured
   // handle centers in node coordinates, including the node's current resize.
   return port.y + port.height / 2 - anchor.y - anchor.height / 2;
-}
-
-interface ConnectionPreviewPair {
-  sourcePort: Pick<AudioGraphPort, 'id'>;
-  targetPort?: Pick<AudioGraphPort, 'id'>;
-}
-
-function connectionPreviewPairs(
-  model: AudioGraphModel,
-  selectedPorts: readonly SelectedAudioPort[],
-  sourceNodeId: string,
-  sourceAnchorId: string,
-  targetNodeId?: string,
-  targetAnchorId?: string,
-): ConnectionPreviewPair[] {
-  const selectedSources = selectedOutputPorts(model, selectedPorts, sourceNodeId);
-  const activeSources =
-    selectedSources.length > 1 && selectedSources.some((port) => port.id === sourceAnchorId)
-      ? selectedSources
-      : [{ id: sourceAnchorId }];
-  if (!targetNodeId || !targetAnchorId) {
-    return activeSources.map((sourcePort) => ({ sourcePort }));
-  }
-  return selectedConnectionBatch(
-    model,
-    {
-      sourceNodeId,
-      sourcePortId: sourceAnchorId,
-      targetNodeId,
-      targetPortId: targetAnchorId,
-    },
-    selectedPorts,
-  ).map((connection) => ({
-    sourcePort: { id: connection.sourcePortId },
-    targetPort: { id: connection.targetPortId },
-  }));
-}
-
-/** A drag from `connection`'s source port carries the other selected outputs of that node
- * when the grabbed port is part of the selection; otherwise only the grabbed port. */
-function dragConnectionRequest(
-  model: AudioGraphModel,
-  connection: AudioGraphConnection,
-  selectedPorts: readonly SelectedAudioPort[],
-): ChannelConnectionRequest {
-  const selected = selectedOutputPorts(model, selectedPorts, connection.sourceNodeId);
-  const batch = selected.length > 1 && selected.some((port) => port.id === connection.sourcePortId);
-  return {
-    sourceNodeId: connection.sourceNodeId,
-    sourcePortIds: batch ? selected.map((port) => port.id) : [connection.sourcePortId],
-    sourceAnchorPortId: connection.sourcePortId,
-    targetNodeId: connection.targetNodeId,
-    targetAnchorPortId: connection.targetPortId,
-  };
-}
-
-function selectedConnectionBatch(
-  model: AudioGraphModel,
-  connection: AudioGraphConnection,
-  selectedPorts: readonly SelectedAudioPort[],
-): AudioGraphConnection[] {
-  const { pairs } = mapChannelConnections(
-    model,
-    dragConnectionRequest(model, connection, selectedPorts),
-  );
-  // A target without the hovered port still previews the grabbed cable alone; committing
-  // validates through planChannelConnections and creates nothing.
-  return pairs.length ? pairs : [connection];
 }
 
 function BatchConnectionLine({
@@ -625,7 +536,7 @@ function useConnectionHandlers(
 ) {
   const isValidConnection = useCallback(
     (connection: Connection | Edge) =>
-      canConnectAudioGraph(
+      canConnectGraph(
         model,
         toGraphConnection(connection),
         'id' in connection ? connection.id : undefined,
@@ -638,7 +549,7 @@ function useConnectionHandlers(
         model,
         dragConnectionRequest(model, toGraphConnection(connection), selectedPortsRef.current),
       );
-      const nextModel = connectAudioGraphBatch(model, connections);
+      const nextModel = connectGraphBatch(model, connections);
       commit(nextModel, 'runtime');
       if (nextModel !== model && connections.length > 1) clearSelectedPorts();
     },
@@ -646,12 +557,12 @@ function useConnectionHandlers(
   );
   const onReconnect = useCallback(
     (edge: AudioFlowEdge, connection: Connection) =>
-      commit(reconnectAudioGraph(model, edge.id, toGraphConnection(connection)), 'runtime'),
+      commit(reconnectGraph(model, edge.id, toGraphConnection(connection)), 'runtime'),
     [commit, model],
   );
   const onReconnectEnd = useCallback<ReconnectEnd>(
     (_, edge, _handleType, connectionState) => {
-      if (!connectionState.isValid) commit(disconnectAudioGraph(model, [edge.id]), 'runtime');
+      if (!connectionState.isValid) commit(disconnectGraph(model, [edge.id]), 'runtime');
     },
     [commit, model],
   );
@@ -662,7 +573,7 @@ function useDeletionHandlers(model: AudioGraphModel, commit: CommitGraph) {
   const removeEdges = useCallback(
     (removedEdges: AudioFlowEdge[]) =>
       commit(
-        disconnectAudioGraph(
+        disconnectGraph(
           model,
           removedEdges.map((edge) => edge.id),
         ),
@@ -673,7 +584,7 @@ function useDeletionHandlers(model: AudioGraphModel, commit: CommitGraph) {
   const onDelete = useCallback(
     ({ nodes, edges }: { nodes: AudioFlowNode[]; edges: AudioFlowEdge[] }) =>
       commit(
-        removeAudioGraphItems(
+        removeGraphItems(
           model,
           nodes.map((node) => node.id),
           edges.map((edge) => edge.id),
@@ -706,32 +617,7 @@ function useNodeChangeHandler(
             : change,
         ),
       );
-      const normalizedSizes = new Map(
-        changes.flatMap((change) =>
-          change.type === 'dimensions' && change.dimensions && change.setAttributes
-            ? [
-                [
-                  change.id,
-                  {
-                    width: change.dimensions.width,
-                    height: change.dimensions.height - (disclosureHeights.get(change.id) ?? 0),
-                  },
-                ] as const,
-              ]
-            : [],
-        ),
-      );
-      let nextModel = model;
-      for (const change of changes) {
-        if (change.type === 'position' && change.position) {
-          nextModel = moveAudioGraphNode(nextModel, change.id, change.position);
-        }
-        if (change.type === 'dimensions') {
-          const size = normalizedSizes.get(change.id);
-          if (size) nextModel = resizeAudioGraphNode(nextModel, change.id, size);
-        }
-      }
-      commit(nextModel, 'layout');
+      commit(applyNodeLayoutChanges(model, changes, disclosureHeights), 'layout');
     },
     [applyNodeChanges, commit, disclosureHeights, model],
   );
@@ -918,18 +804,12 @@ function GraphContextSurface({
   );
 }
 
-function sameViewport(a: AudioGraphViewport, b: AudioGraphViewport) {
-  return a.x === b.x && a.y === b.y && a.zoom === b.zoom;
-}
-
 function restoreCanvasViewport(
   instance: ReactFlowInstance<AudioFlowNode, AudioFlowEdge> | null,
   viewport: AudioGraphViewport | undefined,
 ) {
-  if (!instance || !viewport) return;
-  if (sameViewport(instance.getViewport(), viewport)) return;
-  // Acknowledging a saved gesture must not animate or reposition an already matching view.
-  void instance.setViewport({ ...viewport }, { duration: 0 });
+  const restored = instance && viewportToRestore(instance.getViewport(), viewport);
+  if (restored) void instance.setViewport(restored, { duration: 0 });
 }
 
 function useCanvasViewport(
@@ -967,12 +847,9 @@ function useCanvasViewport(
     NonNullable<ReactFlowProps<AudioFlowNode, AudioFlowEdge>['onMoveEnd']>
   >(
     (_, nextViewport) => {
-      // Restoring the saved view echoes it back. Every other move, including Fit graph,
-      // is what the user now sees, so the next mount must restore it rather than an older
-      // view where new nodes would land out of sight. onMoveEnd saves once per gesture.
-      const saved = requestedViewport.current;
-      if (!mounted.current || (saved && sameViewport(saved, nextViewport))) return;
-      onViewportChange?.({ ...nextViewport });
+      // onMoveEnd reports once per gesture; restoring the requested view echoes it back.
+      const saved = mounted.current && viewportToSave(requestedViewport.current, nextViewport);
+      if (saved) onViewportChange?.(saved);
     },
     [onViewportChange],
   );
@@ -1184,7 +1061,7 @@ function CanvasConnectionDialog({
       onCancel={connecting.close}
       onConnect={(connections) => {
         // One commit, so the whole batch is a single undo step.
-        commit(connectAudioGraphBatch(model, connections), 'runtime');
+        commit(connectGraphBatch(model, connections), 'runtime');
         connecting.close();
       }}
     />

@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import type { ProductUpdate } from '../../core/domain/updates';
 import { I18nProvider, i18n } from '../../core/i18n';
+import type { UpdatesPort } from '../../core/ports/UpdatesPort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { ActionButton } from '../../core/ui/ActionButton';
-import type { ProductUpdate, UpdatesPort } from '../../core/updates/UpdatesPort';
 import { UpdateAccess } from './UpdateAccess';
 
 const product: ProductUpdate = {

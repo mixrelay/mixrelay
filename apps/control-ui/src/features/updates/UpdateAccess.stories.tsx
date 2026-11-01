@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
+import type { ProductUpdate } from '../../core/domain/updates';
+import type { UpdatesPort } from '../../core/ports/UpdatesPort';
 import { Text } from '../../core/ui/Text';
-import type { ProductUpdate, UpdatesPort } from '../../core/updates/UpdatesPort';
 import { UpdateAccess } from './UpdateAccess';
 
 const unpublished: ProductUpdate[] = ['mix-relay'].map((product) => ({

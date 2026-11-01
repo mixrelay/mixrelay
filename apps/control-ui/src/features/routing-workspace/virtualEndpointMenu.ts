@@ -4,7 +4,7 @@ import type {
   AudioSessionStatus,
   VirtualEndpointSettings,
   VirtualEndpointSpec,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/status';
 import type { HierarchicalMenuItem } from '../../core/ui/HierarchicalMenu';
 import { type RoutingNodeRequest, virtualEndpointIdentity } from './model';
 

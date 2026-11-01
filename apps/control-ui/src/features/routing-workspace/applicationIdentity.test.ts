@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
-
 import type { AudioGraphModel } from '../../core/audio-graph/model';
 import type {
   CapturableApplication,
   RuntimeApplicationSelector,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/inventory';
 import { applicationInventorySelection, applicationSelectorKey } from './applicationIdentity';
 import { presentRoutingApplicationIcons } from './model';
 

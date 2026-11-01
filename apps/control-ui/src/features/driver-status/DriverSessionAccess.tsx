@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { DriverPort } from '../../core/driver/DriverPort';
+import type { DriverPort } from '../../core/ports/DriverPort';
 import { type DriverSession, useDriverSession } from './useDriverSession';
 
 /** The Driver owns device settings; graph nodes provide their editing UI. */

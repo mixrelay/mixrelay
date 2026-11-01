@@ -1,9 +1,9 @@
+import { StorybookMockControlPort } from '../core/adapters/fake/StorybookMockControlPort';
+import type { RuntimeGraphDocument } from '../core/domain/control/graph';
 import '../test-support/integration';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
-import type { RuntimeGraphDocument } from '../core/control-port/types';
 import { I18nProvider, i18n } from '../core/i18n';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import { midiFixture, midiPortFixture } from '../features/midi/midiFixtures';

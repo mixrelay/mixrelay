@@ -1,4 +1,14 @@
+import type { GraphLayoutResponse } from '../../core/domain/control/catalog';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type {
+  ExternalProcessorDescriptor,
+  ProviderPorts,
+} from '../../core/domain/control/processors';
+import type { AudioSessionStatus } from '../../core/domain/control/status';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { ProblemsTarget } from '../../test-support/ProblemsTarget';
+import { catalogOf, engineDefaults } from '../../test-support/portDefaults';
 import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -7,15 +17,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioGraphNodeMenuItem } from '../../core/audio-graph/AudioGraphCanvas';
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
-import {
-  type AudioSessionStatus,
-  type ControlPort,
-  ControlPortError,
-  type ExternalProcessorDescriptor,
-  type GraphLayoutResponse,
-  type ProviderPorts,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { GraphApplicationError } from './GraphApplicationQueue';
@@ -352,6 +353,10 @@ function port(overrides: Partial<ControlPort> = {}): ControlPort {
         width: null,
       }),
     ),
+    ...engineDefaults(
+      async () => document,
+      () => selectedGraph,
+    ),
     ...overrides,
   };
 }
@@ -377,11 +382,15 @@ function renderWorkspace(controlPort: ControlPort, onBusyChange?: (busy: boolean
   return render(workspace(controlPort, onBusyChange));
 }
 
+/** The graph the fake engine reports as selected; `workspace` keeps it on the rendered one. */
+let selectedGraph = 'graph-1';
+
 function workspace(
   controlPort: ControlPort,
   onBusyChange?: (busy: boolean) => void,
   graphId?: string,
 ) {
+  selectedGraph = graphId ?? 'graph-1';
   return (
     <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
@@ -1495,6 +1504,8 @@ it('places new remote nodes from saved layout while keeping local geometry and v
   const controlPort = port({
     applyGraph: vi.fn().mockRejectedValue(new GraphApplicationError('graph_conflict_unresolved')),
     getGraph: vi.fn().mockResolvedValueOnce(document).mockResolvedValue(remote),
+    // The engine publishes the remote node before the reload reads the selected graph.
+    getGraphCatalog: vi.fn(async () => catalogOf('saved', remote)),
     getGraphLayout,
     setGraphLayout: vi.fn(),
     getGraphStatus: vi

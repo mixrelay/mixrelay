@@ -2827,6 +2827,7 @@ dependencies = [
  "mixrelay-audio-graph",
  "mixrelay-audio-io",
  "mixrelay-audio-recorder",
+ "mixrelay-test-support",
  "serde",
  "serde_json",
 ]
@@ -3221,6 +3222,7 @@ version = "0.1.0"
 dependencies = [
  "hound",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

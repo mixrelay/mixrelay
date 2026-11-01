@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-import type { ControlPort, MixRelayStatus } from '../../core/control-port/types';
+import type { MixRelayStatus } from '../../core/domain/control/status';
 import { controlState, statePush } from '../../test-support/controlTelemetry';
 import { useAudioStatus } from './useAudioStatus';
 
@@ -20,7 +20,7 @@ it('uses pushed power, fences late fallback responses and clears lost health bef
     const source = statePush();
     const pending = Promise.withResolvers<MixRelayStatus>();
     const getStatus = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(status);
-    const port = { ...source, getStatus } as unknown as ControlPort;
+    const port = { ...source, getStatus };
     const hook = renderHook(() => useAudioStatus(port));
     act(() => source.push(controlState()));
     await act(async () => pending.resolve({ ...status, driverState: 'unavailable' }));
@@ -45,7 +45,7 @@ it('retains the status while refreshing, then adopts the acknowledged pause', as
   });
   const port = {
     getStatus: vi.fn().mockResolvedValueOnce(status).mockReturnValueOnce(pending),
-  } as unknown as ControlPort;
+  };
   const hook = renderHook(({ refresh }) => useAudioStatus(port, refresh), {
     initialProps: { refresh: 0 },
   });
@@ -59,10 +59,10 @@ it('retains the status while refreshing, then adopts the acknowledged pause', as
 });
 
 it('never retains ready health for a replacement or failed service', async () => {
-  const first = { getStatus: vi.fn().mockResolvedValue(status) } as unknown as ControlPort;
+  const first = { getStatus: vi.fn().mockResolvedValue(status) };
   const next = {
     getStatus: vi.fn().mockRejectedValue(new Error('offline')),
-  } as unknown as ControlPort;
+  };
   const hook = renderHook(({ port, refresh }) => useAudioStatus(port, refresh), {
     initialProps: { port: first, refresh: 0 },
   });
@@ -87,7 +87,7 @@ it('polls after completion and ignores late replies from a cancelled refresh', a
       .mockResolvedValueOnce(status)
       .mockReturnValueOnce(late)
       .mockResolvedValue(status),
-  } as unknown as ControlPort;
+  };
   const hook = renderHook(({ refresh }) => useAudioStatus(port, refresh), {
     initialProps: { refresh: 0 },
   });
@@ -121,8 +121,8 @@ it('ignores a failed status read from a replaced service instead of hiding the c
         reject = fail;
       }),
     ),
-  } as unknown as ControlPort;
-  const current = { getStatus: vi.fn().mockResolvedValue(status) } as unknown as ControlPort;
+  };
+  const current = { getStatus: vi.fn().mockResolvedValue(status) };
   const hook = renderHook(({ port }) => useAudioStatus(port), { initialProps: { port: old } });
   hook.rerender({ port: current });
   await waitFor(() => expect(hook.result.current).toEqual(status));
@@ -137,7 +137,7 @@ it('keeps an unchanged poll reply, but marks the first reply after a refresh as 
   vi.useFakeTimers();
   try {
     // The same object every time, as fixture ports do.
-    const port = { getStatus: vi.fn(async () => status) } as unknown as ControlPort;
+    const port = { getStatus: vi.fn(async () => status) };
     const hook = renderHook(({ refresh }) => useAudioStatus(port, refresh), {
       initialProps: { refresh: 0 },
     });

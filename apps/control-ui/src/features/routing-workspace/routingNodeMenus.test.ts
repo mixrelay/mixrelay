@@ -1,7 +1,8 @@
 import { expect, it } from 'vitest';
 import type { AudioGraphNodeMenuItem } from '../../core/audio-graph/AudioGraphCanvas';
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
-import type { AudioSessionStatus, CapturableApplication } from '../../core/control-port/types';
+import type { CapturableApplication } from '../../core/domain/control/inventory';
+import type { AudioSessionStatus } from '../../core/domain/control/status';
 import { i18n } from '../../core/i18n';
 import { createNodeMenuItems } from './routingNodeMenus';
 import { unknownNativeFormats, virtualPolicy, virtualSpec } from './virtualEndpointFixtures';

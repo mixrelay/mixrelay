@@ -1,10 +1,9 @@
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-
 import { i18n } from '../i18n';
 import styles from './AudioGraphCanvas.module.css';
 import type { AudioGraphModel } from './model';
-import type { SelectedAudioPort } from './useAudioPortSelection';
+import type { SelectedAudioPort } from './portSelection';
 
 function channelRanges(channels: readonly number[]) {
   const sorted = [...new Set(channels)].sort((a, b) => a - b);

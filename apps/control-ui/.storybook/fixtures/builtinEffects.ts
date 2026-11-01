@@ -1,6 +1,7 @@
+import { StorybookMockControlPort } from '../../src/core/adapters/fake/StorybookMockControlPort';
 import { type AudioGraphModel, graphNodeDefaultWidth } from '../../src/core/audio-graph/model';
-import { StorybookMockControlPort } from '../../src/core/control-port/StorybookMockControlPort';
-import type { MeterSnapshot, RuntimeGraphDocument } from '../../src/core/control-port/types';
+import type { RuntimeGraphDocument } from '../../src/core/domain/control/graph';
+import type { MeterSnapshot } from '../../src/core/domain/control/meters';
 import {
   type EffectKind,
   effectKinds,

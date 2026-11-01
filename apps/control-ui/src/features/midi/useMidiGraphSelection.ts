@@ -1,5 +1,5 @@
 import { useContext, useEffect } from 'react';
-import { MidiContext } from '../../core/midi/MidiPort';
+import { MidiContext } from '../../core/midi/MidiContext';
 import type { useGraphCatalog } from '../graphs/useGraphCatalog';
 
 export function useMidiGraphSelection(

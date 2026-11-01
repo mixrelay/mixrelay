@@ -1,12 +1,13 @@
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
+import type { DriverSnapshot } from '../../core/domain/driver';
+import type { DriverPort } from '../../core/ports/DriverPort';
+import type { LicensingPort } from '../../core/ports/LicensingPort';
 import '../../test-support/integration';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { App } from '../../app/App';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type { DriverPort, DriverSnapshot } from '../../core/driver/DriverPort';
 import { I18nProvider, i18n } from '../../core/i18n';
-import type { LicensingPort } from '../../core/licensing/LicensingPort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
 import type { EndpointUpdate } from '../../core/ui/AudioNodeEndpointOptions';

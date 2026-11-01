@@ -1,10 +1,11 @@
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type { AudioSessionStatus } from '../../core/domain/control/status';
 import '../../test-support/integration';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { describe, expect, it, vi } from 'vitest';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type { AudioSessionStatus, RuntimeGraphDocument } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';

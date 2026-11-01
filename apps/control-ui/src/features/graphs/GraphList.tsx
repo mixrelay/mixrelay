@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { GraphCatalog } from '../../core/control-port/types';
+import type { GraphCatalog } from '../../core/domain/control/catalog';
 import { CollectionItem } from '../../core/ui/CollectionItem';
 import { ConfirmationDialog } from '../../core/ui/ConfirmationDialog';
 import styles from './GraphList.module.css';

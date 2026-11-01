@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { ProcessorRetryRequest } from '../../core/domain/control/graph';
+import type { FailedProcessorInstance } from '../../core/domain/control/status';
 
-import type { FailedProcessorInstance, ProcessorRetryRequest } from '../../core/control-port/types';
 import { ProcessorRecoveryButton } from './ProcessorRecoveryButton';
 
 type RetryTarget = Omit<ProcessorRetryRequest, 'expectedRevision'>;

@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { version } from '../../../package.json';
+import type { LicensingStatus } from '../../core/domain/licensing';
 import { I18nProvider, i18n } from '../../core/i18n';
-import type { LicensingPort, LicensingStatus } from '../../core/licensing/LicensingPort';
+import type { LicensingPort } from '../../core/ports/LicensingPort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { LicenseAccess } from './LicenseAccess';
 

@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import {
-  ControlPortError,
-  type GraphApplyRequest,
-  type GraphApplyResponse,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type {
+  GraphApplyRequest,
+  GraphApplyResponse,
+  RuntimeGraphDocument,
+} from '../../core/domain/control/graph';
 import { controlState, statePush } from '../../test-support/controlTelemetry';
+import { graphWriterDefaults } from '../../test-support/portDefaults';
 import { GRAPH_APPLICATION_TIMEOUT_MS, GraphApplicationQueue } from './GraphApplicationQueue';
 import { addRoutingNode, runtimeGraphToAudioGraph } from './model';
 import { virtualSpec } from './virtualEndpointFixtures';
@@ -17,9 +18,12 @@ function fixture(beforeReload?: () => Promise<void>) {
     { kind: 'virtual_input', spec: virtualSpec },
     { x: 20, y: 30 },
   );
+  let selected: string | undefined;
+  const getGraph = vi.fn().mockResolvedValue(empty);
   const port = {
+    ...graphWriterDefaults(getGraph, () => selected),
     isOperationPending: vi.fn().mockResolvedValue(false),
-    getGraph: vi.fn().mockResolvedValue(empty),
+    getGraph,
     getGraphStatus: vi
       .fn()
       .mockResolvedValue({ activeRevision: 1, submittedRevision: 1, protocolVersion: 1 }),
@@ -44,6 +48,9 @@ function fixture(beforeReload?: () => Promise<void>) {
   };
   const queue = new GraphApplicationQueue(port, callbacks);
   return {
+    select: (graphId: string) => {
+      selected = graphId;
+    },
     queue,
     port,
     callbacks,

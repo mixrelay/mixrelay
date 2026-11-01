@@ -1,6 +1,6 @@
 import type { AudioGraphModel } from '../../audio-graph/model';
 import { AudioMeterStore } from '../../audio-meter/AudioMeterStore';
-import type { NativeDeviceFormats } from '../../control-port/types';
+import type { NativeDeviceFormats } from '../../domain/control/nativeFormat';
 import type { EndpointControl } from '../../ui/AudioNodeEndpointOptions';
 import type { AudioNodeMeterBank } from '../../ui/AudioNodeMeterBanks';
 import type { AudioNodeParameterControl } from '../../ui/AudioNodeParameterGrid';

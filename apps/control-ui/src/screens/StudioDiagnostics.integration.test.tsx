@@ -1,9 +1,9 @@
+import { StorybookMockControlPort } from '../core/adapters/fake/StorybookMockControlPort';
 import '../test-support/integration';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { processorReportState } from '../../.storybook/fixtures/processorReport';
-import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
 import { I18nProvider, i18n } from '../core/i18n';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import { advance, eventually, find, finishFakeTimerTest } from '../test-support/fakeTimerQueries';

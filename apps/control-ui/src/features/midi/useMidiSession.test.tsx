@@ -1,7 +1,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { MidiPort, MidiStatus } from '../../core/midi/MidiPort';
+import type { MidiStatus } from '../../core/domain/midi';
+import type { MidiPort } from '../../core/ports/MidiPort';
 import { advance } from '../../test-support/fakeTimerQueries';
 import { midiFixture } from './midiFixtures';
 import { useMidiSession } from './useMidiSession';

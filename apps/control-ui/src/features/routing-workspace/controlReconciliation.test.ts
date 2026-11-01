@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { RuntimeGraphDocument } from '../../core/control-port/types';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import {
   acknowledgedNodeControl,
   controlChanges,

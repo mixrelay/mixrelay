@@ -1,4 +1,4 @@
-import type { MidiAssignment, MidiBinding, MidiStatus } from '../../core/midi/MidiPort';
+import type { MidiAssignment, MidiBinding, MidiStatus } from '../../core/domain/midi';
 export const midiAssignment: MidiAssignment = {
   target: { graphId: 'main', nodeId: 'gain' },
   action: 'volume',
@@ -39,7 +39,7 @@ export function midiPortFixture(initial: MidiStatus = midiFixture) {
     setStatus(next: MidiStatus) {
       status = structuredClone(next);
     },
-    async command(name: import('../../core/midi/MidiPort').MidiCommand) {
+    async command(name: import('../../core/ports/MidiPort').MidiCommand) {
       if (name === 'midi_map') status = { ...status, mapMode: true };
       if (name === 'midi_cancel') status = { ...status, mapMode: false, learn: { state: 'idle' } };
       if (name === 'midi_learn') status = { ...status, learn: { state: 'waiting' } };

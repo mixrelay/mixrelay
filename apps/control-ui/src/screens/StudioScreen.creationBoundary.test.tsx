@@ -1,8 +1,8 @@
+import { StorybookMockControlPort } from '../core/adapters/fake/StorybookMockControlPort';
 import '../test-support/integration';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
 import { I18nProvider, i18n } from '../core/i18n';
 import { FeatureAccess } from '../core/licensing/FeatureAccess';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';

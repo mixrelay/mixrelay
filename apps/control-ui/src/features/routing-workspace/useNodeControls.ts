@@ -1,12 +1,16 @@
 import { useEffect, useRef } from 'react';
-import { graphControls } from '../../core/control-port/telemetry';
-import type { ControlPort, GraphNodeControls } from '../../core/control-port/types';
-import { useSharedState } from '../../core/structuralShare';
+import type { GraphNodeControls } from '../../core/domain/control/graph';
+import { graphControls } from '../../core/domain/control/state';
+import type { GraphPort } from '../../core/ports/control/GraphPort';
+import type { TelemetryPort } from '../../core/ports/control/TelemetryPort';
+import { useSharedState } from '../../core/ui/useStructuralShare';
 import type { GraphApplicationQueue } from './GraphApplicationQueue';
+
+type NodeControlsPort = Pick<GraphPort, 'getNodeControls'> & Pick<TelemetryPort, 'subscribeState'>;
 
 /** A single bounded-rate reader; stale graph/port replies cannot affect a replacement workspace. */
 export function useNodeControls(
-  port: ControlPort,
+  port: NodeControlsPort,
   graphId: string | undefined,
   revision: number,
   idle: boolean,
@@ -17,7 +21,7 @@ export function useNodeControls(
   latest.current = { revision, idle };
   useEffect(() => {
     setSnapshot(null);
-    if (!graphId || !port.getNodeControls) return;
+    if (!graphId) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     let incarnation: string | undefined;
@@ -62,7 +66,7 @@ export function useNodeControls(
         return;
       }
       try {
-        const result = await port.getNodeControls?.(graphId);
+        const result = await port.getNodeControls(graphId);
         if (current()) receive(result);
       } catch {
         // An unreachable controller must not leave apparently actionable stale buttons.

@@ -1,6 +1,9 @@
 import type { TFunction } from 'i18next';
 import type { AudioGraphNodeMenuItem } from '../../core/audio-graph/AudioGraphCanvas';
-import type { ExternalProcessorDescriptor, ProviderPorts } from '../../core/control-port/types';
+import type {
+  ExternalProcessorDescriptor,
+  ProviderPorts,
+} from '../../core/domain/control/processors';
 import { providerPortsFrom } from './model';
 import type { useProcessorCatalog } from './useProcessorCatalog';
 

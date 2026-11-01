@@ -1,10 +1,12 @@
-import {
-  type ControlPort,
-  ControlPortError,
-  type GraphCatalog,
-  type GraphCatalogAction,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import type { GraphCatalog, GraphCatalogAction } from '../../core/domain/control/catalog';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type { GraphPort } from '../../core/ports/control/GraphPort';
+import type { WorkspacePort } from '../../core/ports/control/WorkspacePort';
+
+/** The catalog, its workspace files and the graph activation they wait for. */
+export type CatalogPort = Pick<GraphPort, 'getGraph' | 'getGraphStatus'> &
+  Pick<WorkspacePort, 'getGraphCatalog' | 'mutateGraphCatalog' | 'workspaceFile'>;
 
 export interface GraphCatalogState {
   catalog: GraphCatalog | null;
@@ -62,6 +64,7 @@ function workspaceUncertain(error: unknown) {
 
 function retryableRead(error: unknown) {
   if (!(error instanceof ControlPortError)) return true;
+  // A refusal about the catalog resource itself is not retried.
   if (errorCode(error) === 'graph_catalog_unavailable') return false;
   return [408, 429, 502, 503, 504].includes(error.status);
 }
@@ -93,7 +96,7 @@ export class GraphCatalogController {
   private retryDelay = 500;
   private readonly listeners = new Set<() => void>();
 
-  constructor(private readonly port: ControlPort) {}
+  constructor(private readonly port: CatalogPort) {}
 
   snapshot = () => this.state;
   subscribe = (listener: () => void) => {
@@ -154,9 +157,8 @@ export class GraphCatalogController {
 
   reload = () =>
     this.run(async (generation) => {
-      if (!this.port.getGraphCatalog) throw new Error('catalog unavailable');
       this.accept(await bounded(this.port.getGraphCatalog()), generation, true);
-    }, Boolean(this.port.getGraphCatalog));
+    }, true);
 
   workspaceFile = (action: 'new' | 'open' | 'save' | 'save_as', locale: string) =>
     this.run(async (generation) => {
@@ -194,8 +196,7 @@ export class GraphCatalogController {
     await this.waitActive(next.document.revision, generation);
     if (generation !== this.generation) return;
     // The accepted document remains visible even if capture synchronization fails.
-    const confirmed = this.port.getGraphCatalog ? await this.port.getGraphCatalog() : next;
-    this.accept(confirmed, generation, false);
+    this.accept(await this.port.getGraphCatalog(), generation, false);
   }
 
   private async waitActive(revision: number, generation: number) {
@@ -213,7 +214,6 @@ export class GraphCatalogController {
     const catalog = this.state.catalog;
     if (!catalog || this.state.uncertain) return;
     await this.run(async (generation) => {
-      if (!this.port.mutateGraphCatalog) throw new Error('catalog mutations unavailable');
       const document = await bounded(this.port.getGraph());
       if (generation !== this.generation) return;
       this.mutationSent = true;

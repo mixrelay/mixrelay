@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { NativeDeviceFormats, NativeSampleFormat } from '../control-port/types';
-import { sharedChannelCounts } from '../driver/sharedDeviceFormat';
+import type { NativeDeviceFormats, NativeSampleFormat } from '../domain/control/nativeFormat';
+import { sharedChannelCounts } from '../domain/control/sharedDeviceFormat';
 import styles from './AudioNodeCard.module.css';
 import { NativeSampleFormatField } from './NativeSampleFormatField';
 import { SelectField } from './SelectField';

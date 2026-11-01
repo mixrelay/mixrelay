@@ -1,6 +1,7 @@
 import { type Dispatch, type SetStateAction, useState } from 'react';
+import { disconnectGraph, removeGraphItems } from '../domain/graph/topology';
 import type { HierarchicalMenuItem } from '../ui/HierarchicalMenu';
-import { type AudioGraphModel, disconnectAudioGraph, removeAudioGraphItems } from './model';
+import type { AudioGraphModel } from './model';
 import type { AudioFlowEdge, AudioFlowNode } from './reactFlowAdapter';
 
 export interface GraphContextMenuLabels {
@@ -281,12 +282,12 @@ export function useGraphContextMenu(options: ContextOptions) {
         (options.renameNode as (nodeId: string) => void)(scope.nodes[0] as string);
         break;
       case 'context:remove':
-        options.commit(removeAudioGraphItems(options.model, scope.nodes, scope.edges), 'runtime');
+        options.commit(removeGraphItems(options.model, scope.nodes, scope.edges), 'runtime');
         select([], []);
         break;
       case 'context:disconnect':
         options.commit(
-          disconnectAudioGraph(options.model, connectedEdges(options.model, scope)),
+          disconnectGraph(options.model, connectedEdges(options.model, scope)),
           'runtime',
         );
         break;

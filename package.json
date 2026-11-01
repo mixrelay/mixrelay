@@ -14,6 +14,8 @@
     "build": "pnpm --filter @mixrelay/control-ui build",
     "check": "pnpm check:audio-formats && pnpm check:ui-quality && pnpm --filter @mixrelay/control-ui check && pnpm check:native && pnpm check:rust",
     "check:audio-formats": "cargo test -p mixrelay-audio-io --lib format_contract::tests",
+    "fixtures:replies": "pnpm fixtures:replies:check || pnpm fixtures:replies:check",
+    "fixtures:replies:check": "node scripts/lab/native-check.mjs cargo test --no-fail-fast -p mixrelay-control-protocol -p mixrelay-driver-control -p mixrelay-desktop --lib --bins reply_fixture",
     "check:macos-engine": "node scripts/lab/native-check.mjs cargo test -p mixrelay-service --bin mixrelay-service -- --test-threads=1",
     "check:crate-layers": "node --test scripts/check-crate-layers.test.mjs && node scripts/check-crate-layers.mjs",
     "check:native": "node scripts/lab/native-check.mjs cargo test -p mixrelay-macos-transport -p mixrelay-hal-core -p mixrelay-macos-test-support && pnpm check:macos-engine && cargo run -p mixrelay-hal-bundle",

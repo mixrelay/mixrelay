@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { moveAudioGraphNode } from '../../core/audio-graph/model';
-import type { GraphLayoutResponse, RuntimeGraphDocument } from '../../core/control-port/types';
+import type { GraphLayoutResponse } from '../../core/domain/control/catalog';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import { graphWriterDefaults } from '../../test-support/portDefaults';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { addRoutingNode, audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
 
@@ -17,8 +19,10 @@ function fixture() {
     { x: 120, y: 80 },
   );
   const savedLayout = Promise.withResolvers<GraphLayoutResponse>();
+  const getGraph = vi.fn().mockResolvedValue(empty);
   const port = {
-    getGraph: vi.fn().mockResolvedValue(empty),
+    ...graphWriterDefaults(getGraph, () => graphId),
+    getGraph,
     getGraphStatus: vi.fn().mockResolvedValue({ activeRevision: 8, submittedRevision: 8 }),
     applyGraph: vi.fn(),
   };

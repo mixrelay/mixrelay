@@ -1,4 +1,4 @@
-import type { DriverSnapshot } from '../../core/driver/DriverPort';
+import type { DriverSnapshot } from '../../core/domain/driver';
 
 export const readyDriver: DriverSnapshot = {
   protocolVersion: 1,

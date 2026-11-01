@@ -1,13 +1,7 @@
 import { useContext } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  type MidiAction,
-  MidiContext,
-  MidiGraphContext,
-  MidiNodeContext,
-  sameTarget,
-  shortControl,
-} from './MidiPort';
+import { type MidiAction, sameTarget, shortControl } from '../domain/midi';
+import { MidiContext, MidiGraphContext, MidiNodeContext } from './MidiContext';
 
 /** Replace an audio action with one mapping focus owner while map mode is active. */
 export function useMidiControl(action: MidiAction) {

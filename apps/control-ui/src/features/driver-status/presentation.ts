@@ -1,4 +1,4 @@
-import type { DriverState } from '../../core/control-port/types';
+import type { DriverState } from '../../core/domain/control/status';
 import type { StatusTone } from '../../core/ui/StatusBadge';
 
 // The workspace and diagnostic card must give the same state the same meaning.

@@ -1,8 +1,8 @@
 import { Button, Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components';
 import { useTranslation } from 'react-i18next';
+import { themePreference } from '../domain/appearance';
 import styles from '../theme/ComponentTheme.module.css';
 import { useTheme } from '../theme/MixRelayProvider';
-import { themePreference } from '../theme/themePreference';
 import iconStyles from './IconActionButton.module.css';
 import pickerStyles from './ThemePicker.module.css';
 import { Tooltip } from './Tooltip';

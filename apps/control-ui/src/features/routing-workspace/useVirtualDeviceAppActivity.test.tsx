@@ -1,14 +1,15 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, assert, beforeEach, expect, it, vi } from 'vitest';
-import type { ControlPort, DeviceAppActivity } from '../../core/control-port/types';
+import type { DeviceAppActivity } from '../../core/domain/control/inventory';
 import { useVirtualDeviceAppActivity } from './useVirtualDeviceAppActivity';
 import { virtualPolicy } from './virtualEndpointFixtures';
 
 const devices = {
   native: [{ bundleId: 'app', displayName: 'App', processId: 1, playing: true, recording: false }],
 };
-const portWith = (read = vi.fn().mockResolvedValue(devices)) =>
-  ({ getVirtualDeviceAppActivity: read }) as unknown as ControlPort;
+const portWith = (read = vi.fn().mockResolvedValue(devices)) => ({
+  getVirtualDeviceAppActivity: read,
+});
 const tick = (ms = 0) =>
   act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
@@ -38,7 +39,7 @@ it('distinguishes unsupported, loading, successful empty, rejection and recovery
   const read = vi.fn().mockResolvedValue({});
   const port = portWith(read);
   const hook = renderHook(({ port }) => useVirtualDeviceAppActivity(port), {
-    initialProps: { port: {} as ControlPort },
+    initialProps: { port: {} },
   });
   expect(hook.result.current).toEqual({ state: 'unavailable' });
   hook.rerender({ port });
@@ -50,7 +51,7 @@ it('distinguishes unsupported, loading, successful empty, rejection and recovery
   expect(hook.result.current).toEqual({ state: 'unavailable' });
   await tick(1000);
   expect(hook.result.current).toEqual({ state: 'observed', devices: {} });
-  hook.rerender({ port: {} as ControlPort });
+  hook.rerender({ port: {} });
   expect(hook.result.current).toEqual({ state: 'unavailable' });
 });
 

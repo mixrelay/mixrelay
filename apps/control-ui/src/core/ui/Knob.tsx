@@ -1,13 +1,13 @@
 import { type KeyboardEvent, useRef } from 'react';
-import styles from './Knob.module.css';
+import { knobDragPosition } from '../domain/parameters/parameterGesture';
 import {
-  isLogarithmicRange,
   parameterAtPosition,
   parameterPosition,
   snapParameter,
   steppedParameterKey,
-  useCapturedPointerDrag,
-} from './parameterValue';
+} from '../domain/parameters/parameterRange';
+import styles from './Knob.module.css';
+import { useCapturedPointerDrag } from './useCapturedPointerDrag';
 
 export interface KnobProps {
   label: string;
@@ -34,14 +34,6 @@ function useKnobInteraction({
   const input = useRef<HTMLInputElement>(null);
   const range = { minimum: min, maximum: max, step, scale };
   const normalize = (next: number) => snapParameter(next, range);
-  // Shift drags one public step (or less) per pixel, also at the top of log ranges.
-  const finePosition = (current: number, pixels: number) => {
-    const rawValue = parameterAtPosition(current, range);
-    const sensitivity = isLogarithmicRange(range)
-      ? (rawValue * Math.log(max / min)) / 1600
-      : (max - min) / 1600;
-    return parameterPosition(rawValue + pixels * Math.min(step, sensitivity), range);
-  };
   const pointer = useCapturedPointerDrag({
     disabled,
     begin(event) {
@@ -51,14 +43,11 @@ function useKnobInteraction({
     },
     update(active, event) {
       // The continuous position accumulates; only reported values snap to the step.
-      active.position = Math.max(
-        0,
-        Math.min(
-          1,
-          event.shiftKey
-            ? finePosition(active.position, active.y - event.clientY)
-            : active.position + (active.y - event.clientY) / 160,
-        ),
+      active.position = knobDragPosition(
+        active.position,
+        active.y - event.clientY,
+        event.shiftKey,
+        range,
       );
       active.y = event.clientY;
       onChange(normalize(parameterAtPosition(active.position, range)));

@@ -1,20 +1,21 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  type AudioSessionStatus,
-  type ControlPort,
-  ControlPortError,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type { AudioSessionStatus } from '../../core/domain/control/status';
+import type { GraphPort } from '../../core/ports/control/GraphPort';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { InlineNotice } from '../../core/ui/InlineNotice';
 import { InlineSelect } from '../../core/ui/InlineSelect';
 import styles from './AudioSessionControl.module.css';
 import { waitForGraphActivation } from './waitForGraphActivation';
 
+/** The engine capabilities this module uses. */
+type SessionPort = Pick<GraphPort, 'getGraph' | 'getGraphStatus' | 'reconfigureSession'>;
+
 export interface AudioSessionSettingsProps {
   disabled?: boolean;
-  controlPort: ControlPort;
+  controlPort: SessionPort;
   session: AudioSessionStatus;
   onApplied: (document: RuntimeGraphDocument) => void;
   onBusyChange: (busy: boolean) => void;
@@ -31,7 +32,7 @@ function useSessionSettings({
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [selection, setSelection] = useState<{
-    port: ControlPort;
+    port: SessionPort;
     base: AudioSessionStatus['format'];
     frames: string;
   } | null>(null);
@@ -182,8 +183,8 @@ function sessionErrorKey(cause: unknown): string {
 }
 
 async function reconfigure(
-  controlPort: ControlPort,
-  reconfigureSession: NonNullable<ControlPort['reconfigureSession']>,
+  controlPort: SessionPort,
+  reconfigureSession: NonNullable<GraphPort['reconfigureSession']>,
   format: AudioSessionStatus['format'],
   isCurrent: () => boolean,
 ): Promise<RuntimeGraphDocument | null> {

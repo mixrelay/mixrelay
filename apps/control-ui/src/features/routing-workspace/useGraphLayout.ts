@@ -8,11 +8,11 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { type AudioGraphModel, normalizeAudioGraphNodeSize } from '../../core/audio-graph/model';
-import type { ControlPort, GraphLayout } from '../../core/control-port/types';
-import { GraphLayoutController } from './GraphLayoutController';
+import type { GraphLayout } from '../../core/domain/control/catalog';
+import { GraphLayoutController, type LayoutPort } from './GraphLayoutController';
 
 export function useGraphLayout(
-  port: ControlPort,
+  port: LayoutPort,
   graphId: string | undefined,
   model: AudioGraphModel | null,
   setModel: Dispatch<SetStateAction<AudioGraphModel | null>>,

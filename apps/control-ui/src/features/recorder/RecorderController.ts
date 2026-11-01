@@ -1,10 +1,10 @@
-import {
-  type ControlPort,
-  ControlPortError,
-  type RecorderRequest,
-  type RecorderSettings,
-  type RecorderStatus,
-} from '../../core/control-port/types';
+import { ControlPortError, hasErrorCode } from '../../core/domain/control/errors';
+import type {
+  RecorderRequest,
+  RecorderSettings,
+  RecorderStatus,
+} from '../../core/domain/control/recorder';
+import type { RecorderPort } from '../../core/ports/control/RecorderPort';
 
 interface RecorderSnapshot {
   status: RecorderStatus | null;
@@ -31,7 +31,7 @@ export class RecorderController {
   private commandError: string | null = null;
 
   public constructor(
-    private readonly port: ControlPort,
+    private readonly port: RecorderPort,
     private readonly graphId: string,
     private readonly nodeId: string,
   ) {}
@@ -178,13 +178,13 @@ export class RecorderController {
   }
 
   private readFailed(error: unknown): void {
-    const code = error instanceof ControlPortError ? error.body.code : null;
     // A contested read is not a recorder failure; commands still expose this rejection.
-    if (code === 'graph_exchange_busy') return;
+    if (hasErrorCode(error, 'graph_exchange_busy')) return;
+    const removed = hasErrorCode(error, 'node_not_found');
     this.publish({
       ...this.snapshot,
-      status: code === 'node_not_found' ? null : this.snapshot.status,
-      settings: code === 'node_not_found' ? null : this.snapshot.settings,
+      status: removed ? null : this.snapshot.status,
+      settings: removed ? null : this.snapshot.settings,
       error: this.commandError ?? recorderError(error),
     });
   }

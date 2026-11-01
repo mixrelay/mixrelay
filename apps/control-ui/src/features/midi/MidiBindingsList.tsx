@@ -11,7 +11,7 @@ import {
   type MidiControl,
   type MidiStatus,
   sameTarget,
-} from '../../core/midi/MidiPort';
+} from '../../core/domain/midi';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { ContentSection } from '../../core/ui/ContentSection';
 import { InlineNotice } from '../../core/ui/InlineNotice';

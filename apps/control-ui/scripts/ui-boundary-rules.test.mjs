@@ -365,3 +365,145 @@ test('screen-level tests side-effect import the integration timeout owner; other
     ],
   );
 });
+
+const layer = (filename, source) =>
+  inspectScript(filename, source).violations.filter((item) => item.code === 'layer');
+
+test('domain imports only domain, and no package or Core view module', () => {
+  assert.deepEqual(layer('core/domain/graph/topology.ts', "import { a } from './other';"), []);
+  assert.deepEqual(layer('core/domain/graph/plan.ts', "import type { T } from '../model';"), []);
+  for (const source of [
+    "import { useState } from 'react';",
+    "import type { Node } from '@xyflow/react';",
+    "import { invoke } from '@tauri-apps/api/core';",
+    "import { nodeWidths } from '../../theme/tokens';",
+    "import type { StatusTone } from '../../ui/StatusBadge';",
+    "import type { ControlPort } from '../../ports/control/ControlPort';",
+    "export { x } from '../../adapters/x';",
+    "type Port = import('../../ports/Clock').Clock;",
+    "const later = import('../../ui/Knob');",
+  ])
+    assert.equal(layer('core/domain/graph/topology.ts', source).length, 1, source);
+});
+
+test('ports and application import only the layers inside them', () => {
+  assert.deepEqual(
+    layer(
+      'core/ports/control/GraphPort.ts',
+      "import type { G } from '../../domain/control/graph';",
+    ),
+    [],
+  );
+  assert.equal(
+    layer('core/ports/Scheduler.ts', "import { T } from '../application/history/UndoHistory';")
+      .length,
+    1,
+  );
+  assert.deepEqual(
+    layer(
+      'core/application/history/UndoHistory.ts',
+      "import type { Scheduler } from '../../ports/Scheduler'; import { x } from '../../domain/x';",
+    ),
+    [],
+  );
+  assert.equal(
+    layer('core/application/telemetry/Hub.ts', "import { open } from '../../adapters/http';")
+      .length,
+    1,
+  );
+});
+
+test('adapters may use platform packages but never the view', () => {
+  assert.deepEqual(
+    layer(
+      'core/adapters/tauri/TauriNativeShell.ts',
+      "import { invoke } from '@tauri-apps/api/core'; import type { P } from '../../ports/P'; import { H } from '../../application/telemetry/TelemetryHub';",
+    ),
+    [],
+  );
+  for (const source of [
+    "import { useEffect } from 'react';",
+    "import { useTranslation } from 'react-i18next';",
+    "import { Knob } from '../../ui/Knob';",
+    "import { App } from '../../../app/App';",
+  ])
+    assert.equal(layer('core/adapters/tauri/TauriNativeShell.ts', source).length, 1, source);
+});
+
+test('only composition roots, tests and stories choose adapters', () => {
+  const adapter =
+    "import { TauriControlPort } from '../../core/adapters/control/TauriControlPort';";
+  assert.equal(layer('features/graphs/GraphList.tsx', adapter).length, 1);
+  assert.deepEqual(layer('features/graphs/GraphList.test.tsx', adapter), []);
+  assert.deepEqual(layer('features/graphs/GraphList.stories.tsx', adapter), []);
+  assert.deepEqual(layer('screens/StudioScreen.tsx', adapter.replace('../../', '../')), []);
+  assert.deepEqual(
+    layer('app/localPorts.ts', "import { X } from '../core/adapters/tauri/TauriNativeShell';"),
+    [],
+  );
+  assert.deepEqual(layer('main.tsx', "import { X } from './core/adapters/browser/storage';"), []);
+  // Core view modules follow the same rule: only the ambient browser timers.
+  assert.deepEqual(
+    layer('core/history/useUndoHistory.ts', "import { t } from '../adapters/browser/timers';"),
+    [],
+  );
+  for (const source of [
+    "import { TauriControlPort } from '../adapters/control/TauriControlPort';",
+    "import { s } from '../adapters/browser/themePreferenceStorage';",
+    "export { s } from '../adapters/browser/languages';",
+  ])
+    assert.equal(layer('core/ui/Foo.tsx', source).length, 1, source);
+  // Browser timers are the one ambient implementation features may default to.
+  assert.deepEqual(
+    layer(
+      'features/a/Queue.ts',
+      "import { timerScheduler } from '../../core/adapters/browser/timers';",
+    ),
+    [],
+  );
+  assert.equal(
+    layer('features/a/Queue.ts', "import { s } from '../../core/adapters/browser/storage';").length,
+    1,
+  );
+});
+
+test('only adapters import platform APIs', () => {
+  const platform = "import { invoke } from '@tauri-apps/api/core';";
+  for (const filename of ['features/a/b.ts', 'core/ui/Foo.tsx', 'screens/S.tsx', 'app/App.tsx'])
+    assert.equal(layer(filename, platform).length, 1, filename);
+  assert.deepEqual(layer('core/adapters/tauri/TauriX.ts', platform), []);
+  assert.deepEqual(layer('features/a/b.test.ts', platform), []);
+});
+
+test('test support is reachable from tests, stories and other test support only', () => {
+  const fake = "import { fakeEngineFetch } from '../../test-support/fakeEngine';";
+  for (const filename of ['features/a/b.ts', 'core/ui/Foo.tsx', 'core/domain/x.ts', 'app/App.tsx'])
+    assert.equal(
+      layer(filename, filename.startsWith('app/') ? fake.replace('../../', '../') : fake).length,
+      1,
+      filename,
+    );
+  assert.deepEqual(layer('features/a/b.test.ts', fake), []);
+  assert.deepEqual(layer('features/a/b.stories.tsx', fake), []);
+  assert.deepEqual(
+    layer('test-support/fakeNativeShell.tsx', "import { x } from './fakeEngine';"),
+    [],
+  );
+});
+
+test('every import form is checked, including template literals and import-equals', () => {
+  for (const source of [
+    'const m = import(`../../ui/Knob`);',
+    'import knob = require("../../ui/Knob");',
+    'const m = require(`react`);',
+  ])
+    assert.equal(layer('core/domain/graph/topology.ts', source).length, 1, source);
+  assert.equal(
+    layer('features/a/b.ts', "const m = import.meta.glob('../../core/adapters/control/*.ts');")
+      .length,
+    1,
+  );
+  // A computed specifier cannot be resolved statically and is not reported.
+  const computed = ['const m = import(`../$', '{name}`);'].join('');
+  assert.deepEqual(layer('core/domain/graph/topology.ts', computed), []);
+});

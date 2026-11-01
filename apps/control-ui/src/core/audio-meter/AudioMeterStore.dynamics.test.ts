@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import type { NodeMeterSnapshot } from '../control-port/types';
+import type { NodeMeterSnapshot } from '../domain/control/meters';
 import { AudioMeterStore, audioMeterKey } from './AudioMeterStore';
 
 const node: NodeMeterSnapshot = {

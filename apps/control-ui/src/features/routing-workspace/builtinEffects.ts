@@ -1,5 +1,5 @@
-import type { AudioNodeParameterControl } from '../../core/audio-graph/model';
 import { type EffectTranslationKey, effectTranslations } from '../../core/i18n/effects';
+import type { AudioNodeParameterControl } from '../../core/ui/AudioNodeParameterGrid';
 
 export const effectKinds = [
   'equalizer',

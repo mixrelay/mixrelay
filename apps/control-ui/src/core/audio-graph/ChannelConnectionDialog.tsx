@@ -1,5 +1,11 @@
 import { type FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  type ChannelConnectionPlan,
+  type ChannelConnectionRequest,
+  planChannelConnections,
+} from '../domain/graph/channelConnections';
+import { type GraphConnection, graphConnectionRejection } from '../domain/graph/topology';
 import { ActionButton } from '../ui/ActionButton';
 import { Dialog } from '../ui/Dialog';
 import { FormActions } from '../ui/FormActions';
@@ -8,19 +14,8 @@ import { SelectField } from '../ui/SelectField';
 import { Stack } from '../ui/Stack';
 import { Text } from '../ui/Text';
 import styles from './ChannelConnectionDialog.module.css';
-import {
-  type ChannelConnectionPlan,
-  type ChannelConnectionRequest,
-  planChannelConnections,
-} from './channelConnections';
-import {
-  type AudioGraphConnection,
-  type AudioGraphModel,
-  type AudioGraphNode,
-  audioGraphConnectionRejection,
-  audioGraphNodeTitle,
-} from './model';
-import { namedAudioPorts } from './reactFlowAdapter';
+import { type AudioGraphModel, type AudioGraphNode, audioGraphNodeTitle } from './model';
+import { namedAudioPorts } from './portNames';
 
 export interface ChannelConnectionDialogProps {
   model: AudioGraphModel;
@@ -29,7 +24,7 @@ export interface ChannelConnectionDialogProps {
   sourcePortIds?: readonly string[];
   onCancel: () => void;
   /** Receives the accepted connections, validated again against `model` on submit. */
-  onConnect: (connections: AudioGraphConnection[]) => void;
+  onConnect: (connections: GraphConnection[]) => void;
 }
 
 interface Range {
@@ -166,7 +161,7 @@ function acceptsSelfConnection(model: AudioGraphModel, node: AudioGraphNode) {
   return node.outputPorts.some((output) =>
     node.inputPorts.some(
       (input) =>
-        audioGraphConnectionRejection(model, {
+        graphConnectionRejection(model, {
           sourceNodeId: node.id,
           sourcePortId: output.id,
           targetNodeId: node.id,

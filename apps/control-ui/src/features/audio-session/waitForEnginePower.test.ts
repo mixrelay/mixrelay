@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { TauriControlPort } from '../../core/adapters/control/TauriControlPort';
+import type { MixRelayStatus } from '../../core/domain/control/status';
 
-import { TauriControlPort } from '../../core/control-port/TauriControlPort';
-import type { MixRelayStatus } from '../../core/control-port/types';
 import { waitForEnginePower } from './waitForEnginePower';
 
 const status: MixRelayStatus = {

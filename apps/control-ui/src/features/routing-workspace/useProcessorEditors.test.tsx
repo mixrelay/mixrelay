@@ -1,8 +1,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import type { ProcessorEditorStatus } from '../../core/control-port/types';
+import type { ProcessorEditorStatus } from '../../core/domain/control/processors';
 import { controlState, statePush } from '../../test-support/controlTelemetry';
 import { EDITOR_POLL_MS, useProcessorEditors } from './useProcessorEditors';
 

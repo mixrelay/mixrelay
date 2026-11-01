@@ -1,7 +1,10 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type {
+  AudioDeviceDescriptor,
+  CapturableApplication,
+} from '../../core/domain/control/inventory';
 
-import type { AudioDeviceDescriptor, CapturableApplication } from '../../core/control-port/types';
 import {
   DEVICE_PRESENCE_POLL_MS,
   INVENTORY_POLL_MS,

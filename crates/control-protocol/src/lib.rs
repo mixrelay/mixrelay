@@ -4,6 +4,8 @@ pub use control_failure::{
     ControlBoundary, ControlFailureCode, ControlFailureContext, ControlPlatform, ControlStage,
     FailureDelivery,
 };
+#[cfg(test)]
+mod reply_fixtures;
 mod telemetry;
 pub use telemetry::{ControlStateSnapshot, ControlTelemetry, TelemetryDecoder, TelemetryEncoder};
 mod editor_surface;

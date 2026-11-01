@@ -1,33 +1,31 @@
-import { getVersion } from '@tauri-apps/api/app';
-import { isTauri } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { version as buildVersion } from '../../../package.json';
+import { removableSubscription } from '../application/subscription';
+import { NativeShellContext } from '../shell/NativeShellContext';
 
 /** The native menu opens product information independently of the footer license workflow. */
 export function useAppInformation(onOpen: () => void, enabled: boolean) {
+  const shell = useContext(NativeShellContext);
   const [version, setVersion] = useState(buildVersion);
   const open = useRef(onOpen);
   open.current = onOpen;
   useEffect(() => {
-    if (!enabled || !isTauri()) return;
+    if (!enabled || !shell) return;
     let disposed = false;
-    let stop: (() => void) | undefined;
-    void getVersion()
+    void shell
+      .version()
       .then((value) => {
         if (!disposed) setVersion(value);
       })
       .catch((error: unknown) => console.error('Could not read app version', error));
-    void listen('app-about', () => open.current())
-      .then((unsubscribe) => {
-        if (disposed) unsubscribe();
-        else stop = unsubscribe;
-      })
-      .catch((error: unknown) => console.error('About menu listener failed', error));
+    const stop = removableSubscription(
+      shell.onAbout(() => open.current()),
+      (error) => console.error('About menu listener failed', error),
+    );
     return () => {
       disposed = true;
-      stop?.();
+      stop();
     };
-  }, [enabled]);
+  }, [enabled, shell]);
   return version;
 }

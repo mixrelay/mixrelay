@@ -6,7 +6,7 @@ import type {
   ExternalProcessorDescriptor,
   ProviderNodeConfig,
   ProviderPorts,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/processors';
 import type { NodeChoiceControl } from '../../core/ui/AudioNodeCard';
 import { changeProcessorLayout, type GraphPresentation } from './model';
 import {

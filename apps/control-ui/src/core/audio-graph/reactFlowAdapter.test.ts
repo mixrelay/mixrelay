@@ -1,17 +1,14 @@
 import { assert, describe, expect, it } from 'vitest';
-
+import { connectGraph, disconnectGraph } from '../domain/graph/topology';
 import {
   type AudioGraphModel,
-  connectAudioGraph,
-  disconnectAudioGraph,
   graphNodeDefaultWidth,
   normalizeAudioGraphNodeSize,
   resizeAudioGraphNode,
 } from './model';
+import { audioGraphEdgeEndpoints, namedAudioPorts } from './portNames';
 import {
   applyAudioNodeLayers,
-  audioGraphEdgeEndpoints,
-  namedAudioPorts,
   reconcileAudioFlowEdges,
   reconcileAudioFlowNodes,
 } from './reactFlowAdapter';
@@ -81,7 +78,7 @@ describe('React Flow incremental adapter', () => {
     expect(edges[0]?.zIndex).toBe(0);
     expect(nodes[0]?.zIndex).toBe(1);
     expect(reconcileAudioFlowEdges(edges, before)).toBe(edges);
-    const after = disconnectAudioGraph(before, ['edge-511']);
+    const after = disconnectGraph(before, ['edge-511']);
     const nextNodes = reconcileAudioFlowNodes(nodes, after);
     const nextEdges = reconcileAudioFlowEdges(edges, after);
 
@@ -100,7 +97,7 @@ describe('React Flow incremental adapter', () => {
     const selectedNodes = nodes.map((node, index) =>
       index === 1 ? { ...node, selected: true } : node,
     );
-    const after = connectAudioGraph(before, {
+    const after = connectGraph(before, {
       sourceNodeId: 'node-0',
       sourcePortId: 'out',
       targetNodeId: 'node-1',

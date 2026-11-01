@@ -3,7 +3,7 @@ import type {
   NodeControlRequest,
   RuntimeGraphDocument,
   RuntimeGraphNode,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/graph';
 
 type Change = { id: string; type: string; value: Omit<NodeControlRequest, 'expectedRevision'> };
 const gainTypes = new Set([

@@ -1,9 +1,16 @@
-import type { ControlPort } from '../../core/control-port/types';
-import { waitForPushedRevision } from '../../core/control-port/waitForPushedRevision';
+import { timerScheduler } from '../../core/adapters/browser/timers';
+import { waitForPushedRevision } from '../../core/application/graph/waitForPushedRevision';
+import type { GraphPort } from '../../core/ports/control/GraphPort';
+import type { TelemetryPort } from '../../core/ports/control/TelemetryPort';
+import type { WorkspacePort } from '../../core/ports/control/WorkspacePort';
+import type { Scheduler } from '../../core/ports/Scheduler';
+
+/** The engine capabilities this module uses. */
+type EngineControl = GraphPort & WorkspacePort & TelemetryPort;
 
 const OBSERVATION_MS = 200;
 type ReadPort = Pick<
-  ControlPort,
+  EngineControl,
   'getGraph' | 'getGraphCatalog' | 'getGraphStatus' | 'subscribeState'
 >;
 
@@ -49,6 +56,7 @@ export class GraphReadback {
     private readonly port: ReadPort,
     private readonly timeoutMs: number,
     private readonly failure: (code: string) => Error,
+    private readonly scheduler: Scheduler = timerScheduler,
   ) {}
 
   bound<T>(request: Promise<T>, signal: AbortSignal, timeoutMs = this.timeoutMs) {
@@ -57,7 +65,14 @@ export class GraphReadback {
 
   async waitForRevision(revision: number, signal: AbortSignal) {
     if (this.port.subscribeState)
-      return waitForPushedRevision(this.port, revision, signal, this.timeoutMs, this.failure);
+      return waitForPushedRevision(
+        this.port,
+        revision,
+        signal,
+        this.timeoutMs,
+        this.scheduler,
+        this.failure,
+      );
     const deadline = Date.now() + this.timeoutMs;
     while (true) {
       signal.throwIfAborted();
@@ -82,8 +97,7 @@ export class GraphReadback {
    * lagging revision there only makes the next write stale, never attributes B's content to A.
    */
   async document(signal: AbortSignal, graphId: string | undefined) {
-    if (!this.port.getGraphCatalog || graphId === undefined)
-      return this.bound(this.port.getGraph(), signal);
+    if (graphId === undefined) return this.bound(this.port.getGraph(), signal);
     const catalog = await this.bound(this.port.getGraphCatalog(), signal);
     if (catalog.activeId !== graphId) throw this.failure('graph_catalog_revision_stale');
     return catalog.document;

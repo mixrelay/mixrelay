@@ -3,10 +3,10 @@ import type { AudioGraphNodeMenuItem } from '../../core/audio-graph/AudioGraphCa
 import type { AudioGraphModel } from '../../core/audio-graph/model';
 import type {
   AudioDeviceDescriptor,
-  AudioSessionStatus,
   CapturableApplication,
-  ExternalProcessorDescriptor,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/inventory';
+import type { ExternalProcessorDescriptor } from '../../core/domain/control/processors';
+import type { AudioSessionStatus } from '../../core/domain/control/status';
 import { applicationInventorySelection } from './applicationIdentity';
 import { chainKinds, effectKinds } from './builtinEffects';
 import { virtualEndpointIdentity } from './model';

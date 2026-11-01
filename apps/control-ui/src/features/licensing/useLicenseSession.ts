@@ -1,6 +1,6 @@
 import { type MutableRefObject, useEffect, useRef, useState } from 'react';
-
-import type { LicensingPort, LicensingStatus } from '../../core/licensing/LicensingPort';
+import type { LicensingStatus } from '../../core/domain/licensing';
+import type { LicensingPort } from '../../core/ports/LicensingPort';
 
 const errorCodes = [
   'invalid_configuration',

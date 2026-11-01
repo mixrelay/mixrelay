@@ -69,7 +69,7 @@ DSUB 웹 팔레트의 결정값입니다. 제조사의 도장색·실측값으�
 
 ### 테마 선택
 
-앱의 기본값은 System입니다. Provider는 OS의 색 구성 변경을 따라가며 명시적 선택은 `mixrelay.theme`에 저장합니다. 저장소 접근 실패 시에도 현재 세션에서 선택할 수 있습니다. Storybook의 theme 선택은 앱의 저장값을 쓰지 않습니다.
+앱의 기본값은 System입니다. Provider는 OS의 색 구성 변경을 따라갑니다. 앱은 Provider에 브라우저 저장소를 연결해 명시적 선택을 `mixrelay.theme`에 저장하며, 저장소 접근 실패 시에도 현재 세션에서 선택할 수 있습니다. Storybook의 theme 선택은 앱의 저장값을 쓰지 않습니다.
 
 아래 두 Canvas는 명시적인 Light/Dark 표본입니다. 문서 상단의 테마 선택은 문서 표면을 바꾸며, Canvas는 Storybook의 해당 Story globals를 사용합니다. 값 표와 실제 표본을 함께 비교합니다.
 

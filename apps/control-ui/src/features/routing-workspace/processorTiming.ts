@@ -1,5 +1,5 @@
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import type { ProcessorTiming } from '../../core/control-port/types';
+import type { ProcessorTiming } from '../../core/domain/control/status';
 
 export function presentProcessorTimings(
   model: AudioGraphModel | null,

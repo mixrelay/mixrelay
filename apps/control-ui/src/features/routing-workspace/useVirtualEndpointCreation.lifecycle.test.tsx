@@ -1,8 +1,9 @@
 import { act, renderHook } from '@testing-library/react';
 import { type ComponentProps, isValidElement, useLayoutEffect, useRef } from 'react';
 import { expect, it, vi } from 'vitest';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type { RuntimeGraphDocument, VirtualEndpointSpec } from '../../core/control-port/types';
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type { VirtualEndpointSpec } from '../../core/domain/control/status';
 import type { NameDialog } from '../../core/ui/NameDialog';
 import { runtimeGraphToAudioGraph } from './model';
 import { useVirtualEndpointCreation } from './useVirtualEndpointCreation';

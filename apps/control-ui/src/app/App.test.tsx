@@ -1,14 +1,16 @@
+import { StorybookMockControlPort } from '../core/adapters/fake/StorybookMockControlPort';
+import type { RuntimeGraphDocument } from '../core/domain/control/graph';
+import type { MixRelayStatus } from '../core/domain/control/status';
+import type { ControlPort } from '../core/ports/control/ControlPort';
+import type { DriverPort } from '../core/ports/DriverPort';
+import type { LicensingPort } from '../core/ports/LicensingPort';
+import type { UpdatesPort } from '../core/ports/UpdatesPort';
 import '../test-support/integration';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
-import type { ControlPort, MixRelayStatus, RuntimeGraphDocument } from '../core/control-port/types';
-import type { DriverPort } from '../core/driver/DriverPort';
 import { I18nProvider, i18n, resolveLocale } from '../core/i18n';
-import type { LicensingPort } from '../core/licensing/LicensingPort';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
-import type { UpdatesPort } from '../core/updates/UpdatesPort';
 import { readyDriver } from '../features/driver-status/driverFixtures';
 import { App } from './App';
 
@@ -33,6 +35,13 @@ function controlPortWithStatus(
     rescanProcessors: controlPort.rescanProcessors.bind(controlPort),
     setProcessorEditor: controlPort.setProcessorEditor.bind(controlPort),
     setProcessorParameter: controlPort.setProcessorParameter.bind(controlPort),
+    getNodeControls: controlPort.getNodeControls.bind(controlPort),
+    updateNodeControl: controlPort.updateNodeControl.bind(controlPort),
+    retryProcessor: controlPort.retryProcessor.bind(controlPort),
+    getGraphCatalog: controlPort.getGraphCatalog.bind(controlPort),
+    mutateGraphCatalog: controlPort.mutateGraphCatalog.bind(controlPort),
+    getGraphLayout: controlPort.getGraphLayout.bind(controlPort),
+    setGraphLayout: controlPort.setGraphLayout.bind(controlPort),
   };
 }
 

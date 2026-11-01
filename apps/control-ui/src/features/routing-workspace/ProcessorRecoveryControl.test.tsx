@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { I18nextProvider } from 'react-i18next';
 import { describe, expect, it, vi } from 'vitest';
+import type { FailedProcessorInstance } from '../../core/domain/control/status';
 
-import type { FailedProcessorInstance } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { ProcessorRecoveryControl } from './ProcessorRecoveryControl';
 

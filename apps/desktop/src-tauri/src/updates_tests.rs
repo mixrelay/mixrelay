@@ -1,3 +1,6 @@
+use mixrelay_test_support::{every_variant, reply_fixture::refresh_reply_fixture};
+use serde_json::json;
+
 use super::{
     Catalog, Download, LatestVersion, MAX_RESPONSE_BYTES, Platform, Product, Release, UpdateError,
     UpdateState, authorize_download, https_url, product_update, read_response, stable_version,
@@ -343,5 +346,37 @@ fn retired_separate_product_cannot_be_checked_or_downloaded() {
             r#"{"product":"mix-relay-driver","latest":null,"releases":[]}"#
         )
         .is_err()
+    );
+}
+
+/// A stale fixture is rewritten and this fails; review the diff and commit it
+/// (`pnpm fixtures:replies` reruns every fixture owner).
+#[test]
+fn updates_reply_fixture_matches_the_serialized_contract() {
+    let update = product_update(
+        Product::MixRelay,
+        Some("1.2.9".into()),
+        platform("macos", "arm64"),
+        Ok(catalog(
+            Product::MixRelay,
+            "1.2.10",
+            vec![download("macos", "universal")],
+        )),
+    );
+    let states = std::collections::BTreeMap::from([(
+        "[0].state",
+        json!(every_variant!(UpdateState {
+            Available,
+            Current,
+            Published,
+            NotPublished,
+            Unavailable,
+        })),
+    )]);
+    let update_stale = refresh_reply_fixture("updates", &[update]).unwrap();
+    let states_stale = refresh_reply_fixture("updates.variants", &states).unwrap();
+    assert!(
+        !update_stale && !states_stale,
+        "updates reply fixtures were stale and have been rewritten; review and commit them"
     );
 }

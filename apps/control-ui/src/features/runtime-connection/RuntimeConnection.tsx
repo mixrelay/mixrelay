@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next';
 import {
   RUNTIME_CONNECT_STAGES,
   type RuntimeConnectStage,
-  type RuntimePort,
   type RuntimeStatus,
-} from '../../core/runtime/RuntimePort';
+} from '../../core/domain/runtime';
+import type { RuntimePort } from '../../core/ports/RuntimePort';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { BrandIdentity } from '../../core/ui/BrandIdentity';
 import { Inline } from '../../core/ui/Inline';

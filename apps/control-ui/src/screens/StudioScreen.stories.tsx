@@ -1,11 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import type { ComponentProps } from 'react';
-
 import {
   type StorybookControlState,
   StorybookMockControlPort,
-} from '../core/control-port/StorybookMockControlPort';
-import type { RuntimeGraphDocument } from '../core/control-port/types';
+} from '../core/adapters/fake/StorybookMockControlPort';
+import type { RuntimeGraphDocument } from '../core/domain/control/graph';
+
 import { StudioScreen } from './StudioScreen';
 
 const graph: RuntimeGraphDocument = {

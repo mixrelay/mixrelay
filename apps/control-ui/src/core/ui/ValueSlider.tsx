@@ -1,7 +1,12 @@
 import { useLayoutEffect, useRef } from 'react';
 import { Slider, SliderThumb, SliderTrack } from 'react-aria-components';
+import {
+  clampParameter,
+  isLogarithmicRange,
+  sliderScale,
+  steppedParameterKey,
+} from '../domain/parameters/parameterRange';
 import styles from '../theme/ComponentTheme.module.css';
-import { clampParameter, isLogarithmicRange, steppedParameterKey } from './parameterValue';
 
 /** Core slider behavior and hit area, shared by levels and node parameters. */
 export function ValueSlider({
@@ -26,18 +31,9 @@ export function ValueSlider({
   onChange: (value: number) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const logarithmic = isLogarithmicRange({ minimum: min, maximum: max, step, scale });
-  // The maximum derivative defines enough positions to preserve the public parameter step.
-  const resolution = logarithmic ? Math.ceil((Math.log(max / min) * max) / step) : 1;
-  const toSlider = (next: number) =>
-    logarithmic ? (Math.log(next / min) / Math.log(max / min)) * resolution : next;
-  const fromSlider = (next: number) =>
-    logarithmic
-      ? Math.max(
-          min,
-          Math.min(max, Math.round((min * (max / min) ** (next / resolution)) / step) * step),
-        )
-      : next;
+  const range = { minimum: min, maximum: max, step, scale };
+  const logarithmic = isLogarithmicRange(range);
+  const slider = sliderScale(range);
   useLayoutEffect(() => {
     if (valueText) inputRef.current?.setAttribute('aria-valuetext', valueText);
     else inputRef.current?.removeAttribute('aria-valuetext');
@@ -54,22 +50,22 @@ export function ValueSlider({
     <div
       onKeyDownCapture={(event) => {
         if (!logarithmic || disabled) return;
-        const next = steppedParameterKey(event.key, value, { minimum: min, maximum: max, step });
+        const next = steppedParameterKey(event.key, value, range);
         if (next === undefined) return;
         event.preventDefault();
         event.stopPropagation();
-        onChange(clampParameter(next, { minimum: min, maximum: max, step }));
+        onChange(clampParameter(next, range));
       }}
     >
       <Slider
         className={`${styles.sliderRoot} nodrag nopan nowheel`}
         aria-label={label}
-        value={toSlider(value)}
-        minValue={logarithmic ? 0 : min}
-        maxValue={logarithmic ? resolution : max}
-        step={logarithmic ? 1 : step}
+        value={slider.toSlider(value)}
+        minValue={slider.minValue}
+        maxValue={slider.maxValue}
+        step={slider.step}
         isDisabled={disabled}
-        onChange={(next) => onChange(fromSlider(next))}
+        onChange={(next) => onChange(slider.fromSlider(next))}
       >
         <SliderTrack className={styles.sliderTrack}>
           {({ state }) => (

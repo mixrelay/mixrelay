@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-
-import type { ProductUpdate, UpdateProduct, UpdatesPort } from '../../core/updates/UpdatesPort';
+import type { ProductUpdate, UpdateProduct } from '../../core/domain/updates';
+import type { UpdatesPort } from '../../core/ports/UpdatesPort';
 
 const checkInterval = 24 * 60 * 60 * 1_000;
 

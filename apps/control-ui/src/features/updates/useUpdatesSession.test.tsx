@@ -1,8 +1,9 @@
 import { act, renderHook } from '@testing-library/react';
 import { type ReactNode, StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ProductUpdate } from '../../core/domain/updates';
+import type { UpdatesPort } from '../../core/ports/UpdatesPort';
 
-import type { ProductUpdate, UpdatesPort } from '../../core/updates/UpdatesPort';
 import { useUpdatesSession } from './useUpdatesSession';
 
 const day = 24 * 60 * 60 * 1_000;

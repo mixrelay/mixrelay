@@ -3,12 +3,14 @@
 `apps/control-ui`(React 19.2, TypeScript 7.0, Vite, Vitest, Storybook, React Aria, React Flow)에 적용하는 규칙이다. 작업에 해당하는 조건의 절을 먼저 읽는다. UI 디자인·접근성 계약은 [디자인 시스템](design-system.md), [조작·접근성 계약](design/interaction-accessibility.md), [리뷰 관점](design/ui-reviewers.md)이 정하고, 테스트 실행 환경은 [개발 작업 규칙](development.md)이 정한다. 근거: [Rules of React](https://react.dev/reference/rules), [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect), [Choosing the State Structure](https://react.dev/learn/choosing-the-state-structure), [TSConfig](https://www.typescriptlang.org/tsconfig/), [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html), [Testing Library](https://testing-library.com/docs/queries/about), [Bulletproof React 구조](https://github.com/alan2207/bulletproof-react/blob/master/docs/project-structure.md).
 
 ## 강제 수단
-- **지금 검사가 막는 것:** `tsc`의 `strict`·`noUncheckedIndexedAccess`·`noFallthroughCasesInSwitch`·`isolatedModules`. Biome `recommended`와 `noExplicitAny`·`noNonNullAssertion`·인지 복잡도 15·함수 80줄. `check:boundaries`(UI 라이브러리는 Core만 import, 원시 컨트롤은 Core 전용, 색·토큰·CSS 규칙). 테스트 커버리지 100%.
+- **지금 검사가 막는 것:** `tsc`의 `strict`·`noUncheckedIndexedAccess`·`noFallthroughCasesInSwitch`·`isolatedModules`. Biome `recommended`와 `noExplicitAny`·`noNonNullAssertion`·인지 복잡도 15·함수 80줄. `check:boundaries`(UI 라이브러리는 Core만 import, 원시 컨트롤은 Core 전용, 색·토큰·CSS 규칙, Core 계층의 import 방향과 어댑터를 고르는 위치). 테스트 커버리지 100%.
 - **규칙이지만 아직 검사가 막지 않는 것:** 기능 폴더 사이 import 금지, 렌더 중 ref 접근, Effect로 상태 파생, IO 응답 런타임 검증, `exactOptionalPropertyTypes`. 리뷰에서 확인하고, 검사를 추가할 때 이 목록을 갱신한다.
 - 린트를 끄는 주석은 이유를 함께 쓴다. 의존성 배열 규칙(`useExhaustiveDependencies`)을 `void x;` 같은 우회로 맞추지 않는다.
 
 ## 구조를 만들거나 옮길 때
-- Feature는 Core를, Screen은 Feature와 Core를, App은 그 모두를 import한다. 역방향(Core가 Feature를, Feature가 Screen·App을 import)은 금지한다. React Aria·React Flow는 Core만 직접 쓴다. Core는 디자인 시스템과 함께 도메인 모델(`core/audio-graph`), IO 포트(`core/control-port` 등), 테마 토큰을 소유한다.
+- Feature는 Core를, Screen은 Feature와 Core를, App은 그 모두를 import한다. 역방향(Core가 Feature를, Feature가 Screen·App을 import)은 금지한다. React Aria·React Flow는 Core만 직접 쓴다. Core는 디자인 시스템과 함께 도메인 규칙, IO 포트와 그 구현, 테마 토큰을 소유한다.
+- Core 안은 계층으로 나눈다. `core/domain`은 프레임워크 없는 타입과 규칙(그래프 토폴로지, 엔진 프로토콜 계약 등), `core/ports`는 Core가 소비하는 IO 인터페이스(엔진 기능별 포트, 시계·스케줄러, 네이티브 셸, 저장소), `core/application`은 포트만으로 동작하는 조정 로직(실행 취소 기록, 텔레메트리, revision 대기), `core/adapters`는 HTTP·Tauri·브라우저 API로 포트를 구현한다. 나머지 Core 폴더는 컴포넌트·훅·테마를 담는 UI 계층이다.
+- `domain`은 `domain`만, `ports`는 `domain`·`ports`만, `application`은 그 둘과 `application`만 import하고 어떤 패키지도 import하지 않는다. `adapters`는 React·React Aria·React Flow·react-i18next와 Core UI 계층을 import하지 않는다. 포트 구현은 App·Screen 조합 지점(`app/`, `screens/`, `main.tsx`)에서 고르고, Core UI 계층과 기능 코드는 포트 인터페이스만 받는다. 예외는 설정이 없는 브라우저 타이머(`core/adapters/browser/timers`) 하나다. Core 훅, 기능 코드, 어댑터 생성자는 이를 `Scheduler`·`Clock`의 기본값으로 쓸 수 있고, 안쪽 계층은 항상 주입받는다. 테스트와 스토리는 가짜 구현을 만들 수 있으며 `test-support`는 테스트, 스토리, 다른 `test-support` 모듈에서만 import한다. `check:boundaries`가 이 방향을 검사한다.
 - 기능 폴더는 서로 import하지 않는다. 둘 이상의 기능이 쓰는 타입·로직은 Core로 옮기고, 기능의 조합은 Screen이나 App에서 한다. 테스트도 같은 방향을 지킨다(기능 테스트가 `app/App`을 렌더하지 않는다).
 - barrel(`index.ts` 재노출) 파일과 경로 별칭을 만들지 않고 모듈을 직접 import한다([Vite](https://vite.dev/guide/performance)). named export만 쓴다(Storybook 스토리 제외).
 - 한 파일은 한 컴포넌트나 한 책임을 갖는다. 파일이 여러 책임을 갖거나 수백 줄을 넘기 시작하면 하위 컴포넌트·훅·순수 모듈로 나눈다.
@@ -39,6 +41,7 @@
 ## IO를 다룰 때
 - 엔진·Driver·라이선스·업데이트와의 통신은 Core의 포트 인터페이스(`ControlPort` 등)를 통해서만 한다. 구현(`HttpControlPort`, `TauriControlPort`, `StorybookMockControlPort`)은 어댑터이고, 포트는 props로 주입한다. 컴포넌트와 기능 코드는 `fetch`·Tauri API를 직접 부르지 않는다.
 - 어댑터는 응답을 검증하고, 검증 실패를 포트 오류로 바꿔 알린다. 변경 명령의 응답 검증이 실패해도 서버에서 변경이 일어나지 않았다는 뜻은 아니다.
+- 디코더는 Rust 소유자가 직렬화한 응답 fixture(`tests/fixtures/control-replies`)로도 시험한다. Rust 테스트는 fixture가 직렬화 결과와 다르면 다시 쓰고 실패하며, `rustReplyFixtures.test.ts`가 각 fixture를 디코딩한다. 계약을 바꾼 뒤에는 `pnpm fixtures:replies`로 다시 만들고 바뀐 fixture를 함께 커밋한다.
 - 조회와 변경 명령을 구분한다. 화면과 다음 조작의 기준은 실행부가 확인한 상태다. revision이 명확히 거부되면 최신 문서에 실제 편집한 항목만 다시 병합해 재시도하고, 결과가 불확실한 변경 명령은 자동으로 반복하지 않고 편집을 보존한 채 확인 후 재시도한다([제품 문서](product.md)의 확인된 설정 규칙). 일반적인 자동 재시도나 낙관적 갱신을 변경 명령에 붙이지 않는다.
 
 ## 테스트를 쓰거나 고칠 때

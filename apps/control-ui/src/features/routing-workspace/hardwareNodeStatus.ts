@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
-import type { AudioDeviceDescriptor } from '../../core/control-port/types';
+import type { AudioDeviceDescriptor } from '../../core/domain/control/inventory';
 
 /** Presence is a display projection, never a graph edit or a default-device substitution. */
 export function presentHardwareNodeStatus(

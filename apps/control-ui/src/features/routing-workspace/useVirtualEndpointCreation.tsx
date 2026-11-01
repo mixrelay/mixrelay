@@ -3,10 +3,10 @@ import { useTranslation } from 'react-i18next';
 import type { AudioGraphModel, AudioGraphPosition } from '../../core/audio-graph/model';
 import type { PlaceGraphNodes } from '../../core/audio-graph/nodePlacement';
 import type {
-  ControlPort,
   VirtualEndpointSettings,
   VirtualEndpointSpec,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/status';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { NameDialog } from '../../core/ui/NameDialog';
 import { addRoutingNode, type GraphPresentation } from './model';
 import {

@@ -1,15 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { browserThemePreferenceStorage } from '../adapters/browser/themePreferenceStorage';
+import { themePreference, themeStorageKey } from '../domain/appearance';
 import { i18n } from '../i18n';
 import { ThemePicker } from '../ui/ThemePicker';
 import { MixRelayProvider, useTheme } from './MixRelayProvider';
 import { themeCss } from './theme';
-import {
-  readThemePreference,
-  saveThemePreference,
-  themePreference,
-  themeStorageKey,
-} from './themePreference';
+
+const browserStorage = browserThemePreferenceStorage();
 
 afterEach(() => {
   localStorage.removeItem(themeStorageKey);
@@ -47,7 +45,7 @@ it('restores an existing host appearance when its provider is removed', () => {
 it('uses system appearance by default and follows OS changes through media CSS', () => {
   localStorage.removeItem(themeStorageKey);
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
     </MixRelayProvider>,
   );
@@ -59,7 +57,7 @@ it('uses system appearance by default and follows OS changes through media CSS',
 it('restores, changes and saves a preference across provider remounts', () => {
   localStorage.setItem(themeStorageKey, 'light');
   const first = render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
     </MixRelayProvider>,
   );
@@ -69,7 +67,7 @@ it('restores, changes and saves a preference across provider remounts', () => {
   expect(localStorage.getItem(themeStorageKey)).toBe('dark');
   first.unmount();
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
     </MixRelayProvider>,
   );
@@ -78,7 +76,7 @@ it('restores, changes and saves a preference across provider remounts', () => {
 
 it('keeps an unsaved workspace edit mounted when appearance changes', () => {
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
       <input aria-label="Draft name" defaultValue="Studio" />
     </MixRelayProvider>,
@@ -92,7 +90,7 @@ it('keeps an unsaved workspace edit mounted when appearance changes', () => {
 
 it('synchronizes saved preferences and clearing storage without reacting to other settings', () => {
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
     </MixRelayProvider>,
   );
@@ -117,10 +115,11 @@ it('treats unknown preferences and inaccessible storage as system while allowing
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
     throw new Error('blocked');
   });
-  expect(readThemePreference()).toBe('system');
-  expect(() => saveThemePreference('dark')).not.toThrow();
+  const storage = browserThemePreferenceStorage();
+  expect(storage.read()).toBe('system');
+  expect(() => storage.write('dark')).not.toThrow();
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <Consumer />
     </MixRelayProvider>,
   );
@@ -152,7 +151,7 @@ it('lets Storybook control appearance without changing the saved app choice', ()
 it('keeps pseudo appearance labels usable through the shared locale provider', async () => {
   await i18n.changeLanguage('pseudo');
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <ThemePicker />
     </MixRelayProvider>,
   );
@@ -167,7 +166,7 @@ it('exposes one keyboard trigger and checked appearance choices, then returns fo
   await i18n.changeLanguage('en');
   localStorage.removeItem(themeStorageKey);
   render(
-    <MixRelayProvider>
+    <MixRelayProvider store={browserStorage}>
       <ThemePicker />
     </MixRelayProvider>,
   );
@@ -187,4 +186,47 @@ it('exposes one keyboard trigger and checked appearance choices, then returns fo
   await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'light'));
   await waitFor(() => expect(trigger).toHaveFocus());
   expect(trigger).toHaveAccessibleName('Appearance: Light');
+});
+
+it('keeps an uncontrolled preference in the supplied store instead of local storage', () => {
+  let saved: 'light' | 'dark' | 'system' = 'dark';
+  let changed: ((value: 'light' | 'dark' | 'system') => void) | undefined;
+  const store = {
+    read: () => saved,
+    write: vi.fn((value: typeof saved) => {
+      saved = value;
+    }),
+    subscribe: vi.fn((listener: (value: typeof saved) => void) => {
+      changed = listener;
+      return () => {
+        changed = undefined;
+      };
+    }),
+  };
+  const view = render(
+    <MixRelayProvider store={store}>
+      <Consumer />
+    </MixRelayProvider>,
+  );
+  expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+  act(() => changed?.('light'));
+  expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+  fireEvent.click(screen.getByRole('button', { name: 'light' }));
+  expect(store.write).toHaveBeenCalledWith('dark');
+  expect(localStorage.getItem(themeStorageKey)).toBeNull();
+  view.unmount();
+  expect(changed).toBeUndefined();
+});
+
+it('keeps an uncontrolled choice for this session only when no store is given', () => {
+  localStorage.setItem(themeStorageKey, 'light');
+  render(
+    <MixRelayProvider>
+      <Consumer />
+    </MixRelayProvider>,
+  );
+  expect(document.documentElement).toHaveAttribute('data-theme', 'system');
+  fireEvent.click(screen.getByRole('button', { name: 'system' }));
+  expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+  expect(localStorage.getItem(themeStorageKey)).toBe('light');
 });

@@ -1862,7 +1862,7 @@ export const componentContracts: readonly ComponentContract[] = [
     playgroundStory: 'core-playgrounds-channelconnectiondialog--playground',
     group: 'Overlays',
     purpose: '포트 드래그와 같은 채널 매핑을 키보드로 고르고 미리 본 뒤 한 번에 연결한다.',
-    use: '그래프 노드·출력 포트 선택에서 열고 onConnect(accepted)를 connectAudioGraphBatch 한 번으로 runtime commit한다.',
+    use: '그래프 노드·출력 포트 선택에서 열고 onConnect(accepted)를 connectGraphBatch 한 번으로 runtime commit한다.',
     avoid:
       '포트마다 Tab 정지점을 늘리거나 미리보기와 다른 규칙으로 연결하지 않는다. 열린 동안 그래프 삭제 키를 받지 않는다.',
     anatomy:
@@ -1873,7 +1873,7 @@ export const componentContracts: readonly ComponentContract[] = [
     interaction:
       'Shift+F10/ContextMenu 키 또는 보조 클릭 → 연결 메뉴. 첫 필드 focus, Esc 취소, Enter 제출. 제출 때 현재 model로 재검증. 닫으면 출발 노드 바깥 그룹으로 focus 복귀. 요약만 polite status로 알린다.',
     source: 'apps/control-ui/src/core/audio-graph/ChannelConnectionDialog.tsx',
-    api: 'export interface ChannelConnectionDialogProps {\n  model: AudioGraphModel;\n  sourceNodeId: string;\n  /** Output ports chosen on the canvas; kept as a sparse set until a range is chosen. */\n  sourcePortIds?: readonly string[];\n  onCancel: () => void;\n  /** Receives the accepted connections, validated again against `model` on submit. */\n  onConnect: (connections: AudioGraphConnection[]) => void;\n}\n\nexport function ChannelConnectionDialog({\n  model,\n  sourceNodeId,\n  sourcePortIds,\n  onCancel,\n  onConnect,\n}: ChannelConnectionDialogProps)',
+    api: 'export interface ChannelConnectionDialogProps {\n  model: AudioGraphModel;\n  sourceNodeId: string;\n  /** Output ports chosen on the canvas; kept as a sparse set until a range is chosen. */\n  sourcePortIds?: readonly string[];\n  onCancel: () => void;\n  /** Receives the accepted connections, validated again against `model` on submit. */\n  onConnect: (connections: GraphConnection[]) => void;\n}\n\nexport function ChannelConnectionDialog({\n  model,\n  sourceNodeId,\n  sourcePortIds,\n  onCancel,\n  onConnect,\n}: ChannelConnectionDialogProps)',
     consumers: ['apps/control-ui/src/core/audio-graph/AudioGraphCanvas.tsx'],
     tests: [
       'apps/control-ui/src/core/audio-graph/ChannelConnectionDialog.test.tsx',
@@ -2085,7 +2085,7 @@ export const componentContracts: readonly ComponentContract[] = [
     tokens:
       'AudioNodeCard .parameterList/.knobGroup(subgrid 라벨 높이 공유); 필드 규격은 ParameterField/Knob/ValueSlider.',
     interaction:
-      '각 입력이 Tab 대상; 노브·숫자·슬라이더 키보드 규칙은 parameterValue 공통 모듈. nodrag/nowheel로 그래프 조작과 분리.',
+      '각 입력이 Tab 대상; 노브·숫자·슬라이더 키보드 규칙은 core/domain/parameters 공통 모듈. nodrag/nowheel로 그래프 조작과 분리.',
     source: 'apps/control-ui/src/core/ui/AudioNodeParameterGrid.tsx',
     api: "export interface AudioNodeParameterControl extends ParameterFieldControl {\n  section?: 'main' | 'options';\n  precise?: boolean;\n}\n\nexport function AudioNodeParameterGrid({\n  controls,\n  disabled,\n  onChange,\n}: {\n  controls: readonly AudioNodeParameterControl[];\n  disabled: boolean;\n  onChange: (parameterId: string, value: number) => void;\n})",
     consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
@@ -2128,7 +2128,7 @@ export const componentContracts: readonly ComponentContract[] = [
     interaction:
       '노드/선 외부 하나씩 Tab: Enter/Space 선택, 방향키 이동(Shift 크게), Esc 해제, Delete/Backspace 삭제. 내부 필드 그래프 키 분리. 키보드 포트 연결 완료는 별도 제품 검증.',
     source: 'apps/control-ui/src/core/audio-graph/AudioGraphCanvas.tsx',
-    api: "const emptyProcessorEditorStatuses = new Map<string, ProcessorEditorStatus>();\n\nexport interface AudioNodeControlSlots {\n  power?: ReactNode;\n  mute?: ReactNode;\n}\n\nexport type AudioGraphNodeMenuItem = HierarchicalMenuItem;\n\nexport type AudioGraphChangeKind =\n  | 'layout'\n  | 'level'\n  | 'processor_parameter'\n  | 'parameter_group'\n  | 'runtime';\n\nexport interface ProcessorEditorLabels {\n  open: string;\n  retry: string;\n  failure: Record<ProcessorEditorFailure, string>;\n}\n\nexport interface AudioGraphViewport {\n  x: number;\n  y: number;\n  zoom: number;\n}\n\nexport interface AudioGraphCanvasProps {\n  nodeContextActions?: (nodeId: string) => readonly NodeContextAction[];\n  renderNodeControls?: (node: AudioGraphNode) => AudioNodeControlSlots | null;\n  renderNodeContent?: (node: AudioGraphNode) => ReactNode;\n  contextMenuLabels?: GraphContextMenuLabels;\n  addNodeLabel?: string;\n  ariaLabel: string;\n  meterStore?: AudioMeterStore;\n  model: AudioGraphModel;\n  nodeMenuItems?: readonly AudioGraphNodeMenuItem[];\n  onAddNode?: (itemId: string, position: XYPosition, placeNodes?: PlaceGraphNodes) => void;\n  onNodeMenuOpenedChange?: (opened: boolean) => void;\n  onNodeRenameRequest?: (nodeId: string) => void;\n  onModelChange: (model: AudioGraphModel, kind: AudioGraphChangeKind) => void;\n  onNodeEndpointChange?: (nodeId: string, value: EndpointUpdate) => void;\n  /** A choice from the node's `channelLayoutControl`. */\n  onNodeChannelLayoutChange?: (nodeId: string, value: string) => void;\n  onNodeGainChange?: (nodeId: string, gainDb: number) => void;\n  onNodeParameterChange?: (nodeId: string, parameterId: string, value: number) => void;\n  onNodeParametersChange?: (\n    nodeId: string,\n    updates: readonly { id: string; value: number }[],\n  ) => void;\n  onProcessorEditorRetry?: (nodeId: string) => void;\n  processorEditorLabels?: ProcessorEditorLabels;\n  processorEditorStatuses?: ReadonlyMap<string, ProcessorEditorStatus>;\n  /** Initial or externally restored view; user movement remains locally interactive. */\n  viewport?: AudioGraphViewport;\n  /** Reports user pan/zoom and insertion reveals, never external viewport restoration. */\n  onViewportChange?: (viewport: AudioGraphViewport) => void;\n}\n\nexport function AudioGraphCanvas({\n  addNodeLabel,\n  contextMenuLabels,\n  ariaLabel,\n  meterStore,\n  model,\n  nodeMenuItems = [],\n  onAddNode,\n  onModelChange,\n  onNodeMenuOpenedChange,\n  onNodeRenameRequest,\n  nodeContextActions,\n  onProcessorEditorRetry,\n  processorEditorLabels,\n  processorEditorStatuses = emptyProcessorEditorStatuses,\n  renderNodeContent,\n  renderNodeControls,\n  viewport,\n  onViewportChange,\n  ...edits\n}: AudioGraphCanvasProps)",
+    api: "const emptyProcessorEditorStatuses = new Map<string, ProcessorEditorStatus>();\n\nexport interface AudioNodeControlSlots {\n  power?: ReactNode;\n  mute?: ReactNode;\n}\n\nexport type AudioGraphNodeMenuItem = HierarchicalMenuItem;\n\nexport type AudioGraphChangeKind =\n  | 'layout'\n  | 'level'\n  | 'processor_parameter'\n  | 'parameter_group'\n  | 'runtime';\n\nexport interface ProcessorEditorLabels {\n  open: string;\n  retry: string;\n  failure: Record<ProcessorEditorFailure, string>;\n}\n\nexport interface AudioGraphCanvasProps {\n  nodeContextActions?: (nodeId: string) => readonly NodeContextAction[];\n  renderNodeControls?: (node: AudioGraphNode) => AudioNodeControlSlots | null;\n  renderNodeContent?: (node: AudioGraphNode) => ReactNode;\n  contextMenuLabels?: GraphContextMenuLabels;\n  addNodeLabel?: string;\n  ariaLabel: string;\n  meterStore?: AudioMeterStore;\n  model: AudioGraphModel;\n  nodeMenuItems?: readonly AudioGraphNodeMenuItem[];\n  onAddNode?: (itemId: string, position: XYPosition, placeNodes?: PlaceGraphNodes) => void;\n  onNodeMenuOpenedChange?: (opened: boolean) => void;\n  onNodeRenameRequest?: (nodeId: string) => void;\n  onModelChange: (model: AudioGraphModel, kind: AudioGraphChangeKind) => void;\n  onNodeEndpointChange?: (nodeId: string, value: EndpointUpdate) => void;\n  /** A choice from the node's `channelLayoutControl`. */\n  onNodeChannelLayoutChange?: (nodeId: string, value: string) => void;\n  onNodeGainChange?: (nodeId: string, gainDb: number) => void;\n  onNodeParameterChange?: (nodeId: string, parameterId: string, value: number) => void;\n  onNodeParametersChange?: (\n    nodeId: string,\n    updates: readonly { id: string; value: number }[],\n  ) => void;\n  onProcessorEditorRetry?: (nodeId: string) => void;\n  processorEditorLabels?: ProcessorEditorLabels;\n  processorEditorStatuses?: ReadonlyMap<string, ProcessorEditorStatus>;\n  /** Initial or externally restored view; user movement remains locally interactive. */\n  viewport?: AudioGraphViewport;\n  /** Reports user pan/zoom and insertion reveals, never external viewport restoration. */\n  onViewportChange?: (viewport: AudioGraphViewport) => void;\n}\n\nexport function AudioGraphCanvas({\n  addNodeLabel,\n  contextMenuLabels,\n  ariaLabel,\n  meterStore,\n  model,\n  nodeMenuItems = [],\n  onAddNode,\n  onModelChange,\n  onNodeMenuOpenedChange,\n  onNodeRenameRequest,\n  nodeContextActions,\n  onProcessorEditorRetry,\n  processorEditorLabels,\n  processorEditorStatuses = emptyProcessorEditorStatuses,\n  renderNodeContent,\n  renderNodeControls,\n  viewport,\n  onViewportChange,\n  ...edits\n}: AudioGraphCanvasProps)",
     consumers: ['apps/control-ui/src/features/routing-workspace/RoutingWorkspace.tsx'],
     tests: ['apps/control-ui/src/core/audio-graph/AudioGraphCanvas.test.tsx'],
     storyId: 'core-audio-graph-canvas--connect-disconnect-reconnect',
@@ -2197,13 +2197,13 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid: 'Feature별 theme CSS 복사나 palette override를 만들지 않는다.',
     anatomy: 'I18nProvider → ThemeContext → generated themeCss + children.',
     states:
-      'theme 미지정 저장 preference/기본system; 제어 theme시 onThemeChange callback만 요청. storage 이벤트 동기화.',
+      'theme 미지정 시 store의 저장 preference/기본 system. store가 없으면 이번 세션만 유지하며 앱은 브라우저 저장소를 연결한다. 제어 theme시 onThemeChange callback만 요청. store 구독으로 다른 창의 변경을 동기화.',
     tokens:
       'tokens.ts → theme.ts CSS 전체; html data-theme; Globals/Fonts; OS prefers-color-scheme.',
     interaction:
       'provider 자체 Tab 없음. locale은 resolved language; pseudo는 React Aria en. 테마 변경 의미는 ThemePicker가 소유.',
     source: 'apps/control-ui/src/core/theme/MixRelayProvider.tsx',
-    api: 'export function MixRelayProvider({\n  children,\n  theme,\n  onThemeChange,\n}: PropsWithChildren<{\n  theme?: ThemePreference;\n  onThemeChange?: (value: ThemePreference) => void;\n}>)',
+    api: 'const sessionOnly: ThemePreferenceStore = {\n  read: () => defaultThemePreference,\n  write: () => undefined,\n  subscribe: () => () => undefined,\n};\n\nexport function MixRelayProvider({\n  children,\n  theme,\n  onThemeChange,\n  store = sessionOnly,\n}: PropsWithChildren<{\n  theme?: ThemePreference;\n  onThemeChange?: (value: ThemePreference) => void;\n  /** Where an uncontrolled preference is kept between sessions. */\n  store?: ThemePreferenceStore;\n}>)',
     consumers: ['apps/control-ui/src/main.tsx'],
     tests: [
       'apps/control-ui/src/core/theme/MixRelayProvider.test.tsx',
@@ -2223,12 +2223,13 @@ export const componentContracts: readonly ComponentContract[] = [
     purpose: '앱 i18n 인스턴스를 공급하고 문서 언어(html lang)를 현재 언어에 맞춘다.',
     use: '앱 최상위와 Storybook preview에서 한 번 감싼다. 언어 변경은 i18n.changeLanguage가 소유한다.',
     avoid: '컴포넌트마다 별도 i18n 인스턴스를 만들거나 lang을 직접 바꾸지 않는다.',
-    anatomy: 'I18nextProvider(app i18n) → children; languageChanged 구독으로 html lang 갱신.',
+    anatomy:
+      'I18nextProvider(instance, 기본 app i18n) → children; languageChanged 구독으로 html lang 갱신.',
     states: 'resolvedLanguage가 없으면 요청 언어로 lang을 정한다. pseudo는 지원 locale로 해석.',
     tokens: '없음. 서체 선택은 Fonts.css의 html lang 규칙이 소비한다.',
     interaction: 'Tab 없음. 언어가 바뀌면 보조 기술과 지역 서체가 같은 lang을 사용한다.',
     source: 'apps/control-ui/src/core/i18n/index.tsx',
-    api: 'export function I18nProvider({ children }: PropsWithChildren)',
+    api: 'export const i18n = createI18n([], initReactI18next);\n\nexport function I18nProvider({\n  children,\n  instance = i18n,\n}: PropsWithChildren<{ instance?: I18n }>)',
     consumers: ['apps/control-ui/src/main.tsx'],
     tests: ['apps/control-ui/src/core/i18n/DocumentLanguage.test.tsx'],
     storyId: 'core-playgrounds-i18nprovider--playground',

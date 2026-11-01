@@ -1,4 +1,5 @@
-import type { ControlStateSnapshot, StateListener } from '../core/control-port/telemetry';
+import type { ControlStateSnapshot } from '../core/domain/control/state';
+import type { StateListener } from '../core/ports/control/TelemetryPort';
 
 export function controlState(generation = 1, revision = 2): ControlStateSnapshot {
   return {

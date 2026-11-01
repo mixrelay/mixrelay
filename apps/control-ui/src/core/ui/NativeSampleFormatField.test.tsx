@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { NativeDeviceFormats, NativeStreamFormat } from '../domain/control/nativeFormat';
 
-import type { NativeDeviceFormats, NativeStreamFormat } from '../control-port/types';
 import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { NativeSampleFormatField } from './NativeSampleFormatField';
 

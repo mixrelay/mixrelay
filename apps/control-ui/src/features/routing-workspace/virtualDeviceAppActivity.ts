@@ -1,6 +1,7 @@
 import type { TFunction } from 'i18next';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import type { DeviceAppActivity, VirtualEndpointSettings } from '../../core/control-port/types';
+import type { DeviceAppActivity } from '../../core/domain/control/inventory';
+import type { VirtualEndpointSettings } from '../../core/domain/control/status';
 import type { DeviceAppActivityProps } from '../../core/ui/DeviceAppActivity';
 import { virtualEndpointIdentity } from './model';
 import type { DeviceActivityObservation } from './useVirtualDeviceAppActivity';

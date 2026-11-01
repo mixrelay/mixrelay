@@ -1,4 +1,4 @@
-import type { MixRelayStatus } from '../../core/control-port/types';
+import type { MixRelayStatus } from '../../core/domain/control/status';
 import { useSustainedProblem } from '../../core/ui/useSustainedProblem';
 
 /** A failed processing owner is critical and shown at once; other issues may be brief. */

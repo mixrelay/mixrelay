@@ -5,32 +5,25 @@ import {
   useRef,
   useState,
 } from 'react';
-
-export interface SelectedAudioPort {
-  nodeId: string;
-  portId: string;
-  side: 'input' | 'output';
-}
+import {
+  audioPortKey,
+  type MeasuredPort,
+  mergeAudioPorts,
+  type Point,
+  polylineIntersectsRectangle,
+  rectanglePortSelection,
+  rectanglesOverlap,
+  type SelectedAudioPort,
+  type SelectionRectangle,
+  selectionRectangle,
+} from './portSelection';
 
 const portSelectionDistance = 3;
 
-function audioPortKey(port: SelectedAudioPort) {
-  return `${port.side}\u0000${port.nodeId}\u0000${port.portId}`;
-}
-
-interface PortSelectionStart {
+interface PortSelectionStart extends Point {
   additive: boolean;
   nodeId?: string;
   pointerId: number;
-  x: number;
-  y: number;
-}
-
-interface SelectionRectangle {
-  bottom: number;
-  left: number;
-  right: number;
-  top: number;
 }
 
 function portSelectionStart(event: ReactPointerEvent<HTMLElement>): PortSelectionStart | null {
@@ -54,88 +47,22 @@ function portSelectionStart(event: ReactPointerEvent<HTMLElement>): PortSelectio
   };
 }
 
-function selectionRectangle(
-  start: PortSelectionStart,
-  end: { x: number; y: number },
-): SelectionRectangle {
-  return {
-    bottom: Math.max(start.y, end.y),
-    left: Math.min(start.x, end.x),
-    right: Math.max(start.x, end.x),
-    top: Math.min(start.y, end.y),
-  };
-}
-
-function pointInsideRectangle(point: DOMPoint, rectangle: SelectionRectangle) {
-  return (
-    point.x >= rectangle.left &&
-    point.x <= rectangle.right &&
-    point.y >= rectangle.top &&
-    point.y <= rectangle.bottom
-  );
-}
-
-function segmentsIntersect(
-  firstStart: DOMPoint,
-  firstEnd: DOMPoint,
-  secondStart: DOMPoint,
-  secondEnd: DOMPoint,
-) {
-  const rangesOverlap = (firstA: number, firstB: number, secondA: number, secondB: number) =>
-    Math.max(Math.min(firstA, firstB), Math.min(secondA, secondB)) <=
-    Math.min(Math.max(firstA, firstB), Math.max(secondA, secondB));
-  if (
-    !rangesOverlap(firstStart.x, firstEnd.x, secondStart.x, secondEnd.x) ||
-    !rangesOverlap(firstStart.y, firstEnd.y, secondStart.y, secondEnd.y)
-  ) {
-    return false;
+/** The cable's path sampled every 10 px, in screen coordinates. */
+function sampledPath(path: SVGPathElement, transform: DOMMatrix) {
+  const length = path.getTotalLength();
+  const sampleLength = 10;
+  const points: Point[] = [];
+  for (let distance = 0; distance < length + sampleLength; distance += sampleLength) {
+    const point = path.getPointAtLength(Math.min(distance, length));
+    points.push(new DOMPoint(point.x, point.y).matrixTransform(transform));
   }
-  const cross = (start: DOMPoint, end: DOMPoint, point: DOMPoint) =>
-    (end.x - start.x) * (point.y - start.y) - (end.y - start.y) * (point.x - start.x);
-  const firstSideA = cross(firstStart, firstEnd, secondStart);
-  const firstSideB = cross(firstStart, firstEnd, secondEnd);
-  const secondSideA = cross(secondStart, secondEnd, firstStart);
-  const secondSideB = cross(secondStart, secondEnd, firstEnd);
-  return firstSideA * firstSideB <= 0 && secondSideA * secondSideB <= 0;
-}
-
-function segmentIntersectsRectangle(start: DOMPoint, end: DOMPoint, rectangle: SelectionRectangle) {
-  if (pointInsideRectangle(start, rectangle) || pointInsideRectangle(end, rectangle)) return true;
-  const topLeft = new DOMPoint(rectangle.left, rectangle.top);
-  const topRight = new DOMPoint(rectangle.right, rectangle.top);
-  const bottomRight = new DOMPoint(rectangle.right, rectangle.bottom);
-  const bottomLeft = new DOMPoint(rectangle.left, rectangle.bottom);
-  return (
-    segmentsIntersect(start, end, topLeft, topRight) ||
-    segmentsIntersect(start, end, topRight, bottomRight) ||
-    segmentsIntersect(start, end, bottomRight, bottomLeft) ||
-    segmentsIntersect(start, end, bottomLeft, topLeft)
-  );
+  return points;
 }
 
 function edgeIntersectsRectangle(path: SVGPathElement, rectangle: SelectionRectangle) {
-  const bounds = path.getBoundingClientRect();
-  if (
-    bounds.right < rectangle.left ||
-    bounds.left > rectangle.right ||
-    bounds.bottom < rectangle.top ||
-    bounds.top > rectangle.bottom
-  ) {
-    return false;
-  }
+  if (!rectanglesOverlap(path.getBoundingClientRect(), rectangle)) return false;
   const transform = path.getScreenCTM();
-  if (!transform) return false;
-  const length = path.getTotalLength();
-  const sampleLength = 10;
-  const initialPoint = path.getPointAtLength(0);
-  let previous = new DOMPoint(initialPoint.x, initialPoint.y).matrixTransform(transform);
-  for (let distance = sampleLength; distance < length + sampleLength; distance += sampleLength) {
-    const point = path.getPointAtLength(Math.min(distance, length));
-    const current = new DOMPoint(point.x, point.y).matrixTransform(transform);
-    if (segmentIntersectsRectangle(previous, current, rectangle)) return true;
-    previous = current;
-  }
-  return false;
+  return transform ? polylineIntersectsRectangle(sampledPath(path, transform), rectangle) : false;
 }
 
 function selectedAudioEdgeIds(root: HTMLElement | null, rectangle: SelectionRectangle) {
@@ -149,52 +76,26 @@ function selectedAudioEdgeIds(root: HTMLElement | null, rectangle: SelectionRect
   return ids;
 }
 
-function selectedAudioPorts(
-  root: HTMLElement | null,
-  start: PortSelectionStart,
-  end: { x: number; y: number },
-) {
-  const selectionRect = selectionRectangle(start, end);
-  const handles = root?.querySelectorAll<HTMLElement>('[data-audio-port-side]');
-  const hits: SelectedAudioPort[] = [];
-  let nearestNode: string | undefined;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const handle of handles ?? []) {
-    if (handle.dataset.audioPortSide !== 'output') continue;
-    const bounds = handle.getBoundingClientRect();
-    const misses =
-      bounds.right < selectionRect.left ||
-      bounds.left > selectionRect.right ||
-      bounds.bottom < selectionRect.top ||
-      bounds.top > selectionRect.bottom;
-    if (misses) continue;
-    const nodeId = handle.dataset.audioNodeId;
-    const portId = handle.dataset.audioPortId;
-    const side = handle.dataset.audioPortSide;
-    if (nodeId && portId && side === 'output') {
-      hits.push({ nodeId, portId, side });
-      const distance =
-        (bounds.left + bounds.width / 2 - start.x) ** 2 +
-        (bounds.top + bounds.height / 2 - start.y) ** 2;
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestNode = nodeId;
-      }
-    }
-  }
-  start.nodeId ??= nearestNode;
-  return hits.filter((port) => port.nodeId === start.nodeId);
+/** Output handles with their measured screen bounds. */
+function measuredOutputPorts(root: HTMLElement | null): MeasuredPort[] {
+  const handles = root?.querySelectorAll<HTMLElement>('[data-audio-port-side="output"]');
+  return [...(handles ?? [])].flatMap((handle) => {
+    const { audioNodeId: nodeId, audioPortId: portId } = handle.dataset;
+    return nodeId && portId
+      ? [{ nodeId, portId, side: 'output' as const, bounds: handle.getBoundingClientRect() }]
+      : [];
+  });
 }
 
-function mergeAudioPorts(
-  current: readonly SelectedAudioPort[],
-  added: readonly SelectedAudioPort[],
-  nodeId?: string,
-) {
-  const sameNode = current.filter((port) => port.side === 'output' && port.nodeId === nodeId);
-  const combined = new Map(sameNode.map((port) => [audioPortKey(port), port]));
-  for (const port of added) combined.set(audioPortKey(port), port);
-  return [...combined.values()];
+function selectedAudioPorts(root: HTMLElement | null, start: PortSelectionStart, end: Point) {
+  const selection = rectanglePortSelection(
+    measuredOutputPorts(root),
+    start,
+    selectionRectangle(start, end),
+    start.nodeId,
+  );
+  start.nodeId ??= selection.nodeId;
+  return selection.ports;
 }
 
 function highlightAudioPorts(root: HTMLElement | null, selected: readonly SelectedAudioPort[]) {

@@ -1,4 +1,4 @@
-import type { MeterSnapshot } from '../control-port/types';
+import type { MeterSnapshot } from '../domain/control/meters';
 import { meterScale } from '../theme/tokens';
 
 const EMPTY_LEVELS: readonly number[] = [];

@@ -233,3 +233,5 @@ pub(crate) async fn licensing_deactivate(
 
 #[cfg(test)]
 mod lifecycle_tests;
+#[cfg(test)]
+mod tests;

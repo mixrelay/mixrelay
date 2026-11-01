@@ -1,5 +1,7 @@
 import { type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { ProductUpdate, UpdateDownload, UpdateProduct } from '../../core/domain/updates';
+import type { UpdatesPort } from '../../core/ports/UpdatesPort';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { ContentSection } from '../../core/ui/ContentSection';
 import { FormActions } from '../../core/ui/FormActions';
@@ -9,12 +11,6 @@ import { InlineNotice } from '../../core/ui/InlineNotice';
 import type { StatusTone } from '../../core/ui/StatusBadge';
 import { Text } from '../../core/ui/Text';
 import { UpdatesDialog } from '../../core/ui/UpdatesDialog';
-import type {
-  ProductUpdate,
-  UpdateDownload,
-  UpdateProduct,
-  UpdatesPort,
-} from '../../core/updates/UpdatesPort';
 import { useUpdatesSession } from './useUpdatesSession';
 
 const products: UpdateProduct[] = ['mix-relay'];

@@ -1,50 +1,40 @@
 import { render, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import { fakeNativeShell } from '../../test-support/fakeNativeShell';
 import { MixRelayProvider } from './MixRelayProvider';
 import { NativeWindowTheme } from './NativeWindowTheme';
 
-const native = vi.hoisted(() => ({ isTauri: vi.fn(), setTheme: vi.fn() }));
-vi.mock('@tauri-apps/api/core', () => ({ isTauri: native.isTauri }));
-vi.mock('@tauri-apps/api/window', () => ({
-  getCurrentWindow: () => ({ setTheme: native.setTheme }),
-}));
-
-beforeEach(() => {
-  native.isTauri.mockReset().mockReturnValue(true);
-  native.setTheme.mockReset().mockResolvedValue(undefined);
-});
-
-it('sets the native window to the chosen appearance and releases it for system', () => {
+it('keeps the native window on the chosen appearance, including system', () => {
+  const native = fakeNativeShell();
   const view = render(
     <MixRelayProvider theme="dark">
       <NativeWindowTheme />
     </MixRelayProvider>,
+    { wrapper: native.Provider },
   );
-  expect(native.setTheme).toHaveBeenLastCalledWith('dark');
+  expect(native.shell.setWindowTheme).toHaveBeenLastCalledWith('dark');
   view.rerender(
     <MixRelayProvider theme="system">
       <NativeWindowTheme />
     </MixRelayProvider>,
   );
-  expect(native.setTheme).toHaveBeenLastCalledWith(null);
+  expect(native.shell.setWindowTheme).toHaveBeenLastCalledWith('system');
 });
 
-it('does nothing in the browser and reports native failures without throwing', async () => {
-  native.isTauri.mockReturnValue(false);
-  const view = render(
+it('does nothing without a shell and reports native failures without throwing', async () => {
+  render(
     <MixRelayProvider theme="light">
       <NativeWindowTheme />
     </MixRelayProvider>,
   );
-  expect(native.setTheme).not.toHaveBeenCalled();
-
-  native.isTauri.mockReturnValue(true);
-  native.setTheme.mockRejectedValue(new Error('denied'));
+  const native = fakeNativeShell();
+  native.shell.setWindowTheme.mockRejectedValue(new Error('denied'));
   const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-  view.rerender(
+  render(
     <MixRelayProvider theme="dark">
       <NativeWindowTheme />
     </MixRelayProvider>,
+    { wrapper: native.Provider },
   );
   await waitFor(() =>
     expect(error).toHaveBeenCalledWith(
@@ -52,4 +42,5 @@ it('does nothing in the browser and reports native failures without throwing', a
       expect.any(Error),
     ),
   );
+  error.mockRestore();
 });

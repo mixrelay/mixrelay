@@ -1,19 +1,15 @@
+import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { GraphApplyResponse, RuntimeGraphDocument } from '../../core/domain/control/graph';
+import type { ExternalProcessorDescriptor } from '../../core/domain/control/processors';
+import type { AudioSessionStatus, FailedProcessorInstance } from '../../core/domain/control/status';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { ProblemsTarget } from '../../test-support/ProblemsTarget';
 import { GRAPH_APPLICATION_TIMEOUT_MS } from './GraphApplicationQueue';
 import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AudioGraphCanvasProps } from '../../core/audio-graph/AudioGraphCanvas';
-import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type {
-  AudioSessionStatus,
-  ControlPort,
-  ExternalProcessorDescriptor,
-  FailedProcessorInstance,
-  GraphApplyResponse,
-  RuntimeGraphDocument,
-} from '../../core/control-port/types';
-import { ControlPortError } from '../../core/control-port/types';
 import { I18nProvider, i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { advance, eventually, find } from '../../test-support/fakeTimerQueries';
@@ -818,19 +814,6 @@ it.each(['same topology', 'changed topology'] as const)(
     }
   },
 );
-
-it('omits native power and mute when the connected port offers read-only node controls', async () => {
-  vi.useFakeTimers();
-  const native: ControlPort = port(document(signalSource));
-  const read = vi.spyOn(native, 'getNodeControls');
-  native.updateNodeControl = undefined;
-  render(view(native, { graphId: 'graph-1' }));
-  await act(async () => vi.advanceTimersByTimeAsync(1000));
-  expect(canvas().model.nodes).toHaveLength(1);
-  expect(read).toHaveBeenCalled();
-  expect(screen.queryByRole('button', { name: 'Disable Hardware input' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Mute Hardware input' })).not.toBeInTheDocument();
-});
 
 it('records duplicate completion callbacks for one layout gesture only once', async () => {
   const native = port(document({ kind: 'compressor' }));

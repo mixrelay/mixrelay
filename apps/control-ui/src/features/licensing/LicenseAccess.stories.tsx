@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
-
+import type { LicensingStatus } from '../../core/domain/licensing';
 import { i18n } from '../../core/i18n';
-import type { LicensingPort, LicensingStatus } from '../../core/licensing/LicensingPort';
+import type { LicensingPort } from '../../core/ports/LicensingPort';
 import { LicenseAccess } from './LicenseAccess';
 
 const free: LicensingStatus = {

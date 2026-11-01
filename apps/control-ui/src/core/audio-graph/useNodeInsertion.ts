@@ -1,6 +1,6 @@
 import type { ReactFlowInstance } from '@xyflow/react';
 import { type RefObject, useEffect, useRef } from 'react';
-import type { AudioGraphViewport } from './AudioGraphCanvas';
+import type { AudioGraphViewport } from './graphViewport';
 import { graphNodeDefaultWidth, normalizeAudioGraphNodeSize } from './model';
 import {
   defaultInsertionSize,

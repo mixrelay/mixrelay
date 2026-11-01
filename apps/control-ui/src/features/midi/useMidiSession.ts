@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MidiCommand, MidiPort, MidiStatus } from '../../core/midi/MidiPort';
+import type { MidiStatus } from '../../core/domain/midi';
+import type { MidiCommand, MidiPort } from '../../core/ports/MidiPort';
 
 export function useMidiSession(port: MidiPort, opened: boolean) {
   const [status, setStatus] = useState<MidiStatus | null>(null);

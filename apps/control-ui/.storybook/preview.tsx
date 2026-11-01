@@ -1,9 +1,9 @@
 import type { Preview } from '@storybook/react-vite';
 import { useGlobals } from 'storybook/internal/preview-api';
+import { themePreference } from '../src/core/domain/appearance';
 
 import { I18nProvider, i18n } from '../src/core/i18n';
 import { MixRelayProvider } from '../src/core/theme/MixRelayProvider';
-import { themePreference } from '../src/core/theme/themePreference';
 
 const preview: Preview = {
   loaders: [

@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-
 import type {
-  ControlPort,
   ExternalProcessorCatalog,
   ExternalProcessorDescriptor,
   ExternalProcessorDiagnostic,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/processors';
+import type { InventoryPort } from '../../core/ports/control/InventoryPort';
 
 const PATHS_KEY = 'mixrelay.processorPaths.v1';
 type CatalogAction = 'initial' | 'scan' | 'directory';
 type CatalogPort = Pick<
-  ControlPort,
+  InventoryPort,
   'getProcessors' | 'rescanProcessors' | 'selectProcessorDirectory'
 >;
 export type ProcessorCatalogFailure = 'catalog' | 'directory' | 'paths';

@@ -11,6 +11,7 @@ import {
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { HistoryStep } from '../../core/application/history/UndoHistory';
 import {
   AudioGraphCanvas,
   type AudioGraphChangeKind,
@@ -19,21 +20,23 @@ import {
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
 import { audioGraphNodeTitle, normalizeAudioGraphNodeSize } from '../../core/audio-graph/model';
 import type { PlaceGraphNodes } from '../../core/audio-graph/nodePlacement';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import type {
   AudioDeviceDescriptor,
-  AudioSessionStatus,
   CapturableApplication,
-  ControlPort,
-  ExternalProcessorDescriptor,
+} from '../../core/domain/control/inventory';
+import type { ExternalProcessorDescriptor } from '../../core/domain/control/processors';
+import type {
+  AudioSessionStatus,
   FailedProcessorInstance,
-  RuntimeGraphDocument,
   VirtualEndpointSettings,
   VirtualEndpointSpec,
-} from '../../core/control-port/types';
-import { ControlPortError } from '../../core/control-port/types';
-import { type HistoryStep, useUndoHistory } from '../../core/history/useUndoHistory';
+} from '../../core/domain/control/status';
+import { useUndoHistory } from '../../core/history/useUndoHistory';
 import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
-import { MidiContext, MidiGraphContext } from '../../core/midi/MidiPort';
+import { MidiContext, MidiGraphContext } from '../../core/midi/MidiContext';
+import type { ControlPort } from '../../core/ports/control/ControlPort';
 import type { EndpointControl } from '../../core/ui/AudioNodeEndpointOptions';
 import { InlineNotice } from '../../core/ui/InlineNotice';
 import { NodeMuteButton, NodePowerButton } from '../../core/ui/NodeSignalControls';
@@ -119,7 +122,7 @@ export interface RoutingWorkspaceProps {
   onProblemsChange?: (summary: WorkspaceProblemSummary) => void;
   failedProcessors?: FailedProcessorInstance[];
   catalogRevision?: number;
-  processorTimings?: import('../../core/control-port/types').ProcessorTiming[];
+  processorTimings?: import('../../core/domain/control/status').ProcessorTiming[];
   graphId?: string;
   interactionDisabled?: boolean;
   sessionDocument?: RuntimeGraphDocument;
@@ -597,7 +600,7 @@ function useGraphApplication(
           ),
         beforeApply: parameters.whenIdle,
         beforeReload: () => settleParametersForReload(parameters.whenIdle),
-        getReloadLayout: controlPort.getGraphLayout?.bind(controlPort),
+        getReloadLayout: controlPort.getGraphLayout.bind(controlPort),
         getDocument: () => latest.current.graph.document,
         getModel: () => currentModel.current,
         document: (document) => latest.current.graph.setDocument(document),
@@ -1566,7 +1569,7 @@ type NodeRenderInputs = Pick<
 function useNodeRenderers(
   props: WorkspaceViewProps,
   t: TFunction,
-  snapshot: import('../../core/control-port/types').GraphNodeControls | null,
+  snapshot: import('../../core/domain/control/graph').GraphNodeControls | null,
   model: AudioGraphModel | null,
   editors: ReturnType<typeof useProcessorEditors>,
 ) {
@@ -1713,10 +1716,7 @@ function nodeRecoveryControl(
           (candidate) => candidate.graphId === props.graphId && candidate.nodeId === node.id,
         )
       : undefined;
-  const retryAvailable =
-    failed !== undefined &&
-    props.catalogRevision !== undefined &&
-    props.controlPort.retryProcessor !== undefined;
+  const retryAvailable = failed !== undefined && props.catalogRevision !== undefined;
   return retryAvailable ? (
     <ProcessorRecoveryControl
       busy={disabled || props.layoutDirty}
@@ -1749,7 +1749,7 @@ function nodeSignalControls(
   props: NodeRenderInputs,
   node: AudioGraphNode,
   t: TFunction,
-  snapshot: import('../../core/control-port/types').GraphNodeControls | null,
+  snapshot: import('../../core/domain/control/graph').GraphNodeControls | null,
 ) {
   const control = node.runtime?.control ?? { enabled: true, muted: false };
   const recoveryOnly = usesRecoveryControls(node, props.mapping);
@@ -1762,7 +1762,6 @@ function nodeSignalControls(
   const retryAvailable = retry !== null;
   const graphId = props.graphId;
   if (!graphId || (!entry && !retryAvailable)) return null;
-  if (!props.controlPort.updateNodeControl) return { power: retry };
   // Native disabled buttons own interaction gating; the graph queue validates each live command.
   const change = (value: { enabled?: boolean; muted?: boolean }) => {
     void props.application.setNodeControl(graphId, nodeId, value);

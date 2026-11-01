@@ -1,11 +1,10 @@
 import { expect, it } from 'vitest';
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
+import type { RuntimeGraphDocument, RuntimeGraphNode } from '../../core/domain/control/graph';
 import type {
   ExternalProcessorDescriptor,
   ProviderPorts,
-  RuntimeGraphDocument,
-  RuntimeGraphNode,
-} from '../../core/control-port/types';
+} from '../../core/domain/control/processors';
 import {
   addRoutingNode,
   audioGraphToRuntimeGraph,

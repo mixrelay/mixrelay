@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { type ComponentProps, useState } from 'react';
 import { expect, userEvent, within } from 'storybook/test';
+import type { MidiStatus } from '../core/domain/midi';
 import { i18n } from '../core/i18n';
-import type { MidiStatus } from '../core/midi/MidiPort';
 import { midiBinding, midiFixture, midiPortFixture } from '../features/midi/midiFixtures';
 import { App } from './App';
 import workspaceMeta, { MidiControls } from './App.stories';

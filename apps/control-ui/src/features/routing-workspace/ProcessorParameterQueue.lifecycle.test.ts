@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import type { ProcessorParameterUpdateResponse } from '../../core/control-port/types';
+import type { ProcessorParameterUpdateResponse } from '../../core/domain/control/processors';
 import { ProcessorParameterQueue } from './ProcessorParameterQueue';
 
 const update = { expectedRevision: 1, nodeId: 'processor-a', parameterId: 1, value: 0.5 };

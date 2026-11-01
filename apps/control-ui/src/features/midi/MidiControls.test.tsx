@@ -2,16 +2,10 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type ReactNode, useContext, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { MidiAssignment, MidiBinding, MidiStatus } from '../../core/domain/midi';
 import { I18nProvider, i18n } from '../../core/i18n';
-import {
-  type MidiAssignment,
-  type MidiBinding,
-  MidiGraphContext,
-  MidiNodeContext,
-  MidiPanelContext,
-  type MidiPort,
-  type MidiStatus,
-} from '../../core/midi/MidiPort';
+import { MidiGraphContext, MidiNodeContext, MidiPanelContext } from '../../core/midi/MidiContext';
+import type { MidiPort } from '../../core/ports/MidiPort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
 import { NodeMuteButton, NodePowerButton } from '../../core/ui/NodeSignalControls';
@@ -292,7 +286,7 @@ it('the panel selects and highlights a mapping in mode, edits only that row, and
   expect(command).toHaveBeenCalledWith('midi_learn', expect.anything());
 });
 it('loading and unsuccessful selection, removal or exit preserve the current map state', async () => {
-  const pending = Promise.withResolvers<import('../../core/midi/MidiPort').MidiStatus>();
+  const pending = Promise.withResolvers<import('../../core/domain/midi').MidiStatus>();
   const command = vi
     .fn<MidiPort['command']>()
     .mockReturnValueOnce(pending.promise)
@@ -316,7 +310,7 @@ it('loading and unsuccessful selection, removal or exit preserve the current map
 });
 
 it('unavailable mapping scopes never expose a false volume target and MIDI key repeat/composition does not toggle modes', async () => {
-  const { MidiContext } = await import('../../core/midi/MidiPort');
+  const { MidiContext } = await import('../../core/midi/MidiContext');
   const context = {
     active: true,
     status: midiFixture,
@@ -454,7 +448,7 @@ it('the panel follows capture and device reattachment observations without reope
   ).toHaveTextContent('Programme / Programme output · Volume');
 });
 it('map mode disables non-mappable Options while preserving its panel relationship', async () => {
-  const { MidiContext } = await import('../../core/midi/MidiPort');
+  const { MidiContext } = await import('../../core/midi/MidiContext');
   const { NodeOptionsSection } = await import('../../core/ui/NodeOptionsSection');
   view(
     <MidiContext.Provider

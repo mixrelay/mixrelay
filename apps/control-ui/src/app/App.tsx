@@ -1,34 +1,29 @@
 import { useCallback, useState } from 'react';
-import { localControlPort } from '../core/control-port/localControlPort';
-import type { ControlPort } from '../core/control-port/types';
-import type { DiagnosticsPort } from '../core/diagnostics/DiagnosticsPort';
-import { localDiagnosticsPort } from '../core/diagnostics/TauriDiagnosticsPort';
-import type { DriverPort } from '../core/driver/DriverPort';
-import { localDriverPort } from '../core/driver/TauriDriverPort';
 import { FeatureAccess } from '../core/licensing/FeatureAccess';
-import type { LicensingPort } from '../core/licensing/LicensingPort';
-import { localLicensingPort } from '../core/licensing/TauriLicensingPort';
-import type { MidiPort } from '../core/midi/MidiPort';
-import { localMidiPort } from '../core/midi/TauriMidiPort';
-import type { RuntimePort } from '../core/runtime/RuntimePort';
-import { localRuntimePort } from '../core/runtime/TauriRuntimePort';
-import { localUpdatesPort } from '../core/updates/TauriUpdatesPort';
-import type { UpdatesPort } from '../core/updates/UpdatesPort';
+import type { ControlPort } from '../core/ports/control/ControlPort';
+import type { DiagnosticsPort } from '../core/ports/DiagnosticsPort';
+import type { DriverPort } from '../core/ports/DriverPort';
+import type { LicensingPort } from '../core/ports/LicensingPort';
+import type { MidiPort } from '../core/ports/MidiPort';
+import type { RuntimePort } from '../core/ports/RuntimePort';
+import type { UpdatesPort } from '../core/ports/UpdatesPort';
 import { DriverSessionAccess } from '../features/driver-status/DriverSessionAccess';
 import { LicenseAccess } from '../features/licensing/LicenseAccess';
 import { MidiAccess } from '../features/midi/MidiAccess';
 import { RuntimeConnection } from '../features/runtime-connection/RuntimeConnection';
 import { UpdateAccess } from '../features/updates/UpdateAccess';
 import { StudioScreen } from '../screens/StudioScreen';
+import { localPorts } from './localPorts';
 
+/** Omitted ports are this environment's own (app/localPorts); tests and stories pass fakes. */
 export function App({
-  controlPort = localControlPort,
-  licensingPort = localLicensingPort,
-  updatesPort = localUpdatesPort,
-  driverPort = localDriverPort,
-  runtimePort = localRuntimePort,
-  diagnosticsPort = localDiagnosticsPort,
-  midiPort = localMidiPort,
+  controlPort = localPorts().controlPort,
+  licensingPort = localPorts().licensingPort,
+  updatesPort = localPorts().updatesPort,
+  driverPort = localPorts().driverPort,
+  runtimePort = localPorts().runtimePort,
+  diagnosticsPort = localPorts().diagnosticsPort,
+  midiPort = localPorts().midiPort,
 }: {
   midiPort?: MidiPort | null;
   controlPort?: ControlPort;

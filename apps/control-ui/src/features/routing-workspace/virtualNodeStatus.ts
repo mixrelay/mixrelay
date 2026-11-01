@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
-import type { AudioSessionStatus } from '../../core/control-port/types';
+import type { AudioSessionStatus } from '../../core/domain/control/status';
 import { getAudioSessionPresentation } from '../audio-session/presentation';
 
 export type GraphAvailability = 'active' | 'applying' | 'loading' | 'unavailable' | 'blocked';

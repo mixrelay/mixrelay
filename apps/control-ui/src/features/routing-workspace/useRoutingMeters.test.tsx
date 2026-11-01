@@ -1,8 +1,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { audioMeterKey } from '../../core/audio-meter/AudioMeterStore';
-import type { MeterSnapshot } from '../../core/control-port/types';
+import type { MeterSnapshot } from '../../core/domain/control/meters';
 import { useRoutingMeters } from './useRoutingMeters';
 
 const key = audioMeterKey('source', 'out');
@@ -315,13 +314,13 @@ it('ignores a rejected native telemetry response after the store is disposed', a
 });
 
 function pushPort() {
-  const listeners: import('../../core/control-port/types').MeterTelemetryListener[] = [];
+  const listeners: import('../../core/ports/control/TelemetryPort').MeterTelemetryListener[] = [];
   const unsubscribe = vi.fn<() => void>();
   const source = {
     ...port(),
     subscribeMeters: vi.fn(
       async (
-        listener: import('../../core/control-port/types').MeterTelemetryListener,
+        listener: import('../../core/ports/control/TelemetryPort').MeterTelemetryListener,
       ): Promise<() => void> => {
         listeners.push(listener);
         return unsubscribe;

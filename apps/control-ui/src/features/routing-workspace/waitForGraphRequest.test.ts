@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ControlPortError, type GraphRuntimeStatus } from '../../core/control-port/types';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type { GraphRuntimeStatus } from '../../core/domain/control/graph';
 import { waitForGraphRequest } from './waitForGraphRequest';
 
 beforeEach(() => vi.useFakeTimers());

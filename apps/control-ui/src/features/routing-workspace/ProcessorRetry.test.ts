@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import {
-  ControlPortError,
-  type GraphApplyResponse,
-  type ProcessorRetryRequest,
-  type RuntimeGraphDocument,
-} from '../../core/control-port/types';
+import { ControlPortError } from '../../core/domain/control/errors';
+import type {
+  GraphApplyResponse,
+  ProcessorRetryRequest,
+  RuntimeGraphDocument,
+} from '../../core/domain/control/graph';
+import { graphWriterDefaults } from '../../test-support/portDefaults';
 import { GRAPH_APPLICATION_TIMEOUT_MS, GraphApplicationQueue } from './GraphApplicationQueue';
 import { runtimeGraphToAudioGraph } from './model';
 
@@ -79,7 +79,9 @@ function fixture(options: { beforeApply?: () => Promise<void> } = {}) {
   let currentDocument = document;
   let currentModel: AudioGraphModel = runtimeGraphToAudioGraph(document);
   let failedInstanceId: string | undefined = target.expectedInstanceId;
+  const getGraph = vi.fn(async () => currentDocument);
   const port = {
+    ...graphWriterDefaults(getGraph, () => graphId),
     applyGraph: vi.fn(
       async (next: RuntimeGraphDocument): Promise<GraphApplyResponse> => ({
         protocolVersion: 1,
@@ -87,7 +89,7 @@ function fixture(options: { beforeApply?: () => Promise<void> } = {}) {
         state: 'active',
       }),
     ),
-    getGraph: vi.fn(async () => currentDocument),
+    getGraph,
     getGraphStatus: vi.fn(async () => ({
       activeRevision: currentDocument.revision,
       protocolVersion: 1 as const,

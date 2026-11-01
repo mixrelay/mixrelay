@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { themeStorageKey } from '../domain/appearance';
 import { themeCss } from './theme';
 import { themeBootstrapScript, themeDocumentTags } from './themeDocument';
-import { themeStorageKey } from './themePreference';
 
 afterEach(() => {
   vi.restoreAllMocks();

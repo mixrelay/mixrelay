@@ -1,6 +1,6 @@
 import { fireEvent, render } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-import type { NativeDeviceFormats, NativeSampleFormat } from '../control-port/types';
+import type { NativeDeviceFormats, NativeSampleFormat } from '../domain/control/nativeFormat';
 import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { AudioNodeCard } from './AudioNodeCard';
 import type { EndpointControl } from './AudioNodeEndpointOptions';

@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import type { LicensingStatus } from '../../core/domain/licensing';
 import { I18nProvider, i18n } from '../../core/i18n';
-import type { LicensingPort, LicensingStatus } from '../../core/licensing/LicensingPort';
+import type { LicensingPort } from '../../core/ports/LicensingPort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { LicenseDetails } from './LicenseDetails';
 import type { LicenseErrorCode } from './useLicenseSession';
