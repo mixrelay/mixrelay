@@ -9,6 +9,10 @@ use std::{
 ///
 /// Clones share one reading, so a test can keep a clone while the code under test owns
 /// another. Sleeping moves the clock forward to the deadline instead of blocking.
+///
+/// Drive it from one thread. Advances and sleeps from several threads each move the
+/// shared reading, and their order, and so the time each thread sees, is not
+/// deterministic.
 #[derive(Clone, Debug)]
 pub struct ManualClock(Arc<Mutex<Instant>>);
 

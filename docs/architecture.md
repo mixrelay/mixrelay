@@ -22,7 +22,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 | 모델 | `mixrelay-audio-engine` | 블록 처리, 렌더 계획, 지연 보상·측정 | 기반, `audio-graph`, `audio-recorder` |
 | 계약 | `mixrelay-control-protocol` | 편집 앱 ↔ 엔진 제어 메시지 | 기반, 모델 |
 | 계약 | `mixrelay-driver-control` | 엔진·앱 ↔ Driver 서비스 제어, 지연 권한 | 기반 |
-| 도메인 | `mixrelay-engine`(crates/engine) | 엔진 도메인 타입, 도메인·애플리케이션 서비스, 이 서비스가 쓰는 port trait | 기반, 모델, 계약 |
+| 도메인 | `mixrelay-engine`(crates/engine) | 엔진 도메인 타입, 도메인·애플리케이션 서비스, 이 서비스가 쓰는 port trait | 기반, 모델, 계약(서비스 부품과는 서로 의존하지 않음) |
 | 서비스 부품 | `mixrelay-control-server` | 제어 HTTP 서버, 작업 영수증 | 기반, 모델, 계약 |
 | 서비스 부품 | `mixrelay-processor-host` | 플러그인 호스팅(VST3·CLAP, Apple의 AU·AUv3, Linux의 LV2)과 플러그인 편집기 표시 | 기반, 모델, `control-protocol`, vendor 플러그인 형식 |
 | macOS 어댑터 | `mixrelay-macos-transport`(native/macos/common) | CoreAudio IO·FIFO 탭·인벤토리 XPC 인코딩 | 기반 |
@@ -48,6 +48,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 
 ## 의존 규칙
 - 모델·계약·도메인·서비스 부품은 플랫폼 중립이다. OS 어댑터와 앱에 의존하지 않고 OS API를 직접 호출하지 않는다. OS 기능이 필요하면 trait을 정의하고 어댑터나 앱이 구현한다.
+- 도메인 크레이트(`mixrelay-engine`)와 서비스 부품 크레이트는 같은 높이의 계층이다. 서로 의존하지 않고, 앱이 둘을 함께 조립한다.
 - port(trait)는 그 port를 쓰는 안쪽 크레이트가 정의한다. 어댑터는 안쪽 크레이트의 port를 구현하며, 안쪽 크레이트는 구현하는 크레이트를 모른다.
 - 엔진 어댑터는 `native/<os>/`에 두고 `mixrelay-engine`의 port를 구현한다. 기반·모델·계약, `mixrelay-engine`, 같은 OS의 어댑터에 의존할 수 있다. 행의 허용 의존은 `scripts/check-crate-layers.mjs`의 `engineAdapter`로 정한다. 엔진 어댑터가 아닌 어댑터는 `mixrelay-engine`에 의존하지 않는다.
 - 앱은 조립만 한다. 도메인 서비스와 어댑터를 연결하고 실행 수명을 관리하며, 판단과 정책을 두지 않는다.
