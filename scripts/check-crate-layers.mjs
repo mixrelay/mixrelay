@@ -3,7 +3,8 @@
 // Reads `cargo metadata`; prints each forbidden dependency and each workspace crate missing
 // from the table, and exits 1 when any exist. Normal, build and dev dependencies all follow
 // the table; dev dependencies may additionally use test support and enable a workspace
-// crate's `test-*` features (test fakes and observation hooks).
+// crate's `test-*` features (test fakes and observation hooks). In a crate's own
+// `[features]`, only `test-*` features may forward to them, and `default` never reaches one.
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -104,11 +105,49 @@ export function violation(from, to, kind, crates = CRATES) {
   return `not in ${from}'s allowed dependencies in docs/architecture.md`;
 }
 
+const isTestFeature = (feature) => feature.startsWith('test-');
+
 /** Why a `kind` dependency on a workspace crate may not enable `features`, or undefined. */
 export function featureViolation(kind, features) {
-  const test = features.filter((feature) => feature.startsWith('test-'));
+  const test = features.filter(isTestFeature);
   if (kind === 'dev' || test.length === 0) return undefined;
   return `test feature ${test.join(', ')} is for dev-dependencies only`;
+}
+
+/**
+ * Ways a package's own `[features]` table turns a test feature on outside dev-dependencies:
+ * a feature not named `test-*` (including `default`) that forwards to a workspace
+ * dependency's `test-*` feature, or a `default` that reaches the package's own `test-*`
+ * feature directly or through other features.
+ */
+export function packageFeatureViolations(item, members) {
+  const features = item.features ?? {};
+  const workspaceKeys = new Set(
+    item.dependencies.filter((dependency) => members.has(dependency.name)).map((dependency) => dependency.rename ?? dependency.name),
+  );
+  const found = [];
+  for (const [feature, entries] of Object.entries(features)) {
+    if (isTestFeature(feature)) continue;
+    for (const entry of entries) {
+      const forward = entry.match(/^([^/?]+)\??\/(.+)$/);
+      if (forward && workspaceKeys.has(forward[1]) && isTestFeature(forward[2])) {
+        found.push(`${item.name}: feature ${feature} enables ${entry}; test features are for dev-dependencies only`);
+      }
+    }
+  }
+  const reached = new Set();
+  const pending = ['default'];
+  while (pending.length > 0) {
+    const feature = pending.pop();
+    if (reached.has(feature) || features[feature] === undefined) continue;
+    reached.add(feature);
+    if (isTestFeature(feature)) {
+      found.push(`${item.name}: default enables its own ${feature}; test features are for dev-dependencies only`);
+      continue;
+    }
+    pending.push(...features[feature].filter((entry) => !entry.includes('/') && !entry.startsWith('dep:')));
+  }
+  return found;
 }
 
 /** Forbidden dependencies and unregistered or stale crates in `cargo metadata` output. */
@@ -127,6 +166,7 @@ export function violations(metadata) {
       const featureReason = featureViolation(kind, dependency.features ?? []);
       if (featureReason) found.push(`${item.name} -> ${dependency.name} (${kind}): ${featureReason}`);
     }
+    found.push(...packageFeatureViolations(item, members));
   }
   for (const name of Object.keys(CRATES)) {
     if (!members.has(name)) found.push(`${name}: listed in scripts/check-crate-layers.mjs but not a workspace crate`);

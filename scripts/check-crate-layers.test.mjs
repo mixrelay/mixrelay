@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CRATES, LAYERS, engineAdapter, violation, violations } from './check-crate-layers.mjs';
+import { CRATES, LAYERS, engineAdapter, packageFeatureViolations, violation, violations } from './check-crate-layers.mjs';
 
 const metadata = (edges, names = Object.keys(LAYERS)) => ({
   packages: names.map((name) => ({
@@ -102,16 +102,32 @@ test('allow-lists only name registered crates', () => {
   }
 });
 
-test('the engine domain sits above model and contract crates and below adapters and apps', () => {
-  for (const to of ['mixrelay-macos-transport', 'mixrelay-pipewire', 'mixrelay-control-server', 'mixrelay-processor-host', 'truce-rack-core']) {
+test('the engine domain sits above model and contract crates, beside service parts and below adapters and apps', () => {
+  for (const to of ['mixrelay-macos-transport', 'mixrelay-pipewire', 'truce-rack-core']) {
     assert.match(violation('mixrelay-engine', to, 'normal'), /not in .* allowed/, to);
   }
   assert.match(violation('mixrelay-engine', 'mixrelay-service', 'normal'), /app/);
   // Inner crates define the ports they use instead of reaching up to the domain crate.
-  for (const from of ['mixrelay-time', 'mixrelay-audio-engine', 'mixrelay-control-protocol', 'mixrelay-control-server', 'mixrelay-processor-host']) {
+  for (const from of ['mixrelay-time', 'mixrelay-audio-engine', 'mixrelay-control-protocol']) {
     assert.match(violation(from, 'mixrelay-engine', 'normal'), /not in .* allowed/, from);
   }
+  // The domain crate and the service parts are peers: neither depends on the other.
+  for (const part of ['mixrelay-control-server', 'mixrelay-processor-host']) {
+    assert.match(violation('mixrelay-engine', part, 'normal'), /not in .* allowed/, part);
+    assert.match(violation(part, 'mixrelay-engine', 'normal'), /not in .* allowed/, part);
+  }
   assert.match(violation('mixrelay-time', 'mixrelay-audio-io', 'normal'), /not in .* allowed/);
+});
+
+test('an adapter row names only adapters of its own OS', () => {
+  const os = { macos: 'linux', linux: 'macos' };
+  for (const [name, row] of Object.entries(CRATES)) {
+    if (!(row.layer in os) || !Array.isArray(row.allows)) continue;
+    for (const to of row.allows) assert.notEqual(CRATES[to].layer, os[row.layer], `${name} allows ${to}`);
+  }
+  // Engine adapter rows built with the helper follow the same rule.
+  const linuxEngine = { layer: 'linux', allows: engineAdapter('mixrelay-pipewire') };
+  assert.ok(linuxEngine.allows.every((to) => CRATES[to].layer !== 'macos'));
 });
 
 test('engine adapters may use mixrelay-engine; other adapters may not', () => {
@@ -153,5 +169,56 @@ test('test-* features of workspace crates are enabled only from dev-dependencies
   assert.deepEqual(found, [
     'mixrelay-engine -> mixrelay-time (normal): test feature test-util is for dev-dependencies only',
     'mixrelay-hal-core -> mixrelay-macos-transport (build): test feature test-observation is for dev-dependencies only',
+  ]);
+});
+
+test('a crate feature table reaches test features only from test-* features', () => {
+  const members = new Set(['mixrelay-engine', 'mixrelay-time', 'mixrelay-pipewire']);
+  const item = (features) => ({
+    name: 'mixrelay-engine',
+    dependencies: [
+      { name: 'mixrelay-time', kind: null, features: [] },
+      { name: 'mixrelay-pipewire', kind: null, rename: 'pipewire-adapter', features: [] },
+      { name: 'tokio', kind: null, features: [] },
+    ],
+    features,
+  });
+  // A crate's own test feature may forward to a dependency's, and nothing reaches it from default.
+  assert.deepEqual(
+    packageFeatureViolations(item({ default: [], 'test-util': ['mixrelay-time/test-util'], 'native-lab': ['tokio/test-util'] }), members),
+    [],
+  );
+  assert.deepEqual(
+    packageFeatureViolations(
+      item({
+        default: ['lab'],
+        lab: ['mixrelay-time?/test-util', 'pipewire-adapter/test-observation'],
+        'native-lab': ['mixrelay-time/test-util', 'dep:mixrelay-time'],
+      }),
+      members,
+    ),
+    [
+      'mixrelay-engine: feature lab enables mixrelay-time?/test-util; test features are for dev-dependencies only',
+      'mixrelay-engine: feature lab enables pipewire-adapter/test-observation; test features are for dev-dependencies only',
+      'mixrelay-engine: feature native-lab enables mixrelay-time/test-util; test features are for dev-dependencies only',
+    ],
+  );
+  assert.deepEqual(packageFeatureViolations(item({ default: ['test-util'], 'test-util': [] }), members), [
+    'mixrelay-engine: default enables its own test-util; test features are for dev-dependencies only',
+  ]);
+  assert.deepEqual(
+    packageFeatureViolations(item({ default: ['lab'], lab: ['test-util'], 'test-util': [] }), members),
+    ['mixrelay-engine: default enables its own test-util; test features are for dev-dependencies only'],
+  );
+  // The workspace check reports the same findings.
+  const found = violations({
+    packages: [...Object.keys(LAYERS)].map((name) => ({
+      name,
+      dependencies: name === 'mixrelay-engine' ? [{ name: 'mixrelay-time', kind: null, features: [] }] : [],
+      features: name === 'mixrelay-engine' ? { default: ['mixrelay-time/test-util'] } : {},
+    })),
+  });
+  assert.deepEqual(found, [
+    'mixrelay-engine: feature default enables mixrelay-time/test-util; test features are for dev-dependencies only',
   ]);
 });
