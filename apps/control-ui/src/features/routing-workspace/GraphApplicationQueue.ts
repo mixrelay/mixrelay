@@ -8,11 +8,16 @@ import type {
   ProcessorRetryRequest,
   RuntimeGraphDocument,
 } from '../../core/domain/control/graph';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { GraphPort } from '../../core/ports/control/GraphPort';
+import type { TelemetryPort } from '../../core/ports/control/TelemetryPort';
+import type { WorkspacePort } from '../../core/ports/control/WorkspacePort';
 import { acknowledgedNodeControl } from './controlReconciliation';
 import { GraphReadback, pauseGraphObservation } from './GraphReadback';
 import { audioGraphToRuntimeGraph } from './model';
 import { waitForGraphRequest } from './waitForGraphRequest';
+
+/** The engine capabilities this module uses. */
+type EngineControl = GraphPort & WorkspacePort & TelemetryPort;
 
 export const GRAPH_APPLICATION_TIMEOUT_MS = 10_000;
 
@@ -147,7 +152,7 @@ export class GraphApplicationQueue {
 
   constructor(
     private readonly port: Pick<
-      ControlPort,
+      EngineControl,
       | 'applyGraph'
       | 'getGraph'
       | 'getGraphCatalog'
@@ -205,7 +210,6 @@ export class GraphApplicationQueue {
     change: Omit<NodeControlRequest, 'expectedRevision'>,
     expectedRevision?: number,
   ): Promise<NodeControlResult> {
-    if (!this.port.updateNodeControl) return { state: 'rejected', code: 'control_unavailable' };
     const source = this.document ?? this.callbacks.getDocument();
     const rejection = this.nodeControlRejection(graphId, expectedRevision);
     if (rejection) return { state: 'rejected', code: rejection };
@@ -248,7 +252,6 @@ export class GraphApplicationQueue {
   /** Retries one failed processor through the graph writer without replacing its draft. */
   async retryFailedProcessor(target: ProcessorRetryTarget): Promise<NodeControlResult> {
     const retryProcessor = this.port.retryProcessor;
-    if (!retryProcessor) return { state: 'rejected', code: 'control_unavailable' };
     const source = this.document ?? this.callbacks.getDocument();
     if (!source) return { state: 'rejected', code: 'node_not_found' };
     const rejection = this.processorRetryRejection(source, target);
@@ -274,7 +277,7 @@ export class GraphApplicationQueue {
     target: ProcessorRetryTarget,
     signal: AbortSignal,
     attempt: { accepted: boolean; sent: boolean },
-    retryProcessor: NonNullable<ControlPort['retryProcessor']>,
+    retryProcessor: GraphPort['retryProcessor'],
   ): Promise<NodeControlResult> {
     if (this.callbacks.beforeApply) await this.readback.bound(this.callbacks.beforeApply(), signal);
     signal.throwIfAborted();

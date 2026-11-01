@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
+import { unexpected } from '../../test-support/unexpectedPort';
 import { GraphLayoutController } from './GraphLayoutController';
 import type { useGraphLayout } from './useGraphLayout';
 import { presentNodeDisplayNames, useNodeDisplayNameEditor } from './useNodeDisplayNameEditor';
@@ -129,7 +130,15 @@ describe('graph instance display names', () => {
     for (const updated of [
       { ...layout, loaded: false },
       { ...layout, loading: true },
-      { ...layout, controller: new GraphLayoutController({} as never, 'graph') },
+      {
+        ...layout,
+        // Without a graph there is no layout to edit.
+        controller: new GraphLayoutController({
+          getGraphCatalog: unexpected('getGraphCatalog'),
+          getGraphLayout: unexpected('getGraphLayout'),
+          setGraphLayout: unexpected('setGraphLayout'),
+        }),
+      },
     ]) {
       view.rerender(
         <MixRelayProvider>

@@ -3,7 +3,13 @@ import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMock
 import type { GraphCatalog } from '../../core/domain/control/catalog';
 import { ControlPortError } from '../../core/domain/control/errors';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { CatalogPort } from './GraphCatalogController';
 import { GraphCatalogController } from './GraphCatalogController';
+
+/** Gives the fake engine the optional workspaceFile capability. */
+function offerWorkspaceFile(port: CatalogPort, value: CatalogPort['workspaceFile']) {
+  port.workspaceFile = value;
+}
 
 function fixture() {
   const port = new StorybookMockControlPort({
@@ -30,7 +36,7 @@ describe('workspace files', () => {
     const status = Promise.withResolvers<Awaited<ReturnType<ControlPort['getGraphStatus']>>>();
     vi.spyOn(port, 'getGraphStatus').mockReturnValueOnce(status.promise);
     const file = vi.fn().mockResolvedValue(null);
-    (port as ControlPort).workspaceFile = file;
+    offerWorkspaceFile(port, file);
     const pending = controller.workspaceFile('new', 'en');
     controller.dispose();
     await controller.reload();
@@ -48,7 +54,7 @@ describe('workspace files', () => {
       await controller.reload();
       const result = Promise.withResolvers<GraphCatalog | null>();
       const file = vi.fn().mockReturnValue(result.promise);
-      (port as ControlPort).workspaceFile = file;
+      offerWorkspaceFile(port, file);
       const pending = controller.workspaceFile('open', 'en');
       await vi.waitFor(() => expect(file).toHaveBeenCalledTimes(1));
       controller.dispose();
@@ -67,7 +73,7 @@ describe('workspace files', () => {
     const { port, controller } = fixture();
     await controller.reload();
     const loaded = await port.getGraphCatalog();
-    (port as ControlPort).workspaceFile = vi.fn().mockResolvedValue(loaded);
+    offerWorkspaceFile(port, vi.fn().mockResolvedValue(loaded));
     const replacement = Promise.withResolvers<void>();
     const replacementStates: boolean[] = [];
     const unsubscribe = controller.subscribe(() => {
@@ -91,7 +97,7 @@ describe('workspace file outcomes', () => {
     await controller.reload();
     const before = controller.snapshot();
     const file = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(before.catalog);
-    (port as ControlPort).workspaceFile = file;
+    offerWorkspaceFile(port, file);
     await controller.workspaceFile('open', 'ko');
     await controller.workspaceFile('save', 'ko');
     expect(controller.snapshot().document).toBe(before.document);
@@ -105,7 +111,7 @@ describe('workspace file outcomes', () => {
     const before = controller.snapshot();
     const loaded = await port.getGraphCatalog();
     loaded.document = { ...loaded.document, nodes: [], revision: 2 };
-    (port as ControlPort).workspaceFile = vi.fn().mockResolvedValue(loaded);
+    offerWorkspaceFile(port, vi.fn().mockResolvedValue(loaded));
     vi.spyOn(port, 'getGraph').mockRejectedValue(new Error('old capture unavailable'));
     vi.spyOn(port, 'getGraphStatus').mockResolvedValue({
       protocolVersion: 1,
@@ -123,9 +129,14 @@ describe('workspace file outcomes', () => {
     for (const status of [422, 503]) {
       const { port, controller } = fixture();
       await controller.reload();
-      (port as ControlPort).workspaceFile = vi
-        .fn()
-        .mockRejectedValue(new ControlPortError(status, { code: 'graph_invalid', parameters: {} }));
+      offerWorkspaceFile(
+        port,
+        vi
+          .fn()
+          .mockRejectedValue(
+            new ControlPortError(status, { code: 'graph_invalid', parameters: {} }),
+          ),
+      );
       await controller.workspaceFile('open', 'en');
       expect(controller.snapshot().uncertain).toBe(status === 503);
     }

@@ -1,6 +1,13 @@
 import type { GraphLayout, GraphLayoutResponse } from '../../core/domain/control/catalog';
 import { ControlPortError } from '../../core/domain/control/errors';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { WorkspacePort } from '../../core/ports/control/WorkspacePort';
+
+/** Layout reads and writes, fenced by the catalog's active graph. */
+export type LayoutPort = Pick<
+  WorkspacePort,
+  'getGraphCatalog' | 'getGraphLayout' | 'setGraphLayout'
+>;
+
 import { runtimeGraphToAudioGraph } from './model';
 import { rebaseGraphLayout } from './rebaseGraphLayout';
 
@@ -41,12 +48,15 @@ export class GraphLayoutController {
   private cancelRecoveryPause: (() => void) | null = null;
   private readonly listeners = new Set<() => void>();
   readonly enabled: boolean;
+  private readonly graphId: string;
 
   constructor(
-    private readonly port: ControlPort,
-    private readonly graphId?: string,
+    private readonly port: LayoutPort,
+    graphId?: string,
   ) {
-    this.enabled = !!(graphId && port.getGraphLayout && port.setGraphLayout);
+    // Without a graph there is no layout to read or save.
+    this.graphId = graphId ?? '';
+    this.enabled = this.graphId !== '';
     this.state = {
       layout: { positions: {} },
       loaded: !this.enabled,
@@ -90,7 +100,7 @@ export class GraphLayoutController {
 
   /** Explicit reload discards only presentation edits, never audio graph/Undo state. */
   reload = async () => {
-    if (!this.enabled || !this.graphId || !this.port.getGraphLayout) return;
+    if (!this.enabled) return;
     // React StrictMode may set up this same owner again after its cleanup probe.
     this.disposed = false;
     this.cancelTimer();
@@ -134,16 +144,12 @@ export class GraphLayoutController {
   }
 
   private async rebase(generation: number) {
-    if (!this.graphId || !this.port.getGraphLayout) throw new Error('layout reader unavailable');
-    const catalog = this.port.getGraphCatalog
-      ? await bounded(this.port.getGraphCatalog())
-      : undefined;
+    const catalog = await bounded(this.port.getGraphCatalog());
     if (generation !== this.generation) return false;
     if (this.disposed) throw new Error('layout owner disposed');
-    if (catalog && catalog.activeId !== this.graphId)
-      throw new Error('layout graph identity mismatch');
+    if (catalog.activeId !== this.graphId) throw new Error('layout graph identity mismatch');
     const response = this.validate(
-      catalog?.layout && catalog.layoutRevision !== undefined
+      catalog.layout && catalog.layoutRevision !== undefined
         ? {
             graphId: catalog.activeId,
             layoutRevision: catalog.layoutRevision,
@@ -153,9 +159,9 @@ export class GraphLayoutController {
     );
     if (generation !== this.generation) return false;
     if (this.disposed) throw new Error('layout owner disposed');
-    const nodeIds = catalog
-      ? new Set(runtimeGraphToAudioGraph(catalog.document).nodes.map((node) => node.id))
-      : undefined;
+    const nodeIds = new Set(
+      runtimeGraphToAudioGraph(catalog.document).nodes.map((node) => node.id),
+    );
     const layout = rebaseGraphLayout(this.base, this.state.layout, response.layout, nodeIds);
     this.revision = response.layoutRevision;
     this.base = response.layout;
@@ -168,7 +174,7 @@ export class GraphLayoutController {
   private async write(
     generation: number,
     graphId: string,
-    writer: NonNullable<ControlPort['setGraphLayout']>,
+    writer: WorkspacePort['setGraphLayout'],
   ) {
     if (generation !== this.generation || this.state.loading) return;
     const layout = this.state.layout;
@@ -189,7 +195,7 @@ export class GraphLayoutController {
   private async saveAttempt(
     generation: number,
     graphId: string,
-    writer: NonNullable<ControlPort['setGraphLayout']>,
+    writer: WorkspacePort['setGraphLayout'],
   ) {
     const deadline = Date.now() + 10_000;
     let retried = false;
@@ -237,7 +243,7 @@ export class GraphLayoutController {
     this.cancelTimer();
     const graphId = this.graphId;
     const writer = this.port.setGraphLayout;
-    if (!graphId || !writer || this.state.saving || this.state.loading || !this.state.dirty) return;
+    if (!this.enabled || this.state.saving || this.state.loading || !this.state.dirty) return;
     const generation = this.generation;
     this.patch({ saving: true });
     try {
@@ -255,8 +261,8 @@ export class GraphLayoutController {
   /** Explicit retry uses the same field merge, preserving other writers' geometry. */
   retry = async () => {
     if (this.disposed || this.state.loading || this.state.saving) return;
+    // Only an enabled controller accepts edits, so a dirty one has a graph.
     if (!this.state.dirty) return this.reload();
-    if (!this.graphId || !this.port.getGraphLayout) return;
     const generation = ++this.generation;
     this.patch({ loading: true });
     try {

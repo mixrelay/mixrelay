@@ -2,13 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import type { MixRelayStatus } from '../../core/domain/control/status';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { GraphPort } from '../../core/ports/control/GraphPort';
 import { InlineNotice } from '../../core/ui/InlineNotice';
 import { TransportButton } from '../../core/ui/TransportButton';
 import styles from './AudioPauseControl.module.css';
 import { getEnginePresentation } from './presentation';
 import { waitForEnginePower } from './waitForEnginePower';
 import { waitForGraphActivation } from './waitForGraphActivation';
+
+/** The engine capabilities this module uses. */
+type PausePort = Pick<GraphPort, 'getGraph' | 'getGraphStatus' | 'getStatus' | 'setEnginePower'>;
 
 export function AudioPauseControl({
   controlPort,
@@ -17,7 +20,7 @@ export function AudioPauseControl({
   onBusyChange,
   onApplied,
 }: {
-  controlPort: ControlPort;
+  controlPort: PausePort;
   status: MixRelayStatus | null;
   disabled?: boolean;
   onBusyChange: (busy: boolean) => void;

@@ -6,6 +6,7 @@ import type {
   ProcessorParameterChange,
   RuntimeGraphDocument,
 } from '../../core/domain/control/graph';
+import { graphWriterDefaults } from '../../test-support/unexpectedPort';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { changedProcessorParameters, updateRoutingNodeParameter } from './model';
 
@@ -56,8 +57,11 @@ function fixture(beforeApply?: () => Promise<void>) {
     edges: [],
     nodes: [{ id: 'p', type: 'provider', label: null, config }],
   };
+  let selected: string | undefined = 'saved';
+  const getGraph = vi.fn().mockResolvedValue(document);
   const port = {
-    getGraph: vi.fn().mockResolvedValue(document),
+    ...graphWriterDefaults(getGraph, () => selected),
+    getGraph,
     getGraphStatus: vi
       .fn()
       .mockResolvedValue({ activeRevision: 1, submittedRevision: 1, protocolVersion: 1 }),
@@ -80,6 +84,9 @@ function fixture(beforeApply?: () => Promise<void>) {
   };
   const queue = new GraphApplicationQueue(port, callbacks);
   return {
+    select: (graphId: string) => {
+      selected = graphId;
+    },
     queue,
     port,
     callbacks,
@@ -110,6 +117,7 @@ it('ordinary graph edits never infer parameter intent from stale full snapshots'
 
 it('names the selected graph so another client selecting a graph cannot redirect an edit', async () => {
   const f = fixture();
+  f.select('graph-a');
   const queue = new GraphApplicationQueue(f.port, { ...f.callbacks, getGraphId: () => 'graph-a' });
   queue.submit(f.draft);
   await flush();

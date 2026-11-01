@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import type { DeviceAppActivity } from '../../core/domain/control/inventory';
 import type { VirtualEndpointSettings } from '../../core/domain/control/status';
 import { structuralShare } from '../../core/domain/structuralShare';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { InventoryPort } from '../../core/ports/control/InventoryPort';
+
+type ActivityPort = Pick<InventoryPort, 'getVirtualDeviceAppActivity'>;
 
 export type DeviceActivityObservation =
   | { state: 'loading' | 'unavailable' }
@@ -10,14 +12,14 @@ export type DeviceActivityObservation =
 
 /** One workspace reader. Identity fences retire replies across ports, UID mappings and visibility. */
 export function useVirtualDeviceAppActivity(
-  controlPort: ControlPort,
+  controlPort: ActivityPort,
   settings?: VirtualEndpointSettings,
 ) {
   const mapping = JSON.stringify(
     settings?.devices.map(({ spec, nativeDeviceIds }) => [spec.id, nativeDeviceIds]),
   );
   const [snapshot, setSnapshot] = useState<{
-    port: ControlPort;
+    port: ActivityPort;
     mapping: string | undefined;
     value: DeviceActivityObservation;
   } | null>(null);
@@ -41,8 +43,8 @@ export function useVirtualDeviceAppActivity(
 }
 
 function startPolling(
-  controlPort: ControlPort,
-  read: NonNullable<ControlPort['getVirtualDeviceAppActivity']>,
+  controlPort: ActivityPort,
+  read: NonNullable<ActivityPort['getVirtualDeviceAppActivity']>,
   publish: (value: DeviceActivityObservation) => void,
 ) {
   let active = true;

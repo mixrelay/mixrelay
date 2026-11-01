@@ -8,6 +8,7 @@ import type {
   NodeControlResponse,
   RuntimeGraphDocument,
 } from '../../core/domain/control/graph';
+import { graphWriterDefaults } from '../../test-support/unexpectedPort';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { runtimeGraphToAudioGraph } from './model';
 
@@ -32,7 +33,9 @@ function fixture() {
   let document: RuntimeGraphDocument | null = source;
   let model: AudioGraphModel | null = runtimeGraphToAudioGraph(source);
   let graphId = 'graph-a';
+  const getGraph = vi.fn(async () => document ?? source);
   const port = {
+    ...graphWriterDefaults(getGraph, () => graphId),
     applyGraph: vi.fn(
       async (request: GraphApplyRequest): Promise<GraphApplyResponse> => ({
         protocolVersion: 1,
@@ -40,7 +43,7 @@ function fixture() {
         state: 'active',
       }),
     ),
-    getGraph: vi.fn(async () => document ?? source),
+    getGraph,
     getGraphStatus: vi.fn(async () => ({
       activeRevision: document?.revision ?? source.revision,
       submittedRevision: document?.revision ?? source.revision,
@@ -94,16 +97,6 @@ function fixture() {
 const flush = () => vi.advanceTimersByTimeAsync(0);
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
-
-it('rejects unavailable node controls without issuing a graph write', async () => {
-  const f = fixture();
-  const queue = new GraphApplicationQueue({ ...f.port, updateNodeControl: undefined }, f.callbacks);
-  await expect(queue.setNodeControl('graph-a', 'gain', { muted: true })).resolves.toEqual({
-    state: 'rejected',
-    code: 'control_unavailable',
-  });
-  expect(f.port.applyGraph).not.toHaveBeenCalled();
-});
 
 it('rejects a command for a deleted node before sending it', async () => {
   const f = fixture();
@@ -440,12 +433,8 @@ it('settles a definite remote rejection when recovery is cancelled', async () =>
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it('rejects unavailable processor retry and a missing source without sending any write', async () => {
+it('rejects a processor retry without a source document and sends no write', async () => {
   const f = fixture();
-  await expect(f.queue.retryFailedProcessor(retryTarget)).resolves.toEqual({
-    state: 'rejected',
-    code: 'control_unavailable',
-  });
   const retryProcessor = vi.fn();
   const queue = new GraphApplicationQueue({ ...f.port, retryProcessor }, f.callbacks);
   f.setDocument(null);

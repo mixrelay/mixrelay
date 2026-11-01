@@ -35,6 +35,13 @@ function controlPortWithStatus(
     rescanProcessors: controlPort.rescanProcessors.bind(controlPort),
     setProcessorEditor: controlPort.setProcessorEditor.bind(controlPort),
     setProcessorParameter: controlPort.setProcessorParameter.bind(controlPort),
+    getNodeControls: controlPort.getNodeControls.bind(controlPort),
+    updateNodeControl: controlPort.updateNodeControl.bind(controlPort),
+    retryProcessor: controlPort.retryProcessor.bind(controlPort),
+    getGraphCatalog: controlPort.getGraphCatalog.bind(controlPort),
+    mutateGraphCatalog: controlPort.mutateGraphCatalog.bind(controlPort),
+    getGraphLayout: controlPort.getGraphLayout.bind(controlPort),
+    setGraphLayout: controlPort.setGraphLayout.bind(controlPort),
   };
 }
 

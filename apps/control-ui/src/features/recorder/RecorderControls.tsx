@@ -6,7 +6,7 @@ import type {
   RecorderStatus,
 } from '../../core/domain/control/recorder';
 import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { RecorderPort } from '../../core/ports/control/RecorderPort';
 import { InlineNotice } from '../../core/ui/InlineNotice';
 import { NodeOptionsSection } from '../../core/ui/NodeOptionsSection';
 import { NodeTransportRow } from '../../core/ui/NodeTransportRow';
@@ -17,6 +17,8 @@ import { TransportButton } from '../../core/ui/TransportButton';
 import { RecorderController, recordingDuration } from './RecorderController';
 import styles from './RecorderControls.module.css';
 
+type RecorderControlPort = RecorderPort;
+
 const sampleRates = [44100, 48000, 88200, 96000, 176400, 192000];
 const encodings: { value: RecorderEncoding; label: string }[] = [
   { value: 'pcm16', label: '16-bit PCM' },
@@ -25,7 +27,7 @@ const encodings: { value: RecorderEncoding; label: string }[] = [
 ];
 
 export function RecorderControls(props: {
-  controlPort: ControlPort;
+  controlPort: RecorderControlPort;
   graphId: string;
   nodeId: string;
   name?: string;

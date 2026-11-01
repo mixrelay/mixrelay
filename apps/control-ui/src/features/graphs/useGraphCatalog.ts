@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
-import { GraphCatalogController } from './GraphCatalogController';
+import { type CatalogPort, GraphCatalogController } from './GraphCatalogController';
 
-export function useGraphCatalog(controlPort: ControlPort) {
+export function useGraphCatalog(controlPort: CatalogPort) {
   const controller = useMemo(() => new GraphCatalogController(controlPort), [controlPort]);
   const state = useSyncExternalStore(
     controller.subscribe,

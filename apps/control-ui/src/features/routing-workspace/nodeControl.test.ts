@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { ControlPortError } from '../../core/domain/control/errors';
 import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
+import { graphWriterDefaults } from '../../test-support/unexpectedPort';
 import { acknowledgedNodeControl } from './controlReconciliation';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
@@ -39,10 +40,13 @@ function fixture() {
     state: 'active';
     requiresGraphReload: boolean;
   }>();
+  let selected: string | undefined = 'graph-a';
+  const getGraph = vi.fn().mockResolvedValue(restored);
   const port = {
+    ...graphWriterDefaults(getGraph, () => selected),
     updateNodeControl: vi.fn().mockReturnValue(completion.promise),
     applyGraph: vi.fn(),
-    getGraph: vi.fn().mockResolvedValue(restored),
+    getGraph,
     getGraphStatus: vi
       .fn()
       .mockResolvedValue({ activeRevision: 8, submittedRevision: 8, protocolVersion: 1 }),
@@ -57,6 +61,9 @@ function fixture() {
     error: vi.fn(),
   };
   return {
+    select: (graphId: string) => {
+      selected = graphId;
+    },
     completion,
     port,
     callbacks,

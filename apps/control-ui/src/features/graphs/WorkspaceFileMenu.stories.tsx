@@ -18,7 +18,8 @@ function sampleControlPort() {
     },
   });
 }
-const base = sampleControlPort();
+/** An engine connection that offers no workspace file commands. */
+const base = {};
 const port = Object.assign(sampleControlPort(), { workspaceFile: fn(async () => null) });
 const meta = {
   title: 'Features/Graphs/File Menu',

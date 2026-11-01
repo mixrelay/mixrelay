@@ -2,8 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../../core/adapters/fake/StorybookMockControlPort';
 import { ControlPortError } from '../../core/domain/control/errors';
 import type { RecorderSettings, RecorderStatus } from '../../core/domain/control/recorder';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { RecorderPort } from '../../core/ports/control/RecorderPort';
 import { RecorderController, recorderError } from './RecorderController';
+
+/** Gives the fake engine the optional selectRecordingFolder capability. */
+function offerFolderChooser(port: RecorderPort, value: RecorderPort['selectRecordingFolder']) {
+  port.selectRecordingFolder = value;
+}
 
 const stopped: RecorderStatus = {
   state: 'stopped',
@@ -187,7 +192,7 @@ describe('settings errors and active take permissions', () => {
       .fn()
       .mockRejectedValueOnce(new Error('picker fault'))
       .mockReturnValueOnce(pending.promise);
-    (f.port as ControlPort).selectRecordingFolder = choose;
+    offerFolderChooser(f.port, choose);
     f.controller.start();
     await flush();
     f.controller.chooseFolder('Folder', 3);

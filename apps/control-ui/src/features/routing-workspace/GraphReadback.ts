@@ -1,10 +1,15 @@
 import { timerScheduler } from '../../core/adapters/browser/timers';
 import { waitForPushedRevision } from '../../core/application/graph/waitForPushedRevision';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { GraphPort } from '../../core/ports/control/GraphPort';
+import type { TelemetryPort } from '../../core/ports/control/TelemetryPort';
+import type { WorkspacePort } from '../../core/ports/control/WorkspacePort';
+
+/** The engine capabilities this module uses. */
+type EngineControl = GraphPort & WorkspacePort & TelemetryPort;
 
 const OBSERVATION_MS = 200;
 type ReadPort = Pick<
-  ControlPort,
+  EngineControl,
   'getGraph' | 'getGraphCatalog' | 'getGraphStatus' | 'subscribeState'
 >;
 
@@ -90,8 +95,7 @@ export class GraphReadback {
    * lagging revision there only makes the next write stale, never attributes B's content to A.
    */
   async document(signal: AbortSignal, graphId: string | undefined) {
-    if (!this.port.getGraphCatalog || graphId === undefined)
-      return this.bound(this.port.getGraph(), signal);
+    if (graphId === undefined) return this.bound(this.port.getGraph(), signal);
     const catalog = await this.bound(this.port.getGraphCatalog(), signal);
     if (catalog.activeId !== graphId) throw this.failure('graph_catalog_revision_stale');
     return catalog.document;

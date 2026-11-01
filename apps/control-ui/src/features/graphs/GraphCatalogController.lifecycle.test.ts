@@ -4,7 +4,13 @@ import type { GraphCatalog } from '../../core/domain/control/catalog';
 import { ControlPortError } from '../../core/domain/control/errors';
 import type { RuntimeGraphDocument } from '../../core/domain/control/graph';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { CatalogPort } from './GraphCatalogController';
 import { GraphCatalogController } from './GraphCatalogController';
+
+/** Gives the fake engine the optional workspaceFile capability. */
+function offerWorkspaceFile(port: CatalogPort, value: CatalogPort['workspaceFile']) {
+  port.workspaceFile = value;
+}
 
 function fixture() {
   const port = new StorybookMockControlPort({
@@ -36,42 +42,14 @@ it('serializes initial catalog reads and mutations while a native operation is p
   expect(controller.snapshot()).toMatchObject({ busy: false, catalog });
   controller.dispose();
 });
-it('shows unavailable native catalog capabilities without sending mutations', async () => {
+it('does not wait for activation when the native workspace file command is unavailable', async () => {
   const { port, controller } = fixture();
+  await controller.reload();
   const native: ControlPort = port;
-  native.getGraphCatalog = undefined;
-  await controller.reload();
-  expect(controller.snapshot().error).toBe('control_request_failed');
-  native.getGraphCatalog = async () => ({
-    protocolVersion: 1,
-    catalogRevision: 1,
-    activeId: 'graph-1',
-    graphs: [],
-    document: await native.getGraph(),
-  });
-  await controller.reload();
-  native.mutateGraphCatalog = undefined;
-  await controller.mutate({ action: 'create', name: 'Unavailable' });
-  expect(controller.snapshot()).toMatchObject({
-    error: 'control_request_failed',
-    uncertain: false,
-  });
   native.workspaceFile = undefined;
   const status = vi.spyOn(native, 'getGraphStatus');
   await controller.workspaceFile('save', 'en');
   expect(status).not.toHaveBeenCalled();
-  controller.dispose();
-});
-it('confirms file activation using its readback when native catalog refresh is unavailable', async () => {
-  const { port, controller } = fixture();
-  await controller.reload();
-  const next = controller.snapshot().catalog;
-  if (!next) throw new Error('Expected a catalog');
-  const native: ControlPort = port;
-  native.getGraphCatalog = undefined;
-  native.workspaceFile = vi.fn().mockResolvedValue(next);
-  await controller.workspaceFile('save', 'en');
-  expect(controller.snapshot()).toMatchObject({ catalog: next, uncertain: false, error: null });
   controller.dispose();
 });
 it('rejects a changed graph revision while waiting for native audio activation', async () => {
@@ -79,7 +57,7 @@ it('rejects a changed graph revision while waiting for native audio activation',
   await controller.reload();
   const next = await port.getGraphCatalog();
   next.document = { ...next.document, revision: 2 };
-  (port as ControlPort).workspaceFile = vi.fn().mockResolvedValue(next);
+  offerWorkspaceFile(port, vi.fn().mockResolvedValue(next));
   vi.spyOn(port, 'getGraphStatus').mockResolvedValue({
     protocolVersion: 1,
     submittedRevision: 3,
@@ -99,7 +77,7 @@ it('times out unconfirmed activation and fences its late status reply', async ()
   await controller.reload();
   const next = await port.getGraphCatalog();
   next.document = { ...next.document, revision: 2 };
-  (port as ControlPort).workspaceFile = vi.fn().mockResolvedValue(next);
+  offerWorkspaceFile(port, vi.fn().mockResolvedValue(next));
   vi.spyOn(port, 'getGraphStatus').mockResolvedValue({
     protocolVersion: 1,
     submittedRevision: 2,
@@ -126,11 +104,14 @@ it('does not send a catalog mutation after disposal during document revision loo
 it('treats a server failure with unrelated structured parameters as an uncertain file outcome', async () => {
   const { port, controller } = fixture();
   await controller.reload();
-  (port as ControlPort).workspaceFile = vi.fn().mockRejectedValue(
-    new ControlPortError(500, {
-      code: 'control_unavailable',
-      parameters: { reason: 'IPC' },
-    }),
+  offerWorkspaceFile(
+    port,
+    vi.fn().mockRejectedValue(
+      new ControlPortError(500, {
+        code: 'control_unavailable',
+        parameters: { reason: 'IPC' },
+      }),
+    ),
   );
   await controller.workspaceFile('open', 'en');
   expect(controller.snapshot().uncertain).toBe(true);
@@ -143,11 +124,14 @@ it('treats a server failure with unrelated structured parameters as an uncertain
 it('clears a confirmed rejected-file error without introducing an uncertain mutation outcome', async () => {
   const { port, controller } = fixture();
   await controller.reload();
-  (port as ControlPort).workspaceFile = vi.fn().mockRejectedValue(
-    new ControlPortError(503, {
-      code: 'control_unavailable',
-      parameters: { workspaceOutcome: 'not_applied' },
-    }),
+  offerWorkspaceFile(
+    port,
+    vi.fn().mockRejectedValue(
+      new ControlPortError(503, {
+        code: 'control_unavailable',
+        parameters: { workspaceOutcome: 'not_applied' },
+      }),
+    ),
   );
   await controller.workspaceFile('open', 'en');
   expect(controller.snapshot()).toMatchObject({ uncertain: false, error: 'control_unavailable' });
@@ -159,7 +143,7 @@ it('fences file confirmation if a subscriber replaces the owner as activation be
   const { port, controller } = fixture();
   await controller.reload();
   const next = await port.getGraphCatalog();
-  (port as ControlPort).workspaceFile = vi.fn().mockResolvedValue(next);
+  offerWorkspaceFile(port, vi.fn().mockResolvedValue(next));
   const status = vi.spyOn(port, 'getGraphStatus');
   const unsubscribe = controller.subscribe(() => {
     if (!controller.snapshot().uncertain) return;

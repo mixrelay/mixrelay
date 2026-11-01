@@ -1,5 +1,4 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { waitForGraphActivation } from './waitForGraphActivation';
 
 afterEach(() => vi.useRealTimers());
@@ -10,7 +9,7 @@ it('waits for the accepted revision instead of treating submission as activation
     .fn()
     .mockResolvedValueOnce({ activeRevision: 4 })
     .mockResolvedValue({ activeRevision: 5 });
-  const port = { getGraphStatus } as unknown as ControlPort;
+  const port = { getGraphStatus };
   const result = waitForGraphActivation(port, 5, () => true);
   await vi.advanceTimersByTimeAsync(25);
   await expect(result).resolves.toBe(true);
@@ -26,11 +25,7 @@ it('stops on cancellation after a pending read without another native request', 
       resolve = done;
     }),
   );
-  const result = waitForGraphActivation(
-    { getGraphStatus } as unknown as ControlPort,
-    5,
-    () => current,
-  );
+  const result = waitForGraphActivation({ getGraphStatus }, 5, () => current);
   current = false;
   resolve({ activeRevision: 4 });
   await expect(result).resolves.toBe(false);
@@ -40,11 +35,9 @@ it('stops on cancellation after a pending read without another native request', 
 it('bounds activation polling and leaves no timer after the deadline', async () => {
   vi.useFakeTimers();
   const getGraphStatus = vi.fn().mockResolvedValue({ activeRevision: 4 });
-  const result = waitForGraphActivation(
-    { getGraphStatus } as unknown as ControlPort,
-    5,
-    () => true,
-  ).catch((error: unknown) => error);
+  const result = waitForGraphActivation({ getGraphStatus }, 5, () => true).catch(
+    (error: unknown) => error,
+  );
   await vi.advanceTimersByTimeAsync(3000);
   expect(await result).toEqual(new Error('Graph activation timed out'));
   expect(getGraphStatus).toHaveBeenCalledTimes(120);
@@ -53,9 +46,7 @@ it('bounds activation polling and leaves no timer after the deadline', async () 
 
 it('does not read graph status when an activation request is already cancelled', async () => {
   const getGraphStatus = vi.fn();
-  await expect(
-    waitForGraphActivation({ getGraphStatus } as unknown as ControlPort, 5, () => false),
-  ).resolves.toBe(false);
+  await expect(waitForGraphActivation({ getGraphStatus }, 5, () => false)).resolves.toBe(false);
   expect(getGraphStatus).not.toHaveBeenCalled();
 });
 
@@ -63,11 +54,7 @@ it('cancels at the activation deadline without showing a timeout for a replaced 
   vi.useFakeTimers();
   let current = true;
   const getGraphStatus = vi.fn().mockResolvedValue({ activeRevision: 4 });
-  const result = waitForGraphActivation(
-    { getGraphStatus } as unknown as ControlPort,
-    5,
-    () => current,
-  );
+  const result = waitForGraphActivation({ getGraphStatus }, 5, () => current);
   setTimeout(() => {
     current = false;
   }, 3000);

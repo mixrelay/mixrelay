@@ -21,14 +21,14 @@ export interface GraphPort {
   getGraphStatus(): Promise<GraphRuntimeStatus>;
   getStatus(): Promise<MixRelayStatus>;
   isOperationPending?(operationId: string): Promise<boolean>;
-  getNodeControls?(graphId: string): Promise<GraphNodeControls>;
-  updateNodeControl?(
+  getNodeControls(graphId: string): Promise<GraphNodeControls>;
+  updateNodeControl(
     graphId: string,
     nodeId: string,
     request: NodeControlRequest,
   ): Promise<NodeControlResponse>;
   /** Explicitly retries one failed processor instance; adapters must not retry this request. */
-  retryProcessor?(request: ProcessorRetryRequest): Promise<GraphApplyResponse>;
+  retryProcessor(request: ProcessorRetryRequest): Promise<GraphApplyResponse>;
   setEnginePower?(enabled: boolean): Promise<GraphApplyResponse>;
   reconfigureSession?(request: {
     expectedRevision: number;

@@ -4,12 +4,12 @@ import type {
   ExternalProcessorDescriptor,
   ExternalProcessorDiagnostic,
 } from '../../core/domain/control/processors';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { InventoryPort } from '../../core/ports/control/InventoryPort';
 
 const PATHS_KEY = 'mixrelay.processorPaths.v1';
 type CatalogAction = 'initial' | 'scan' | 'directory';
 type CatalogPort = Pick<
-  ControlPort,
+  InventoryPort,
   'getProcessors' | 'rescanProcessors' | 'selectProcessorDirectory'
 >;
 export type ProcessorCatalogFailure = 'catalog' | 'directory' | 'paths';

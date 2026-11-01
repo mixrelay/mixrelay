@@ -599,7 +599,7 @@ function useGraphApplication(
           ),
         beforeApply: parameters.whenIdle,
         beforeReload: () => settleParametersForReload(parameters.whenIdle),
-        getReloadLayout: controlPort.getGraphLayout?.bind(controlPort),
+        getReloadLayout: controlPort.getGraphLayout.bind(controlPort),
         getDocument: () => latest.current.graph.document,
         getModel: () => currentModel.current,
         document: (document) => latest.current.graph.setDocument(document),
@@ -1715,10 +1715,7 @@ function nodeRecoveryControl(
           (candidate) => candidate.graphId === props.graphId && candidate.nodeId === node.id,
         )
       : undefined;
-  const retryAvailable =
-    failed !== undefined &&
-    props.catalogRevision !== undefined &&
-    props.controlPort.retryProcessor !== undefined;
+  const retryAvailable = failed !== undefined && props.catalogRevision !== undefined;
   return retryAvailable ? (
     <ProcessorRecoveryControl
       busy={disabled || props.layoutDirty}
@@ -1764,7 +1761,6 @@ function nodeSignalControls(
   const retryAvailable = retry !== null;
   const graphId = props.graphId;
   if (!graphId || (!entry && !retryAvailable)) return null;
-  if (!props.controlPort.updateNodeControl) return { power: retry };
   // Native disabled buttons own interaction gating; the graph queue validates each live command.
   const change = (value: { enabled?: boolean; muted?: boolean }) => {
     void props.application.setNodeControl(graphId, nodeId, value);

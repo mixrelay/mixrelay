@@ -1,8 +1,10 @@
-import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { GraphPort } from '../../core/ports/control/GraphPort';
+
+type EnginePowerPort = Pick<GraphPort, 'getStatus'>;
 
 /** Only native release/activation acknowledgements finish a switch, never local button intent. */
 export async function waitForEnginePower(
-  port: ControlPort,
+  port: EnginePowerPort,
   enabled: boolean,
   current: () => boolean,
 ) {

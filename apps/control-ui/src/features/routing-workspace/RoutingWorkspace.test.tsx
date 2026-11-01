@@ -8,6 +8,7 @@ import type {
 import type { AudioSessionStatus } from '../../core/domain/control/status';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { ProblemsTarget } from '../../test-support/ProblemsTarget';
+import { catalogOf, engineDefaults } from '../../test-support/unexpectedPort';
 import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -352,6 +353,10 @@ function port(overrides: Partial<ControlPort> = {}): ControlPort {
         width: null,
       }),
     ),
+    ...engineDefaults(
+      async () => document,
+      () => selectedGraph,
+    ),
     ...overrides,
   };
 }
@@ -377,11 +382,15 @@ function renderWorkspace(controlPort: ControlPort, onBusyChange?: (busy: boolean
   return render(workspace(controlPort, onBusyChange));
 }
 
+/** The graph the fake engine reports as selected; `workspace` keeps it on the rendered one. */
+let selectedGraph = 'graph-1';
+
 function workspace(
   controlPort: ControlPort,
   onBusyChange?: (busy: boolean) => void,
   graphId?: string,
 ) {
+  selectedGraph = graphId ?? 'graph-1';
   return (
     <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
@@ -1495,6 +1504,8 @@ it('places new remote nodes from saved layout while keeping local geometry and v
   const controlPort = port({
     applyGraph: vi.fn().mockRejectedValue(new GraphApplicationError('graph_conflict_unresolved')),
     getGraph: vi.fn().mockResolvedValueOnce(document).mockResolvedValue(remote),
+    // The engine publishes the remote node before the reload reads the selected graph.
+    getGraphCatalog: vi.fn(async () => catalogOf('saved', remote)),
     getGraphLayout,
     setGraphLayout: vi.fn(),
     getGraphStatus: vi

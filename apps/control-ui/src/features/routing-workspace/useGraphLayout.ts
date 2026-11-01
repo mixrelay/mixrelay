@@ -9,11 +9,10 @@ import {
 } from 'react';
 import { type AudioGraphModel, normalizeAudioGraphNodeSize } from '../../core/audio-graph/model';
 import type { GraphLayout } from '../../core/domain/control/catalog';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
-import { GraphLayoutController } from './GraphLayoutController';
+import { GraphLayoutController, type LayoutPort } from './GraphLayoutController';
 
 export function useGraphLayout(
-  port: ControlPort,
+  port: LayoutPort,
   graphId: string | undefined,
   model: AudioGraphModel | null,
   setModel: Dispatch<SetStateAction<AudioGraphModel | null>>,

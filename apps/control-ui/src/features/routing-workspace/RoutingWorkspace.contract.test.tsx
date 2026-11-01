@@ -815,19 +815,6 @@ it.each(['same topology', 'changed topology'] as const)(
   },
 );
 
-it('omits native power and mute when the connected port offers read-only node controls', async () => {
-  vi.useFakeTimers();
-  const native: ControlPort = port(document(signalSource));
-  const read = vi.spyOn(native, 'getNodeControls');
-  native.updateNodeControl = undefined;
-  render(view(native, { graphId: 'graph-1' }));
-  await act(async () => vi.advanceTimersByTimeAsync(1000));
-  expect(canvas().model.nodes).toHaveLength(1);
-  expect(read).toHaveBeenCalled();
-  expect(screen.queryByRole('button', { name: 'Disable Hardware input' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Mute Hardware input' })).not.toBeInTheDocument();
-});
-
 it('records duplicate completion callbacks for one layout gesture only once', async () => {
   const native = port(document({ kind: 'compressor' }));
   const apply = vi.spyOn(native, 'applyGraph');

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
 import { ControlPortError } from '../../core/domain/control/errors';
 import type { GraphApplyResponse, RuntimeGraphDocument } from '../../core/domain/control/graph';
+import { graphWriterDefaults } from '../../test-support/unexpectedPort';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
 import { rebaseGraphEdit } from './rebaseGraphEdit';
@@ -32,8 +33,11 @@ const rejection = () => new ControlPortError(409, { code: 'graph_revision_stale'
 function fixture() {
   let document = base;
   let model = runtimeGraphToAudioGraph(base);
+  let selected: string | undefined;
+  const getGraph = vi.fn(async () => document);
   const port = {
-    getGraph: vi.fn(async () => document),
+    ...graphWriterDefaults(getGraph, () => selected),
+    getGraph,
     getGraphStatus: vi.fn(async () => ({
       protocolVersion: 1 as const,
       activeRevision: document.revision,
@@ -70,6 +74,9 @@ function fixture() {
   };
   const queue = new GraphApplicationQueue(port, callbacks);
   return {
+    select: (graphId: string) => {
+      selected = graphId;
+    },
     port,
     callbacks,
     queue,
@@ -333,6 +340,7 @@ it('does not publish a late conflict read after cancellation', async () => {
 
 it('keeps the active graph identity when reconciling two definite conflicts', async () => {
   const f = fixture();
+  f.select('current-graph');
   const callbacks = { ...f.callbacks, getGraphId: () => 'current-graph' };
   const queue = new GraphApplicationQueue(f.port, callbacks);
   queue.reset(base);
@@ -425,6 +433,7 @@ it('adopts current settings after an accepted node command loses its exact reloa
       requiresGraphReload: true,
     }),
   };
+  f.select('current-graph');
   const callbacks = { ...f.callbacks, getGraphId: () => 'current-graph' };
   native.getGraph.mockRejectedValueOnce(rejection());
   const queue = new GraphApplicationQueue(native, callbacks);
@@ -516,6 +525,7 @@ it('does not publish old recovery state after the conflict restore callback reti
 it('does not read or restore a newly selected graph when publication changes identity without resetting', async () => {
   const f = fixture();
   let graphId = 'old';
+  f.select('old');
   const callbacks = { ...f.callbacks, getGraphId: () => graphId };
   callbacks.document.mockImplementation(() => {
     graphId = 'new';
@@ -524,7 +534,8 @@ it('does not read or restore a newly selected graph when publication changes ide
   queue.reset(base);
   queue.refresh();
   await flush();
-  expect(f.port.getGraph).toHaveBeenCalledTimes(1);
+  // The selected graph's document is read once, through the catalog that names it.
+  expect(f.port.getGraphCatalog).toHaveBeenCalledTimes(1);
   expect(callbacks.restore).not.toHaveBeenCalled();
   expect(callbacks.reconcile).not.toHaveBeenCalled();
   expect(callbacks.state).toHaveBeenLastCalledWith('applying');
@@ -577,6 +588,7 @@ it.each([false, true])(
         requiresGraphReload,
       }),
     };
+    f.select('g');
     const callbacks = { ...f.callbacks, getGraphId: () => 'g' };
     const queue = new GraphApplicationQueue(native, callbacks);
     queue.reset(base);

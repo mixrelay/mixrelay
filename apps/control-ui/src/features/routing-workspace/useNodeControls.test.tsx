@@ -1,7 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { GraphNodeControls } from '../../core/domain/control/graph';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
 import { controlState, statePush } from '../../test-support/controlTelemetry';
 import type { GraphApplicationQueue } from './GraphApplicationQueue';
 import { useNodeControls } from './useNodeControls';
@@ -17,7 +16,7 @@ it('replays committed push after local edits finish, fences reads and removes mi
   const source = statePush();
   const pending = Promise.withResolvers<GraphNodeControls>();
   const getNodeControls = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(snapshot);
-  const port = { ...source, getNodeControls } as unknown as ControlPort;
+  const port = { ...source, getNodeControls };
   const application = queue();
   const view = renderHook(({ idle }) => useNodeControls(port, 'a', 2, idle, application), {
     initialProps: { idle: true },
@@ -46,7 +45,7 @@ it('reloads a replacement engine even when its revision repeats the previous eng
   const port = {
     ...source,
     getNodeControls: vi.fn().mockResolvedValue(snapshot),
-  } as unknown as ControlPort;
+  };
   const application = queue();
   const view = renderHook(() => useNodeControls(port, 'a', 2, true, application));
   act(() => source.push(controlState(), 'engine-a'));
@@ -61,7 +60,7 @@ it('reloads a replacement engine even when its revision repeats the previous eng
 it('reloads external changes through the graph owner and pauses while a local edit is pending', async () => {
   vi.useFakeTimers();
   const getNodeControls = vi.fn().mockResolvedValue(snapshot);
-  const port = { getNodeControls } as unknown as ControlPort;
+  const port = { getNodeControls };
   const application = queue();
   const view = renderHook(({ idle }) => useNodeControls(port, 'a', 1, idle, application), {
     initialProps: { idle: false },
@@ -81,7 +80,7 @@ it('discards a late old-graph response and does not issue overlapping polls', as
     .fn()
     .mockReturnValueOnce(pending.promise)
     .mockResolvedValue({ ...snapshot, graphId: 'b' });
-  const port = { getNodeControls } as unknown as ControlPort;
+  const port = { getNodeControls };
   const application = queue();
   const view = renderHook(({ graphId }) => useNodeControls(port, graphId, 2, true, application), {
     initialProps: { graphId: 'a' },
@@ -104,7 +103,7 @@ it('clears stale actionable controls on failure and ignores a rejection after di
     .mockRejectedValueOnce(new Error('offline'))
     .mockReturnValueOnce(pending.promise);
   const application = queue();
-  const port = { getNodeControls } as unknown as ControlPort;
+  const port = { getNodeControls };
   const view = renderHook(() => useNodeControls(port, 'a', 2, true, application));
   await act(async () => {});
   expect(view.result.current).toEqual(snapshot);

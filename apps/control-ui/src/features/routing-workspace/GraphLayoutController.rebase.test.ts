@@ -5,8 +5,12 @@ import type {
   GraphLayoutResponse,
 } from '../../core/domain/control/catalog';
 import { ControlPortError } from '../../core/domain/control/errors';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
-import { GraphLayoutController } from './GraphLayoutController';
+import { catalogOf, graphWithNodes } from '../../test-support/unexpectedPort';
+
+/** Every node the layouts in this file place. */
+const layoutGraph = graphWithNodes(['a', 'b', 'concurrent', 'fresh', 'input', 'output']);
+
+import { GraphLayoutController, type LayoutPort } from './GraphLayoutController';
 import { rebaseGraphLayout } from './rebaseGraphLayout';
 
 const base: GraphLayout = {
@@ -43,7 +47,11 @@ function fixture() {
     .mockImplementation(async (_id, request) =>
       response(request.layout, request.expectedLayoutRevision + 1),
     );
-  const port = { getGraphLayout: read, setGraphLayout: write } as unknown as ControlPort;
+  const port: LayoutPort = {
+    getGraphLayout: read,
+    setGraphLayout: write,
+    getGraphCatalog: vi.fn(async () => catalogOf('g', layoutGraph)),
+  };
   return { port, read, write, controller: new GraphLayoutController(port, 'g') };
 }
 beforeEach(() => vi.useFakeTimers());
@@ -357,27 +365,6 @@ it('preserves a fresh reload when an obsolete conflict recovery rejects', async 
   await vi.advanceTimersByTimeAsync(0);
   expect(f.controller.snapshot()).toBe(snapshot);
   expect(snapshot).toMatchObject({ layout: remote, error: false, dirty: false, saving: false });
-  expect(f.write).toHaveBeenCalledTimes(1);
-  f.controller.dispose();
-});
-
-it('retains the unsaved draft when layout read capability disappears before a write rejection', async () => {
-  const f = fixture();
-  await f.controller.reload();
-  const pendingWrite = Promise.withResolvers<GraphLayoutResponse>();
-  f.write.mockReturnValueOnce(pendingWrite.promise);
-  f.controller.update(local);
-  await flush();
-  delete f.port.getGraphLayout;
-  pendingWrite.reject(stale());
-  await vi.advanceTimersByTimeAsync(0);
-  expect(f.controller.snapshot()).toMatchObject({
-    layout: local,
-    dirty: true,
-    error: true,
-    saving: false,
-  });
-  expect(f.read).toHaveBeenCalledTimes(1);
   expect(f.write).toHaveBeenCalledTimes(1);
   f.controller.dispose();
 });

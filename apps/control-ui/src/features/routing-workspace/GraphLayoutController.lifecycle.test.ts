@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GraphLayout, GraphLayoutResponse } from '../../core/domain/control/catalog';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
-import { GraphLayoutController } from './GraphLayoutController';
+import { catalogOf, graphWithNodes } from '../../test-support/unexpectedPort';
+
+/** Every node the layouts in this file place. */
+const layoutGraph = graphWithNodes(['a', 'b', 'concurrent', 'fresh', 'input', 'output']);
+
+import { GraphLayoutController, type LayoutPort } from './GraphLayoutController';
 
 const layout = (x: number): GraphLayout => ({ positions: { input: { x, y: 10 } } });
 const saved = (x = 10): GraphLayoutResponse => ({
@@ -12,28 +16,27 @@ const saved = (x = 10): GraphLayoutResponse => ({
 function fixture() {
   const read = vi.fn().mockResolvedValue(saved());
   const write = vi.fn().mockResolvedValue(saved(20));
-  const port = { getGraphLayout: read, setGraphLayout: write } as unknown as ControlPort;
+  const port: LayoutPort = {
+    getGraphLayout: read,
+    setGraphLayout: write,
+    getGraphCatalog: vi.fn(async () => catalogOf('a', layoutGraph)),
+  };
   return { port, read, write, controller: new GraphLayoutController(port, 'a') };
 }
 afterEach(() => vi.useRealTimers());
 
-it.each(['graph', 'reader', 'writer'] as const)(
-  'leaves a controller without its %s capability inert',
-  async (missing) => {
-    const f = fixture();
-    if (missing === 'reader') delete f.port.getGraphLayout;
-    if (missing === 'writer') delete f.port.setGraphLayout;
-    const controller = new GraphLayoutController(f.port, missing === 'graph' ? undefined : 'a');
-    expect(controller.enabled).toBe(false);
-    await controller.reload();
-    controller.update(layout(20));
-    await controller.retry();
-    controller.dispose();
-    expect(f.read).not.toHaveBeenCalled();
-    expect(f.write).not.toHaveBeenCalled();
-    expect(controller.snapshot()).toMatchObject({ loaded: true, dirty: false, error: false });
-  },
-);
+it.each([undefined, ''])('leaves a controller without a graph (%j) inert', async (graphId) => {
+  const f = fixture();
+  const controller = new GraphLayoutController(f.port, graphId);
+  expect(controller.enabled).toBe(false);
+  await controller.reload();
+  controller.update(layout(20));
+  await controller.retry();
+  controller.dispose();
+  expect(f.read).not.toHaveBeenCalled();
+  expect(f.write).not.toHaveBeenCalled();
+  expect(controller.snapshot()).toMatchObject({ loaded: true, dirty: false, error: false });
+});
 
 it('notifies subscribers and removes unsubscribed listeners without saving unchanged layouts', async () => {
   vi.useFakeTimers();
@@ -155,6 +158,8 @@ describe('explicit layout rebasing', () => {
       const old = Promise.withResolvers<GraphLayoutResponse>();
       f.read.mockReturnValueOnce(old.promise);
       const retry = f.controller.retry();
+      // Let the retry read the catalog and start its layout read before the newer reload.
+      await vi.advanceTimersByTimeAsync(0);
       await f.controller.reload();
       const before = f.controller.snapshot();
       if (outcome === 'accept') old.resolve(saved(99));
@@ -178,21 +183,6 @@ describe('explicit layout rebasing', () => {
     await f.controller.retry();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.write).toHaveBeenCalledTimes(1);
-    f.controller.dispose();
-  });
-
-  it('retains the local draft when the provider loses its read or write capability', async () => {
-    vi.useFakeTimers();
-    const f = fixture();
-    await f.controller.reload();
-    f.controller.update(layout(20));
-    delete f.port.getGraphLayout;
-    await f.controller.retry();
-    expect(f.read).toHaveBeenCalledTimes(1);
-    expect(f.controller.snapshot().dirty).toBe(true);
-    delete f.port.setGraphLayout;
-    await vi.advanceTimersByTimeAsync(400);
-    expect(f.write).not.toHaveBeenCalled();
     f.controller.dispose();
   });
 });

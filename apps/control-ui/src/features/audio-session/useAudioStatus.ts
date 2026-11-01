@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import type { MixRelayStatus } from '../../core/domain/control/status';
 import { structuralShare } from '../../core/domain/structuralShare';
-import type { ControlPort } from '../../core/ports/control/ControlPort';
+import type { GraphPort } from '../../core/ports/control/GraphPort';
+import type { TelemetryPort } from '../../core/ports/control/TelemetryPort';
 
-type Observation = { controlPort: ControlPort; value: MixRelayStatus } | null;
+type StatusPort = Pick<GraphPort, 'getStatus'> & Pick<TelemetryPort, 'subscribeState'>;
+
+type Observation = { controlPort: StatusPort; value: MixRelayStatus } | null;
 
 /** The first reply after a (re)start is always new, even when a port hands back the same
  * object; later replies keep the previous identity when nothing changed. */
-function observation(controlPort: ControlPort, value: MixRelayStatus, first: boolean) {
+function observation(controlPort: StatusPort, value: MixRelayStatus, first: boolean) {
   return (previous: Observation): Observation =>
     first
       ? { controlPort, value: { ...value } }
@@ -15,7 +18,7 @@ function observation(controlPort: ControlPort, value: MixRelayStatus, first: boo
 }
 
 /** Completion-based polling prevents overlapping native requests and cancels on unmount. */
-export function useAudioStatus(controlPort: ControlPort, refreshToken = 0) {
+export function useAudioStatus(controlPort: StatusPort, refreshToken = 0) {
   // An unchanged reply keeps the previous object, so a quiet poll renders nothing. The
   // first reply after a (re)start is always a new object: an acknowledgement refresh
   // marks a new observation that confirmations compare against by identity.
