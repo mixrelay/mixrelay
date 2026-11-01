@@ -41,6 +41,7 @@
 ## IO를 다룰 때
 - 엔진·Driver·라이선스·업데이트와의 통신은 Core의 포트 인터페이스(`ControlPort` 등)를 통해서만 한다. 구현(`HttpControlPort`, `TauriControlPort`, `StorybookMockControlPort`)은 어댑터이고, 포트는 props로 주입한다. 컴포넌트와 기능 코드는 `fetch`·Tauri API를 직접 부르지 않는다.
 - 어댑터는 응답을 검증하고, 검증 실패를 포트 오류로 바꿔 알린다. 변경 명령의 응답 검증이 실패해도 서버에서 변경이 일어나지 않았다는 뜻은 아니다.
+- 디코더는 Rust 소유자가 직렬화한 응답 fixture(`tests/fixtures/control-replies`)로도 시험한다. Rust 테스트는 fixture가 직렬화 결과와 다르면 다시 쓰고 실패하며, `rustReplyFixtures.test.ts`가 각 fixture를 디코딩한다. 계약을 바꾼 뒤에는 `pnpm fixtures:replies`로 다시 만들고 바뀐 fixture를 함께 커밋한다.
 - 조회와 변경 명령을 구분한다. 화면과 다음 조작의 기준은 실행부가 확인한 상태다. revision이 명확히 거부되면 최신 문서에 실제 편집한 항목만 다시 병합해 재시도하고, 결과가 불확실한 변경 명령은 자동으로 반복하지 않고 편집을 보존한 채 확인 후 재시도한다([제품 문서](product.md)의 확인된 설정 규칙). 일반적인 자동 재시도나 낙관적 갱신을 변경 명령에 붙이지 않는다.
 
 ## 테스트를 쓰거나 고칠 때

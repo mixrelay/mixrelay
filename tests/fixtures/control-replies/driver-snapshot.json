@@ -1,0 +1,40 @@
+{
+  "protocolVersion": 1,
+  "revision": 5,
+  "state": "ready",
+  "installedVersion": "1.2.10",
+  "ownerProcessId": 412,
+  "settings": {
+    "canCreate": true,
+    "canRename": true,
+    "renderChannels": [
+      1,
+      2
+    ],
+    "captureChannels": [
+      1,
+      2
+    ],
+    "creationTemplate": {
+      "render": {
+        "channels": 2,
+        "channelLayout": "discrete"
+      },
+      "capture": {
+        "channels": 2,
+        "channelLayout": "discrete"
+      },
+      "supportedSampleRates": [
+        44100,
+        48000,
+        88200,
+        96000,
+        176400,
+        192000
+      ],
+      "defaultSampleRate": 48000
+    },
+    "devices": []
+  },
+  "persistenceError": "disk full"
+}

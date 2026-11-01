@@ -1,6 +1,7 @@
-//! Test-only PCM measurements and checkout-local disposable artifacts.
+//! Test-only PCM measurements, checkout-local disposable artifacts and reply fixtures.
 //! This crate is a dev-dependency only; production storage policy is separate.
 pub mod frame_sequence;
+pub mod reply_fixture;
 pub mod rf64;
 pub mod tone_continuity;
 

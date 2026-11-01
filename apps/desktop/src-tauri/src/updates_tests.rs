@@ -345,3 +345,23 @@ fn retired_separate_product_cannot_be_checked_or_downloaded() {
         .is_err()
     );
 }
+
+/// A stale fixture is rewritten and this fails; review the diff and commit it
+/// (`pnpm fixtures:replies` reruns every fixture owner).
+#[test]
+fn updates_reply_fixture_matches_the_serialized_contract() {
+    let update = product_update(
+        Product::MixRelay,
+        Some("1.2.9".into()),
+        platform("macos", "arm64"),
+        Ok(catalog(
+            Product::MixRelay,
+            "1.2.10",
+            vec![download("macos", "universal")],
+        )),
+    );
+    assert!(
+        !mixrelay_test_support::reply_fixture::refresh_reply_fixture("updates", &[update]).unwrap(),
+        "the updates reply fixture was stale and has been rewritten; review and commit it"
+    );
+}
