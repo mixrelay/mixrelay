@@ -4,11 +4,7 @@ import type {
   AudioGraphPort,
   AudioGraphPosition,
 } from '../../core/audio-graph/model';
-import {
-  addAudioGraphNode,
-  connectAudioGraph,
-  graphNodeDefaultWidth,
-} from '../../core/audio-graph/model';
+import { graphNodeDefaultWidth } from '../../core/audio-graph/model';
 import type {
   CapturableApplication,
   ExternalProcessorDescriptor,
@@ -25,6 +21,7 @@ import type {
   VirtualEndpointSettings,
   VirtualEndpointSpec,
 } from '../../core/control-port/types';
+import { addGraphNode, connectGraph } from '../../core/domain/graph/topology';
 import { nodeInsertionGap } from '../../core/theme/tokens';
 import { applicationInventorySelection, applicationSelectorKey } from './applicationIdentity';
 import {
@@ -311,7 +308,7 @@ export function addRoutingNode(
     position,
   };
   const node = createRoutingNode(base, request, presentation);
-  return addAudioGraphNode(model, node);
+  return addGraphNode(model, node);
 }
 
 function addEffectChain(
@@ -337,7 +334,7 @@ function addEffectChain(
       item,
       presentation,
     );
-    next = addAudioGraphNode(next, node);
+    next = addGraphNode(next, node);
     if (previous) {
       // Generated processor port arrays are dense; connect only channels present on both nodes.
       for (
@@ -347,7 +344,7 @@ function addEffectChain(
       ) {
         const source = previous.outputPorts[channel] as AudioGraphPort;
         const target = node.inputPorts[channel] as AudioGraphPort;
-        next = connectAudioGraph(next, {
+        next = connectGraph(next, {
           sourceNodeId: previous.id,
           sourcePortId: source.id,
           targetNodeId: node.id,
@@ -401,7 +398,7 @@ function addVirtualEndpointSide(
     presentation,
     new Set(model.nodes.map(runtimeNodeId)),
   ).find((node) => node.runtime?.binding?.side === sideName);
-  return side ? addAudioGraphNode(model, { ...side, position }) : model;
+  return side ? addGraphNode(model, { ...side, position }) : model;
 }
 
 export function updateRoutingNodeGain(

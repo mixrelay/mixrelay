@@ -1,23 +1,14 @@
 import { expect, it } from 'vitest';
 import { mapChannelConnections, planChannelConnections } from './channelConnections';
-import type { AudioGraphModel, AudioGraphNode } from './model';
+import type { GraphEdge, GraphNode } from './topology';
 
-function node(id: string, inputs: number, outputs: number): AudioGraphNode {
+function node(id: string, inputs: number, outputs: number): GraphNode {
   const ports = (prefix: string, count: number) =>
-    Array.from({ length: count }, (_, index) => ({
-      id: `${prefix}${index + 1}`,
-      label: `${prefix}${index + 1}`,
-    }));
-  return {
-    id,
-    position: { x: 0, y: 0 },
-    inputPorts: ports('in', inputs),
-    outputPorts: ports('out', outputs),
-    appearance: { category: 'Test', detail: id, icon: 'T', title: id },
-  };
+    Array.from({ length: count }, (_, index) => ({ id: `${prefix}${index + 1}` }));
+  return { id, inputPorts: ports('in', inputs), outputPorts: ports('out', outputs) };
 }
 
-function graph(): AudioGraphModel {
+function graph(): { revision: number; nodes: GraphNode[]; edges: GraphEdge[] } {
   return {
     revision: 1,
     nodes: [node('app', 0, 4), node('fx', 2, 2), node('out', 3, 0)],
@@ -108,7 +99,7 @@ it('plans against pending edges so duplicates and feedback loops are skipped wit
   // With app already feeding fx, routing fx back into app would close a loop.
   const cycle = graph();
   cycle.nodes[0] = node('app', 2, 4);
-  cycle.edges = [model.edges[0] as AudioGraphModel['edges'][number]];
+  cycle.edges = model.edges.slice(0, 1);
   expect(
     planChannelConnections(cycle, {
       sourceNodeId: 'fx',

@@ -1862,7 +1862,7 @@ export const componentContracts: readonly ComponentContract[] = [
     playgroundStory: 'core-playgrounds-channelconnectiondialog--playground',
     group: 'Overlays',
     purpose: '포트 드래그와 같은 채널 매핑을 키보드로 고르고 미리 본 뒤 한 번에 연결한다.',
-    use: '그래프 노드·출력 포트 선택에서 열고 onConnect(accepted)를 connectAudioGraphBatch 한 번으로 runtime commit한다.',
+    use: '그래프 노드·출력 포트 선택에서 열고 onConnect(accepted)를 connectGraphBatch 한 번으로 runtime commit한다.',
     avoid:
       '포트마다 Tab 정지점을 늘리거나 미리보기와 다른 규칙으로 연결하지 않는다. 열린 동안 그래프 삭제 키를 받지 않는다.',
     anatomy:
@@ -1873,7 +1873,7 @@ export const componentContracts: readonly ComponentContract[] = [
     interaction:
       'Shift+F10/ContextMenu 키 또는 보조 클릭 → 연결 메뉴. 첫 필드 focus, Esc 취소, Enter 제출. 제출 때 현재 model로 재검증. 닫으면 출발 노드 바깥 그룹으로 focus 복귀. 요약만 polite status로 알린다.',
     source: 'apps/control-ui/src/core/audio-graph/ChannelConnectionDialog.tsx',
-    api: 'export interface ChannelConnectionDialogProps {\n  model: AudioGraphModel;\n  sourceNodeId: string;\n  /** Output ports chosen on the canvas; kept as a sparse set until a range is chosen. */\n  sourcePortIds?: readonly string[];\n  onCancel: () => void;\n  /** Receives the accepted connections, validated again against `model` on submit. */\n  onConnect: (connections: AudioGraphConnection[]) => void;\n}\n\nexport function ChannelConnectionDialog({\n  model,\n  sourceNodeId,\n  sourcePortIds,\n  onCancel,\n  onConnect,\n}: ChannelConnectionDialogProps)',
+    api: 'export interface ChannelConnectionDialogProps {\n  model: AudioGraphModel;\n  sourceNodeId: string;\n  /** Output ports chosen on the canvas; kept as a sparse set until a range is chosen. */\n  sourcePortIds?: readonly string[];\n  onCancel: () => void;\n  /** Receives the accepted connections, validated again against `model` on submit. */\n  onConnect: (connections: GraphConnection[]) => void;\n}\n\nexport function ChannelConnectionDialog({\n  model,\n  sourceNodeId,\n  sourcePortIds,\n  onCancel,\n  onConnect,\n}: ChannelConnectionDialogProps)',
     consumers: ['apps/control-ui/src/core/audio-graph/AudioGraphCanvas.tsx'],
     tests: [
       'apps/control-ui/src/core/audio-graph/ChannelConnectionDialog.test.tsx',

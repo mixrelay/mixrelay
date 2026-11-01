@@ -1,12 +1,13 @@
-import type { AudioGraphEdge, AudioGraphModel } from '../../core/audio-graph/model';
+import type { AudioGraphModel } from '../../core/audio-graph/model';
 import type { RuntimeGraphEdge } from '../../core/control-port/types';
+import type { GraphEdge } from '../../core/domain/graph/topology';
 
 /** A missing processor descriptor changes visibility, not the authoritative routes.
  * Only explicitly edited cable groups are converted back to per-channel routes. */
 export function serializeGraphEdges(
   model: AudioGraphModel,
   retainedNodes: ReadonlySet<string>,
-  serializeEdited: (edge: AudioGraphEdge) => RuntimeGraphEdge,
+  serializeEdited: (edge: GraphEdge) => RuntimeGraphEdge,
 ): RuntimeGraphEdge[] {
   const edited = new Map(model.edges.map((edge) => [edge.id, edge]));
   const preserved: RuntimeGraphEdge[] = [];
@@ -35,7 +36,7 @@ export function serializeGraphEdges(
   ];
 }
 
-function sameCable(previous: AudioGraphEdge, current: AudioGraphEdge | undefined) {
+function sameCable(previous: GraphEdge, current: GraphEdge | undefined) {
   return (
     current !== undefined &&
     previous.sourceNodeId === current.sourceNodeId &&

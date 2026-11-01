@@ -259,7 +259,97 @@ export function inspectScript(filename, source) {
     if (!core && !test && node.type === 'JSXOpeningElement')
       checkElement(node, imports, bindings, violations);
   });
+  checkLayers(filename, ast, violations);
   return { violations };
+}
+
+// Inner Core layers, innermost first. Each may import only itself and the layers before it;
+// none may import a package, so domain rules and ports stay free of React, React Flow,
+// Tauri, theme tokens and components.
+const innerLayers = ['domain', 'ports', 'application'];
+// Adapters implement ports against the platform, never against the view.
+const viewPackages =
+  /^(?:react(?:-dom)?(?:$|\/)|react-aria-components|@xyflow\/react|react-i18next)/u;
+// Only composition roots choose port implementations; tests, stories and test support
+// may build fakes.
+const compositionRoots = /^(?:app\/|screens\/|test-support\/|main\.tsx$)/u;
+
+function coreLayer(filename) {
+  const match = /^core\/(domain|ports|application|adapters)\//u.exec(filename);
+  if (match) return match[1];
+  return filename.startsWith('core/') ? 'ui' : undefined;
+}
+
+const declarations = new Set([
+  'ImportDeclaration',
+  'ExportNamedDeclaration',
+  'ExportAllDeclaration',
+  'ImportExpression',
+]);
+
+/** The module named by an import or export, `import()`, `require()` or `import('…').T`. */
+function moduleSource(node) {
+  if (declarations.has(node.type)) return node.source?.value;
+  if (node.type === 'TSImportType') return node.argument?.literal?.value ?? node.argument?.value;
+  const call =
+    node.type === 'CallExpression' &&
+    (node.callee.type === 'Import' || node.callee.name === 'require');
+  return call ? node.arguments[0]?.value : undefined;
+}
+
+function moduleSources(ast) {
+  const sources = [];
+  visit(ast, (node) => {
+    const source = moduleSource(node);
+    if (typeof source === 'string') sources.push({ node, source });
+  });
+  return sources;
+}
+
+/** `filename` and the result are relative to src; packages keep their bare name. */
+function resolveSource(filename, source) {
+  if (!source.startsWith('.')) return { package: source };
+  const parts = filename.split('/').slice(0, -1);
+  for (const part of source.split('/')) {
+    if (part === '..') parts.pop();
+    else if (part !== '.') parts.push(part);
+  }
+  return { module: parts.join('/') };
+}
+
+function layerViolation(layer, target) {
+  if (innerLayers.includes(layer)) {
+    if (target.package) return `${layer} modules cannot import packages (${target.package}).`;
+    const allowed = innerLayers.slice(0, innerLayers.indexOf(layer) + 1);
+    const imported = coreLayer(target.module);
+    return allowed.includes(imported)
+      ? undefined
+      : `${layer} modules import only ${allowed.join(', ')} (not ${target.module}).`;
+  }
+  if (layer === 'adapters') {
+    if (target.package)
+      return viewPackages.test(target.package)
+        ? `adapters cannot import view packages (${target.package}).`
+        : undefined;
+    return coreLayer(target.module) === 'ui' || !target.module.startsWith('core/')
+      ? `adapters import only domain, ports, application and adapters (not ${target.module}).`
+      : undefined;
+  }
+  return undefined;
+}
+
+function checkLayers(filename, ast, violations) {
+  if (/\.(?:test|stories)\.tsx?$/u.test(filename)) return;
+  const layer = coreLayer(filename);
+  for (const { node, source } of moduleSources(ast)) {
+    const target = resolveSource(filename, source);
+    const message = layer
+      ? layerViolation(layer, target)
+      : target.module?.startsWith('core/adapters/') && !compositionRoots.test(filename)
+        ? 'Port implementations are chosen by the app and screen composition roots.'
+        : undefined;
+    if (message) issue(violations, node, 'layer', message);
+  }
 }
 
 function checkCoreApi(ast, imports, violations) {

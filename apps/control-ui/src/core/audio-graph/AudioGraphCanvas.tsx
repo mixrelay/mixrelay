@@ -1,3 +1,16 @@
+import {
+  type ChannelConnectionRequest,
+  mapChannelConnections,
+  planChannelConnections,
+} from '../domain/graph/channelConnections';
+import {
+  canConnectGraph,
+  connectGraphBatch,
+  disconnectGraph,
+  type GraphConnection,
+  reconnectGraph,
+  removeGraphItems,
+} from '../domain/graph/topology';
 import { MidiContext, MidiNodeContext } from '../midi/MidiPort';
 import '@xyflow/react/dist/base.css';
 
@@ -65,30 +78,19 @@ import { Tooltip } from '../ui/Tooltip';
 import styles from './AudioGraphCanvas.module.css';
 import { ChannelConnectionDialog } from './ChannelConnectionDialog';
 import {
-  type ChannelConnectionRequest,
-  mapChannelConnections,
-  planChannelConnections,
-} from './channelConnections';
-import {
   focusGraphNode,
   graphContextMenuAnchor,
   openContextMenuFromKeyboard,
   useChannelConnectionRequests,
 } from './graphKeyboard';
 import {
-  type AudioGraphConnection,
   type AudioGraphModel,
   type AudioGraphNode,
   type AudioGraphPort,
   audioGraphNodeTitle,
-  canConnectAudioGraph,
-  connectAudioGraphBatch,
-  disconnectAudioGraph,
   graphNodeMinimumWidth,
   moveAudioGraphNode,
   normalizeAudioGraphNodeSize,
-  reconnectAudioGraph,
-  removeAudioGraphItems,
   resizeAudioGraphNode,
 } from './model';
 import type { PlaceGraphNodes } from './nodePlacement';
@@ -452,7 +454,7 @@ function useAudioFlowCollections(
   return { applyEdgeChanges, onNodesChange, edges, nodes: layeredNodes, setEdges, setNodes };
 }
 
-function toGraphConnection(connection: Connection | Edge): AudioGraphConnection {
+function toGraphConnection(connection: Connection | Edge): GraphConnection {
   return {
     sourceNodeId: connection.source,
     sourcePortId: connection.sourceHandle ?? '',
@@ -531,7 +533,7 @@ function connectionPreviewPairs(
  * when the grabbed port is part of the selection; otherwise only the grabbed port. */
 function dragConnectionRequest(
   model: AudioGraphModel,
-  connection: AudioGraphConnection,
+  connection: GraphConnection,
   selectedPorts: readonly SelectedAudioPort[],
 ): ChannelConnectionRequest {
   const selected = selectedOutputPorts(model, selectedPorts, connection.sourceNodeId);
@@ -547,9 +549,9 @@ function dragConnectionRequest(
 
 function selectedConnectionBatch(
   model: AudioGraphModel,
-  connection: AudioGraphConnection,
+  connection: GraphConnection,
   selectedPorts: readonly SelectedAudioPort[],
-): AudioGraphConnection[] {
+): GraphConnection[] {
   const { pairs } = mapChannelConnections(
     model,
     dragConnectionRequest(model, connection, selectedPorts),
@@ -625,7 +627,7 @@ function useConnectionHandlers(
 ) {
   const isValidConnection = useCallback(
     (connection: Connection | Edge) =>
-      canConnectAudioGraph(
+      canConnectGraph(
         model,
         toGraphConnection(connection),
         'id' in connection ? connection.id : undefined,
@@ -638,7 +640,7 @@ function useConnectionHandlers(
         model,
         dragConnectionRequest(model, toGraphConnection(connection), selectedPortsRef.current),
       );
-      const nextModel = connectAudioGraphBatch(model, connections);
+      const nextModel = connectGraphBatch(model, connections);
       commit(nextModel, 'runtime');
       if (nextModel !== model && connections.length > 1) clearSelectedPorts();
     },
@@ -646,12 +648,12 @@ function useConnectionHandlers(
   );
   const onReconnect = useCallback(
     (edge: AudioFlowEdge, connection: Connection) =>
-      commit(reconnectAudioGraph(model, edge.id, toGraphConnection(connection)), 'runtime'),
+      commit(reconnectGraph(model, edge.id, toGraphConnection(connection)), 'runtime'),
     [commit, model],
   );
   const onReconnectEnd = useCallback<ReconnectEnd>(
     (_, edge, _handleType, connectionState) => {
-      if (!connectionState.isValid) commit(disconnectAudioGraph(model, [edge.id]), 'runtime');
+      if (!connectionState.isValid) commit(disconnectGraph(model, [edge.id]), 'runtime');
     },
     [commit, model],
   );
@@ -662,7 +664,7 @@ function useDeletionHandlers(model: AudioGraphModel, commit: CommitGraph) {
   const removeEdges = useCallback(
     (removedEdges: AudioFlowEdge[]) =>
       commit(
-        disconnectAudioGraph(
+        disconnectGraph(
           model,
           removedEdges.map((edge) => edge.id),
         ),
@@ -673,7 +675,7 @@ function useDeletionHandlers(model: AudioGraphModel, commit: CommitGraph) {
   const onDelete = useCallback(
     ({ nodes, edges }: { nodes: AudioFlowNode[]; edges: AudioFlowEdge[] }) =>
       commit(
-        removeAudioGraphItems(
+        removeGraphItems(
           model,
           nodes.map((node) => node.id),
           edges.map((edge) => edge.id),
@@ -1184,7 +1186,7 @@ function CanvasConnectionDialog({
       onCancel={connecting.close}
       onConnect={(connections) => {
         // One commit, so the whole batch is a single undo step.
-        commit(connectAudioGraphBatch(model, connections), 'runtime');
+        commit(connectGraphBatch(model, connections), 'runtime');
         connecting.close();
       }}
     />

@@ -1,10 +1,11 @@
 import {
-  type AudioGraphConnection,
-  type AudioGraphConnectionRejection,
-  type AudioGraphModel,
-  audioGraphConnectionId,
-  audioGraphConnectionRejection,
-} from './model';
+  type GraphConnection,
+  type GraphConnectionRejection,
+  type GraphEdge,
+  type GraphTopology,
+  graphConnectionId,
+  graphConnectionRejection,
+} from './topology';
 
 /** Source channels of one node mapped onto a target node from an anchor pair. */
 export interface ChannelConnectionRequest {
@@ -17,11 +18,11 @@ export interface ChannelConnectionRequest {
   targetAnchorPortId: string;
 }
 
-export type ChannelConnectionSkip = AudioGraphConnectionRejection | 'out-of-range';
+export type ChannelConnectionSkip = GraphConnectionRejection | 'out-of-range';
 
 export interface ChannelConnectionPlan {
   /** Connections that will be created, in source port order. */
-  accepted: AudioGraphConnection[];
+  accepted: GraphConnection[];
   /** Source ports that will not connect, with the reason. */
   skipped: { sourcePortId: string; targetPortId?: string; reason: ChannelConnectionSkip }[];
 }
@@ -29,12 +30,12 @@ export interface ChannelConnectionPlan {
 /** The single mapping used by pointer drags and the keyboard connection dialog: each
  * selected source port keeps its offset from the source anchor on the target's input
  * ports. Pairs whose target position does not exist are reported as out of range. */
-export function mapChannelConnections(model: AudioGraphModel, request: ChannelConnectionRequest) {
-  const pairs: AudioGraphConnection[] = [];
+export function mapChannelConnections(graph: GraphTopology, request: ChannelConnectionRequest) {
+  const pairs: GraphConnection[] = [];
   const outOfRange: string[] = [];
   const invalid: string[] = [];
-  const source = model.nodes.find((node) => node.id === request.sourceNodeId);
-  const target = model.nodes.find((node) => node.id === request.targetNodeId);
+  const source = graph.nodes.find((node) => node.id === request.sourceNodeId);
+  const target = graph.nodes.find((node) => node.id === request.targetNodeId);
   if (!source || !target) return { pairs, outOfRange, invalid: [...request.sourcePortIds] };
   const sourceAnchor = source.outputPorts.findIndex(
     (port) => port.id === request.sourceAnchorPortId,
@@ -63,13 +64,13 @@ export function mapChannelConnections(model: AudioGraphModel, request: ChannelCo
   return { pairs, outOfRange, invalid };
 }
 
-/** Maps the request and validates every pair against the model, including pairs
+/** Maps the request and validates every pair against the graph, including pairs
  * accepted earlier in the same request, so duplicates are reported, not created twice. */
 export function planChannelConnections(
-  model: AudioGraphModel,
+  graph: GraphTopology,
   request: ChannelConnectionRequest,
 ): ChannelConnectionPlan {
-  const { pairs, outOfRange, invalid } = mapChannelConnections(model, request);
+  const { pairs, outOfRange, invalid } = mapChannelConnections(graph, request);
   const plan: ChannelConnectionPlan = {
     accepted: [],
     skipped: [
@@ -77,9 +78,10 @@ export function planChannelConnections(
       ...invalid.map((sourcePortId) => ({ sourcePortId, reason: 'invalid' as const })),
     ],
   };
-  const pending: AudioGraphModel = { ...model, edges: [...model.edges] };
+  const edges: GraphEdge[] = [...graph.edges];
+  const pending: GraphTopology = { ...graph, edges };
   for (const connection of pairs) {
-    const reason = audioGraphConnectionRejection(pending, connection);
+    const reason = graphConnectionRejection(pending, connection);
     if (reason) {
       plan.skipped.push({
         sourcePortId: connection.sourcePortId,
@@ -89,7 +91,7 @@ export function planChannelConnections(
       continue;
     }
     plan.accepted.push(connection);
-    pending.edges.push({ id: audioGraphConnectionId(connection), ...connection });
+    edges.push({ id: graphConnectionId(connection), ...connection });
   }
   return plan;
 }

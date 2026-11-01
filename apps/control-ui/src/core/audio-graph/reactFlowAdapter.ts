@@ -1,8 +1,8 @@
 import type { Edge, Node } from '@xyflow/react';
+import type { GraphEdge } from '../domain/graph/topology';
 import { canvasLayers } from '../theme/tokens';
 
 import {
-  type AudioGraphEdge,
   type AudioGraphModel,
   type AudioGraphNode,
   type AudioGraphPort,
@@ -15,7 +15,7 @@ export interface AudioFlowNodeData extends Record<string, unknown> {
 }
 
 interface AudioFlowEdgeData extends Record<string, unknown> {
-  graphEdge: AudioGraphEdge;
+  graphEdge: GraphEdge;
 }
 
 export type AudioFlowNode = Node<AudioFlowNodeData, 'audio'>;
@@ -125,7 +125,7 @@ function portEndpoint(ports: readonly AudioGraphPort[], portId: string) {
 
 export function audioGraphEdgeEndpoints(
   nodesById: ReadonlyMap<string, AudioGraphNode>,
-  graphEdge: AudioGraphEdge,
+  graphEdge: GraphEdge,
 ): AudioGraphEdgeEndpoints | null {
   const source = nodesById.get(graphEdge.sourceNodeId);
   const target = nodesById.get(graphEdge.targetNodeId);
@@ -144,7 +144,7 @@ export function audioGraphEdgeEndpoints(
 }
 
 function createFlowEdge(
-  graphEdge: AudioGraphEdge,
+  graphEdge: GraphEdge,
   previous: AudioFlowEdge | undefined,
   ariaLabel: string | undefined,
 ): AudioFlowEdge {

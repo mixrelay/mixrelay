@@ -1,8 +1,9 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { type AudioGraphModel, removeAudioGraphItems } from '../../core/audio-graph/model';
+import type { AudioGraphModel } from '../../core/audio-graph/model';
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
 import type { RuntimeGraphDocument } from '../../core/control-port/types';
+import { removeGraphItems } from '../../core/domain/graph/topology';
 import { useUndoHistory } from '../../core/history/useUndoHistory';
 import { advance, eventually } from '../../test-support/fakeTimerQueries';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
@@ -55,7 +56,7 @@ it('node deletion history reapplies the original node IDs through the actual gra
     error: () => {},
   });
   const history = renderHook(() => useUndoHistory<AudioGraphModel, 'runtime'>());
-  const removed = removeAudioGraphItems(model, ['original-gain'], []);
+  const removed = removeGraphItems(model, ['original-gain'], []);
   act(() => history.result.current.record(model, removed, 'runtime'));
   const apply = async (next: AudioGraphModel) => {
     model = next;
@@ -83,7 +84,7 @@ it('a newly added replacement never reuses a deleted identity', async () => {
   const first = addRoutingNode(empty, { kind: 'recorder' }, { x: 0, y: 0 });
   const firstId = first.nodes[0]?.id;
   if (!firstId) throw new Error('created node required');
-  const deleted = removeAudioGraphItems(first, [firstId], []);
+  const deleted = removeGraphItems(first, [firstId], []);
   const replacement = addRoutingNode(deleted, { kind: 'recorder' }, { x: 0, y: 0 });
   expect(replacement.nodes[0]?.id).not.toBe(firstId);
 });
