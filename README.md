@@ -1,7 +1,9 @@
 # MixRelay
 
 MixRelay is an audio-routing application for streamers, audio artists, and independent
-broadcasters. The current release targets macOS and Linux/PipeWire. Its portable graph
+broadcasters. The current release supports macOS 15.0 or later (Apple Silicon, and
+Apple-supported Intel models through macOS 26) and Linux x86_64/arm64 with PipeWire 1.2
+or later and WirePlumber 0.5 or later. Its portable graph
 and DSP engine is shared across platforms, while native discovery, capture, and
 virtual-device lifecycles remain isolated behind host-audio interfaces.
 
