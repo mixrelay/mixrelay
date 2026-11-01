@@ -27,7 +27,7 @@ impl EngineLifecycle {
             .map_err(|error| error.to_string())?;
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let path = bundled_engine_path(&executable)?;
-        let engine = ControllerEngine::start(&path)
+        let engine = ControllerEngine::start(&path, &mixrelay_time::StdClock::new())
             .map_err(|error| detail(current_locale(), Text::BundledEngineStartFailed, error))?;
         Ok(Self {
             engine: Mutex::new(engine),
@@ -151,10 +151,12 @@ async fn restart_owned_engine(app: &tauri::AppHandle) -> Result<bool, String> {
         .map_err(|error| error.to_string())?;
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let path = bundled_engine_path(&executable)?;
-    let replacement = tauri::async_runtime::spawn_blocking(move || ControllerEngine::start(&path))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())?;
+    let replacement = tauri::async_runtime::spawn_blocking(move || {
+        ControllerEngine::start(&path, &mixrelay_time::StdClock::new())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
     {
         let mut engine = lifecycle
             .engine

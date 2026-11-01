@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use mixrelay_time::{Deadline, MonotonicClock, Sleeper, StdClock};
+use mixrelay_time::{Deadline, MonotonicClock, Sleeper};
 
 // A startup failure closes the lease before allowing a short cooperative drain.
 const STARTUP_FAILURE_GRACE: Duration = Duration::from_millis(500);
@@ -139,8 +139,12 @@ impl StartupChild for Child {
     }
 }
 
-pub(super) fn after_startup_failure(mut child: Child, reaper: Reaper) -> io::Result<()> {
-    match drain_or_kill(&mut child, &StdClock::new()) {
+pub(super) fn after_startup_failure(
+    mut child: Child,
+    reaper: Reaper,
+    clock: &(impl MonotonicClock + Sleeper),
+) -> io::Result<()> {
+    match drain_or_kill(&mut child, clock) {
         // The probe already reaped it; dropping the reaper closes its unused worker.
         Ok(Cleanup::Exited) => Ok(()),
         Ok(Cleanup::Killed) => {
