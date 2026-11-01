@@ -2197,13 +2197,13 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid: 'Feature별 theme CSS 복사나 palette override를 만들지 않는다.',
     anatomy: 'I18nProvider → ThemeContext → generated themeCss + children.',
     states:
-      'theme 미지정 저장 preference/기본system; 제어 theme시 onThemeChange callback만 요청. storage 이벤트 동기화.',
+      'theme 미지정 시 store(기본 브라우저 localStorage)의 저장 preference/기본 system; 제어 theme시 onThemeChange callback만 요청. store 구독으로 다른 창의 변경을 동기화.',
     tokens:
       'tokens.ts → theme.ts CSS 전체; html data-theme; Globals/Fonts; OS prefers-color-scheme.',
     interaction:
       'provider 자체 Tab 없음. locale은 resolved language; pseudo는 React Aria en. 테마 변경 의미는 ThemePicker가 소유.',
     source: 'apps/control-ui/src/core/theme/MixRelayProvider.tsx',
-    api: 'export function MixRelayProvider({\n  children,\n  theme,\n  onThemeChange,\n}: PropsWithChildren<{\n  theme?: ThemePreference;\n  onThemeChange?: (value: ThemePreference) => void;\n}>)',
+    api: "const browserStore = browserThemePreferenceStorage();\n\nexport function MixRelayProvider({\n  children,\n  theme,\n  onThemeChange,\n  store = browserStore,\n}: PropsWithChildren<{\n  theme?: ThemePreference;\n  onThemeChange?: (value: ThemePreference) => void;\n  /** Where an uncontrolled preference is kept; the page's local storage by default. */\n  store?: ThemePreferenceStore;\n}>)",
     consumers: ['apps/control-ui/src/main.tsx'],
     tests: [
       'apps/control-ui/src/core/theme/MixRelayProvider.test.tsx',
@@ -2223,12 +2223,13 @@ export const componentContracts: readonly ComponentContract[] = [
     purpose: '앱 i18n 인스턴스를 공급하고 문서 언어(html lang)를 현재 언어에 맞춘다.',
     use: '앱 최상위와 Storybook preview에서 한 번 감싼다. 언어 변경은 i18n.changeLanguage가 소유한다.',
     avoid: '컴포넌트마다 별도 i18n 인스턴스를 만들거나 lang을 직접 바꾸지 않는다.',
-    anatomy: 'I18nextProvider(app i18n) → children; languageChanged 구독으로 html lang 갱신.',
+    anatomy:
+      'I18nextProvider(instance, 기본 app i18n) → children; languageChanged 구독으로 html lang 갱신.',
     states: 'resolvedLanguage가 없으면 요청 언어로 lang을 정한다. pseudo는 지원 locale로 해석.',
     tokens: '없음. 서체 선택은 Fonts.css의 html lang 규칙이 소비한다.',
     interaction: 'Tab 없음. 언어가 바뀌면 보조 기술과 지역 서체가 같은 lang을 사용한다.',
     source: 'apps/control-ui/src/core/i18n/index.tsx',
-    api: 'export function I18nProvider({ children }: PropsWithChildren)',
+    api: 'export const i18n = createI18n(browserLanguages(navigator), initReactI18next);\n\nexport function I18nProvider({\n  children,\n  instance = i18n,\n}: PropsWithChildren<{ instance?: I18n }>)',
     consumers: ['apps/control-ui/src/main.tsx'],
     tests: ['apps/control-ui/src/core/i18n/DocumentLanguage.test.tsx'],
     storyId: 'core-playgrounds-i18nprovider--playground',

@@ -1,4 +1,3 @@
-import type { ThemePreference } from '../domain/appearance';
 import './Globals.css';
 import {
   createContext,
@@ -10,13 +9,10 @@ import {
 } from 'react';
 import { I18nProvider } from 'react-aria-components';
 import { useTranslation } from 'react-i18next';
+import { browserThemePreferenceStorage } from '../adapters/browser/themePreferenceStorage';
+import type { ThemePreference } from '../domain/appearance';
+import type { ThemePreferenceStore } from '../ports/ThemePreferenceStore';
 import { themeCss } from './theme';
-import {
-  readThemePreference,
-  saveThemePreference,
-  themePreference,
-  themeStorageKey,
-} from './themePreference';
 
 const ThemeContext = createContext<{
   preference: ThemePreference;
@@ -25,23 +21,28 @@ const ThemeContext = createContext<{
 
 export const useTheme = () => useContext(ThemeContext);
 
+const browserStore = browserThemePreferenceStorage();
+
 /** App and Storybook share one visual owner; React Aria supplies behavior only. */
 export function MixRelayProvider({
   children,
   theme,
   onThemeChange,
+  store = browserStore,
 }: PropsWithChildren<{
   theme?: ThemePreference;
   onThemeChange?: (value: ThemePreference) => void;
+  /** Where an uncontrolled preference is kept; the page's local storage by default. */
+  store?: ThemePreferenceStore;
 }>) {
-  const [savedPreference, setSavedPreference] = useState(readThemePreference);
+  const [savedPreference, setSavedPreference] = useState(() => store.read());
   const preference = theme ?? savedPreference;
   const setPreference = (value: ThemePreference) => {
     if (theme !== undefined) {
       onThemeChange?.(value);
     } else {
       setSavedPreference(value);
-      saveThemePreference(value);
+      store.write(value);
     }
   };
   useLayoutEffect(() => {
@@ -53,14 +54,7 @@ export function MixRelayProvider({
       else root.setAttribute('data-theme', previous);
     };
   }, [preference]);
-  useEffect(() => {
-    const synchronize = (event: StorageEvent) => {
-      if (event.key === themeStorageKey || event.key === null)
-        setSavedPreference(themePreference(event.newValue));
-    };
-    window.addEventListener('storage', synchronize);
-    return () => window.removeEventListener('storage', synchronize);
-  }, []);
+  useEffect(() => store.subscribe(setSavedPreference), [store]);
   const { i18n } = useTranslation();
   const locale = i18n.resolvedLanguage === 'pseudo' ? 'en' : (i18n.resolvedLanguage ?? 'en');
   return (
