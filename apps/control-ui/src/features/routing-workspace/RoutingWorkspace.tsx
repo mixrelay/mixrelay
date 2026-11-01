@@ -235,7 +235,7 @@ function useRoutingNodeCreation(options: RoutingNodeCreationOptions) {
                 title: t('studioGraph.nodes.systemAudio.name'),
                 selector: {
                   match: 'all_except',
-                  bundle_ids: ['io.mixrelay.desktop', 'mixrelay-engine-service'],
+                  bundle_ids: ['io.mixrelay.desktop', 'mixrelay-service'],
                 },
               }
             : null

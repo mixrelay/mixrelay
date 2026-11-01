@@ -203,7 +203,7 @@ fn binds_every_code_identity_and_team_without_shell_interpolation() {
         .unwrap();
     assert_eq!(checks.len(), 6);
     for ((_, requirement, role), (identifier, expected_role)) in checks.iter().zip([
-        ("mixrelay-engine-service", ArtifactRole::Engine),
+        ("mixrelay-service", ArtifactRole::Engine),
         ("io.mixrelay.driver.uninstaller", ArtifactRole::Uninstaller),
         ("mixrelay-macos-installer", ArtifactRole::Installer),
         ("io.mixrelay.desktop", ArtifactRole::Application),

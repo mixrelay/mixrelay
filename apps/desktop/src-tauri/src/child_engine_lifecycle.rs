@@ -78,7 +78,7 @@ fn bundled_engine_path(desktop: &Path) -> Result<PathBuf, String> {
     let directory = desktop
         .parent()
         .ok_or_else(|| text(current_locale(), Text::DesktopExecutableParentMissing))?;
-    let engine = directory.join("mixrelay-engine-service");
+    let engine = directory.join("mixrelay-service");
     if !engine.is_file() {
         return Err(detail(
             current_locale(),
@@ -219,7 +219,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let desktop = directory.path().join("MixRelay");
         assert!(bundled_engine_path(&desktop).is_err());
-        let expected = directory.path().join("mixrelay-engine-service");
+        let expected = directory.path().join("mixrelay-service");
         std::fs::write(&expected, b"fixture").unwrap();
         assert_eq!(bundled_engine_path(&desktop).unwrap(), expected);
     }

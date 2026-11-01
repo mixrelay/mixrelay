@@ -11,7 +11,7 @@ export function prepareSourceComparison(directory, execute = execFileSync) {
   execute('clang', ['-std=c17', '-O2', `-mmacosx-version-min=${MINIMUM_MACOS}`, '-Wall', '-Wextra', '-Wpedantic',
     '-Wconversion', '-Wsign-conversion', '-Wshadow', '-Werror', '-fblocks',
     ...['control', 'device', 'pcm'].map(name => `scripts/e2e/macos-source-${name}.c`),
-    'native/macos/engine-service/src/MRMicrophonePermission.m',
+    'native/macos/service/src/MRMicrophonePermission.m',
     ...['Activity.m', 'HalTrace.c', 'Authorization.c'].map(name => `native/macos/hal-driver/tests/MRProbe${name}`),
     ...['CoreAudio', 'CoreFoundation', 'AVFoundation', 'Security', 'Foundation'].flatMap(name => ['-framework', name]),
     '-o', executable], { timeout: 60000 });

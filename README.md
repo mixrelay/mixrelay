@@ -30,7 +30,7 @@ channel counts do not require separate installations. Virtual devices support
 - `crates/processor-host`: isolated AU/VST3/CLAP/LV2 discovery, DSP workers, and native editor broker
 - `crates/control-protocol`: stable machine-readable control contract
 - `crates/control-server`: local HTTP control service; loopback-only by default
-- `apps/engine-service`: platform audio backend, graph lifecycle, and control service process
+- `apps/service`: platform audio backend, graph lifecycle, and control service process
 - `native/macos/hal-driver`: isolated AudioServerPlugIn implementation boundary
 - `packaging`: platform-specific service, driver, and installer boundaries
 

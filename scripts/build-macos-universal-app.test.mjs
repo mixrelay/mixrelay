@@ -123,7 +123,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 mkdir -p "target/$target/release"
-for product in mixrelay-engine-service mixrelay-driver-service; do
+for product in mixrelay-service mixrelay-driver-service; do
   printf '%s\\n' 'MACHO universal' > "target/$target/release/$product"
 done
 printf 'MACHO universal desktop %s\\n' "$target" > "target/$target/release/mixrelay-desktop"
@@ -290,7 +290,7 @@ zshTest("complete product builds helpers and engine with one public app and remo
   for (const [index, target] of ["aarch64-apple-darwin", "x86_64-apple-darwin"].entries())
     assert.equal(
       cargoBuilds[index],
-      `cargo build --locked --release --target ${target} -p mixrelay-macos-installer -p mixrelay-engine-service -p mixrelay-driver-service -p mixrelay-desktop --bins --features mixrelay-desktop/custom-protocol`,
+      `cargo build --locked --release --target ${target} -p mixrelay-macos-installer -p mixrelay-service -p mixrelay-driver-service -p mixrelay-desktop --bins --features mixrelay-desktop/custom-protocol`,
     );
   // The UI and icons are compiled into the desktop binary, so they precede cargo.
   assert.ok(commands.indexOf("pnpm desktop:icons") < commands.indexOf(cargoBuilds[0]));

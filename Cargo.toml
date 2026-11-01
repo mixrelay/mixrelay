@@ -6,7 +6,7 @@ members = [
   "vendor/truce-rack-clap",
   "vendor/truce-rack-vst3",
   "apps/desktop/src-tauri",
-  "apps/engine-service",
+  "apps/service",
   "apps/driver-service",
   "crates/audio-io",
   "crates/audio-graph",

@@ -20,8 +20,7 @@ pub const INSTALLER_LEASE_PATH: &str =
     "/Library/Application Support/MixRelay/lifecycle/installer.owner";
 
 /// The Driver-owned audio engine executable.
-pub const RUNTIME_ENGINE_PATH: &str =
-    "/Library/Application Support/MixRelay/bin/mixrelay-engine-service";
+pub const RUNTIME_ENGINE_PATH: &str = "/Library/Application Support/MixRelay/bin/mixrelay-service";
 /// The Driver-owned on-demand engine definition.
 pub const RUNTIME_LAUNCHD_PATH: &str = "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist";
 

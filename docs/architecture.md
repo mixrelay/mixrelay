@@ -31,7 +31,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 | macOS 어댑터 | `mixrelay-hal-bundle`(native/macos/hal-driver/bundle) | HAL 번들 빌드 도구 | 없음 |
 | Linux 어댑터 | `mixrelay-pipewire`(native/linux/pipewire) | PipeWire 스트림·장치 | 기반 |
 | Linux 어댑터 | `mixrelay-linux-driver`(native/linux/driver-control) | Driver 서비스의 Linux 백엔드 | 기반, 계약, `pipewire` |
-| 앱 | `mixrelay-engine-service`(apps/engine-service) | 엔진 실행 파일: 조립·OS 연결·실행 수명 | 앱 외 전부 |
+| 앱 | `mixrelay-service`(apps/service) | 엔진 실행 파일: 조립·OS 연결·실행 수명 | 앱 외 전부 |
 | 앱 | `mixrelay-driver-service`(apps/driver-service) | Driver 서비스 실행 파일 | 앱 외 전부 |
 | 앱 | `mixrelay-desktop`(apps/desktop/src-tauri) | 편집 앱과 백그라운드 실행부(Tauri) | 앱 외 전부 |
 | 테스트 지원 | `mixrelay-test-support`, `mixrelay-macos-test-support`, `tests/fixtures/*`, `mixrelay-pipewire-observer`(native/linux/pipewire/tests/buffer-observer) | 테스트 도구·진단용 preload | dev-dependency로만 사용 |
@@ -51,7 +51,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 - 새 코드를 둘 곳:
   - 장치·OS에 무관한 오디오 처리 → `audio-engine`, `audio-graph`, `audio-io`
   - 프로세스 사이 메시지 형식 → `control-protocol`(편집 앱 ↔ 엔진), `driver-control`(↔ Driver 서비스)
-  - CoreAudio·PipeWire 호출 → 해당 OS 어댑터. 엔진 쪽 OS 연결은 `apps/engine-service`의 `macos_devices`·`linux_*`
+  - CoreAudio·PipeWire 호출 → 해당 OS 어댑터. 엔진 쪽 OS 연결은 `apps/service`의 `macos_devices`·`linux_*`
   - HAL 동작 → `hal-core`(Rust), ABI 연결만 C 브리지
 - 테스트 배치는 [Rust 작업 규칙](rust-guidelines.md)의 테스트 절을 따른다. 테스트용 가짜는 `#[cfg(test)]` 뒤에 두고 제품 코드의 가시성을 넓히지 않는다.
 
@@ -341,7 +341,7 @@ Linux 어댑터는 Secret Service의 잠긴 항목을 해제하거나 프롬프�
 활성화는 준비된 인스턴스 전체를 옮기고, 폐기는 기존 retired 소유자의 회수 경로에서 수행한다.
 단일 bus 처리와 multibus gather·scatter 및 dry fallback도 이 소유자의 처리 계약에 속한다.
 
-`engine-service`의 조립은 native 계약·DSP 준비·그래프 게시·제어·저장을 각 소유 모듈에 위임한다.
+`mixrelay-service`의 조립은 native 계약·DSP 준비·그래프 게시·제어·저장을 각 소유 모듈에 위임한다.
 `session::NativeFormat`은 native 형식 callback과 설정을, `ProcessTelemetry`는 실패 계수를 소유한다.
 macOS `worker`와 Linux `processing`은 오디오 실행을 소유하고 typed 결과를 공통
 `worker_completion::Completion`에 전달한다. 작업자가 먼저 실패하면 제어 admission을 닫고,

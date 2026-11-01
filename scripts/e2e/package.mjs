@@ -29,13 +29,13 @@ export const installedPaths = (os) =>
   os === 'macos'
     ? [
         '/Applications/MixRelay/MixRelay.app/Contents/MacOS/mixrelay-desktop',
-        '/Library/Application Support/MixRelay/bin/mixrelay-engine-service',
+        '/Library/Application Support/MixRelay/bin/mixrelay-service',
         '/Library/Application Support/MixRelay/bin/mixrelay-driver-service',
         '/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver/Contents/MacOS/MixRelayHAL',
       ]
     : [
         '/usr/bin/mixrelay-desktop',
-        '/usr/bin/mixrelay-engine-service',
+        '/usr/bin/mixrelay-service',
         '/usr/bin/mixrelay-driver-service',
       ];
 

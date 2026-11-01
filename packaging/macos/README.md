@@ -67,7 +67,7 @@ links. An existing product folder must be root-owned and not group/other writabl
 - `/Applications/MixRelay/MixRelay.app` (`io.mixrelay.desktop`)
 - `/Applications/MixRelay/Uninstall MixRelay.app`
 - `/Library/Application Support/MixRelay/bin/mixrelay-driver-service`
-- `/Library/Application Support/MixRelay/bin/mixrelay-engine-service`
+- `/Library/Application Support/MixRelay/bin/mixrelay-service`
 - `/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver` (`io.mixrelay.audio.driver`)
 - `/Library/LaunchDaemons/io.mixrelay.audio.driver.plist`
 - `/Library/LaunchDaemons/io.mixrelay.audio.engine.plist`

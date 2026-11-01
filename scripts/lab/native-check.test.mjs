@@ -41,7 +41,7 @@ test("public workspace and desktop test commands keep the canonical code-check e
   assert.ok(scripts["check:rust"].includes(`${entry}clippy --workspace`));
   assert.ok(scripts["coverage:rust"].startsWith(`${entry}llvm-cov --workspace`));
   // macos-test-support's build script needs the HOST staticlib receipts only this entry prepares.
-  assert.ok(scripts["check:macos-engine"].startsWith(`${entry}test -p mixrelay-engine-service `));
+  assert.ok(scripts["check:macos-engine"].startsWith(`${entry}test -p mixrelay-service `));
   assert.ok(scripts["check:native"].startsWith(`${entry}test -p mixrelay-macos-transport `));
   for (const name of ["check:native", "check:macos-engine"]) {
     const direct = scripts[name].split("&&").map(part => part.trim())
@@ -290,7 +290,7 @@ test("pass and failure reports identify development checks, not installed plugin
 test("macOS fixture checks capture exact HOST Cargo artifacts and preserve the requested target/argv", t => {
   const fixture = nativeFixture(t);
   const calls = [];
-  const args = ["cargo", "clippy", "--locked", "-p", "mixrelay-engine-service", "--all-targets",
+  const args = ["cargo", "clippy", "--locked", "-p", "mixrelay-service", "--all-targets",
     "--target", "x86_64-apple-darwin", "--", "-D", "warnings"];
   const result = runFocusedCargoCheck(args, {
     os: "darwin", env: { CARGO_BUILD_TARGET: "x86_64-apple-darwin", FIXTURE_ENV: "kept" },
@@ -319,7 +319,7 @@ test("macOS non-fixture package checks and Linux workspace checks have no fixtur
     ["linux", ["cargo", "test", "--workspace"]],
     ["darwin", ["cargo", "fmt", "--all", "--check"]],
     ["darwin", ["cargo", "test", "-p", "processor-host", "--lib"]],
-    ["darwin", ["cargo", "build", "-p", "mixrelay-engine-service"]],
+    ["darwin", ["cargo", "build", "-p", "mixrelay-service"]],
   ]) {
     let calls = 0;
     assert.equal(runFocusedCargoCheck(args, {

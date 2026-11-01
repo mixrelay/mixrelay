@@ -102,7 +102,7 @@ int main(void) {
 }
 `);
   const executable = join(directory, 'permission');
-  const source = fileURLToPath(new URL('../../native/macos/engine-service/src/MRMicrophonePermission.m', import.meta.url));
+  const source = fileURLToPath(new URL('../../native/macos/service/src/MRMicrophonePermission.m', import.meta.url));
   execFileSync('xcrun', ['clang', '-fobjc-arc', '-fblocks', `-mmacosx-version-min=${MINIMUM_MACOS}`,
     '-DSessionGetInfo=mr_test_session_get_info', source, fixture,
     '-framework', 'AVFoundation', '-framework', 'Security', '-framework', 'Foundation', '-o', executable]);

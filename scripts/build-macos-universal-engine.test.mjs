@@ -70,7 +70,7 @@ fi
 if [ "\${FAKE_CARGO_MISSING_TARGET:-}" = "$target" ]; then
   exit 0
 fi
-output="$target_dir/$target/release/mixrelay-engine-service"
+output="$target_dir/$target/release/mixrelay-service"
 mkdir -p "$(dirname "$output")"
 printf 'slice=%s\\n' "$target" > "$output"
 chmod 755 "$output"
@@ -134,9 +134,9 @@ function fixture(t) {
   mkdirSync(join(root, "apps/desktop/src-tauri"), { recursive: true });
   copyFileSync(new URL("../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), join(root, "apps/desktop/src-tauri/tauri.conf.json"));
   chmodSync(script, 0o755);
-  const entitlements = join(root, "native/macos/engine-service/Engine.entitlements.plist");
-  mkdirSync(join(root, "native/macos/engine-service"), { recursive: true });
-  copyFileSync(new URL("../native/macos/engine-service/Engine.entitlements.plist", import.meta.url), entitlements);
+  const entitlements = join(root, "native/macos/service/Engine.entitlements.plist");
+  mkdirSync(join(root, "native/macos/service"), { recursive: true });
+  copyFileSync(new URL("../native/macos/service/Engine.entitlements.plist", import.meta.url), entitlements);
   installFakeCommands(bin);
 
   const logs = {
@@ -174,7 +174,7 @@ function runScript(paths, args = [], overrides = {}) {
 }
 
 function universalBinary(paths, targetDir = "target") {
-  return join(paths.root, targetDir, "universal-apple-darwin", "release", "mixrelay-engine-service");
+  return join(paths.root, targetDir, "universal-apple-darwin", "release", "mixrelay-service");
 }
 
 function universalRelease(paths, targetDir = "target") {
@@ -200,7 +200,7 @@ function assertFailurePreserved(paths, previous, targetDir = "target") {
   assert.equal(lstatSync(previous).isFile(), true);
   assert.equal(existsSync(join(universalRelease(paths, targetDir), ".unrelated-temp")), true);
   const leftovers = readdirSync(universalRelease(paths, targetDir))
-    .filter(name => name.startsWith(".mixrelay-engine-service-universal."));
+    .filter(name => name.startsWith(".mixrelay-service-universal."));
   assert.deepEqual(leftovers, []);
 }
 
@@ -222,7 +222,7 @@ zshTest("builds both slices, signs the lipo output, and cleans its temporary dir
   assert.equal(codesignCalls.length, 3);
   assert.match(codesignCalls[0], /^--force --sign - /);
   assert.doesNotMatch(codesignCalls[0], /--options|--timestamp|--identifier|--entitlements/);
-  assert.deepEqual(readdirSync(universalRelease(paths)).sort(), [".unrelated-temp", "mixrelay-engine-service"]);
+  assert.deepEqual(readdirSync(universalRelease(paths)).sort(), [".unrelated-temp", "mixrelay-service"]);
 });
 
 zshTest("release signing uses the exact runtime policy, identifier, and engine entitlements", t => {
@@ -236,11 +236,11 @@ zshTest("release signing uses the exact runtime policy, identifier, and engine e
   const temporaryBinary = calls[0].split(" ").at(-1);
   assert.equal(
     calls[0],
-    `--force --sign ${identity} --options runtime --timestamp --identifier mixrelay-engine-service --entitlements ${join(paths.root, "native/macos/engine-service/Engine.entitlements.plist")} ${temporaryBinary}`,
+    `--force --sign ${identity} --options runtime --timestamp --identifier mixrelay-service --entitlements ${join(paths.root, "native/macos/service/Engine.entitlements.plist")} ${temporaryBinary}`,
   );
-  assert.match(calls[0], /--options runtime --timestamp --identifier mixrelay-engine-service --entitlements /);
-  assert.match(calls[0], /\/\.mixrelay-engine-service-universal\.[^/]+\/mixrelay-engine-service$/);
-  const plist = readFileSync(join(paths.root, "native/macos/engine-service/Engine.entitlements.plist"), "utf8");
+  assert.match(calls[0], /--options runtime --timestamp --identifier mixrelay-service --entitlements /);
+  assert.match(calls[0], /\/\.mixrelay-service-universal\.[^/]+\/mixrelay-service$/);
+  const plist = readFileSync(join(paths.root, "native/macos/service/Engine.entitlements.plist"), "utf8");
   assert.match(plist, /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\/>/);
   assert.match(plist, /<key>com\.apple\.security\.cs\.disable-library-validation<\/key>\s*<true\/>/);
   assert.equal((plist.match(/<key>/g) ?? []).length, 2);

@@ -52,7 +52,7 @@ export const CRATES = {
   'mixrelay-hal-bundle': { layer: 'macos', allows: [] },
   'mixrelay-pipewire': { layer: 'linux', allows: FOUNDATION },
   'mixrelay-linux-driver': { layer: 'linux', allows: [...FOUNDATION, ...CONTRACTS, 'mixrelay-pipewire'] },
-  'mixrelay-engine-service': { layer: 'app', allows: ALL_BUT_APPS },
+  'mixrelay-service': { layer: 'app', allows: ALL_BUT_APPS },
   'mixrelay-driver-service': { layer: 'app', allows: ALL_BUT_APPS },
   'mixrelay-desktop': { layer: 'app', allows: ALL_BUT_APPS },
   'mixrelay-test-support': { layer: 'test', allows: [] },

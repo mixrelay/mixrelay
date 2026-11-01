@@ -40,7 +40,7 @@ while :; do
     target=$(readlink "$executable" 2>/dev/null) || continue
     case "$target" in
       /usr/bin/mixrelay-desktop|'/usr/bin/mixrelay-desktop (deleted)'|\
-      /usr/bin/mixrelay-engine-service|'/usr/bin/mixrelay-engine-service (deleted)') running=true ;;
+      /usr/bin/mixrelay-service|'/usr/bin/mixrelay-service (deleted)') running=true ;;
     esac
   done
   [ "$running" = true ] || break

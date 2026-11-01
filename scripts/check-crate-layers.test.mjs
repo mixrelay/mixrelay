@@ -24,8 +24,8 @@ test('dependencies the table lists are allowed', () => {
     ['mixrelay-macos-driver', 'mixrelay-driver-control'],
     ['mixrelay-linux-driver', 'mixrelay-driver-control'],
     ['mixrelay-linux-driver', 'mixrelay-pipewire'],
-    ['mixrelay-engine-service', 'mixrelay-pipewire'],
-    ['mixrelay-engine-service', 'truce-rack-core'],
+    ['mixrelay-service', 'mixrelay-pipewire'],
+    ['mixrelay-service', 'truce-rack-core'],
   ]) {
     assert.equal(violation(from, to, 'normal'), undefined, `${from} -> ${to}`);
   }
@@ -49,10 +49,10 @@ test('upward, cross-platform, app and test-support dependencies are rejected', (
   assert.match(violation('mixrelay-audio-io', 'mixrelay-audio-graph', 'normal'), /not in .* allowed/);
   assert.match(violation('mixrelay-audio-engine', 'mixrelay-macos-transport', 'normal'), /not in .* allowed/);
   assert.match(violation('mixrelay-pipewire', 'mixrelay-macos-transport', 'normal'), /not in .* allowed/);
-  assert.match(violation('mixrelay-control-server', 'mixrelay-engine-service', 'normal'), /app/);
-  assert.match(violation('mixrelay-desktop', 'mixrelay-engine-service', 'normal'), /app/);
+  assert.match(violation('mixrelay-control-server', 'mixrelay-service', 'normal'), /app/);
+  assert.match(violation('mixrelay-desktop', 'mixrelay-service', 'normal'), /app/);
   assert.match(violation('mixrelay-audio-io', 'mixrelay-test-support', 'normal'), /dev-dependency/);
-  assert.match(violation('mixrelay-engine-service', 'mixrelay-macos-test-support', 'normal'), /dev-dependency/);
+  assert.match(violation('mixrelay-service', 'mixrelay-macos-test-support', 'normal'), /dev-dependency/);
   assert.equal(violation('mixrelay-audio-io', 'mixrelay-test-support', 'dev'), undefined);
   assert.match(violation('mixrelay-audio-engine', 'truce-rack-core', 'normal'), /not in .* allowed/);
   assert.match(violation('mixrelay-control-server', 'truce-rack-core', 'normal'), /not in .* allowed/);

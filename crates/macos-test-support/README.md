@@ -4,7 +4,7 @@ Run Cargo checks from the repository root through the supported wrapper. It
 prepares the HOST Cargo static libraries required by the native fixtures:
 
 ```sh
-node scripts/lab/native-check.mjs cargo test -p mixrelay-engine-service --bin mixrelay-engine-service native_callback_and_hal_contracts -- --exact
+node scripts/lab/native-check.mjs cargo test -p mixrelay-service --bin mixrelay-service native_callback_and_hal_contracts -- --exact
 ```
 
 `cargo test -p mixrelay-macos-test-support` only builds the fixtures and tests the

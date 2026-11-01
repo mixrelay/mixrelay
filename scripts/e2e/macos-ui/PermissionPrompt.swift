@@ -27,7 +27,7 @@ enum PermissionPrompt {
         if text.contains("microphone") { capability = "microphone" }
         else if text.contains("system audio") { capability = "system-audio" }
         else { return nil }
-        let subject = text.contains("mixrelay-engine-service") ? "engine"
+        let subject = text.contains("mixrelay-service") ? "engine"
             : ["source-control", "source control", "mrsourcecontrol"].contains(where: text.contains) ? "source-control"
             : text.contains("qualification.probe") || text.contains("mrroundtripprobe") ? "probe" : "desktop"
         return "\(owner):\(subject):\(capability)"

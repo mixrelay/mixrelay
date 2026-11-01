@@ -2,7 +2,7 @@
 
 MixRelay is one `mix-relay` DEB/RPM/Arch product. One public `mixrelay-desktop`
 application includes the editor, background audio and virtual-device management.
-The package always includes `mixrelay-driver-service` and `mixrelay-engine-service`;
+The package always includes `mixrelay-driver-service` and `mixrelay-service`;
 there is no Driver choice, separate manager or separate update catalog.
 All components use the Cargo workspace version. The unreleased product stays at 0.1.0.
 

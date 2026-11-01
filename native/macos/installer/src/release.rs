@@ -295,7 +295,7 @@ impl ReleasePayloadVerifier {
                     verify_architecture(&path)?;
                     signature(
                         &path,
-                        &self.team.requirement("mixrelay-engine-service"),
+                        &self.team.requirement("mixrelay-service"),
                         ArtifactRole::Engine,
                         policy,
                     )?;
@@ -454,7 +454,7 @@ impl ReleasePayloadVerifier {
         verify_architecture(engine)?;
         signature(
             engine,
-            &self.team.requirement("mixrelay-engine-service"),
+            &self.team.requirement("mixrelay-service"),
             ArtifactRole::Engine,
             VerificationPolicy::Launch,
         )?;

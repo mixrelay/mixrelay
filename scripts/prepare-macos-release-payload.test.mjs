@@ -47,7 +47,7 @@ function fixture(t, simulatedUmask = 0) {
   const manager = join(root, "MixRelay.app");
   const hal = join(root, "MixRelayHAL.driver");
   const driver = join(root, "mixrelay-driver-service");
-  const engine = join(root, "mixrelay-engine-service");
+  const engine = join(root, "mixrelay-service");
   const uninstaller = join(root, "Uninstall MixRelay.app");
   const output = join(root, "payload");
   for (const bundle of [manager, hal, uninstaller]) {

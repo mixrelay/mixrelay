@@ -43,7 +43,7 @@ fn main() {
     build(
         &root,
         "application_clock",
-        "native/macos/engine-service/tests/MRApplicationClockTests.c",
+        "native/macos/service/tests/MRApplicationClockTests.c",
         &libraries,
     );
     build(
@@ -125,7 +125,7 @@ fn build(root: &Path, name: &str, test: &str, libraries: &FixtureLibraries) {
         ])
         .args([
             "-I",
-            "native/macos/engine-service/include",
+            "native/macos/service/include",
             "-I",
             "native/macos/hal-driver/include",
             "-I",
