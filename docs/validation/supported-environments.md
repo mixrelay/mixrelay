@@ -4,7 +4,6 @@ Generated from `support/environments.json`. A listed target is a release require
 
 | Environment | OS / distribution | Version rule | CPU | Same candidate artifact | Execution |
 | --- | --- | --- | --- | --- | --- |
-| macos-14-arm64 | macos | 14 (major) | arm64 | macos-universal-pkg | macos-14 |
 | macos-15-arm64 | macos | 15 (major) | arm64 | macos-universal-pkg | macos-15 |
 | macos-15-x64 | macos | 15 (major) | x64 | macos-universal-pkg | macos-15-intel |
 | macos-26-arm64 | macos | 26 (major) | arm64 | macos-universal-pkg | macos-26 |

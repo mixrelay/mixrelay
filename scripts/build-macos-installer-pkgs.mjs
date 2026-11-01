@@ -1,3 +1,4 @@
+import { MINIMUM_MACOS } from "./macos-minimum.mjs";
 import { PRODUCT_DIRECTORY, APP_PATH, UNINSTALLER_PATH } from "./macos-install-contract.mjs";
 import { createHash } from "node:crypto";
 import {
@@ -30,7 +31,7 @@ const INSTALLER_ID = "io.mixrelay.installer";
 const INSTALLER_COMPONENT_ID = "io.mixrelay.installer.component";
 const OPERATIONS = JSON.parse(readFileSync(new URL("../packaging/localization/installer-operations.json", import.meta.url), "utf8"));
 /** The app's declared minimum macOS; Installer refuses older systems before any script runs. */
-export const MINIMUM_MACOS = JSON.parse(readFileSync(new URL("../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), "utf8")).bundle.macOS.minimumSystemVersion;
+export { MINIMUM_MACOS } from "./macos-minimum.mjs";
 const MAX_COMMAND_OUTPUT = 4 * 1024 * 1024;
 const ARCHITECTURES = ["arm64", "x86_64"];
 const fsApi = {

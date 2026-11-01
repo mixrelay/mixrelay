@@ -55,6 +55,9 @@ function fixture(t) {
   writeFileSync(join(root, "CHANGELOG.md"), changelog);
   writeFileSync(unrelated, "preserve me\n");
   copyFileSync(sourceScript, script);
+  copyFileSync(new URL("./macos-minimum.mjs", import.meta.url), join(root, "scripts/macos-minimum.mjs"));
+  mkdirSync(join(root, "apps/desktop/src-tauri"), { recursive: true });
+  copyFileSync(new URL("../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), join(root, "apps/desktop/src-tauri/tauri.conf.json"));
   copyFileSync(new URL("./polar-configuration.mjs", import.meta.url), join(scripts, "polar-configuration.mjs"));
   executable(join(scripts, "build-macos-driver-launcher.sh"), `#!/bin/sh
 printf 'launcher built\\n' >> "$MOCK_LOG"

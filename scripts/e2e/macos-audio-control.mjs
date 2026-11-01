@@ -1,3 +1,4 @@
+import { MINIMUM_MACOS } from '../macos-minimum.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -46,7 +47,7 @@ export async function macosAudioControl(evidence, target) {
     assert.equal(run('git', ['-C', workspace, 'rev-parse', 'HEAD']).trim(), revision);
     run('xcodebuild', ['-project', join(workspace, 'BlackHole.xcodeproj'), '-scheme', 'BlackHole',
       '-configuration', 'Release', '-derivedDataPath', join(workspace, 'build'),
-      'MACOSX_DEPLOYMENT_TARGET=14.2', 'CODE_SIGNING_ALLOWED=NO'], 300000);
+      `MACOSX_DEPLOYMENT_TARGET=${MINIMUM_MACOS}`, 'CODE_SIGNING_ALLOWED=NO'], 300000);
     const built = join(workspace, 'build/Build/Products/Release/BlackHole.driver');
     run('codesign', ['--force', '--sign', '-', built]);
     run('codesign', ['--verify', '--deep', '--strict', built]);
@@ -66,7 +67,7 @@ export async function macosAudioControl(evidence, target) {
     }
     const companion = join(workspace, 'macos-cadence-control');
     run('xcrun', ['clang', '-std=c17', '-Wall', '-Wextra', '-Wpedantic', '-Wconversion',
-      '-Wsign-conversion', '-Werror', '-mmacosx-version-min=14.2', 'scripts/e2e/macos-cadence-control.c',
+      '-Wsign-conversion', '-Werror', `-mmacosx-version-min=${MINIMUM_MACOS}`, 'scripts/e2e/macos-cadence-control.c',
       '-framework', 'CoreAudio', '-framework', 'CoreFoundation', '-o', companion]);
     run(companion, ['--self-test']);
     cadence = launchCadenceControl(companion, output);

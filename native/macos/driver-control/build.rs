@@ -4,7 +4,7 @@ fn main() {
             .file("src/MRDriverControl.c")
             .flag("-std=c17")
             .flag("-fblocks")
-            .flag("-mmacosx-version-min=14.2")
+            .flag("-mmacosx-version-min=15.0")
             .warnings_into_errors(true)
             .compile("mixrelay_driver_control_native");
         println!("cargo:rerun-if-changed=src/MRDriverControl.c");

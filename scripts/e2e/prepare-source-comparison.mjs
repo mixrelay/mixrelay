@@ -1,3 +1,4 @@
+import { MINIMUM_MACOS } from '../macos-minimum.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -7,7 +8,7 @@ export function prepareSourceComparison(directory, execute = execFileSync) {
   const bundle = resolve(directory, 'io.mixrelay.qualification.source-control.app');
   const executable = join(bundle, 'Contents/MacOS/MRSourceControl');
   mkdirSync(join(bundle, 'Contents/MacOS'), { recursive: true });
-  execute('clang', ['-std=c17', '-O2', '-mmacosx-version-min=14.2', '-Wall', '-Wextra', '-Wpedantic',
+  execute('clang', ['-std=c17', '-O2', `-mmacosx-version-min=${MINIMUM_MACOS}`, '-Wall', '-Wextra', '-Wpedantic',
     '-Wconversion', '-Wsign-conversion', '-Wshadow', '-Werror', '-fblocks',
     ...['control', 'device', 'pcm'].map(name => `scripts/e2e/macos-source-${name}.c`),
     'native/macos/engine-service/src/MRMicrophonePermission.m',

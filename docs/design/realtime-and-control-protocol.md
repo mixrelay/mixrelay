@@ -27,7 +27,7 @@
 
 - 깨우기는 "권한 있는 상태를 다시 확인하라"는 뜻이며 프레임 credit이 아니다. PCM·클록 발행과 분리한다.
 - 같은 프로세스 안(탭 IOProc → 캡처 pump)은 로컬 세마포어를 쓴다.
-- 프로세스 사이는 macOS 14.2를 지원하기 위해 **XPC로 전달한 Mach 세마포어**를 기본으로 한다. 14.4 이상의 공유 futex(`os_sync_wait_on_address` + `OS_SYNC_*_SHARED`)는 측정 후 협상 가능한 대체 구현으로 둔다. 비공개 `__ulock`은 쓰지 않는다.
+- 프로세스 사이는 **XPC로 전달한 Mach 세마포어**를 기본으로 한다. 제품 최소 버전 macOS 15.0은 hosted runner의 검증 범위에 따른다. 14.4 이상의 공유 futex(`os_sync_wait_on_address` + `OS_SYNC_*_SHARED`)는 측정 후 협상 가능한 대체 구현으로 둔다. 비공개 `__ulock`은 쓰지 않는다.
 - 생산자: 상태 발행 → `sequence` 증가 → `pending`이 0에서 1로 바뀔 때만 signal. 소비자: 토큰을 받으면 `pending`을 먼저 0으로 바꾼 뒤 상태를 확인한다. 대기는 다음 마감 또는 `2P` 중 이른 시각까지로 제한해 깨우기 유실이나 생산자 종료가 진행을 영구히 멈추지 못하게 한다. 연속 실패 시 알림 경로를 교체하고 그동안 `min(P/4, 250µs)` 폴링으로 복구한다.
 - 알림 영역은 포인터 없이 magic·version·incarnation과 정렬된 `sequence`/`pending`/`state` 셀로 구성하며, 형식을 바꾸면 전송 버전을 올리고 살아 있는 매핑을 제자리에서 바꾸지 않는다.
 

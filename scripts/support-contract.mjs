@@ -27,6 +27,9 @@ export function validateContract(value) {
     || !['pipewire', 'wireplumber', 'glibc'].every(name => /^\d+\.\d+(?:\.\d+)?$/.test(value.minimums?.linux?.[name] ?? ''))) {
     throw new Error('Invalid deployment or dependency minimum');
   }
+  if (Object.keys(value.macosArchitectures ?? {}).some(major => Number(major) < Number(value.minimums.macos.split('.')[0]))) {
+    throw new Error('macOS architecture support is below the deployment minimum');
+  }
   for (const [items, label] of [[value.artifacts, 'artifact'], [value.qualificationTargets, 'environment'],
     [value.scenarios, 'scenario'], [value.codeChecks?.macos, 'macOS CI'],
     [value.codeChecks?.linuxDistributions, 'Linux CI']]) {

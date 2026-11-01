@@ -1,6 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 repo_root="${0:A:h:h}"
+minimum_macos="$(node "$repo_root/scripts/macos-minimum.mjs")"
 [[ "${APPLE_SIGNING_IDENTITY:-}" == "Developer ID Application: "* ]] || {
   print -u2 "A Developer ID Application identity is required"
   exit 1
@@ -11,7 +12,7 @@ mkdir -p "$output_dir"
 task_dir="$(mktemp -d "$output_dir/.driver-launcher.XXXXXX")"
 trap 'rm -rf "$task_dir"' EXIT
 for arch in arm64 x86_64; do
-  xcrun --sdk macosx clang -arch "$arch" -mmacosx-version-min=14.2 \
+  xcrun --sdk macosx clang -arch "$arch" "-mmacosx-version-min=$minimum_macos" \
     -Wall -Wextra -Werror -O2 "$repo_root/native/macos/common/MRDriverRuntimeLauncher.c" \
     -o "$task_dir/$arch"
 done

@@ -130,6 +130,9 @@ function fixture(t) {
   mkdirSync(bin);
   const script = join(scripts, "build-macos-universal-engine.sh");
   cpSync(sourceScript, script);
+  copyFileSync(new URL("./macos-minimum.mjs", import.meta.url), join(root, "scripts/macos-minimum.mjs"));
+  mkdirSync(join(root, "apps/desktop/src-tauri"), { recursive: true });
+  copyFileSync(new URL("../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), join(root, "apps/desktop/src-tauri/tauri.conf.json"));
   chmodSync(script, 0o755);
   const entitlements = join(root, "native/macos/engine-service/Engine.entitlements.plist");
   mkdirSync(join(root, "native/macos/engine-service"), { recursive: true });

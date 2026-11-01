@@ -1,3 +1,4 @@
+import { MINIMUM_MACOS } from '../macos-minimum.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -55,7 +56,7 @@ int main(void) {
 `);
   const source = fileURLToPath(new URL('../../native/macos/hal-driver/tests/MRProbeActivity.m', import.meta.url));
   const executable = join(directory, 'activity');
-  execFileSync('xcrun', ['clang', '-mmacosx-version-min=14.2', source, fixture,
+  execFileSync('xcrun', ['clang', `-mmacosx-version-min=${MINIMUM_MACOS}`, source, fixture,
     '-framework', 'Foundation', '-o', executable]);
   execFileSync(executable, [], { timeout: 10000 });
 });
@@ -102,7 +103,7 @@ int main(void) {
 `);
   const executable = join(directory, 'permission');
   const source = fileURLToPath(new URL('../../native/macos/engine-service/src/MRMicrophonePermission.m', import.meta.url));
-  execFileSync('xcrun', ['clang', '-fobjc-arc', '-fblocks', '-mmacosx-version-min=14.2',
+  execFileSync('xcrun', ['clang', '-fobjc-arc', '-fblocks', `-mmacosx-version-min=${MINIMUM_MACOS}`,
     '-DSessionGetInfo=mr_test_session_get_info', source, fixture,
     '-framework', 'AVFoundation', '-framework', 'Security', '-framework', 'Foundation', '-o', executable]);
   execFileSync(executable, [], { timeout: 10000 });
@@ -167,7 +168,7 @@ int main(void) {
 }
 `);
   const executable = join(directory, 'probe-consent');
-  execFileSync('xcrun', ['clang', '-std=c17', '-O2', '-mmacosx-version-min=14.2',
+  execFileSync('xcrun', ['clang', '-std=c17', '-O2', `-mmacosx-version-min=${MINIMUM_MACOS}`,
     '-Wall', '-Wextra', '-Wpedantic', '-Wconversion', '-Wsign-conversion', '-Wshadow', '-Werror',
     fixture, fileURLToPath(new URL('../../native/macos/hal-driver/tests/MRProbeHalTrace.c', import.meta.url)),
     fileURLToPath(new URL('../../native/macos/hal-driver/tests/MRProbeAuthorization.c', import.meta.url)),

@@ -7,6 +7,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 repo_root="${0:A:h:h}"
+minimum_macos="$(node "$repo_root/scripts/macos-minimum.mjs")"
 native_root="$repo_root/native/macos/application-capture"
 endpoint_uid=""
 registration_api=${MIXRELAY_LAB_TAP_REGISTRATION:-function}
@@ -68,7 +69,7 @@ mkdir -p "$tone_bundle/Contents/MacOS"
 cp "$native_root/tests/$tone_name-Info.plist" "$tone_bundle/Contents/Info.plist"
 
 strict_flags=(
-  -mmacosx-version-min=14.2
+  "-mmacosx-version-min=$minimum_macos"
   -Wall
   -Wextra
   -Wpedantic
