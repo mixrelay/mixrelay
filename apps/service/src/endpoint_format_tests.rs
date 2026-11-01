@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
-use mixrelay_processor_state::{StateStore, read_bundle, write_bundle};
+use mixrelay_processor_state::{StateStore, preview_bundle, write_bundle};
 
 #[path = "endpoint_format_ack_tests.rs"]
 mod acknowledgements;
@@ -204,7 +204,7 @@ fn workspace_request(
 }
 
 fn saved_workspace_rate(path: &str, rate: u32) {
-    let (manifest, references) = read_bundle(std::fs::File::open(path).unwrap(), None).unwrap();
+    let (manifest, references) = preview_bundle(std::fs::File::open(path).unwrap()).unwrap();
     assert!(references.is_empty());
     let mut file: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
     for graph in file["catalog"]["graphs"].as_array_mut().unwrap() {

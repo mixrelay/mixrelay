@@ -7,7 +7,10 @@ use std::{
 
 use sha2::{Digest, Sha256};
 
-use crate::{MAX_STATE_BYTES, StateError, StateRef};
+use crate::{
+    MAX_STATE_BYTES, StateBlobSink, StateBlobSource, StateError, StateRef,
+    payload::{hash_exact, hex_digest},
+};
 
 #[cfg(unix)]
 #[path = "store/unix.rs"]
@@ -21,7 +24,6 @@ mod tests;
 
 use platform::StoreDirectory;
 
-const IO_CHUNK_BYTES: usize = 64 * 1024;
 const TEMP_CREATE_ATTEMPTS: usize = 128;
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -104,7 +106,7 @@ impl StateStore {
         bytes
             .try_reserve_exact(capacity)
             .map_err(|_| StateError::Allocation)?;
-        self.copy_verified(reference, &mut bytes)?;
+        self.copy_payload(reference, &mut bytes)?;
         Ok(bytes)
     }
 
@@ -126,7 +128,7 @@ impl StateStore {
         hash_blob(&mut file, reference, None)
     }
 
-    pub(crate) fn store_payload<R: Read>(
+    fn store_payload<R: Read + ?Sized>(
         &self,
         reader: &mut R,
         byte_length: u64,
@@ -161,11 +163,7 @@ impl StateStore {
         Ok(reference)
     }
 
-    pub(crate) fn copy_verified(
-        &self,
-        reference: &StateRef,
-        writer: &mut impl Write,
-    ) -> Result<(), StateError> {
+    fn copy_payload(&self, reference: &StateRef, writer: &mut dyn Write) -> Result<(), StateError> {
         reference.validate()?;
         let directory = self.open_existing_directory()?;
         let mut file = open_blob(&directory, reference)?;
@@ -186,83 +184,30 @@ impl StateStore {
     }
 }
 
-pub(crate) fn verify_payload_stream(
-    reader: &mut impl Read,
-    reference: &StateRef,
-) -> Result<(), StateError> {
-    reference.validate()?;
-    hash_exact(
-        reader,
-        reference.byte_length(),
-        None,
-        Some(reference),
-        false,
-    )?;
-    Ok(())
-}
-
-fn hash_exact(
-    reader: &mut impl Read,
-    byte_length: u64,
-    mut writer: Option<&mut dyn Write>,
-    expected: Option<&StateRef>,
-    check_eof: bool,
-) -> Result<String, StateError> {
-    let mut hasher = Sha256::new();
-    let mut remaining = byte_length;
-    let chunk_size = byte_length.min(IO_CHUNK_BYTES as u64);
-    let buffer_size = usize::try_from(chunk_size).map_err(|_| StateError::Allocation)?;
-    let mut buffer = Vec::new();
-    buffer
-        .try_reserve_exact(buffer_size)
-        .map_err(|_| StateError::Allocation)?;
-    buffer.resize(buffer_size, 0_u8);
-    while remaining > 0 {
-        let wanted =
-            usize::try_from(remaining.min(chunk_size)).map_err(|_| StateError::Allocation)?;
-        let count = read_retry(reader, &mut buffer[..wanted])?;
-        if count == 0 {
-            return Err(StateError::Integrity);
-        }
-        hasher.update(&buffer[..count]);
-        if let Some(output) = writer.as_deref_mut() {
-            output.write_all(&buffer[..count])?;
-        }
-        remaining -= count as u64;
+impl StateBlobSource for StateStore {
+    fn verify(&self, reference: &StateRef) -> Result<(), StateError> {
+        // The inherent method of the same name, not this one.
+        StateStore::verify(self, reference)
     }
 
-    if check_eof {
-        let mut extra = [0_u8; 1];
-        if read_retry(reader, &mut extra)? != 0 {
-            return Err(StateError::Integrity);
-        }
-    }
-    let digest = hasher.finalize();
-    let digest: [u8; 32] = digest.into();
-    let encoded = hex_digest(&digest);
-    if expected.is_some_and(|reference| encoded != reference.sha256()) {
-        return Err(StateError::Integrity);
-    }
-    Ok(encoded)
-}
-
-fn read_retry(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<usize> {
-    loop {
-        match reader.read(buffer) {
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            result => return result,
-        }
+    fn copy_verified(
+        &self,
+        reference: &StateRef,
+        writer: &mut dyn Write,
+    ) -> Result<(), StateError> {
+        self.copy_payload(reference, writer)
     }
 }
 
-fn hex_digest(digest: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        encoded.push(HEX[usize::from(*byte >> 4)] as char);
-        encoded.push(HEX[usize::from(*byte & 0x0f)] as char);
+impl StateBlobSink for StateStore {
+    fn store_verified(
+        &self,
+        reader: &mut dyn Read,
+        reference: &StateRef,
+    ) -> Result<(), StateError> {
+        self.store_payload(reader, reference.byte_length(), Some(reference))
+            .map(|_| ())
     }
-    encoded
 }
 
 fn open_blob(directory: &StoreDirectory, reference: &StateRef) -> Result<File, StateError> {

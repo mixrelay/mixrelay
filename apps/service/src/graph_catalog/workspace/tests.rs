@@ -727,7 +727,7 @@ fn portable_bundle_reopens_large_states_after_source_store_is_deleted() {
 
     let reopened_store = StateStore::new(dir.join("reopened-assets"));
     let (manifest, bundled_refs) =
-        read_bundle(File::open(&output).unwrap(), Some(&reopened_store)).unwrap();
+        read_bundle(File::open(&output).unwrap(), &reopened_store).unwrap();
     let reopened: WorkspaceFile = serde_json::from_slice(&manifest).unwrap();
     assert_eq!(
         state_assets::referenced(&reopened.catalog).unwrap(),
