@@ -1,6 +1,15 @@
 import type { ControlStateSnapshot, ControlTelemetry } from '../../domain/control/state';
-import { array, integer, literal, nullable, object, optional, string } from '../decode';
-import { controlStateSnapshot } from './protocolDecoders';
+import {
+  array,
+  integer,
+  literal,
+  nullable,
+  object,
+  optional,
+  string,
+  unknownValue,
+} from '../decode';
+import { controlStateSnapshot, meterTelemetry } from './protocolDecoders';
 
 interface MeterBinding {
   nodeId: string;
@@ -19,7 +28,8 @@ interface PackedTelemetry {
   engineIncarnation: string;
   sequence: number;
   meters: PackedMeters;
-  state?: ControlStateSnapshot | null;
+  /** Decoded on its own, so a bad snapshot never stops the meters. */
+  state?: unknown;
 }
 
 const packedTelemetry = object<PackedTelemetry>({
@@ -40,13 +50,45 @@ const packedTelemetry = object<PackedTelemetry>({
     ),
     samples: string,
   }),
-  state: optional(nullable(controlStateSnapshot)),
+  state: unknownValue,
 });
+
+/** Reports a rejected part of a stream; the stream itself may continue. */
+export type TelemetryReport = (message: string, error: unknown) => void;
+
+const consoleReport: TelemetryReport = (message, error) => console.error(message, error);
 
 /** Decodes one ordered stream (a native channel or an SSE response). Meter bindings are
  * sent only when they change, so each stream needs its own decoder. */
 export class TelemetryDecoder {
   private bindings?: MeterBinding[];
+  private stateRejected = false;
+
+  constructor(private readonly report: TelemetryReport = consoleReport) {}
+
+  /** A window the native channel already parsed, with unpacked meters. */
+  window(message: unknown): ControlTelemetry {
+    const window = meterTelemetry(message, 'telemetry window');
+    const state = this.state(
+      typeof message === 'object' && message !== null && 'state' in message
+        ? message.state
+        : undefined,
+    );
+    return { ...window, state };
+  }
+
+  /** The snapshot, or undefined when it breaks its contract: the window's meters still
+   * count, and consumers keep waiting for the next valid snapshot. Reported once per stream. */
+  private state(value: unknown): ControlStateSnapshot | null | undefined {
+    if (value === undefined || value === null) return value;
+    try {
+      return controlStateSnapshot(value, 'telemetry.state');
+    } catch (error) {
+      if (!this.stateRejected) this.report('Telemetry state snapshot rejected', error);
+      this.stateRejected = true;
+      return undefined;
+    }
+  }
 
   /** Raw frames align samples to four bytes so the webview can use Float32Array directly. */
   raw(frame: ArrayBuffer): ControlTelemetry {
@@ -73,7 +115,7 @@ export class TelemetryDecoder {
     if (!bindings) throw new Error('meter bindings missing');
     const decoded = unpack(packet, bindings, samples);
     this.bindings = bindings;
-    return decoded;
+    return { ...decoded, state: this.state(packet.state) };
   }
 }
 
@@ -112,7 +154,6 @@ function unpack(
   return {
     engineIncarnation: packet.engineIncarnation,
     sequence: packet.sequence,
-    state: packet.state,
     meters: {
       protocolVersion: packet.meters.protocolVersion,
       revision: packet.meters.revision,

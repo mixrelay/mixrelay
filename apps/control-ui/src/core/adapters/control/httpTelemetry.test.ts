@@ -66,6 +66,7 @@ it.each(['missing', 'identity', 'oversized', 'malformed', 'eof'])(
 );
 
 it.each([true, false])('ends a started stream on EOF or decode failure (EOF: %s)', async (eof) => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   const source = stream(null);
   const opening = source.open();
   source.send(packedTelemetry());
@@ -74,6 +75,26 @@ it.each([true, false])('ends a started stream on EOF or decode failure (EOF: %s)
   else source.send({});
   await vi.advanceTimersByTimeAsync(0);
   expect(source.listener.ended).toHaveBeenCalledOnce();
+  // Why the stream ended is logged once, including the path of an unreadable event.
+  expect(error).toHaveBeenCalledOnce();
+  if (!eof) expect(error.mock.calls[0]?.[1]).toMatchObject({ path: 'telemetry.engineIncarnation' });
+  error.mockRestore();
+});
+
+it('keeps metering through a started stream whose state snapshot is unreadable', async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  const source = stream(null);
+  const opening = source.open();
+  source.send(packedTelemetry());
+  await opening;
+  source.send({ ...packedTelemetry(), sequence: 2, state: { generation: -1 } });
+  source.send({ ...packedTelemetry(), sequence: 3, state: { generation: -1 } });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(source.listener.window).toHaveBeenCalledTimes(3);
+  expect(source.listener.window.mock.lastCall?.[0].state).toBeUndefined();
+  expect(source.listener.ended).not.toHaveBeenCalled();
+  expect(error).toHaveBeenCalledOnce();
+  error.mockRestore();
 });
 
 it.each([new Response(null, { status: 503 }), new Response(null)])(

@@ -56,7 +56,6 @@ import {
   graphNodeControls,
   graphRuntimeStatus,
   meterSnapshot,
-  meterTelemetry,
   mixRelayStatus,
   nodeControlResponse,
   processorEditorFrame,
@@ -271,11 +270,11 @@ export class TauriControlPort implements ControlPort {
       }
       try {
         listener.window(
-          message instanceof ArrayBuffer
-            ? decoder.raw(message)
-            : meterTelemetry(message, 'telemetry window'),
+          message instanceof ArrayBuffer ? decoder.raw(message) : decoder.window(message),
         );
-      } catch {
+      } catch (error) {
+        // The stream cannot continue past a window it cannot read; say why, once.
+        console.error('Telemetry window rejected; the meter stream ends', error);
         active = false;
         listener.ended();
       }

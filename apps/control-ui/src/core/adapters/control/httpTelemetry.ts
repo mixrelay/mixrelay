@@ -55,6 +55,7 @@ export async function openHttpTelemetry(
       void pump(reader, () => active, receive).catch((error: unknown) => {
         if (!active) return;
         close();
+        console.error('Telemetry stream rejected; the meter stream ends', error);
         if (!started) reject(error);
         else listener.ended();
       });

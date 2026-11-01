@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import type { ControlStateSnapshot } from '../../domain/control/state';
 import { TelemetryDecoder } from './telemetryCodec';
 
@@ -92,4 +92,48 @@ it('rejects truncated headers, invalid bindings, excess samples and nonfinite va
   expect(() => new TelemetryDecoder().sse(JSON.stringify(metadata))).toThrow(
     'invalid meter samples',
   );
+});
+
+it('drops a state snapshot that breaks its contract and keeps the meters, reporting it once', () => {
+  const { metadata } = packed();
+  const report = vi.fn();
+  const decoder = new TelemetryDecoder(report);
+  const broken = { ...metadata, state: { ...state(), generation: 'two' } };
+  const first = decoder.sse(JSON.stringify(broken));
+  expect(first.state).toBeUndefined();
+  expect(first.meters.nodes[0]?.peaks).toEqual([0.5, 0.25]);
+  const { bindings: _omitted, ...meters } = metadata.meters;
+  expect(decoder.sse(JSON.stringify({ ...broken, sequence: 2, meters })).state).toBeUndefined();
+  expect(report).toHaveBeenCalledOnce();
+  expect(report.mock.calls[0]?.[1]).toMatchObject({ path: 'telemetry.state.generation' });
+  expect(decoder.sse(JSON.stringify({ ...metadata, sequence: 3, meters })).state).toEqual(state());
+  expect(decoder.sse(JSON.stringify({ ...metadata, sequence: 4, meters, state: null })).state).toBe(
+    null,
+  );
+});
+
+it('reads a window the native channel already parsed, with the same state rule', () => {
+  const report = vi.fn();
+  const decoder = new TelemetryDecoder(report);
+  const meters = { protocolVersion: 1, revision: 2, nodes: [] };
+  const window = { engineIncarnation: 'a', sequence: 1, meters };
+  expect(decoder.window(window)).toEqual({ ...window, state: undefined });
+  expect(decoder.window({ ...window, state: state() }).state).toEqual(state());
+  expect(decoder.window({ ...window, state: { generation: 1 } }).state).toBeUndefined();
+  expect(report).toHaveBeenCalledOnce();
+  expect(() => decoder.window({ ...window, meters: { ...meters, protocolVersion: 2 } })).toThrow(
+    'telemetry window.meters.protocolVersion',
+  );
+});
+
+it('reports to the console by default', () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  new TelemetryDecoder().window({
+    engineIncarnation: 'a',
+    sequence: 1,
+    meters: { protocolVersion: 1, revision: 2, nodes: [] },
+    state: {},
+  });
+  expect(error).toHaveBeenCalledWith('Telemetry state snapshot rejected', expect.anything());
+  error.mockRestore();
 });
