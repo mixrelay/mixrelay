@@ -27,7 +27,8 @@ impl Transport {
             .timeout(Duration::from_secs(5))
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+            .build()
+            .map_err(super::transport_error)?;
         *cached = Some(client.clone());
         Ok(client)
     }

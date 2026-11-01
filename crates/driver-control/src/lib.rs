@@ -18,7 +18,7 @@ mod test_backend;
 pub use client::DriverClient;
 pub use contract::{
     COMMAND_ROUTE, DriverBackend, DriverCommand, DriverDeviceConfig, DriverError, DriverSnapshot,
-    DriverState, NativeDirection, SNAPSHOT_ROUTE,
+    DriverState, NativeDirection, SNAPSHOT_ROUTE, TransportFailure,
 };
 pub use manager::DriverManager;
 pub use server::{AccessRequest, PAID_ACCESS_HEADER, PaidAccess, router, router_with_access};

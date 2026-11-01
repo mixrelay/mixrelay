@@ -283,7 +283,8 @@ impl IntoResponse for ApiError {
             }
             DriverError::Backend(_)
             | DriverError::Io(_)
-            | DriverError::Http(_)
+            | DriverError::NotReachable(_)
+            | DriverError::Transport(_)
             | DriverError::Remote { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         };
         (
