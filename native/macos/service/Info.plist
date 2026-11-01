@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>MixRelay</string>
 	<key>CFBundleIdentifier</key>
-	<string>mixrelay-service</string>
+	<string>io.mixrelay.service</string>
 	<key>CFBundleName</key>
 	<string>MixRelay</string>
 	<key>NSMicrophoneUsageDescription</key>

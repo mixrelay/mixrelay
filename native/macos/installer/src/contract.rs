@@ -21,6 +21,9 @@ pub const INSTALLER_LEASE_PATH: &str =
 
 /// The Driver-owned audio engine executable.
 pub const RUNTIME_ENGINE_PATH: &str = "/Library/Application Support/MixRelay/bin/mixrelay-service";
+/// The engine's code-signing identifier. It equals `CFBundleIdentifier` in
+/// `native/macos/service/Info.plist`; `scripts/macos-identity.test.mjs` checks every copy.
+pub(crate) const RUNTIME_ENGINE_IDENTIFIER: &str = "io.mixrelay.service";
 /// The Driver-owned on-demand engine definition.
 pub const RUNTIME_LAUNCHD_PATH: &str = "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist";
 

@@ -137,6 +137,7 @@ function fixture(t) {
   const entitlements = join(root, "native/macos/service/Engine.entitlements.plist");
   mkdirSync(join(root, "native/macos/service"), { recursive: true });
   copyFileSync(new URL("../native/macos/service/Engine.entitlements.plist", import.meta.url), entitlements);
+  copyFileSync(new URL("../native/macos/service/Info.plist", import.meta.url), join(root, "native/macos/service/Info.plist"));
   installFakeCommands(bin);
 
   const logs = {
@@ -227,6 +228,9 @@ zshTest("builds both slices, signs the lipo output, and cleans its temporary dir
 
 zshTest("release signing uses the exact runtime policy, identifier, and engine entitlements", t => {
   const paths = fixture(t);
+  // The script signs with whatever identity the embedded Info.plist declares.
+  const infoPlist = join(paths.root, "native/macos/service/Info.plist");
+  writeFileSync(infoPlist, readFileSync(infoPlist, "utf8").replace(/(<key>CFBundleIdentifier<\/key>\s*<string>)[^<]+/, "$1io.mixrelay.fixture-engine"));
   const identity = "Developer ID Application: MixRelay, Inc. (ABCDEF1234)";
   const result = runScript(paths, [], { MIXRELAY_CODESIGN_IDENTITY: identity });
   assert.equal(result.status, 0, result.stderr);
@@ -236,9 +240,9 @@ zshTest("release signing uses the exact runtime policy, identifier, and engine e
   const temporaryBinary = calls[0].split(" ").at(-1);
   assert.equal(
     calls[0],
-    `--force --sign ${identity} --options runtime --timestamp --identifier mixrelay-service --entitlements ${join(paths.root, "native/macos/service/Engine.entitlements.plist")} ${temporaryBinary}`,
+    `--force --sign ${identity} --options runtime --timestamp --identifier io.mixrelay.fixture-engine --entitlements ${join(paths.root, "native/macos/service/Engine.entitlements.plist")} ${temporaryBinary}`,
   );
-  assert.match(calls[0], /--options runtime --timestamp --identifier mixrelay-service --entitlements /);
+  assert.match(calls[0], /--options runtime --timestamp --identifier io\.mixrelay\.fixture-engine --entitlements /);
   assert.match(calls[0], /\/\.mixrelay-service-universal\.[^/]+\/mixrelay-service$/);
   const plist = readFileSync(join(paths.root, "native/macos/service/Engine.entitlements.plist"), "utf8");
   assert.match(plist, /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\/>/);

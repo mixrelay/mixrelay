@@ -34,6 +34,11 @@ if [[ "$codesign_identity" != "-" && ! -f "$engine_entitlements" ]]; then
   print -u2 "Engine release entitlements are missing: $engine_entitlements"
   exit 1
 fi
+engine_info_plist="$repo_root/native/macos/service/Info.plist"
+if [[ "$codesign_identity" != "-" ]]; then
+  # Sign with the bundle identity the binary embeds, so the two cannot drift.
+  engine_identifier="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$engine_info_plist")"
+fi
 target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 if [[ "$target_dir" != /* ]]; then
   target_dir="$repo_root/$target_dir"
@@ -165,7 +170,7 @@ else
     --sign "$codesign_identity" \
     --options runtime \
     --timestamp \
-    --identifier mixrelay-service \
+    --identifier "$engine_identifier" \
     --entitlements "$engine_entitlements" \
     "$temporary_binary"
 fi

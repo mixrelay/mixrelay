@@ -295,7 +295,7 @@ impl ReleasePayloadVerifier {
                     verify_architecture(&path)?;
                     signature(
                         &path,
-                        &self.team.requirement("mixrelay-service"),
+                        &self.team.requirement(crate::contract::RUNTIME_ENGINE_IDENTIFIER),
                         ArtifactRole::Engine,
                         policy,
                     )?;
@@ -454,7 +454,7 @@ impl ReleasePayloadVerifier {
         verify_architecture(engine)?;
         signature(
             engine,
-            &self.team.requirement("mixrelay-service"),
+            &self.team.requirement(crate::contract::RUNTIME_ENGINE_IDENTIFIER),
             ArtifactRole::Engine,
             VerificationPolicy::Launch,
         )?;
