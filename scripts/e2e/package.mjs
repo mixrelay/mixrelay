@@ -39,6 +39,13 @@ export const installedPaths = (os) =>
         '/usr/bin/mixrelay-driver-service',
       ];
 
+// Executables that earlier builds installed and no current package owns. Removal must leave
+// none of them, so a stale binary from an install before the engine rename is caught.
+export const retiredPaths = (os) =>
+  os === 'macos'
+    ? ['/Library/Application Support/MixRelay/bin/mixrelay-engine-service']
+    : ['/usr/bin/mixrelay-engine-service'];
+
 export function requireDisposableHost(os, acknowledged) {
   assert.equal(
     acknowledged,

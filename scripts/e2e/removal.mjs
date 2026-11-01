@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { installedPaths } from './package.mjs';
+import { installedPaths, retiredPaths } from './package.mjs';
 
 function execute(program, args) {
   const result = spawnSync(program, args, {
@@ -39,11 +39,10 @@ export function removeInstalled(os, format, output, run = execute, exists = exis
             '/Library/LaunchDaemons/io.mixrelay.driver.removal.plist',
           ]
         : ['/usr/lib/systemd/user/mixrelay-driver.service']),
+      ...retiredPaths(os),
     ];
-    assert.ok(
-      owned.every((path) => !exists(path)),
-      'Removal left installed product artifacts',
-    );
+    const left = owned.filter((path) => exists(path));
+    assert.ok(left.length === 0, `Removal left installed product artifacts: ${left.join(', ')}`);
   } catch (error) {
     log += `\n${error.stack}`;
     throw error;
