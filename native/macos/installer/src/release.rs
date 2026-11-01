@@ -21,7 +21,8 @@ use thiserror::Error;
 
 use crate::{
     FilesystemLayout, FilesystemStaged, InstallSources, LaunchdConfiguration, LaunchdError,
-    OwnedTarget, ServiceAccount, UniversalError, validate_universal_binary,
+    OwnedTarget, ServiceAccount, UniversalError, contract::RUNTIME_ENGINE_IDENTIFIER,
+    validate_universal_binary,
 };
 
 mod policy;
@@ -295,7 +296,7 @@ impl ReleasePayloadVerifier {
                     verify_architecture(&path)?;
                     signature(
                         &path,
-                        &self.team.requirement(crate::contract::RUNTIME_ENGINE_IDENTIFIER),
+                        &self.team.requirement(RUNTIME_ENGINE_IDENTIFIER),
                         ArtifactRole::Engine,
                         policy,
                     )?;
@@ -454,7 +455,7 @@ impl ReleasePayloadVerifier {
         verify_architecture(engine)?;
         signature(
             engine,
-            &self.team.requirement(crate::contract::RUNTIME_ENGINE_IDENTIFIER),
+            &self.team.requirement(RUNTIME_ENGINE_IDENTIFIER),
             ArtifactRole::Engine,
             VerificationPolicy::Launch,
         )?;
