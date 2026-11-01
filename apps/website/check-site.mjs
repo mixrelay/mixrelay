@@ -121,7 +121,7 @@ for (const [page, html] of sources) {
   assert.doesNotMatch(html, /14일|평가판\s*·|영구 무료 기능 요금제는 없습니다|기간이 끝난 뒤 계속 사용하려면 구매가 필요/, `${page}: no obsolete trial policy`);
   assert.doesNotMatch(html, /그래프·매핑 저장 및 불러오기는 유료 기능|유료 라이선스로 추가 기능과 저장·복원/, `${page}: no obsolete paid-only saving policy`);
   for (const price of html.matchAll(/US\$\d+(?:\.\d+)?/g)) {
-    assert.ok(['US$19', 'US$29'].includes(price[0]), `${page}: only confirmed early-adopter and 1.0 prices`);
+    assert.ok(['US$19.99', 'US$29.99'].includes(price[0]), `${page}: only confirmed early-adopter and 1.0 prices`);
   }
 }
 
@@ -180,7 +180,7 @@ const pricingPages = ['index.html', ...['en', 'ko'].map((language) => `legal/${l
   ...manualLanguages.map((language) => `manual/${language}/licensing.html`)];
 for (const page of pricingPages) {
   const html = sources.get(page);
-  assert.deepEqual([...html.matchAll(/US\$\d+/g)].map((match) => match[0]), ['US$19', 'US$29'], `${page}: early-adopter price followed by the future 1.0 price`);
+  assert.deepEqual([...html.matchAll(/US\$\d+(?:\.\d+)?/g)].map((match) => match[0]), ['US$19.99', 'US$29.99'], `${page}: early-adopter price followed by the future 1.0 price`);
   for (const version of ['1.0', '0.x', '1.x', '2.0']) assert.ok(html.includes(version), `${page}: pricing and update rights include ${version}`);
   assert.doesNotMatch(html, /<(?:del|s|strike)\b|line-through|\d+\s*%/i, `${page}: plain pricing without strikethrough or percentage discounts`);
 }
