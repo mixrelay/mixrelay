@@ -1,5 +1,5 @@
 import type { GraphLayout, GraphLayoutResponse } from '../../core/domain/control/catalog';
-import { ControlPortError } from '../../core/domain/control/errors';
+import { ControlPortError, hasErrorCode } from '../../core/domain/control/errors';
 import type { WorkspacePort } from '../../core/ports/control/WorkspacePort';
 
 /** Layout reads and writes, fenced by the catalog's active graph. */
@@ -137,7 +137,7 @@ export class GraphLayoutController {
   };
 
   private definiteConflict(error: unknown) {
-    if (!(error instanceof ControlPortError) || error.body.code !== 'graph_revision_stale')
+    if (!(error instanceof ControlPortError) || !hasErrorCode(error, 'graph_revision_stale'))
       return false;
     const parameters = error.body.parameters as Record<string, unknown> | null;
     return parameters?.resource === 'graph_layout' && parameters.graphId === this.graphId;

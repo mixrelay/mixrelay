@@ -64,6 +64,7 @@ function workspaceUncertain(error: unknown) {
 
 function retryableRead(error: unknown) {
   if (!(error instanceof ControlPortError)) return true;
+  // A refusal about the catalog resource itself is not retried.
   if (errorCode(error) === 'graph_catalog_unavailable') return false;
   return [408, 429, 502, 503, 504].includes(error.status);
 }

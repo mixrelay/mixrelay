@@ -1,4 +1,4 @@
-import { ControlPortError } from '../../core/domain/control/errors';
+import { ControlPortError, hasErrorCode } from '../../core/domain/control/errors';
 import type {
   RecorderRequest,
   RecorderSettings,
@@ -180,13 +180,13 @@ export class RecorderController {
   }
 
   private readFailed(error: unknown): void {
-    const code = error instanceof ControlPortError ? error.body.code : null;
     // A contested read is not a recorder failure; commands still expose this rejection.
-    if (code === 'graph_exchange_busy') return;
+    if (hasErrorCode(error, 'graph_exchange_busy')) return;
+    const removed = hasErrorCode(error, 'node_not_found');
     this.publish({
       ...this.snapshot,
-      status: code === 'node_not_found' ? null : this.snapshot.status,
-      settings: code === 'node_not_found' ? null : this.snapshot.settings,
+      status: removed ? null : this.snapshot.status,
+      settings: removed ? null : this.snapshot.settings,
       error: this.commandError ?? recorderError(error),
     });
   }

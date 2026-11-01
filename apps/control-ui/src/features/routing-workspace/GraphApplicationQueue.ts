@@ -1,6 +1,10 @@
 import type { AudioGraphModel } from '../../core/audio-graph/model';
 import type { GraphLayout, GraphLayoutResponse } from '../../core/domain/control/catalog';
-import { ControlPortError } from '../../core/domain/control/errors';
+import {
+  ControlPortError,
+  hasErrorCode,
+  type ProtocolErrorCode,
+} from '../../core/domain/control/errors';
 import type {
   NodeControlRequest,
   NodeControlResponse,
@@ -88,6 +92,18 @@ function errorCode(error: unknown): string {
   return error instanceof ControlPortError ? error.body.code : 'control_request_failed';
 }
 
+/** Refusals the engine reports before changing anything. */
+const definiteRejectionCodes = [
+  'graph_revision_stale',
+  'engine_replaced',
+  'invalid_operation_id',
+  'node_disabled',
+  'node_not_found',
+  'processor_instance_stale',
+  'processor_not_failed',
+  'processor_unavailable',
+] as const satisfies readonly ProtocolErrorCode[];
+
 function definiteNodeRejection(error: unknown) {
   if (error instanceof ControlPortError) {
     const parameters = error.body.parameters;
@@ -101,18 +117,10 @@ function definiteNodeRejection(error: unknown) {
       return true;
   }
   return (
-    (error instanceof ControlPortError || error instanceof GraphApplicationError) &&
-    [
-      'graph_catalog_revision_stale',
-      'graph_revision_stale',
-      'engine_replaced',
-      'invalid_operation_id',
-      'node_disabled',
-      'node_not_found',
-      'processor_instance_stale',
-      'processor_not_failed',
-      'processor_unavailable',
-    ].includes(errorCode(error))
+    (error instanceof GraphApplicationError &&
+      (error.code === 'graph_catalog_revision_stale' ||
+        definiteRejectionCodes.some((code) => code === error.code))) ||
+    hasErrorCode(error, ...definiteRejectionCodes)
   );
 }
 
@@ -121,8 +129,7 @@ function definiteNodeRejection(error: unknown) {
  * the deadline. Any other failure, such as a lost acknowledgement, is rethrown and never replayed.
  */
 function requireRebasableConflict(error: unknown, deadline: number) {
-  if (!(error instanceof ControlPortError) || error.body.code !== 'graph_revision_stale')
-    throw error;
+  if (!hasErrorCode(error, 'graph_revision_stale')) throw error;
   if (Date.now() >= deadline) throw failure('graph_conflict_unresolved');
 }
 
@@ -571,8 +578,7 @@ export class GraphApplicationQueue {
     signal: AbortSignal,
     graphId?: string,
   ): Promise<ConflictRecovery> {
-    if (!(error instanceof ControlPortError) || error.body.code !== 'graph_revision_stale')
-      return 'unresolved';
+    if (!hasErrorCode(error, 'graph_revision_stale')) return 'unresolved';
     try {
       const document = await this.readEngine(signal, true, graphId ? { graphId } : undefined);
       if (this.pending) return 'draft_kept';
@@ -622,12 +628,7 @@ export class GraphApplicationQueue {
       if (!signal.aborted)
         this.pendingParameters = new Map([...parameters, ...this.pendingParameters]);
       const rebase = this.callbacks.rebase;
-      if (
-        error instanceof ControlPortError &&
-        error.body.code === 'graph_revision_stale' &&
-        before &&
-        rebase
-      ) {
+      if (hasErrorCode(error, 'graph_revision_stale') && before && rebase) {
         await this.rebaseRejectedEdit({ before, model, parameters, rebase }, signal);
         return;
       }
