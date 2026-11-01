@@ -3,6 +3,9 @@
 //! Each Rust owner serializes a representative reply into `tests/fixtures/control-replies`.
 //! A test that finds its fixture stale rewrites it and fails, so rerunning the owning tests
 //! (`pnpm fixtures:replies`) regenerates every fixture for review and commit.
+//!
+//! `<name>.variants.json` lists, per field path of fixture `<name>`, every serialized
+//! variant of the enum at that path, so the UI test decodes each variant in place.
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -21,6 +24,29 @@ pub fn refresh_reply_fixture(name: &str, value: &impl Serialize) -> io::Result<b
     refresh(&path, value)
 }
 
+/// Every unit variant of an enum, as an array. The match makes the list exhaustive: adding a
+/// variant fails to compile until it is listed here too.
+#[macro_export]
+macro_rules! every_variant {
+    ($type:ident { $($variant:ident),+ $(,)? }) => {{
+        let all = [$($type::$variant),+];
+        for value in all {
+            match value {
+                $($type::$variant)|+ => (),
+            }
+        }
+        all
+    }};
+}
+
+/// Serializes the variants listed for one field path of a fixture.
+/// # Panics
+/// Panics if a variant cannot be serialized, which only a broken `Serialize` impl causes.
+#[must_use]
+pub fn variants<T: Serialize>(values: &[T]) -> serde_json::Value {
+    serde_json::to_value(values).expect("enum variants serialize")
+}
+
 fn refresh(path: &Path, value: &impl Serialize) -> io::Result<bool> {
     let previous = fs::read_to_string(path).unwrap_or_default();
     let current = serde_json::to_string_pretty(value)? + "\n";
@@ -35,6 +61,20 @@ fn refresh(path: &Path, value: &impl Serialize) -> io::Result<bool> {
 mod tests {
     use super::*;
     use crate::FixtureDir;
+
+    #[derive(Clone, Copy, Serialize)]
+    enum Sample {
+        First,
+        Second,
+    }
+
+    #[test]
+    fn lists_every_variant_serialized() {
+        assert_eq!(
+            variants(&every_variant!(Sample { First, Second })),
+            serde_json::json!(["First", "Second"])
+        );
+    }
 
     #[test]
     fn rewrites_only_a_missing_or_stale_fixture() {

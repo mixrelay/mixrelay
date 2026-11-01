@@ -10,16 +10,22 @@ use mixrelay_audio_graph::{
     NodeControl, NodeId, NodeSpec, PortId,
 };
 use mixrelay_audio_io::{
-    VirtualEndpointCapabilities, VirtualEndpointSettings,
+    ChannelLayout, NativeDeviceFormats, NativeSampleFormat, NativeStreamFormat,
+    NativeStreamFormats, StreamSpec, VirtualEndpointCapabilities, VirtualEndpointDeviceSettings,
+    VirtualEndpointId, VirtualEndpointSettings, VirtualEndpointSpec,
     process::{ProcessingState, SampleFaults},
     session::{
         AudioBackendKind, AudioSessionCapabilities, AudioSessionStatus, ClockAuthority,
-        SessionFormat,
+        SessionFormat, SessionIssue,
     },
 };
 use mixrelay_audio_recorder::{Encoding, RecorderState};
-use mixrelay_test_support::reply_fixture::refresh_reply_fixture;
+use mixrelay_test_support::{
+    every_variant,
+    reply_fixture::{refresh_reply_fixture, variants},
+};
 use serde::Serialize;
+use serde_json::{Value, json};
 
 use crate::{
     AppStatus, ControlStateSnapshot, DriverState, EngineControlSnapshot, EnginePauseReason,
@@ -40,18 +46,58 @@ const SESSION_FORMAT: SessionFormat = SessionFormat {
     block_frames: 128,
 };
 
+fn native(channels: u16, sample_format: NativeSampleFormat) -> NativeStreamFormat {
+    NativeStreamFormat {
+        sample_rate: 48_000,
+        channels,
+        sample_format,
+    }
+}
+
+fn virtual_endpoint_settings() -> VirtualEndpointSettings {
+    let stereo = StreamSpec {
+        channels: 2,
+        channel_layout: ChannelLayout::Stereo,
+    };
+    VirtualEndpointSettings {
+        devices: vec![VirtualEndpointDeviceSettings {
+            spec: VirtualEndpointSpec {
+                id: VirtualEndpointId::new("relay-1".to_owned()),
+                display_name: "MixRelay 1".to_owned(),
+                render: Some(stereo),
+                capture: None,
+                supported_sample_rates: vec![44_100, 48_000],
+                default_sample_rate: 48_000,
+            },
+            native_device_ids: vec!["MixRelayDevice:relay-1".to_owned()],
+            observed_sample_rate: Some(48_000),
+            supported_sample_rates: vec![44_100, 48_000],
+            can_set_sample_rate: true,
+            native_formats: NativeDeviceFormats {
+                render: NativeStreamFormats {
+                    current: Some(native(2, NativeSampleFormat::Float32)),
+                    supported: vec![
+                        native(2, NativeSampleFormat::Float32),
+                        native(2, NativeSampleFormat::Signed24),
+                    ],
+                },
+                capture: NativeStreamFormats::default(),
+            },
+        }],
+        ..VirtualEndpointSettings::configurable(&VirtualEndpointCapabilities {
+            max_render_channels: 2,
+            max_capture_channels: 2,
+            supported_sample_rates: vec![44_100, 48_000],
+            supports_duplex: true,
+            supports_dynamic_creation: true,
+        })
+    }
+}
+
 fn session() -> AudioSessionStatus {
     AudioSessionStatus {
         endpoint_preferences_unavailable: false,
-        virtual_endpoint_settings: Some(VirtualEndpointSettings::configurable(
-            &VirtualEndpointCapabilities {
-                max_render_channels: 2,
-                max_capture_channels: 2,
-                supported_sample_rates: vec![44_100, 48_000],
-                supports_duplex: true,
-                supports_dynamic_creation: true,
-            },
-        )),
+        virtual_endpoint_settings: Some(virtual_endpoint_settings()),
         processing_state: ProcessingState::Running,
         discontinuities: 1,
         format: SESSION_FORMAT,
@@ -298,13 +344,121 @@ fn telemetry_state() -> ControlStateSnapshot {
     }
 }
 
+/// Every variant of each status enum the UI decodes, by its field path in `status`.
+fn status_variants() -> BTreeMap<String, Value> {
+    let device = "audioSession.virtualEndpointSettings.devices[0]";
+    BTreeMap::from([
+        (
+            "driverState".to_owned(),
+            variants(&every_variant!(DriverState {
+                NotInstalled,
+                Installing,
+                RestartRequired,
+                InstalledNotLoaded,
+                Blocked,
+                Unavailable,
+                InvalidPermissions,
+                VersionMismatch,
+                Ready,
+            })),
+        ),
+        (
+            "enginePower.pauseReason".to_owned(),
+            variants(&every_variant!(EnginePauseReason { RepeatedFailures })),
+        ),
+        (
+            "audioSession.processingState".to_owned(),
+            variants(&every_variant!(ProcessingState {
+                Idle,
+                Running,
+                Stopped
+            })),
+        ),
+        (
+            "audioSession.clockAuthority".to_owned(),
+            variants(&every_variant!(ClockAuthority {
+                EngineTimer,
+                Device,
+                AudioServer,
+                Host,
+            })),
+        ),
+        (
+            "audioSession.issue".to_owned(),
+            variants(&every_variant!(SessionIssue {
+                DeviceUnavailable,
+                ProcessingFailed,
+                ApplicationUnavailable,
+                ApplicationAmbiguous,
+                SampleRateMismatch,
+                BlockSizeMismatch,
+                ClockNotSynchronized,
+                InvalidFormat,
+                ReconfigurationFailed,
+                PreferencesUnavailable,
+                StoredFormatUnavailable,
+            })),
+        ),
+        (
+            "audioSession.capabilities.backend".to_owned(),
+            variants(&every_variant!(AudioBackendKind {
+                CoreAudio,
+                PipeWire,
+                ContractOnly,
+            })),
+        ),
+        (
+            format!("{device}.spec.render.channelLayout"),
+            variants(&every_variant!(ChannelLayout {
+                Mono,
+                Stereo,
+                Discrete
+            })),
+        ),
+        (
+            format!("{device}.nativeFormats.render.supported[0].sampleFormat"),
+            variants(&every_variant!(NativeSampleFormat {
+                Float32,
+                Signed16,
+                Signed24,
+                Signed32
+            })),
+        ),
+    ])
+}
+
+/// Every variant of each telemetry-state enum the UI decodes, by its field path.
+fn telemetry_state_variants() -> BTreeMap<String, Value> {
+    BTreeMap::from([
+        (
+            "graph.pendingReason".to_owned(),
+            variants(&every_variant!(GraphPendingReason {
+                AwaitingMicrophonePermission
+            })),
+        ),
+        (
+            "editors[0].state".to_owned(),
+            variants(&every_variant!(ProcessorEditorState {
+                Unavailable,
+                Closed,
+                Opening,
+                Open,
+                Failed,
+            })),
+        ),
+        ("controls".to_owned(), json!([null])),
+    ])
+}
+
 #[test]
 fn engine_reply_fixtures_match_the_serialized_contracts() {
     let stale: Vec<_> = [
         stale("status", &status()),
+        stale("status.variants", &status_variants()),
         stale("graph", &graph()),
         stale("catalog", &catalog()),
         stale("telemetry-state", &telemetry_state()),
+        stale("telemetry-state.variants", &telemetry_state_variants()),
     ]
     .into_iter()
     .flatten()

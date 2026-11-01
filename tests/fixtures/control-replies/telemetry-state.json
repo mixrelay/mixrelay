@@ -74,7 +74,58 @@
           ],
           "defaultSampleRate": 48000
         },
-        "devices": []
+        "devices": [
+          {
+            "spec": {
+              "id": "relay-1",
+              "displayName": "MixRelay 1",
+              "render": {
+                "channels": 2,
+                "channelLayout": "stereo"
+              },
+              "capture": null,
+              "supportedSampleRates": [
+                44100,
+                48000
+              ],
+              "defaultSampleRate": 48000
+            },
+            "nativeDeviceIds": [
+              "MixRelayDevice:relay-1"
+            ],
+            "observedSampleRate": 48000,
+            "supportedSampleRates": [
+              44100,
+              48000
+            ],
+            "canSetSampleRate": true,
+            "nativeFormats": {
+              "render": {
+                "current": {
+                  "sampleRate": 48000,
+                  "channels": 2,
+                  "sampleFormat": "float32"
+                },
+                "supported": [
+                  {
+                    "sampleRate": 48000,
+                    "channels": 2,
+                    "sampleFormat": "float32"
+                  },
+                  {
+                    "sampleRate": 48000,
+                    "channels": 2,
+                    "sampleFormat": "signed24"
+                  }
+                ]
+              },
+              "capture": {
+                "current": null,
+                "supported": []
+              }
+            }
+          }
+        ]
       },
       "processingState": "running",
       "discontinuities": 1,

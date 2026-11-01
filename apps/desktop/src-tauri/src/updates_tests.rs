@@ -1,3 +1,8 @@
+use mixrelay_test_support::{
+    every_variant,
+    reply_fixture::{refresh_reply_fixture, variants},
+};
+
 use super::{
     Catalog, Download, LatestVersion, MAX_RESPONSE_BYTES, Platform, Product, Release, UpdateError,
     UpdateState, authorize_download, https_url, product_update, read_response, stable_version,
@@ -360,8 +365,20 @@ fn updates_reply_fixture_matches_the_serialized_contract() {
             vec![download("macos", "universal")],
         )),
     );
+    let states = std::collections::BTreeMap::from([(
+        "[0].state",
+        variants(&every_variant!(UpdateState {
+            Available,
+            Current,
+            Published,
+            NotPublished,
+            Unavailable,
+        })),
+    )]);
+    let update_stale = refresh_reply_fixture("updates", &[update]).unwrap();
+    let states_stale = refresh_reply_fixture("updates.variants", &states).unwrap();
     assert!(
-        !mixrelay_test_support::reply_fixture::refresh_reply_fixture("updates", &[update]).unwrap(),
-        "the updates reply fixture was stale and has been rewritten; review and commit it"
+        !update_stale && !states_stale,
+        "updates reply fixtures were stale and have been rewritten; review and commit them"
     );
 }
