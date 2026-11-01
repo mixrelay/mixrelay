@@ -32,13 +32,13 @@ fn a_client_id_never_starts_work_twice() {
     );
     assert_eq!(
         ledger.admit(Some("client"), 2, at(0), unused),
-        Err(Rejection::Pending)
+        Err(Rejection::Pending("client"))
     );
     assert_eq!(ledger.pending(), 1);
     assert_eq!(ledger.complete("client", "done", at(1)), Some(1));
     assert_eq!(
         ledger.admit(Some("client"), 3, at(2), unused),
-        Err(Rejection::Complete("done"))
+        Err(Rejection::Complete("client", "done"))
     );
     assert_eq!(ledger.len(), 1);
 }
@@ -51,7 +51,7 @@ fn closed_admission_still_resolves_known_client_ids() {
     ledger.close();
     assert_eq!(
         ledger.admit(Some("client"), 2, at(0), unused),
-        Err(Rejection::Complete("done"))
+        Err(Rejection::Complete("client", "done"))
     );
     assert_eq!(
         ledger.admit(Some("other"), 2, at(0), unused),

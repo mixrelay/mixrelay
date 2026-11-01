@@ -1,6 +1,6 @@
 use std::{
     sync::{Arc, Mutex, MutexGuard},
-    time::{Duration, Instant as SystemInstant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -18,10 +18,12 @@ mod ledger;
 use ledger::{Ack, ReceiptLedger, Rejection, Snapshot};
 use mixrelay_time::MonotonicClock;
 
-/// The process's monotonic clock, read from when the owner was created.
-struct SystemClock(SystemInstant);
+/// The standard library's monotonic clock, read from when the owner was created. It is the
+/// production clock because `std::time::Instant` behaves the same on every platform; tests
+/// pass their own through `with_clock`.
+struct StdClock(StdInstant);
 
-impl MonotonicClock for SystemClock {
+impl MonotonicClock for StdClock {
     fn now(&self) -> mixrelay_time::Instant {
         mixrelay_time::Instant::from_origin(self.0.elapsed())
     }
@@ -62,7 +64,7 @@ pub struct ControlOperations {
 
 struct Inner {
     ledger: Mutex<ReceiptLedger<Box<StoredResponse>, Arc<Notify>>>,
-    clock: Arc<dyn MonotonicClock>,
+    clock: Box<dyn MonotonicClock>,
     ingress: Arc<Semaphore>,
     owner_nonce: u128,
     next_id: std::sync::atomic::AtomicU64,
@@ -89,10 +91,10 @@ impl ControlOperations {
     /// Creates an open operation owner with a fresh session identifier namespace.
     #[must_use]
     pub fn new() -> Self {
-        Self::with_clock(Arc::new(SystemClock(SystemInstant::now())))
+        Self::with_clock(Box::new(StdClock(StdInstant::now())))
     }
 
-    fn with_clock(clock: Arc<dyn MonotonicClock>) -> Self {
+    fn with_clock(clock: Box<dyn MonotonicClock>) -> Self {
         static OWNER_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -151,7 +153,10 @@ impl ControlOperations {
         self.inner.clock.now()
     }
 
-    fn admit(&self, requested: Option<&str>) -> Result<Admission, Rejection<Box<StoredResponse>>> {
+    fn admit<'a>(
+        &self,
+        requested: Option<&'a str>,
+    ) -> Result<Admission, Rejection<'a, Box<StoredResponse>>> {
         let notify = Arc::new(Notify::new());
         let now = self.now();
         let id = self
@@ -320,15 +325,9 @@ pub(super) async fn dispatch(
     };
     let admission = match operations.admit(requested.as_deref()) {
         Ok(admission) => admission,
-        Err(rejection) => {
-            // A rejected known ID is always the client's own.
-            let id = requested.as_deref().unwrap_or_default();
-            return match rejection {
-                Rejection::Pending => pending_response(id),
-                Rejection::Complete(response) => response.into_response(Some(id)),
-                Rejection::Full => admission_full_response(&request),
-            };
-        }
+        Err(Rejection::Pending(id)) => return pending_response(id),
+        Err(Rejection::Complete(id, response)) => return response.into_response(Some(id)),
+        Err(Rejection::Full) => return admission_full_response(&request),
     };
     let operation_id = admission.id.clone();
     let task_operations = operations.clone();
@@ -893,7 +892,7 @@ mod tests {
     #[tokio::test]
     async fn client_receipts_are_bounded_until_acknowledged_or_expired() {
         let clock = ManualClock::new(mixrelay_time::Instant::from_origin(Duration::ZERO));
-        let operations = ControlOperations::with_clock(Arc::new(clock.clone()));
+        let operations = ControlOperations::with_clock(Box::new(clock.clone()));
         let router = test_router(
             operations.clone(),
             post(|| async { StatusCode::NO_CONTENT }),
@@ -1146,7 +1145,7 @@ mod tests {
     #[test]
     fn acknowledgement_and_expiry_remove_completed_receipts_only() {
         let clock = ManualClock::new(mixrelay_time::Instant::from_origin(Duration::ZERO));
-        let operations = ControlOperations::with_clock(Arc::new(clock.clone()));
+        let operations = ControlOperations::with_clock(Box::new(clock.clone()));
         let pending = operations.admit(None).expect("pending admission");
         assert!(matches!(operations.acknowledge(&pending.id), Ack::Pending));
         operations.complete(&pending.id, stored(StatusCode::OK, b"ok", true));

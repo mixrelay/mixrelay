@@ -15,14 +15,13 @@ pub(super) struct ReceiptLedger<R, W> {
     receipts: HashMap<String, Receipt<R, W>>,
 }
 
-struct Receipt<R, W> {
-    waiter: W,
-    outcome: Outcome<R>,
-}
-
-enum Outcome<R> {
-    Pending,
-    Complete { response: R, completed_at: Instant },
+enum Receipt<R, W> {
+    /// Running; `W` is woken when it completes.
+    Pending(W),
+    Complete {
+        response: R,
+        completed_at: Instant,
+    },
 }
 
 /// What a receipt says about an operation.
@@ -35,11 +34,11 @@ pub(super) enum Snapshot<R> {
 
 /// Why `admit` did not start a new operation.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum Rejection<R> {
+pub(super) enum Rejection<'a, R> {
     /// The client ID already names a running operation.
-    Pending,
+    Pending(&'a str),
     /// The client ID already names a completed operation; replay its response.
-    Complete(R),
+    Complete(&'a str, R),
     /// Admission is closed or every receipt is in use.
     Full,
 }
@@ -51,7 +50,7 @@ pub(super) enum Ack {
     Missing,
 }
 
-impl<R: Clone, W: Clone> ReceiptLedger<R, W> {
+impl<R: Clone, W> ReceiptLedger<R, W> {
     pub(super) fn new(capacity: usize, completed_ttl: Duration) -> Self {
         Self {
             capacity,
@@ -78,21 +77,31 @@ impl<R: Clone, W: Clone> ReceiptLedger<R, W> {
     }
 
     /// Starts an operation under the client's ID, or under the first identity from
-    /// `issue` that no receipt uses. A known client ID never starts work again.
-    pub(super) fn admit(
+    /// `issue` that no receipt uses, and keeps `waiter` until it completes.
+    ///
+    /// Expired receipts are dropped first, so their IDs start new work. `now` may be read
+    /// slightly before another caller's: expiry saturates, so a late reading never expires
+    /// a receipt early.
+    ///
+    /// # Errors
+    ///
+    /// Checked in this order: a client ID with a kept receipt returns that receipt
+    /// (`Pending` or `Complete`) even while admission is closed; then `Full` when
+    /// admission is closed or every receipt is in use.
+    pub(super) fn admit<'a>(
         &mut self,
-        requested: Option<&str>,
+        requested: Option<&'a str>,
         waiter: W,
         now: Instant,
         mut issue: impl FnMut() -> String,
-    ) -> Result<String, Rejection<R>> {
+    ) -> Result<String, Rejection<'a, R>> {
         self.purge_expired(now);
         if let Some(id) = requested
             && let Some(receipt) = self.receipts.get(id)
         {
-            return Err(match &receipt.outcome {
-                Outcome::Pending => Rejection::Pending,
-                Outcome::Complete { response, .. } => Rejection::Complete(response.clone()),
+            return Err(match receipt {
+                Receipt::Pending(_) => Rejection::Pending(id),
+                Receipt::Complete { response, .. } => Rejection::Complete(id, response.clone()),
             });
         }
         if !self.admission_open || self.receipts.len() >= self.capacity {
@@ -107,13 +116,7 @@ impl<R: Clone, W: Clone> ReceiptLedger<R, W> {
             },
             str::to_owned,
         );
-        self.receipts.insert(
-            id.clone(),
-            Receipt {
-                waiter,
-                outcome: Outcome::Pending,
-            },
-        );
+        self.receipts.insert(id.clone(), Receipt::Pending(waiter));
         self.pending += 1;
         Ok(id)
     }
@@ -122,22 +125,28 @@ impl<R: Clone, W: Clone> ReceiptLedger<R, W> {
     /// A missing or already completed receipt is left unchanged.
     pub(super) fn complete(&mut self, id: &str, response: R, now: Instant) -> Option<W> {
         let receipt = self.receipts.get_mut(id)?;
-        if !matches!(receipt.outcome, Outcome::Pending) {
-            return None;
-        }
-        receipt.outcome = Outcome::Complete {
+        let completed = Receipt::Complete {
             response,
             completed_at: now,
         };
-        self.pending = self.pending.saturating_sub(1);
-        Some(receipt.waiter.clone())
+        match std::mem::replace(receipt, completed) {
+            Receipt::Pending(waiter) => {
+                self.pending = self.pending.saturating_sub(1);
+                Some(waiter)
+            }
+            // The first completion stands.
+            first => {
+                *receipt = first;
+                None
+            }
+        }
     }
 
     pub(super) fn snapshot(&mut self, id: &str, now: Instant) -> Snapshot<R> {
         self.purge_expired(now);
-        match self.receipts.get(id).map(|receipt| &receipt.outcome) {
-            Some(Outcome::Pending) => Snapshot::Pending,
-            Some(Outcome::Complete { response, .. }) => Snapshot::Complete(response.clone()),
+        match self.receipts.get(id) {
+            Some(Receipt::Pending(_)) => Snapshot::Pending,
+            Some(Receipt::Complete { response, .. }) => Snapshot::Complete(response.clone()),
             None => Snapshot::Missing,
         }
     }
@@ -145,10 +154,10 @@ impl<R: Clone, W: Clone> ReceiptLedger<R, W> {
     /// Removes a completed receipt so its ID and slot can be reused.
     pub(super) fn acknowledge(&mut self, id: &str, now: Instant) -> Ack {
         self.purge_expired(now);
-        match self.receipts.get(id).map(|receipt| &receipt.outcome) {
+        match self.receipts.get(id) {
             None => Ack::Missing,
-            Some(Outcome::Pending) => Ack::Pending,
-            Some(Outcome::Complete { .. }) => {
+            Some(Receipt::Pending(_)) => Ack::Pending,
+            Some(Receipt::Complete { .. }) => {
                 self.receipts.remove(id);
                 Ack::Completed
             }
@@ -157,19 +166,21 @@ impl<R: Clone, W: Clone> ReceiptLedger<R, W> {
 
     /// Removes and returns a completed response that no client will poll for.
     pub(super) fn take_completed(&mut self, id: &str) -> Option<R> {
-        let receipt = self.receipts.remove(id)?;
-        if let Outcome::Complete { response, .. } = receipt.outcome {
-            return Some(response);
+        let (id, receipt) = self.receipts.remove_entry(id)?;
+        match receipt {
+            Receipt::Complete { response, .. } => Some(response),
+            pending => {
+                self.receipts.insert(id, pending);
+                None
+            }
         }
-        self.receipts.insert(id.to_owned(), receipt);
-        None
     }
 
     /// Completed receipts expire `completed_ttl` after completion; pending ones never do.
     fn purge_expired(&mut self, now: Instant) {
         let ttl = self.completed_ttl;
         self.receipts.retain(|_, receipt| {
-            !matches!(&receipt.outcome, Outcome::Complete { completed_at, .. }
+            !matches!(receipt, Receipt::Complete { completed_at, .. }
                 if now.duration_since(*completed_at) >= ttl)
         });
     }
