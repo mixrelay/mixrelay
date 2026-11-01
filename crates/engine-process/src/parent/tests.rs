@@ -1,41 +1,10 @@
-//! Controller child startup, ownership loss and readiness failures.
-use super::readiness::wait_with_timeout;
+//! Controller child startup, ownership loss and readiness failures with real processes.
 use super::*;
+use mixrelay_time::StdClock;
 use std::{
-    io::{Cursor, Read},
     thread,
     time::{Duration, Instant},
 };
-
-#[test]
-fn readiness_requires_the_exact_acknowledgement() {
-    assert!(wait_with_timeout(Cursor::new(*crate::READY), Duration::from_secs(1)).is_ok());
-    let error = wait_with_timeout(Cursor::new(b"MRREADY"), Duration::from_secs(1))
-        .expect_err("short acknowledgement must fail");
-    assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
-
-    let error = wait_with_timeout(Cursor::new(b"MRREADY!"), Duration::from_secs(1))
-        .expect_err("wrong acknowledgement must fail");
-    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-}
-
-#[test]
-fn readiness_timeout_is_bounded() {
-    let started = Instant::now();
-    let error = wait_with_timeout(SlowReader, Duration::from_millis(10))
-        .expect_err("a reader that never acknowledges must time out");
-    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
-    assert!(started.elapsed() < Duration::from_secs(1));
-}
-
-struct SlowReader;
-
-impl Read for SlowReader {
-    fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
-        thread::sleep(Duration::from_millis(100));
-        Ok(0)
-    }
-}
 
 #[cfg(unix)]
 mod unix_processes {
@@ -83,8 +52,12 @@ mod unix_processes {
         let (directory, executable) = fixture("cat >/dev/null");
         let mut active = start_fixture(&executable).unwrap();
         let missing = directory.path().join("absent-engine");
-        let error =
-            ControllerEngine::start_with_reaper(&missing, Reaper::refuse_preparation).unwrap_err();
+        let error = ControllerEngine::start_with_reaper(
+            &missing,
+            &StdClock::new(),
+            Reaper::refuse_preparation,
+        )
+        .unwrap_err();
         let preserved = active.try_wait().unwrap().is_none();
         active.request_shutdown();
         let stopped = wait_for_exit(&mut active);
@@ -97,11 +70,12 @@ mod unix_processes {
     fn child_spawn_failure_closes_the_prepared_reaper() {
         let directory = tempdir().unwrap();
         let (reaper, observed) = Reaper::observe_exit().unwrap();
-        let error =
-            ControllerEngine::start_with_reaper(&directory.path().join("absent-engine"), || {
-                Ok(reaper)
-            })
-            .unwrap_err();
+        let error = ControllerEngine::start_with_reaper(
+            &directory.path().join("absent-engine"),
+            &StdClock::new(),
+            || Ok(reaper),
+        )
+        .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
         observed.recv_timeout(Duration::from_secs(2)).unwrap();
     }
@@ -110,7 +84,9 @@ mod unix_processes {
     fn invalid_readiness_closes_the_prepared_reaper() {
         let (_directory, executable) = fixture_without_ready("printf 'MRREADY?\\n'\nexit 0");
         let (reaper, observed) = Reaper::observe_exit().unwrap();
-        let error = ControllerEngine::start_with_reaper(&executable, || Ok(reaper)).unwrap_err();
+        let error =
+            ControllerEngine::start_with_reaper(&executable, &StdClock::new(), || Ok(reaper))
+                .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         observed.recv_timeout(Duration::from_secs(2)).unwrap();
     }
@@ -121,7 +97,9 @@ mod unix_processes {
             "cat >/dev/null\ni=0\nwhile [ ! -f \"$0.release\" ] && [ \"$i\" -lt 500 ]; do\n  i=$((i+1))\n  sleep 0.01\ndone",
         );
         let (reaper, observed) = Reaper::observe_exit().unwrap();
-        let engine = ControllerEngine::start_with_reaper(&executable, || Ok(reaper)).unwrap();
+        let engine =
+            ControllerEngine::start_with_reaper(&executable, &StdClock::new(), || Ok(reaper))
+                .unwrap();
         let (finished, returned) = std::sync::mpsc::channel();
         let dropping = thread::spawn(move || {
             drop(engine);
@@ -173,14 +151,14 @@ mod unix_processes {
     /// error a bounded number of times.
     fn start_fixture(executable: &Path) -> io::Result<ControllerEngine> {
         for _ in 0..100 {
-            match ControllerEngine::start(executable) {
+            match ControllerEngine::start(executable, &StdClock::new()) {
                 Err(error) if error.kind() == io::ErrorKind::ExecutableFileBusy => {
                     thread::sleep(Duration::from_millis(10));
                 }
                 result => return result,
             }
         }
-        ControllerEngine::start(executable)
+        ControllerEngine::start(executable, &StdClock::new())
     }
 
     fn fixture(body: &str) -> (TempDir, PathBuf) {

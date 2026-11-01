@@ -5,6 +5,8 @@ use std::{
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
 };
 
+use mixrelay_time::{MonotonicClock, Sleeper};
+
 mod readiness;
 mod reaping;
 use reaping::Reaper;
@@ -42,14 +44,15 @@ impl ControllerEngine {
     ///
     /// Returns an I/O error if reaper preparation, spawning, piping, readiness, or
     /// the startup liveness check fails. On every post-spawn error the private
-    /// lease is closed, the owned child is given a bounded grace period, and
-    /// only that child is killed and reaped if it remains alive.
-    pub fn start(executable: &Path) -> io::Result<Self> {
-        Self::start_with_reaper(executable, Reaper::prepare)
+    /// lease is closed, the owned child is given a bounded grace period measured on
+    /// `clock`, and only that child is killed and reaped if it remains alive.
+    pub fn start(executable: &Path, clock: &(impl MonotonicClock + Sleeper)) -> io::Result<Self> {
+        Self::start_with_reaper(executable, clock, Reaper::prepare)
     }
 
     fn start_with_reaper(
         executable: &Path,
+        clock: &(impl MonotonicClock + Sleeper),
         prepare: impl FnOnce() -> io::Result<Reaper>,
     ) -> io::Result<Self> {
         let reaper = prepare().map_err(|error| {
@@ -75,6 +78,7 @@ impl ControllerEngine {
             return Err(fail_start(
                 child,
                 reaper,
+                clock,
                 io::Error::other("controller-owned engine stdin pipe was not created"),
             ));
         };
@@ -83,18 +87,19 @@ impl ControllerEngine {
             return Err(fail_start(
                 child,
                 reaper,
+                clock,
                 io::Error::other("controller-owned engine stdout pipe was not created"),
             ));
         };
 
         if let Err(error) = readiness::wait(stdout) {
             drop(lease);
-            return Err(fail_start(child, reaper, error));
+            return Err(fail_start(child, reaper, clock, error));
         }
 
         if let Err(error) = reject_child_that_exited_during_startup(&mut child) {
             drop(lease);
-            return Err(fail_start(child, reaper, error));
+            return Err(fail_start(child, reaper, clock, error));
         }
 
         Ok(Self {
@@ -165,11 +170,16 @@ fn reject_child_that_exited_during_startup(child: &mut Child) -> io::Result<()> 
     Ok(())
 }
 
-fn fail_start(mut child: Child, reaper: Reaper, error: io::Error) -> io::Error {
+fn fail_start(
+    mut child: Child,
+    reaper: Reaper,
+    clock: &(impl MonotonicClock + Sleeper),
+    error: io::Error,
+) -> io::Error {
     // Closing stdin is the first cleanup action so a cooperative child can
     // leave its normal drain path before the bounded grace period expires.
     child.stdin.take();
-    match reaping::after_startup_failure(child, reaper) {
+    match reaping::after_startup_failure(child, reaper, clock) {
         Ok(()) => error,
         Err(cleanup_error) => io::Error::new(
             error.kind(),

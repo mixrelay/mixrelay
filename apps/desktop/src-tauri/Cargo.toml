@@ -20,6 +20,7 @@ midir = "=0.11.1"
 mixrelay-control-protocol = { path = "../../../crates/control-protocol" }
 mixrelay-driver-control = { path = "../../../crates/driver-control" }
 mixrelay-engine-process = { path = "../../../crates/engine-process" }
+mixrelay-time = { path = "../../../crates/time" }
 mixrelay-licensing = { path = "../../../crates/licensing" }
 # Native credential stores; no plaintext license-file fallback.
 open = "5.4.4"

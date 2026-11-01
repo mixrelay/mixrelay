@@ -49,7 +49,7 @@ export const CRATES = {
   'mixrelay-local-socket': { layer: 'foundation', allows: [] },
   'mixrelay-licensing': { layer: 'foundation', allows: [] },
   'mixrelay-processor-state': { layer: 'foundation', allows: [] },
-  'mixrelay-engine-process': { layer: 'foundation', allows: [] },
+  'mixrelay-engine-process': { layer: 'foundation', allows: ['mixrelay-time'] },
   'mixrelay-time': { layer: 'foundation', allows: [] },
   'mixrelay-audio-graph': { layer: 'model', allows: FOUNDATION },
   'mixrelay-audio-recorder': { layer: 'model', allows: FOUNDATION },

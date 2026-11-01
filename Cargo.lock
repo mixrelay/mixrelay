@@ -2869,6 +2869,7 @@ dependencies = [
  "mixrelay-process-tap",
  "mixrelay-realtime",
  "mixrelay-test-support",
+ "mixrelay-time",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -2936,6 +2937,7 @@ version = "0.1.0"
 name = "mixrelay-engine-process"
 version = "0.1.0"
 dependencies = [
+ "mixrelay-time",
  "tempfile",
  "tokio",
  "tracing",
@@ -3203,6 +3205,7 @@ dependencies = [
  "mixrelay-processor-state",
  "mixrelay-realtime",
  "mixrelay-test-support",
+ "mixrelay-time",
  "parking_lot",
  "reqwest",
  "serde",
