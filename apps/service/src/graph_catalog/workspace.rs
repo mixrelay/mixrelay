@@ -6,7 +6,7 @@ use std::{
 };
 
 use mixrelay_control_protocol::{GraphCatalogResponse, WorkspaceAction, WorkspaceRequest};
-use mixrelay_processor_state::{StateError, StateRef, read_bundle, write_bundle};
+use mixrelay_processor_state::{StateError, StateRef, preview_bundle, read_bundle, write_bundle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -47,7 +47,7 @@ fn load_fingerprinted(path: &Path) -> Result<(Catalog, String, Vec<StateRef>), P
     let file = File::open(path).map_err(|error| unavailable(&error.to_string()))?;
     let mut reader = FingerprintedReader::new(file);
     let (manifest, bundled_refs) =
-        read_bundle(&mut reader, None).map_err(|error| bundle_read_error(&error))?;
+        preview_bundle(&mut reader).map_err(|error| bundle_read_error(&error))?;
     reader
         .require_eof()
         .map_err(|error| invalid(&format!("invalid MixRelay workspace bundle: {error}")))?;
@@ -87,7 +87,7 @@ fn import_bundle(
     let file = File::open(path).map_err(|error| unavailable(&error.to_string()))?;
     let mut reader = FingerprintedReader::new(file);
     let (manifest, bundled_refs) =
-        read_bundle(&mut reader, Some(store)).map_err(|error| bundle_read_error(&error))?;
+        read_bundle(&mut reader, store).map_err(|error| bundle_read_error(&error))?;
     reader
         .require_eof()
         .map_err(|error| invalid(&format!("invalid MixRelay workspace bundle: {error}")))?;
