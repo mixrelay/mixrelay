@@ -1,10 +1,8 @@
 use mixrelay_licensing::{AccessSnapshot, AccessStatus};
 use std::collections::BTreeMap;
 
-use mixrelay_test_support::{
-    every_variant,
-    reply_fixture::{refresh_reply_fixture, variants},
-};
+use mixrelay_test_support::{every_variant, reply_fixture::refresh_reply_fixture};
+use serde_json::json;
 
 use super::LicensingStatus;
 
@@ -23,7 +21,7 @@ fn licensing_status_reply_fixture_matches_the_serialized_contract() {
     };
     let statuses = BTreeMap::from([(
         "status",
-        variants(&every_variant!(AccessStatus {
+        json!(every_variant!(AccessStatus {
             Free,
             Licensed,
             ClockInvalid,

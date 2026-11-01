@@ -5,10 +5,8 @@ use mixrelay_audio_io::{
     NativeStreamFormats, StreamSpec, VirtualEndpointCapabilities, VirtualEndpointDeviceSettings,
     VirtualEndpointId, VirtualEndpointSettings, VirtualEndpointSpec,
 };
-use mixrelay_test_support::{
-    every_variant,
-    reply_fixture::{refresh_reply_fixture, variants},
-};
+use mixrelay_test_support::{every_variant, reply_fixture::refresh_reply_fixture};
+use serde_json::json;
 
 use super::{DriverSnapshot, DriverState};
 
@@ -36,7 +34,7 @@ fn driver_snapshot_reply_fixture_matches_the_serialized_contract() {
     };
     let states = BTreeMap::from([(
         "state",
-        variants(&every_variant!(DriverState {
+        json!(every_variant!(DriverState {
             Ready,
             NotInstalled,
             InstalledNotLoaded,

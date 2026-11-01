@@ -1,7 +1,5 @@
-use mixrelay_test_support::{
-    every_variant,
-    reply_fixture::{refresh_reply_fixture, variants},
-};
+use mixrelay_test_support::{every_variant, reply_fixture::refresh_reply_fixture};
+use serde_json::json;
 
 use super::{
     Catalog, Download, LatestVersion, MAX_RESPONSE_BYTES, Platform, Product, Release, UpdateError,
@@ -367,7 +365,7 @@ fn updates_reply_fixture_matches_the_serialized_contract() {
     );
     let states = std::collections::BTreeMap::from([(
         "[0].state",
-        variants(&every_variant!(UpdateState {
+        json!(every_variant!(UpdateState {
             Available,
             Current,
             Published,

@@ -39,14 +39,6 @@ macro_rules! every_variant {
     }};
 }
 
-/// Serializes the variants listed for one field path of a fixture.
-/// # Panics
-/// Panics if a variant cannot be serialized, which only a broken `Serialize` impl causes.
-#[must_use]
-pub fn variants<T: Serialize>(values: &[T]) -> serde_json::Value {
-    serde_json::to_value(values).expect("enum variants serialize")
-}
-
 fn refresh(path: &Path, value: &impl Serialize) -> io::Result<bool> {
     let previous = fs::read_to_string(path).unwrap_or_default();
     let current = serde_json::to_string_pretty(value)? + "\n";
@@ -71,7 +63,7 @@ mod tests {
     #[test]
     fn lists_every_variant_serialized() {
         assert_eq!(
-            variants(&every_variant!(Sample { First, Second })),
+            serde_json::json!(every_variant!(Sample { First, Second })),
             serde_json::json!(["First", "Second"])
         );
     }

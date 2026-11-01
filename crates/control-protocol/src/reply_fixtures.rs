@@ -20,10 +20,7 @@ use mixrelay_audio_io::{
     },
 };
 use mixrelay_audio_recorder::{Encoding, RecorderState};
-use mixrelay_test_support::{
-    every_variant,
-    reply_fixture::{refresh_reply_fixture, variants},
-};
+use mixrelay_test_support::{every_variant, reply_fixture::refresh_reply_fixture};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -350,7 +347,7 @@ fn status_variants() -> BTreeMap<String, Value> {
     BTreeMap::from([
         (
             "driverState".to_owned(),
-            variants(&every_variant!(DriverState {
+            json!(every_variant!(DriverState {
                 NotInstalled,
                 Installing,
                 RestartRequired,
@@ -364,11 +361,11 @@ fn status_variants() -> BTreeMap<String, Value> {
         ),
         (
             "enginePower.pauseReason".to_owned(),
-            variants(&every_variant!(EnginePauseReason { RepeatedFailures })),
+            json!(every_variant!(EnginePauseReason { RepeatedFailures })),
         ),
         (
             "audioSession.processingState".to_owned(),
-            variants(&every_variant!(ProcessingState {
+            json!(every_variant!(ProcessingState {
                 Idle,
                 Running,
                 Stopped
@@ -376,7 +373,7 @@ fn status_variants() -> BTreeMap<String, Value> {
         ),
         (
             "audioSession.clockAuthority".to_owned(),
-            variants(&every_variant!(ClockAuthority {
+            json!(every_variant!(ClockAuthority {
                 EngineTimer,
                 Device,
                 AudioServer,
@@ -385,7 +382,7 @@ fn status_variants() -> BTreeMap<String, Value> {
         ),
         (
             "audioSession.issue".to_owned(),
-            variants(&every_variant!(SessionIssue {
+            json!(every_variant!(SessionIssue {
                 DeviceUnavailable,
                 ProcessingFailed,
                 ApplicationUnavailable,
@@ -401,7 +398,7 @@ fn status_variants() -> BTreeMap<String, Value> {
         ),
         (
             "audioSession.capabilities.backend".to_owned(),
-            variants(&every_variant!(AudioBackendKind {
+            json!(every_variant!(AudioBackendKind {
                 CoreAudio,
                 PipeWire,
                 ContractOnly,
@@ -409,7 +406,7 @@ fn status_variants() -> BTreeMap<String, Value> {
         ),
         (
             format!("{device}.spec.render.channelLayout"),
-            variants(&every_variant!(ChannelLayout {
+            json!(every_variant!(ChannelLayout {
                 Mono,
                 Stereo,
                 Discrete
@@ -417,7 +414,7 @@ fn status_variants() -> BTreeMap<String, Value> {
         ),
         (
             format!("{device}.nativeFormats.render.supported[0].sampleFormat"),
-            variants(&every_variant!(NativeSampleFormat {
+            json!(every_variant!(NativeSampleFormat {
                 Float32,
                 Signed16,
                 Signed24,
@@ -432,13 +429,13 @@ fn telemetry_state_variants() -> BTreeMap<String, Value> {
     BTreeMap::from([
         (
             "graph.pendingReason".to_owned(),
-            variants(&every_variant!(GraphPendingReason {
+            json!(every_variant!(GraphPendingReason {
                 AwaitingMicrophonePermission
             })),
         ),
         (
             "editors[0].state".to_owned(),
-            variants(&every_variant!(ProcessorEditorState {
+            json!(every_variant!(ProcessorEditorState {
                 Unavailable,
                 Closed,
                 Opening,
@@ -452,7 +449,7 @@ fn telemetry_state_variants() -> BTreeMap<String, Value> {
 
 /// Every refusal code the engine sends, so the UI can check the codes it interprets exist.
 fn error_codes() -> Value {
-    variants(&every_variant!(ErrorCode {
+    json!(every_variant!(ErrorCode {
         DriverNotInstalled,
         DriverNotLoaded,
         DriverPermissionInvalid,
