@@ -1,26 +1,38 @@
 import { invoke } from '@tauri-apps/api/core';
-
+import { boolean, integer, literal, nullable, object, optional } from '../adapters/decode';
 import type { LicensingPort, LicensingStatus } from './LicensingPort';
+
+const licensingStatus = object<LicensingStatus>({
+  status: literal('free', 'licensed', 'clock_invalid'),
+  expiresAtUnix: nullable(integer),
+  remainingDays: integer,
+  configured: boolean,
+  hasActivation: optional(boolean),
+});
+
+async function status(command: string, ...args: [Record<string, unknown>?]) {
+  return licensingStatus(await invoke(command, ...args), command);
+}
 
 export class TauriLicensingPort implements LicensingPort {
   getStatus(): Promise<LicensingStatus> {
-    return invoke<LicensingStatus>('licensing_status');
+    return status('licensing_status');
   }
 
   activate(key: string, instanceName: string): Promise<LicensingStatus> {
-    return invoke<LicensingStatus>('licensing_activate', { key, instanceName });
+    return status('licensing_activate', { key, instanceName });
   }
 
   validate(): Promise<LicensingStatus> {
-    return invoke<LicensingStatus>('licensing_validate');
+    return status('licensing_validate');
   }
 
   deactivate(): Promise<LicensingStatus> {
-    return invoke<LicensingStatus>('licensing_deactivate');
+    return status('licensing_deactivate');
   }
 
-  openCheckout(): Promise<void> {
-    return invoke<void>('licensing_open_checkout');
+  async openCheckout(): Promise<void> {
+    await invoke('licensing_open_checkout');
   }
 }
 

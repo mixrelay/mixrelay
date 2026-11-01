@@ -9,9 +9,11 @@ beforeEach(() => {
   vi.mocked(invoke).mockReset();
 });
 
+const free = { status: 'free', expiresAtUnix: null, remainingDays: 0, configured: true };
+
 it('uses only the native licensing commands and passes a key only to activation', async () => {
   const port = new TauriLicensingPort();
-  vi.mocked(invoke).mockResolvedValue(undefined);
+  vi.mocked(invoke).mockResolvedValue(free);
   await port.getStatus();
   await port.activate('secret-license-key', 'Studio Mac');
   await port.validate();
@@ -24,6 +26,21 @@ it('uses only the native licensing commands and passes a key only to activation'
     ['licensing_deactivate'],
     ['licensing_open_checkout'],
   ]);
+});
+
+it('rejects a status that is not a licensing state, including an unknown access state', async () => {
+  const port = new TauriLicensingPort();
+  for (const reply of [undefined, { ...free, status: 'trial' }, { ...free, remainingDays: -1 }]) {
+    vi.mocked(invoke).mockResolvedValueOnce(reply);
+    await expect(port.getStatus()).rejects.toThrow('invalid response at licensing_status');
+  }
+  vi.mocked(invoke).mockResolvedValueOnce({
+    ...free,
+    status: 'licensed',
+    expiresAtUnix: 9,
+    hasActivation: true,
+  });
+  await expect(port.validate()).resolves.toMatchObject({ status: 'licensed', hasActivation: true });
 });
 
 it('selects a native port only when Tauri internals exist', async () => {

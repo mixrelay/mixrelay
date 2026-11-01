@@ -4,8 +4,37 @@ import type { DriverCommand } from './DriverPort';
 import { TauriDriverPort } from './TauriDriverPort';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+const snapshot = {
+  protocolVersion: 1,
+  revision: 7,
+  state: 'ready',
+  installedVersion: '1.0.0',
+  ownerProcessId: 12,
+  settings: {
+    canCreate: true,
+    canRename: true,
+    renderChannels: [2],
+    captureChannels: [2],
+    creationTemplate: null,
+    devices: [],
+  },
+};
 beforeEach(() => {
   vi.mocked(invoke).mockReset();
+  vi.mocked(invoke).mockResolvedValue(snapshot);
+});
+
+it('returns the observed snapshot and refuses one from another protocol or with a bad device', async () => {
+  const port = new TauriDriverPort();
+  await expect(port.getSnapshot()).resolves.toEqual(snapshot);
+  vi.mocked(invoke).mockResolvedValueOnce({ ...snapshot, protocolVersion: 2 });
+  await expect(port.getSnapshot()).rejects.toThrow('driver_status.protocolVersion');
+  const device = { nativeDeviceIds: [], spec: {}, observedSampleRate: null };
+  vi.mocked(invoke).mockResolvedValueOnce({
+    ...snapshot,
+    settings: { ...snapshot.settings, devices: [device] },
+  });
+  await expect(port.getSnapshot()).rejects.toThrow('driver_status.settings.devices[0]');
 });
 
 it('uses only Driver owner commands and full directional formats', async () => {

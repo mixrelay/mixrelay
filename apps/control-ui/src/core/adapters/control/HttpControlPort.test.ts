@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { protocolFixtures as fixtures } from '../../../test-support/protocolFixtures';
 import { ControlPortError } from '../../domain/control/errors';
 import type { RuntimeGraphDocument } from '../../domain/control/graph';
 import { HttpControlPort } from './HttpControlPort';
@@ -31,9 +32,7 @@ it('does not fabricate a remote API for desktop-owned recorder preferences', asy
 it.each(['device-a', 'device-b'])(
   'sets the rate of %s through its identity-targeted route',
   async (endpointId) => {
-    const request = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(response({ revision: 3, state: 'pending' }));
+    const request = vi.fn<typeof fetch>().mockResolvedValue(response(fixtures.apply(3, 'pending')));
     const port = new HttpControlPort('http://control', request);
     const format = { endpointId, expectedRevision: 2, sampleRate: 44100 };
     await expect(port.setVirtualEndpointSampleRate(format)).resolves.toMatchObject({ revision: 3 });
@@ -128,14 +127,14 @@ describe('HttpControlPort', () => {
   it('does not bind browser fetch to the adapter instance', async () => {
     const request = vi.fn(function (this: unknown) {
       expect(this).toBeUndefined();
-      return Promise.resolve(response({ driverState: 'ready' }));
+      return Promise.resolve(response(fixtures.status()));
     });
-    await expect(new HttpControlPort('http://control', request).getStatus()).resolves.toEqual({
-      driverState: 'ready',
-    });
+    await expect(new HttpControlPort('http://control', request).getStatus()).resolves.toEqual(
+      fixtures.status(),
+    );
   });
   it('stores presentation independently with an encoded graph ID and layout revision', async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValue(response({ graphId: 'graph/1' }));
+    const request = vi.fn<typeof fetch>().mockResolvedValue(response(fixtures.layout('graph/1')));
     const port = new HttpControlPort('http://control', request);
     const layout = {
       expectedLayoutRevision: 4,
@@ -158,7 +157,7 @@ describe('HttpControlPort', () => {
 
 describe('HttpControlPort graph operations', () => {
   it('uses durable catalog routes with both concurrency baselines', async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValue(response({ activeId: 'graph-1' }));
+    const request = vi.fn<typeof fetch>().mockResolvedValue(response(fixtures.catalog()));
     const port = new HttpControlPort('http://control', request);
     await port.getGraphCatalog();
     const mutation = {
@@ -178,24 +177,18 @@ describe('HttpControlPort graph operations', () => {
   it('uses the versioned loopback API for status, graph reads, and graph writes', async () => {
     const request = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(response({ driverState: 'ready' }))
+      .mockResolvedValueOnce(response(fixtures.status()))
       .mockResolvedValueOnce(response(graph))
-      .mockResolvedValueOnce(response({ activeRevision: 2 }))
-      .mockResolvedValueOnce(response({ revision: 3, state: 'pending' }, true, 202))
+      .mockResolvedValueOnce(response(fixtures.graphStatus(2)))
+      .mockResolvedValueOnce(response(fixtures.apply(3, 'pending'), true, 202))
       .mockResolvedValueOnce(response({ processors: [], protocolVersion: 1 }))
-      .mockResolvedValueOnce(
-        response({ nodeId: 'vst/node', parameterId: 42, protocolVersion: 1, value: 0.75 }),
-      )
-      .mockResolvedValueOnce(
-        response({ failure: null, nodeId: 'vst/node', protocolVersion: 1, state: 'closed' }),
-      )
-      .mockResolvedValueOnce(
-        response({ failure: null, nodeId: 'vst/node', protocolVersion: 1, state: 'opening' }),
-      );
+      .mockResolvedValueOnce(response(fixtures.parameter('vst/node', 42, 0.75)))
+      .mockResolvedValueOnce(response(fixtures.editor('vst/node', 'closed')))
+      .mockResolvedValueOnce(response(fixtures.editor('vst/node', 'opening')));
     const port = new HttpControlPort('http://control', request);
 
     await expect(port.getStatus()).resolves.toMatchObject({ driverState: 'ready' });
-    await expect(port.getGraph()).resolves.toBe(graph);
+    await expect(port.getGraph()).resolves.toEqual(graph);
     await expect(port.getGraphStatus()).resolves.toMatchObject({ activeRevision: 2 });
     await expect(port.applyGraph({ ...graph, revision: 3 })).resolves.toMatchObject({
       revision: 3,
@@ -424,8 +417,11 @@ describe('HttpControlPort terminal receipts', () => {
 
 describe('HttpControlPort native-independent controls', () => {
   it('encodes node identities and preserves gain, power and mute revision fences', async () => {
-    const controls = { graphId: 'graph/a', revision: 7, nodes: [] };
-    const request = vi.fn<typeof fetch>().mockResolvedValue(response(controls));
+    const controls = fixtures.nodeControls('graph/a', 7);
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(controls))
+      .mockResolvedValueOnce(response(fixtures.nodeControl(8)));
     const port = new HttpControlPort('http://control', request);
     await expect(port.getNodeControls('graph/a')).resolves.toEqual(controls);
     const mutation = { expectedRevision: 7, gainDb: -12, enabled: false, muted: true };
@@ -445,7 +441,10 @@ describe('HttpControlPort native-independent controls', () => {
 
   it('returns meter snapshots and uses independent session format commands', async () => {
     const meters = { protocolVersion: 1, revision: 7, nodes: [] };
-    const request = vi.fn<typeof fetch>().mockResolvedValue(response(meters));
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(meters))
+      .mockResolvedValueOnce(response(fixtures.apply(8, 'pending')));
     const port = new HttpControlPort('http://control', request);
     await expect(port.getMeters()).resolves.toEqual(meters);
     const settings = { expectedRevision: 7, format: { sampleRate: 96000, blockFrames: 256 } };
@@ -459,7 +458,12 @@ describe('HttpControlPort native-independent controls', () => {
   });
 
   it('keeps plugin rescan, native frame and editor input on dedicated routes', async () => {
-    const request = vi.fn<typeof fetch>().mockResolvedValue(response({ protocolVersion: 1 }));
+    const frame = { instanceId: 'instance-1', session: 3, width: 2, height: 1, pngBase64: '' };
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ protocolVersion: 1, processors: [] }))
+      .mockResolvedValueOnce(response(frame))
+      .mockResolvedValueOnce(response(null));
     const port = new HttpControlPort('http://control', request);
     await port.rescanProcessors(['/Library/Audio/Plug-Ins/VST3']);
     await port.getProcessorEditorFrame('fx/a');
@@ -543,4 +547,58 @@ it('uses the caller operation identity and observes its receipt without consumin
   expect(request.mock.calls.slice(1).every(([, options]) => options?.method !== 'DELETE')).toBe(
     true,
   );
+});
+
+describe('HttpControlPort response validation', () => {
+  it('reports a reply that breaks its contract as an uncertain failure, not as success', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ ...fixtures.status(), driverState: 'sleeping' }))
+      .mockResolvedValueOnce(response({ protocolVersion: 1, revision: '4', state: 'active' }));
+    const port = new HttpControlPort('http://control', request);
+    await expect(port.getStatus()).rejects.toMatchObject({
+      status: 502,
+      body: { parameters: { path: '/api/v1/status.driverState' } },
+    });
+    await expect(port.applyGraph(graph)).rejects.toMatchObject({
+      status: 502,
+      body: { code: 'control_request_failed', parameters: { reason: 'invalid_response' } },
+    });
+  });
+
+  it('validates the terminal reply of a polled operation after acknowledging it', async () => {
+    vi.useFakeTimers();
+    try {
+      const request = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(operationResponse({ operationId: 'op' }, true, 202, 'op'))
+        .mockResolvedValueOnce(operationResponse({ revision: 4 }, true, 200, undefined, 'op'))
+        .mockResolvedValueOnce(operationResponse(null, true, 204));
+      const result = new HttpControlPort('http://control', request).applyGraph(graph);
+      const outcome = expect(result).rejects.toMatchObject({ status: 502 });
+      await advanceOperationPoll();
+      await outcome;
+      expect(request.mock.calls[2]?.[1]).toMatchObject({ method: 'DELETE' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the status of a refusal with an unreadable or minimal body', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response('<html>Bad Gateway</html>', false, 504))
+      .mockResolvedValueOnce(response({ code: 'feature_limit' }, false, 402));
+    const port = new HttpControlPort('http://control', request);
+    await expect(port.getGraph()).rejects.toEqual(
+      new ControlPortError(504, {
+        code: 'control_request_failed',
+        parameters: { reason: 'invalid_error_body' },
+      }),
+    );
+    await expect(port.getGraph()).rejects.toMatchObject({
+      status: 402,
+      body: { code: 'feature_limit' },
+    });
+  });
 });

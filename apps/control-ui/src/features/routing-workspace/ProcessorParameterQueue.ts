@@ -1,4 +1,4 @@
-import { ControlPortError, type ProtocolErrorCode } from '../../core/domain/control/errors';
+import { ControlPortError, type ProtocolErrorBody } from '../../core/domain/control/errors';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
 
 export interface PendingProcessorParameter {
@@ -11,7 +11,7 @@ export interface PendingProcessorParameter {
 export interface ProcessorParameterFailure {
   readonly requestId: number;
   readonly update: Readonly<PendingProcessorParameter>;
-  readonly code: ProtocolErrorCode;
+  readonly code: ProtocolErrorBody['code'];
 }
 
 interface Request {

@@ -5,7 +5,7 @@ import type {
   GraphLayoutRequest,
   GraphLayoutResponse,
 } from '../../domain/control/catalog';
-import { ControlPortError, type ProtocolErrorBody } from '../../domain/control/errors';
+import { ControlPortError } from '../../domain/control/errors';
 import type {
   GraphApplyRequest,
   GraphApplyResponse,
@@ -34,7 +34,25 @@ import type { ControlPort } from '../../ports/control/ControlPort';
 import type { MeterTelemetryListener, StateListener } from '../../ports/control/TelemetryPort';
 import type { Scheduler } from '../../ports/Scheduler';
 import { timerScheduler } from '../browser/timers';
+import { type Decoder, unknownValue } from '../decode';
 import { openHttpTelemetry } from './httpTelemetry';
+import {
+  externalProcessorCatalog,
+  graphApplyResponse,
+  graphCatalog,
+  graphLayoutResponse,
+  graphNodeControls,
+  graphRuntimeStatus,
+  meterSnapshot,
+  mixRelayStatus,
+  nodeControlResponse,
+  processorEditorFrame,
+  processorEditorStatus,
+  processorParameterUpdateResponse,
+  recorderStatus,
+  runtimeGraphDocument,
+} from './protocolDecoders';
+import { decodeReply, refusal } from './responses';
 
 // The engine listens only on a user-owned Unix socket. In the browser development surface,
 // `vite dev` forwards this same-origin path to it; Tauri uses native IPC instead.
@@ -73,7 +91,10 @@ export class HttpControlPort implements ControlPort {
     return this.recordingSettings(graphId, nodeId);
   }
   public getNodeControls(graphId: string): Promise<GraphNodeControls> {
-    return this.json(`/api/v1/graphs/${encodeURIComponent(graphId)}/nodes/controls`);
+    return this.json(
+      graphNodeControls,
+      `/api/v1/graphs/${encodeURIComponent(graphId)}/nodes/controls`,
+    );
   }
   public updateNodeControl(
     graphId: string,
@@ -81,6 +102,7 @@ export class HttpControlPort implements ControlPort {
     request: NodeControlRequest,
   ): Promise<NodeControlResponse> {
     return this.json(
+      nodeControlResponse,
       `/api/v1/graphs/${encodeURIComponent(graphId)}/nodes/${encodeURIComponent(nodeId)}/control`,
       {
         method: 'PUT',
@@ -91,6 +113,7 @@ export class HttpControlPort implements ControlPort {
   }
   public recorderStatus(graphId: string, nodeId: string): Promise<RecorderStatus> {
     return this.json(
+      recorderStatus,
       `/api/v1/graphs/${encodeURIComponent(graphId)}/recorders/${encodeURIComponent(nodeId)}`,
     );
   }
@@ -102,6 +125,7 @@ export class HttpControlPort implements ControlPort {
     expectedRevision: number,
   ): Promise<RecorderStatus> {
     return this.json(
+      recorderStatus,
       `/api/v1/graphs/${encodeURIComponent(graphId)}/recorders/${encodeURIComponent(nodeId)}`,
       {
         method: 'PUT',
@@ -114,21 +138,21 @@ export class HttpControlPort implements ControlPort {
   public setVirtualEndpointSampleRate(
     request: VirtualEndpointFormatRequest,
   ): Promise<GraphApplyResponse> {
-    return this.json('/api/v1/audio/virtual-endpoint/format', {
+    return this.json(graphApplyResponse, '/api/v1/audio/virtual-endpoint/format', {
       method: 'PUT',
       body: JSON.stringify(request),
       headers: { 'content-type': 'application/json' },
     });
   }
   public getGraphLayout(graphId: string): Promise<GraphLayoutResponse> {
-    return this.json(`/api/v1/graphs/${encodeURIComponent(graphId)}/layout`);
+    return this.json(graphLayoutResponse, `/api/v1/graphs/${encodeURIComponent(graphId)}/layout`);
   }
 
   public setGraphLayout(
     graphId: string,
     request: GraphLayoutRequest,
   ): Promise<GraphLayoutResponse> {
-    return this.json(`/api/v1/graphs/${encodeURIComponent(graphId)}/layout`, {
+    return this.json(graphLayoutResponse, `/api/v1/graphs/${encodeURIComponent(graphId)}/layout`, {
       body: JSON.stringify(request),
       headers: { 'content-type': 'application/json' },
       method: 'PUT',
@@ -136,11 +160,11 @@ export class HttpControlPort implements ControlPort {
   }
 
   public getGraphCatalog(): Promise<GraphCatalog> {
-    return this.json('/api/v1/graphs');
+    return this.json(graphCatalog, '/api/v1/graphs');
   }
 
   public mutateGraphCatalog(request: GraphCatalogRequest): Promise<GraphCatalog> {
-    return this.json('/api/v1/graphs', {
+    return this.json(graphCatalog, '/api/v1/graphs', {
       body: JSON.stringify(request),
       headers: { 'content-type': 'application/json' },
       method: 'PUT',
@@ -150,7 +174,7 @@ export class HttpControlPort implements ControlPort {
     expectedRevision: number;
     format: { sampleRate: number; blockFrames: number };
   }): Promise<GraphApplyResponse> {
-    return this.json('/api/v1/audio/session', {
+    return this.json(graphApplyResponse, '/api/v1/audio/session', {
       body: JSON.stringify(request),
       headers: { 'content-type': 'application/json' },
       method: 'PUT',
@@ -168,7 +192,7 @@ export class HttpControlPort implements ControlPort {
   }
 
   public applyGraph(document: GraphApplyRequest): Promise<GraphApplyResponse> {
-    return this.json('/api/v1/graph', {
+    return this.json(graphApplyResponse, '/api/v1/graph', {
       body: JSON.stringify(document),
       headers: { 'content-type': 'application/json' },
       method: 'PUT',
@@ -176,7 +200,7 @@ export class HttpControlPort implements ControlPort {
   }
 
   public getGraph(): Promise<RuntimeGraphDocument> {
-    return this.json('/api/v1/graph');
+    return this.json(runtimeGraphDocument, '/api/v1/graph');
   }
 
   public async isOperationPending(operationId: string): Promise<boolean> {
@@ -194,19 +218,19 @@ export class HttpControlPort implements ControlPort {
   }
 
   public getGraphStatus(): Promise<GraphRuntimeStatus> {
-    return this.json('/api/v1/graph/status');
+    return this.json(graphRuntimeStatus, '/api/v1/graph/status');
   }
 
   public getMeters(): Promise<MeterSnapshot> {
-    return this.json('/api/v1/meters');
+    return this.json(meterSnapshot, '/api/v1/meters');
   }
 
   public getProcessors(): Promise<ExternalProcessorCatalog> {
-    return this.json('/api/v1/processors');
+    return this.json(externalProcessorCatalog, '/api/v1/processors');
   }
 
   public retryProcessor(request: ProcessorRetryRequest): Promise<GraphApplyResponse> {
-    return this.json('/api/v1/processors/retry', {
+    return this.json(graphApplyResponse, '/api/v1/processors/retry', {
       body: JSON.stringify(request),
       headers: { 'content-type': 'application/json' },
       method: 'PUT',
@@ -214,15 +238,24 @@ export class HttpControlPort implements ControlPort {
   }
 
   public getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus> {
-    return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/editor`);
+    return this.json(
+      processorEditorStatus,
+      `/api/v1/processors/${encodeURIComponent(nodeId)}/editor`,
+    );
   }
 
   public getProcessorEditorFrame(nodeId: string): Promise<ProcessorEditorFrame> {
-    return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/editor/frame`);
+    return this.json(
+      processorEditorFrame,
+      `/api/v1/processors/${encodeURIComponent(nodeId)}/editor/frame`,
+    );
   }
 
-  public sendProcessorEditorInput(nodeId: string, input: ProcessorEditorInput): Promise<void> {
-    return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/editor/input`, {
+  public async sendProcessorEditorInput(
+    nodeId: string,
+    input: ProcessorEditorInput,
+  ): Promise<void> {
+    await this.json(unknownValue, `/api/v1/processors/${encodeURIComponent(nodeId)}/editor/input`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
@@ -230,7 +263,7 @@ export class HttpControlPort implements ControlPort {
   }
 
   public rescanProcessors(paths: string[]): Promise<ExternalProcessorCatalog> {
-    return this.json('/api/v1/processors/scan', {
+    return this.json(externalProcessorCatalog, '/api/v1/processors/scan', {
       body: JSON.stringify({ paths }),
       headers: { 'content-type': 'application/json' },
       method: 'PUT',
@@ -238,7 +271,7 @@ export class HttpControlPort implements ControlPort {
   }
 
   public getStatus(): Promise<MixRelayStatus> {
-    return this.json('/api/v1/status');
+    return this.json(mixRelayStatus, '/api/v1/status');
   }
 
   public setProcessorParameter(
@@ -247,11 +280,15 @@ export class HttpControlPort implements ControlPort {
     value: number,
     expectedRevision: number,
   ): Promise<ProcessorParameterUpdateResponse> {
-    return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/parameters/${parameterId}`, {
-      body: JSON.stringify({ value, expectedRevision }),
-      headers: { 'content-type': 'application/json' },
-      method: 'PUT',
-    });
+    return this.json(
+      processorParameterUpdateResponse,
+      `/api/v1/processors/${encodeURIComponent(nodeId)}/parameters/${parameterId}`,
+      {
+        body: JSON.stringify({ value, expectedRevision }),
+        headers: { 'content-type': 'application/json' },
+        method: 'PUT',
+      },
+    );
   }
 
   public setProcessorEditor(
@@ -259,14 +296,18 @@ export class HttpControlPort implements ControlPort {
     open: boolean,
     expectedRevision: number,
   ): Promise<ProcessorEditorStatus> {
-    return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/editor`, {
-      body: JSON.stringify({ open, expectedRevision }),
-      headers: { 'content-type': 'application/json' },
-      method: 'PUT',
-    });
+    return this.json(
+      processorEditorStatus,
+      `/api/v1/processors/${encodeURIComponent(nodeId)}/editor`,
+      {
+        body: JSON.stringify({ open, expectedRevision }),
+        headers: { 'content-type': 'application/json' },
+        method: 'PUT',
+      },
+    );
   }
 
-  private async json<T>(path: string, init?: RequestInit): Promise<T> {
+  private async json<T>(decoder: Decoder<T>, path: string, init?: RequestInit): Promise<T> {
     // Browser fetch is a Web IDL method, not an adapter method. Calling it with
     // this port as receiver throws before any HTTP request is sent in WebKit.
     const request = this.request;
@@ -287,15 +328,17 @@ export class HttpControlPort implements ControlPort {
     const operationId = pendingOperationId(response);
     if (operationId !== undefined) {
       validateOperationReceipt(body, operationId);
-      return this.pollOperation<T>(operationId);
+      return this.pollOperation(decoder, path, operationId);
     }
-    if (!response.ok) {
-      throw new ControlPortError(response.status, body as ProtocolErrorBody);
-    }
-    return body as T;
+    if (!response.ok) throw refusal(response.status, body);
+    return decodeReply(decoder, body, path);
   }
 
-  private async pollOperation<T>(operationId: string): Promise<T> {
+  private async pollOperation<T>(
+    decoder: Decoder<T>,
+    requestPath: string,
+    operationId: string,
+  ): Promise<T> {
     const path = `/api/v1/operations/${encodeURIComponent(operationId)}`;
     const request = this.request;
     for (;;) {
@@ -315,10 +358,8 @@ export class HttpControlPort implements ControlPort {
       }
       validateTerminalOperation(response, operationId);
       await this.acknowledgeOperation(path);
-      if (!response.ok) {
-        throw new ControlPortError(response.status, body as ProtocolErrorBody);
-      }
-      return body as T;
+      if (!response.ok) throw refusal(response.status, body);
+      return decodeReply(decoder, body, requestPath);
     }
   }
 

@@ -1,4 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
+import { literal } from '../adapters/decode';
 import {
   isRuntimeConnectStage,
   type RuntimeConnectStage,
@@ -6,16 +7,18 @@ import {
   type RuntimeStatus,
 } from './RuntimePort';
 
+const runtimeStatus = literal('ready', 'not_installed', 'incompatible', 'unavailable');
+
 class TauriRuntimePort implements RuntimePort {
-  connect(onStage: (stage: RuntimeConnectStage) => void): Promise<RuntimeStatus> {
+  async connect(onStage: (stage: RuntimeConnectStage) => void): Promise<RuntimeStatus> {
     // Stages are progress only; an unknown message never changes the connection outcome.
     const stages = new Channel<unknown>((message) => {
       if (isRuntimeConnectStage(message)) onStage(message);
     });
-    return invoke<RuntimeStatus>('runtime_connect', { onStage: stages });
+    return runtimeStatus(await invoke('runtime_connect', { onStage: stages }), 'runtime_connect');
   }
-  status(): Promise<RuntimeStatus> {
-    return invoke<RuntimeStatus>('runtime_status');
+  async status(): Promise<RuntimeStatus> {
+    return runtimeStatus(await invoke('runtime_status'), 'runtime_status');
   }
 }
 

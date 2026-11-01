@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { expect, it, vi } from 'vitest';
+import { protocolFixtures } from '../../../test-support/protocolFixtures';
 import { TauriControlPort } from './TauriControlPort';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -23,10 +24,7 @@ it('forwards only recognized native file actions and returns the listener cleanu
 });
 
 it('the packaged adapter uses the real Tauri invocation boundary by default', async () => {
-  vi.mocked(invoke).mockResolvedValueOnce({
-    status: 200,
-    body: { protocolVersion: 1, driverState: 'ready' },
-  });
+  vi.mocked(invoke).mockResolvedValueOnce({ status: 200, body: protocolFixtures.status() });
   await expect(new TauriControlPort().getStatus()).resolves.toMatchObject({ driverState: 'ready' });
   expect(invoke).toHaveBeenCalledExactlyOnceWith('control_get_status', undefined);
 });

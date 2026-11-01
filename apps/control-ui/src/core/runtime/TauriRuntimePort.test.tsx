@@ -51,6 +51,16 @@ it('forwards known connection steps and ignores anything else on the channel', a
   expect(onStage.mock.calls).toEqual([['starting'], ['preparing_engine']]);
 });
 
+it('refuses an outcome that is not a runtime status', async () => {
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+  vi.resetModules();
+  const { localRuntimePort } = await import('./TauriRuntimePort');
+  if (!localRuntimePort) throw new Error('Native runtime adapter was not available');
+  vi.mocked(invoke).mockResolvedValueOnce('starting').mockResolvedValueOnce({ status: 'ready' });
+  await expect(localRuntimePort.status()).rejects.toThrow('invalid response at runtime_status');
+  await expect(localRuntimePort.connect(vi.fn())).rejects.toThrow('runtime_connect');
+});
+
 it('preserves native connection failures for the connection screen', async () => {
   Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
   vi.resetModules();

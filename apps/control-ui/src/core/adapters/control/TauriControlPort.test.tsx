@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { protocolFixtures as fixtures } from '../../../test-support/protocolFixtures';
 import { ControlPortError } from '../../domain/control/errors';
 import type { RuntimeGraphDocument } from '../../domain/control/graph';
 import { HttpControlPort } from './HttpControlPort';
@@ -8,7 +9,10 @@ import { TauriControlPort } from './TauriControlPort';
 const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 3, schemaVersion: 2 };
 
 it('forwards graph-scoped node power/mute with a captured revision', async () => {
-  const invoke = vi.fn().mockResolvedValue({ status: 200, body: { revision: 4, state: 'active' } });
+  const invoke = vi
+    .fn()
+    .mockResolvedValueOnce({ status: 200, body: fixtures.nodeControls('graph-a', 3) })
+    .mockResolvedValueOnce({ status: 200, body: fixtures.nodeControl(4) });
   const port = new TauriControlPort(invoke);
   await port.getNodeControls('graph-a');
   const request = { expectedRevision: 3, enabled: false, muted: true };
@@ -41,9 +45,7 @@ it('forwards explicit processor retry identity and both revision fences over Tau
 it.each(['device-a', 'device-b'])(
   'forwards the %s rate change without rewriting the graph document',
   async (endpointId) => {
-    const invoke = vi
-      .fn()
-      .mockResolvedValue({ status: 202, body: { revision: 4, state: 'pending' } });
+    const invoke = vi.fn().mockResolvedValue({ status: 202, body: fixtures.apply(4, 'pending') });
     const port = new TauriControlPort(invoke);
     const request = { endpointId, expectedRevision: 3, sampleRate: 44100 };
     await expect(port.setVirtualEndpointSampleRate(request)).resolves.toMatchObject({
@@ -84,7 +86,7 @@ describe('TauriControlPort', () => {
     });
   });
   it('forwards action-only recorder controls and native folder selection without graph writes', async () => {
-    const invoke = vi.fn().mockResolvedValue({ status: 200, body: { state: 'stopped' } });
+    const invoke = vi.fn().mockResolvedValue({ status: 200, body: fixtures.recorder() });
     const port = new TauriControlPort(invoke);
     await port.recorderStatus('graph-a', 'take-b');
     const request = {
@@ -110,7 +112,7 @@ describe('TauriControlPort', () => {
     });
   });
   it('forwards layout without submitting the audio document', async () => {
-    const invoke = vi.fn().mockResolvedValue({ status: 200, body: { graphId: 'graph-2' } });
+    const invoke = vi.fn().mockResolvedValue({ status: 200, body: fixtures.layout('graph-2') });
     const port = new TauriControlPort(invoke);
     const request = {
       expectedLayoutRevision: 2,
@@ -128,7 +130,7 @@ describe('TauriControlPort', () => {
 
 describe('TauriControlPort graph operations', () => {
   it('forwards durable catalog requests through native control commands', async () => {
-    const invoke = vi.fn().mockResolvedValue({ status: 200, body: { activeId: 'graph-2' } });
+    const invoke = vi.fn().mockResolvedValue({ status: 200, body: fixtures.catalog('graph-2') });
     const port = new TauriControlPort(invoke);
     await port.getGraphCatalog();
     const request = {
@@ -144,27 +146,18 @@ describe('TauriControlPort graph operations', () => {
   it('uses typed IPC commands for the packaged application', async () => {
     const invoke = vi
       .fn()
-      .mockResolvedValueOnce({ body: { driverState: 'ready' }, status: 200 })
+      .mockResolvedValueOnce({ body: fixtures.status(), status: 200 })
       .mockResolvedValueOnce({ body: graph, status: 200 })
-      .mockResolvedValueOnce({ body: { activeRevision: 3 }, status: 200 })
-      .mockResolvedValueOnce({ body: { revision: 4, state: 'pending' }, status: 202 })
+      .mockResolvedValueOnce({ body: fixtures.graphStatus(3), status: 200 })
+      .mockResolvedValueOnce({ body: fixtures.apply(4, 'pending'), status: 202 })
       .mockResolvedValueOnce({ body: { processors: [], protocolVersion: 1 }, status: 200 })
-      .mockResolvedValueOnce({
-        body: { nodeId: 'vst-1', parameterId: 42, protocolVersion: 1, value: 0.75 },
-        status: 200,
-      })
-      .mockResolvedValueOnce({
-        body: { failure: null, nodeId: 'vst-1', protocolVersion: 1, state: 'closed' },
-        status: 200,
-      })
-      .mockResolvedValueOnce({
-        body: { failure: null, nodeId: 'vst-1', protocolVersion: 1, state: 'opening' },
-        status: 200,
-      });
+      .mockResolvedValueOnce({ body: fixtures.parameter('vst-1', 42, 0.75), status: 200 })
+      .mockResolvedValueOnce({ body: fixtures.editor('vst-1', 'closed'), status: 200 })
+      .mockResolvedValueOnce({ body: fixtures.editor('vst-1', 'opening'), status: 200 });
     const port = new TauriControlPort(invoke);
 
     await expect(port.getStatus()).resolves.toMatchObject({ driverState: 'ready' });
-    await expect(port.getGraph()).resolves.toBe(graph);
+    await expect(port.getGraph()).resolves.toEqual(graph);
     await expect(port.getGraphStatus()).resolves.toMatchObject({ activeRevision: 3 });
     await expect(port.applyGraph({ ...graph, revision: 4 })).resolves.toMatchObject({
       revision: 4,
@@ -233,14 +226,11 @@ describe('TauriControlPort workspace and editor boundaries', () => {
     const invoke = vi
       .fn()
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        status: 200,
-        body: { activeId: 'graph-2' },
-      })
+      .mockResolvedValueOnce({ status: 200, body: fixtures.catalog('graph-2') })
       .mockResolvedValueOnce({ status: 422, body: { code: 'graph_invalid', parameters: {} } });
     const port = new TauriControlPort(invoke);
     await expect(port.workspaceFile(request)).resolves.toBeNull();
-    await expect(port.workspaceFile(request)).resolves.toEqual({ activeId: 'graph-2' });
+    await expect(port.workspaceFile(request)).resolves.toEqual(fixtures.catalog('graph-2'));
     await expect(port.workspaceFile(request)).rejects.toMatchObject({
       status: 422,
       body: { code: 'graph_invalid' },
@@ -251,7 +241,9 @@ describe('TauriControlPort workspace and editor boundaries', () => {
   it('keeps explicit power, meter and reconfiguration requests independent of graph writes', async () => {
     const invoke = vi
       .fn()
-      .mockResolvedValue({ status: 200, body: { revision: 3, state: 'active' } });
+      .mockResolvedValueOnce({ status: 200, body: fixtures.apply(3) })
+      .mockResolvedValueOnce({ status: 200, body: { protocolVersion: 1, revision: 3, nodes: [] } })
+      .mockResolvedValueOnce({ status: 200, body: fixtures.apply(3) });
     const port = new TauriControlPort(invoke);
     await port.setEnginePower(false);
     await port.getMeters();
@@ -265,7 +257,12 @@ describe('TauriControlPort workspace and editor boundaries', () => {
   });
 
   it('forwards native processor frames, input and rescan without graph replacement', async () => {
-    const invoke = vi.fn().mockResolvedValue({ status: 200, body: { protocolVersion: 1 } });
+    const frame = { instanceId: 'instance-1', session: 3, width: 2, height: 1, pngBase64: '' };
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 200, body: frame })
+      .mockResolvedValueOnce({ status: 200, body: null })
+      .mockResolvedValueOnce({ status: 200, body: { protocolVersion: 1, processors: [] } });
     const port = new TauriControlPort(invoke);
     const input = {
       instanceId: 'instance-1',
@@ -288,8 +285,29 @@ describe('TauriControlPort workspace and editor boundaries', () => {
 
 describe('TauriControlPort native pickers and inventory', () => {
   it('returns native application and audio device inventory and nullable directory selection', async () => {
-    const applications = [{ name: 'Firefox', id: 'org.mozilla.firefox' }];
-    const devices = [{ id: 'output-1', name: 'Speakers' }];
+    const applications = [
+      {
+        bundleId: 'org.mozilla.firefox',
+        displayName: 'Firefox',
+        iconDataUrl: null,
+        processId: 42,
+        selector: {
+          match: 'bundle_id',
+          bundle_id: 'org.mozilla.firefox',
+          include_descendants: true,
+        },
+      },
+    ];
+    const devices = [
+      {
+        displayName: 'Speakers',
+        inputChannels: 0,
+        isDefaultInput: false,
+        isDefaultOutput: true,
+        outputChannels: 2,
+        uid: 'output-1',
+      },
+    ];
     const invoke = vi
       .fn()
       .mockResolvedValueOnce(applications)
@@ -480,4 +498,64 @@ it('observes only a matching pending receipt without consuming the mutation resu
   for (let index = 0; index < 5; index++)
     await expect(port.isOperationPending('ours')).resolves.toBe(false);
   expect(invoke).toHaveBeenCalledWith('control_get_operation', { operationId: 'ours' });
+});
+
+describe('TauriControlPort response validation', () => {
+  it('refuses a reply without the desktop envelope or with a broken engine body', async () => {
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce(fixtures.status())
+      .mockResolvedValueOnce({ status: 200, body: { ...fixtures.status(), underruns: -1 } })
+      .mockResolvedValueOnce({ status: 200, body: { activeId: 'graph-2' } });
+    const port = new TauriControlPort(invoke);
+    await expect(port.getStatus()).rejects.toMatchObject({
+      status: 502,
+      body: { parameters: { path: 'control_get_status.status' } },
+    });
+    await expect(port.getStatus()).rejects.toMatchObject({
+      body: { parameters: { path: 'control_get_status.underruns' } },
+    });
+    await expect(
+      port.workspaceFile({
+        action: 'open',
+        expectedRevision: 1,
+        expectedCatalogRevision: 1,
+        locale: 'en',
+      }),
+    ).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('refuses malformed direct desktop replies and a non-numeric telemetry subscription', async () => {
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce({ folder: '/Takes', sampleRate: 48000 })
+      .mockResolvedValueOnce({ 'device-a': [{ bundleId: 'a' }] })
+      .mockResolvedValueOnce('seven');
+    const port = new TauriControlPort(invoke, () => ({ onmessage: () => undefined }));
+    await expect(port.recordingSettings('graph-a', 'take')).rejects.toMatchObject({
+      body: { parameters: { path: 'recording_settings.encoding' } },
+    });
+    await expect(port.getVirtualDeviceAppActivity()).rejects.toMatchObject({
+      body: { parameters: { path: 'list_device_app_activity.device-a[0].displayName' } },
+    });
+    await expect(port.subscribeMeters({ window: vi.fn(), ended: vi.fn() })).rejects.toMatchObject({
+      status: 502,
+    });
+  });
+
+  it('ends the meter stream on a window that is not meter telemetry', async () => {
+    let deliver: (message: unknown) => void = () => undefined;
+    const channel = {
+      set onmessage(listener: (message: unknown) => void) {
+        deliver = listener;
+      },
+    };
+    const invoke = vi.fn().mockResolvedValue(3);
+    const listener = { window: vi.fn(), ended: vi.fn() };
+    await new TauriControlPort(invoke, () => channel).subscribeMeters(listener);
+    deliver(null);
+    deliver({ engineIncarnation: 'a', sequence: 1, meters: { protocolVersion: 1 } });
+    expect(listener.window).not.toHaveBeenCalled();
+    expect(listener.ended).toHaveBeenCalledOnce();
+  });
 });

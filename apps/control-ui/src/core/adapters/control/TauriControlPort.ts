@@ -10,7 +10,7 @@ import type {
   GraphLayoutRequest,
   GraphLayoutResponse,
 } from '../../domain/control/catalog';
-import { ControlPortError, type ProtocolErrorBody } from '../../domain/control/errors';
+import { ControlPortError } from '../../domain/control/errors';
 import type {
   GraphApplyRequest,
   GraphApplyResponse,
@@ -26,7 +26,7 @@ import type {
   CapturableApplication,
   DeviceAppActivity,
 } from '../../domain/control/inventory';
-import type { MeterSnapshot, MeterTelemetry } from '../../domain/control/meters';
+import type { MeterSnapshot } from '../../domain/control/meters';
 import type {
   ExternalProcessorCatalog,
   ProcessorEditorFrame,
@@ -44,23 +44,53 @@ import type { ControlPort } from '../../ports/control/ControlPort';
 import type { MeterTelemetryListener, StateListener } from '../../ports/control/TelemetryPort';
 import type { Scheduler } from '../../ports/Scheduler';
 import { timerScheduler } from '../browser/timers';
+import { type Decoder, integer, nullable, object, string, unknownValue } from '../decode';
+import {
+  audioDevices,
+  capturableApplications,
+  deviceAppActivity,
+  externalProcessorCatalog,
+  graphApplyResponse,
+  graphCatalog,
+  graphLayoutResponse,
+  graphNodeControls,
+  graphRuntimeStatus,
+  meterSnapshot,
+  meterTelemetry,
+  mixRelayStatus,
+  nodeControlResponse,
+  processorEditorFrame,
+  processorEditorStatus,
+  processorParameterUpdateResponse,
+  recorderSettings,
+  recorderStatus,
+  runtimeGraphDocument,
+} from './protocolDecoders';
+import { decodeReply, refusal } from './responses';
 import { TelemetryDecoder } from './telemetryCodec';
 
-type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
-type MeterMessage = MeterTelemetry | ArrayBuffer | { ended: true };
-/** The native side keeps its end; the webview only receives. */
-type MessageChannel = { onmessage: (message: MeterMessage) => void };
+/** Native replies are untyped until decoded. */
+type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+/** The native side keeps its end; the webview only receives windows (decoded or packed) and
+ * an end marker. */
+type MessageChannel = { onmessage: (message: unknown) => void };
 
 /** The terminal marker. Checked without `in`: WebKit rejects a minified loop header whose
  * nested arrow body uses it (see scripts/check-webkit-syntax.mjs). */
-function isEnd(message: MeterMessage): message is { ended: true } {
-  return !(message instanceof ArrayBuffer) && Object.hasOwn(message, 'ended');
+function isEnd(message: unknown): boolean {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    !(message instanceof ArrayBuffer) &&
+    Object.hasOwn(message, 'ended')
+  );
 }
 
-interface ControlProxyResponse {
-  body: unknown;
-  status: number;
-}
+/** The desktop forwards engine replies with their HTTP status. */
+const proxyResponse = object<{ status: number; body: unknown }>({
+  status: integer,
+  body: unknownValue,
+});
 
 export class TauriControlPort implements ControlPort {
   private readonly telemetry: TelemetryHub;
@@ -71,17 +101,21 @@ export class TauriControlPort implements ControlPort {
     return this.telemetry.subscribeMeters(listener);
   }
   public getNodeControls(graphId: string): Promise<GraphNodeControls> {
-    return this.call('control_get_node_controls', { graphId });
+    return this.call(graphNodeControls, 'control_get_node_controls', { graphId });
   }
   public updateNodeControl(
     graphId: string,
     nodeId: string,
     request: NodeControlRequest,
   ): Promise<NodeControlResponse> {
-    return this.call('control_update_node_control', { graphId, nodeId, request });
+    return this.call(nodeControlResponse, 'control_update_node_control', {
+      graphId,
+      nodeId,
+      request,
+    });
   }
   public setEnginePower(enabled: boolean): Promise<GraphApplyResponse> {
-    return this.call('control_set_engine_power', { enabled });
+    return this.call(graphApplyResponse, 'control_set_engine_power', { enabled });
   }
   public onWorkspaceFile(
     listener: (action: 'new' | 'open' | 'save' | 'save_as') => void,
@@ -95,20 +129,18 @@ export class TauriControlPort implements ControlPort {
   public async workspaceFile(
     request: Parameters<NonNullable<ControlPort['workspaceFile']>>[0],
   ): Promise<GraphCatalog | null> {
-    const response = await this.invokeCommand<ControlProxyResponse | null>('workspace_file', {
-      request,
-    });
+    const response = decodeReply(
+      nullable(proxyResponse),
+      await this.invokeCommand('workspace_file', { request }),
+      'workspace_file',
+    );
     if (!response) return null;
     if (response.status < 200 || response.status >= 300)
-      throw new ControlPortError(response.status, response.body as ProtocolErrorBody);
-    return response.body as GraphCatalog;
+      throw refusal(response.status, response.body);
+    return decodeReply(graphCatalog, response.body, 'workspace_file');
   }
   public async recordingSettings(graphId: string, nodeId: string): Promise<RecorderSettings> {
-    try {
-      return await this.invokeCommand<RecorderSettings>('recording_settings', { graphId, nodeId });
-    } catch (error) {
-      throw invocationError('recording_settings', error);
-    }
+    return this.direct(recorderSettings, 'recording_settings', { graphId, nodeId });
   }
 
   public async setRecordingSettings(
@@ -117,20 +149,16 @@ export class TauriControlPort implements ControlPort {
     settings: RecorderSettings,
     expectedRevision: number,
   ): Promise<RecorderSettings> {
-    try {
-      return await this.invokeCommand<RecorderSettings>('save_recording_settings', {
-        graphId,
-        nodeId,
-        settings,
-        expectedRevision,
-      });
-    } catch (error) {
-      throw invocationError('save_recording_settings', error);
-    }
+    return this.direct(recorderSettings, 'save_recording_settings', {
+      graphId,
+      nodeId,
+      settings,
+      expectedRevision,
+    });
   }
 
   public recorderStatus(graphId: string, nodeId: string): Promise<RecorderStatus> {
-    return this.call('control_get_recorder_status', { graphId, nodeId });
+    return this.call(recorderStatus, 'control_get_recorder_status', { graphId, nodeId });
   }
 
   public controlRecorder(
@@ -139,7 +167,7 @@ export class TauriControlPort implements ControlPort {
     request: RecorderRequest,
     expectedRevision: number,
   ): Promise<RecorderStatus> {
-    return this.call('control_set_recorder', {
+    return this.call(recorderStatus, 'control_set_recorder', {
       graphId,
       nodeId,
       request: { expectedRevision, request },
@@ -150,62 +178,60 @@ export class TauriControlPort implements ControlPort {
     defaultPath?: string;
     title?: string;
   }): Promise<string | null> {
-    try {
-      return await this.invokeCommand<string | null>('select_recording_folder', options);
-    } catch (error) {
-      throw invocationError('select_recording_folder', error);
-    }
+    return this.direct(nullable(string), 'select_recording_folder', options);
   }
 
   public setVirtualEndpointSampleRate(
     request: VirtualEndpointFormatRequest,
   ): Promise<GraphApplyResponse> {
-    return this.call('control_set_virtual_endpoint_sample_rate', { request });
+    return this.call(graphApplyResponse, 'control_set_virtual_endpoint_sample_rate', { request });
   }
   public getGraphLayout(graphId: string): Promise<GraphLayoutResponse> {
-    return this.call('control_get_graph_layout', { graphId });
+    return this.call(graphLayoutResponse, 'control_get_graph_layout', { graphId });
   }
 
   public setGraphLayout(
     graphId: string,
     request: GraphLayoutRequest,
   ): Promise<GraphLayoutResponse> {
-    return this.call('control_set_graph_layout', { graphId, request });
+    return this.call(graphLayoutResponse, 'control_set_graph_layout', { graphId, request });
   }
 
   public getGraphCatalog(): Promise<GraphCatalog> {
-    return this.call('control_get_graph_catalog');
+    return this.call(graphCatalog, 'control_get_graph_catalog');
   }
 
   public mutateGraphCatalog(request: GraphCatalogRequest): Promise<GraphCatalog> {
-    return this.call('control_mutate_graph_catalog', { request });
+    return this.call(graphCatalog, 'control_mutate_graph_catalog', { request });
   }
   public reconfigureSession(request: {
     expectedRevision: number;
     format: { sampleRate: number; blockFrames: number };
   }): Promise<GraphApplyResponse> {
-    return this.call('control_reconfigure_session', { request });
+    return this.call(graphApplyResponse, 'control_reconfigure_session', { request });
   }
   public constructor(
     private readonly invokeCommand: Invoke = invoke,
-    private readonly createChannel: () => MessageChannel = () => new Channel<MeterMessage>(),
+    private readonly createChannel: () => MessageChannel = () => new Channel<unknown>(),
     scheduler: Scheduler = timerScheduler,
   ) {
     this.telemetry = new TelemetryHub((listener) => this.openTelemetry(listener), scheduler);
   }
 
   public applyGraph(document: GraphApplyRequest): Promise<GraphApplyResponse> {
-    return this.call('control_apply_graph', { document });
+    return this.call(graphApplyResponse, 'control_apply_graph', { document });
   }
 
   public getGraph(): Promise<RuntimeGraphDocument> {
-    return this.call('control_get_graph');
+    return this.call(runtimeGraphDocument, 'control_get_graph');
   }
 
   public async isOperationPending(operationId: string): Promise<boolean> {
-    const response = await this.invokeCommand<ControlProxyResponse>('control_get_operation', {
-      operationId,
-    });
+    const response = decodeReply(
+      proxyResponse,
+      await this.invokeCommand('control_get_operation', { operationId }),
+      'control_get_operation',
+    );
     if (response.status !== 202) return false;
     return (
       typeof response.body === 'object' &&
@@ -216,11 +242,11 @@ export class TauriControlPort implements ControlPort {
   }
 
   public getGraphStatus(): Promise<GraphRuntimeStatus> {
-    return this.call('control_get_graph_status');
+    return this.call(graphRuntimeStatus, 'control_get_graph_status');
   }
 
   public getMeters(): Promise<MeterSnapshot> {
-    return this.call('control_get_meters');
+    return this.call(meterSnapshot, 'control_get_meters');
   }
 
   /** Each consumed window returns one credit, so a stalled webview receives nothing more
@@ -244,14 +270,22 @@ export class TauriControlPort implements ControlPort {
         return listener.ended();
       }
       try {
-        listener.window(message instanceof ArrayBuffer ? decoder.raw(message) : message);
+        listener.window(
+          message instanceof ArrayBuffer
+            ? decoder.raw(message)
+            : meterTelemetry(message, 'telemetry window'),
+        );
       } catch {
         active = false;
         listener.ended();
       }
       credit();
     };
-    id = await this.invokeCommand<number>('control_subscribe_telemetry', { channel });
+    id = decodeReply(
+      integer,
+      await this.invokeCommand('control_subscribe_telemetry', { channel }),
+      'control_subscribe_telemetry',
+    );
     for (; owed > 0; owed -= 1) credit();
     const page = typeof document === 'undefined' ? undefined : document;
     const visibility = () => {
@@ -271,39 +305,38 @@ export class TauriControlPort implements ControlPort {
   }
 
   public getProcessors(): Promise<ExternalProcessorCatalog> {
-    return this.call('control_get_processors');
+    return this.call(externalProcessorCatalog, 'control_get_processors');
   }
 
   public retryProcessor(request: ProcessorRetryRequest): Promise<GraphApplyResponse> {
-    return this.call('control_retry_processor', { request });
+    return this.call(graphApplyResponse, 'control_retry_processor', { request });
   }
 
   public getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus> {
-    return this.call('control_get_processor_editor', { nodeId });
+    return this.call(processorEditorStatus, 'control_get_processor_editor', { nodeId });
   }
 
   public getProcessorEditorFrame(nodeId: string): Promise<ProcessorEditorFrame> {
-    return this.call('control_get_processor_editor_frame', { nodeId });
+    return this.call(processorEditorFrame, 'control_get_processor_editor_frame', { nodeId });
   }
 
-  public sendProcessorEditorInput(nodeId: string, input: ProcessorEditorInput): Promise<void> {
-    return this.call('control_send_processor_editor_input', { nodeId, input });
+  public async sendProcessorEditorInput(
+    nodeId: string,
+    input: ProcessorEditorInput,
+  ): Promise<void> {
+    await this.call(unknownValue, 'control_send_processor_editor_input', { nodeId, input });
   }
 
   public rescanProcessors(paths: string[]): Promise<ExternalProcessorCatalog> {
-    return this.call('control_rescan_processors', { paths });
+    return this.call(externalProcessorCatalog, 'control_rescan_processors', { paths });
   }
 
   public async selectProcessorDirectory(): Promise<string | null> {
-    try {
-      return await this.invokeCommand<string | null>('select_processor_directory');
-    } catch (error) {
-      throw invocationError('select_processor_directory', error);
-    }
+    return this.direct(nullable(string), 'select_processor_directory');
   }
 
   public getStatus(): Promise<MixRelayStatus> {
-    return this.call('control_get_status');
+    return this.call(mixRelayStatus, 'control_get_status');
   }
 
   public setProcessorParameter(
@@ -312,7 +345,7 @@ export class TauriControlPort implements ControlPort {
     value: number,
     expectedRevision: number,
   ): Promise<ProcessorParameterUpdateResponse> {
-    return this.call('control_set_processor_parameter', {
+    return this.call(processorParameterUpdateResponse, 'control_set_processor_parameter', {
       nodeId,
       parameterId,
       value,
@@ -325,40 +358,55 @@ export class TauriControlPort implements ControlPort {
     open: boolean,
     expectedRevision: number,
   ): Promise<ProcessorEditorStatus> {
-    return this.call('control_set_processor_editor', { nodeId, open, expectedRevision });
+    return this.call(processorEditorStatus, 'control_set_processor_editor', {
+      nodeId,
+      open,
+      expectedRevision,
+    });
   }
 
   public async listCapturableApplications(): Promise<CapturableApplication[]> {
-    try {
-      return await this.invokeCommand<CapturableApplication[]>('list_capturable_applications');
-    } catch (error) {
-      throw invocationError('list_capturable_applications', error);
-    }
+    return this.direct(capturableApplications, 'list_capturable_applications');
   }
 
-  public getVirtualDeviceAppActivity(): Promise<Record<string, DeviceAppActivity[]>> {
-    return this.invokeCommand('list_device_app_activity');
+  /** An IPC rejection stays unwrapped: it means activity is unavailable, not a failed edit. */
+  public async getVirtualDeviceAppActivity(): Promise<Record<string, DeviceAppActivity[]>> {
+    return decodeReply(
+      deviceAppActivity,
+      await this.invokeCommand('list_device_app_activity'),
+      'list_device_app_activity',
+    );
   }
 
   public async listAudioDevices(): Promise<AudioDeviceDescriptor[]> {
-    try {
-      return await this.invokeCommand<AudioDeviceDescriptor[]>('list_audio_devices');
-    } catch (error) {
-      throw invocationError('list_audio_devices', error);
-    }
+    return this.direct(audioDevices, 'list_audio_devices');
   }
 
-  private async call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-    let response: ControlProxyResponse;
+  /** A desktop command answered directly, without the engine's status envelope. */
+  private async direct<T>(
+    decoder: Decoder<T>,
+    command: string,
+    ...args: [Record<string, unknown>?]
+  ): Promise<T> {
+    let reply: unknown;
     try {
-      response = await this.invokeCommand<ControlProxyResponse>(command, args);
+      reply = await this.invokeCommand(command, ...args);
     } catch (error) {
       throw invocationError(command, error);
     }
-    if (response.status < 200 || response.status >= 300) {
-      throw new ControlPortError(response.status, response.body as ProtocolErrorBody);
-    }
-    return response.body as T;
+    return decodeReply(decoder, reply, command);
+  }
+
+  /** An engine command the desktop proxies as `{ status, body }`. */
+  private async call<T>(
+    decoder: Decoder<T>,
+    command: string,
+    args?: Record<string, unknown>,
+  ): Promise<T> {
+    const response = await this.direct(proxyResponse, command, args);
+    if (response.status < 200 || response.status >= 300)
+      throw refusal(response.status, response.body);
+    return decodeReply(decoder, response.body, command);
   }
 }
 

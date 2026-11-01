@@ -1,4 +1,6 @@
 import type { ControlStateSnapshot, ControlTelemetry } from '../../domain/control/state';
+import { array, integer, literal, nullable, object, optional, string } from '../decode';
+import { controlStateSnapshot } from './protocolDecoders';
 
 interface MeterBinding {
   nodeId: string;
@@ -17,8 +19,29 @@ interface PackedTelemetry {
   engineIncarnation: string;
   sequence: number;
   meters: PackedMeters;
-  state?: ControlStateSnapshot;
+  state?: ControlStateSnapshot | null;
 }
+
+const packedTelemetry = object<PackedTelemetry>({
+  engineIncarnation: string,
+  sequence: integer,
+  meters: object<PackedMeters>({
+    protocolVersion: literal(1),
+    revision: integer,
+    bindings: optional(
+      array(
+        object<MeterBinding>({
+          nodeId: string,
+          portId: string,
+          channels: integer,
+          inputChannels: nullable(integer),
+        }),
+      ),
+    ),
+    samples: string,
+  }),
+  state: optional(nullable(controlStateSnapshot)),
+});
 
 /** Decodes one ordered stream (a native channel or an SSE response). Meter bindings are
  * sent only when they change, so each stream needs its own decoder. */
@@ -29,15 +52,16 @@ export class TelemetryDecoder {
   raw(frame: ArrayBuffer): ControlTelemetry {
     const length = new DataView(frame).getUint32(0, true);
     if (length > frame.byteLength - 4) throw new Error('invalid telemetry header');
-    const metadata: PackedTelemetry = JSON.parse(
-      new TextDecoder().decode(new Uint8Array(frame, 4, length)),
+    const metadata = packedTelemetry(
+      JSON.parse(new TextDecoder().decode(new Uint8Array(frame, 4, length))),
+      'telemetry',
     );
     const offset = (length + 7) & ~3;
     return this.unpack(metadata, new Float32Array(frame, offset));
   }
 
   sse(data: string): ControlTelemetry {
-    const metadata: PackedTelemetry = JSON.parse(data);
+    const metadata = packedTelemetry(JSON.parse(data), 'telemetry');
     const bytes = Uint8Array.from(atob(metadata.meters.samples), (character) =>
       character.charCodeAt(0),
     );

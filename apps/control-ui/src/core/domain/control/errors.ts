@@ -22,8 +22,10 @@ export type ProtocolErrorCode =
   | 'processor_not_failed'
   | 'processor_unavailable';
 
+/** `code` is open-ended: the engine and the desktop add codes, and an unknown one is still a
+ * refusal. ProtocolErrorCode names the codes this UI interprets. */
 export interface ProtocolErrorBody {
-  code: ProtocolErrorCode;
+  code: string;
   parameters: unknown;
 }
 
