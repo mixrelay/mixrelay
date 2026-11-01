@@ -1,124 +1,66 @@
 import { act, renderHook } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
+import { StrictMode, useEffect } from 'react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { fakeScheduler } from '../../test-support/fakeScheduler';
 import { useUndoHistory } from './useUndoHistory';
 
+beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
-describe('undo gesture merging boundaries', () => {
-  it('merges a short gesture but keeps different operation kinds and late gestures separate', () => {
-    vi.useFakeTimers();
-    const { result } = renderHook(() => useUndoHistory<number, 'gain' | 'layout'>());
-    act(() => {
-      result.current.record(0, 1, 'gain', 'fader');
-      result.current.record(1, 2, 'gain', 'fader');
-    });
-    expect(result.current.undo()).toEqual({ kind: 'gain', value: 0 });
-    expect(result.current.redo()).toEqual({ kind: 'gain', value: 2 });
-    act(() => result.current.record(2, 3, 'gain', 'fader'));
-    expect(result.current.undo()).toEqual({ kind: 'gain', value: 2 });
-    act(() => {
-      result.current.record(2, 4, 'gain', 'fader');
-      vi.advanceTimersByTime(601);
-      result.current.record(4, 5, 'gain', 'fader');
-      result.current.record(5, 6, 'layout', 'fader');
-    });
-    expect(result.current.undo()).toEqual({ kind: 'layout', value: 5 });
-    expect(result.current.undo()).toEqual({ kind: 'gain', value: 4 });
-    expect(result.current.undo()).toEqual({ kind: 'gain', value: 2 });
+it('keeps one history with stable methods across renders and Strict Mode', () => {
+  const { result, rerender } = renderHook(() => useUndoHistory<number, string>(), {
+    wrapper: StrictMode,
   });
-
-  it('limits immediate and debounced history while retaining the latest 100 edits', () => {
-    vi.useFakeTimers();
-    const { result } = renderHook(() => useUndoHistory<number, 'gain'>());
-    act(() => {
-      for (let index = 0; index < 101; index++) result.current.record(index, index + 1, 'gain');
-    });
-    for (let index = 100; index >= 1; index--) {
-      expect(result.current.undo()).toEqual({ kind: 'gain', value: index });
-    }
-    expect(result.current.undo()).toBeNull();
-    act(() => {
-      result.current.clear();
-      for (let index = 0; index < 101; index++) {
-        result.current.recordDebounced(index, index + 1, 'gain', `gesture-${index}`, 10);
-        vi.advanceTimersByTime(10);
-      }
-    });
-    for (let index = 100; index >= 1; index--)
-      expect(result.current.undo()).toEqual({ kind: 'gain', value: index });
-    expect(result.current.undo()).toBeNull();
+  const first = result.current;
+  act(() => result.current.record(0, 1, 'layout'));
+  rerender();
+  expect(result.current).toBe(first);
+  act(() => {
+    result.current.recordDebounced(1, 2, 'level', 'gain');
+    result.current.flush();
+    result.current.rebase((value) => value * 10);
   });
+  expect(result.current.undo()).toEqual({ kind: 'level', value: 10 });
+  expect(result.current.redo()).toEqual({ kind: 'level', value: 20 });
 });
 
-describe('pending history rebasing and cleanup', () => {
-  it('rebases both undo and redo entries as well as a live pending gesture', () => {
-    vi.useFakeTimers();
-    const { result } = renderHook(() => useUndoHistory<number, 'gain' | 'layout'>());
-    act(() => {
-      result.current.record(0, 1, 'gain');
-      result.current.record(1, 2, 'layout');
-    });
-    expect(result.current.undo()).toEqual({ kind: 'layout', value: 1 });
-    act(() => result.current.recordDebounced(1, 3, 'gain', 'fader'));
-    act(() => result.current.rebase((value) => value + 10));
-    expect(result.current.undo()).toEqual({ kind: 'gain', value: 11 });
-    expect(result.current.undo()).toEqual({ kind: 'gain', value: 10 });
-    expect(result.current.redo()).toEqual({ kind: 'gain', value: 11 });
-  });
+it('uses browser timers by default and a supplied clock and scheduler when given', () => {
+  const browser = renderHook(() => useUndoHistory<number, string>());
+  act(() => browser.result.current.recordDebounced(0, 1, 'level', 'gain'));
+  expect(vi.getTimerCount()).toBe(1);
+  act(() => vi.advanceTimersByTime(400));
+  expect(browser.result.current.undo()?.value).toBe(0);
+  const time = fakeScheduler();
+  const supplied = renderHook(() => useUndoHistory<number, string>(time, time));
+  act(() => supplied.result.current.recordDebounced(0, 1, 'level', 'gain'));
+  expect([vi.getTimerCount(), time.pending()]).toEqual([0, 1]);
+});
 
-  it('transforms each shared snapshot once so rebased entries keep sharing it', () => {
-    const snapshots = [{ value: 0 }, { value: 1 }, { value: 2 }];
-    const { result } = renderHook(() => useUndoHistory<{ value: number }, 'layout'>());
-    act(() => {
-      result.current.record(
-        snapshots[0] as { value: number },
-        snapshots[1] as { value: number },
-        'layout',
-      );
-      result.current.record(
-        snapshots[1] as { value: number },
-        snapshots[2] as { value: number },
-        'layout',
-      );
-    });
-    const transform = vi.fn((snapshot: { value: number }) => ({ value: snapshot.value + 10 }));
-    act(() => result.current.rebase(transform));
-    expect(transform).toHaveBeenCalledTimes(3);
-    const second = result.current.undo();
-    const first = result.current.undo();
-    expect(second?.value).toEqual({ value: 11 });
-    // The first entry's `after` and the second's `before` are still one object.
-    expect(result.current.redo()?.value).toBe(second?.value);
-    expect(first?.value).toEqual({ value: 10 });
+it('clears pending and committed entries when the owning control port changes', () => {
+  const { result, rerender } = renderHook(
+    ({ controlPort }) => {
+      const history = useUndoHistory<number, string>();
+      useEffect(() => {
+        void controlPort;
+        history.clear();
+      }, [controlPort, history.clear]);
+      return history;
+    },
+    { initialProps: { controlPort: {} } },
+  );
+  act(() => {
+    result.current.record(0, 1, 'graph');
+    result.current.recordDebounced(1, 2, 'level', 'gain');
   });
+  rerender({ controlPort: {} });
+  expect(vi.getTimerCount()).toBe(0);
+  expect(result.current.undo()).toBeNull();
+});
 
-  it('flushes a pending gesture before changing its group or operation kind', () => {
-    vi.useFakeTimers();
-    const { result } = renderHook(() => useUndoHistory<number, 'gain' | 'layout'>());
-    act(() => {
-      result.current.recordDebounced(0, 1, 'gain', 'a');
-      result.current.recordDebounced(1, 2, 'gain', 'a');
-      result.current.recordDebounced(2, 3, 'gain', 'b');
-      result.current.recordDebounced(3, 4, 'layout', 'b');
-    });
-    expect(result.current.undo()).toEqual({ kind: 'layout', value: 3 });
-    expect(result.current.undo()).toEqual({ kind: 'gain', value: 2 });
-    expect(result.current.undo()).toEqual({ kind: 'gain', value: 0 });
-  });
-
-  it('cancels a queued commit on clear and on unmount', () => {
-    vi.useFakeTimers();
-    const { result, unmount } = renderHook(() => useUndoHistory<number, 'gain'>());
-    act(() => {
-      result.current.recordDebounced(0, 1, 'gain', 'fader');
-      result.current.clear();
-      vi.advanceTimersByTime(500);
-    });
-    expect(result.current.undo()).toBeNull();
-    expect(result.current.redo()).toBeNull();
-    act(() => result.current.recordDebounced(1, 2, 'gain', 'fader'));
-    unmount();
-    expect(vi.getTimerCount()).toBe(0);
-  });
+it('removes a pending timer on unmount instead of committing in the background', () => {
+  const { result, unmount } = renderHook(() => useUndoHistory<number, string>());
+  act(() => result.current.recordDebounced(0, 1, 'level', 'gain'));
+  expect(vi.getTimerCount()).toBe(1);
+  unmount();
+  expect(vi.getTimerCount()).toBe(0);
 });

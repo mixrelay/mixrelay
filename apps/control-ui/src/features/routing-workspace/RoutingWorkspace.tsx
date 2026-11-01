@@ -11,6 +11,7 @@ import {
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { HistoryStep } from '../../core/application/history/UndoHistory';
 import {
   AudioGraphCanvas,
   type AudioGraphChangeKind,
@@ -32,7 +33,7 @@ import type {
   VirtualEndpointSettings,
   VirtualEndpointSpec,
 } from '../../core/domain/control/status';
-import { type HistoryStep, useUndoHistory } from '../../core/history/useUndoHistory';
+import { useUndoHistory } from '../../core/history/useUndoHistory';
 import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
 import { MidiContext, MidiGraphContext } from '../../core/midi/MidiPort';
 import type { ControlPort } from '../../core/ports/control/ControlPort';
