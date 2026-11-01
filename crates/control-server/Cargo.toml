@@ -21,7 +21,9 @@ tracing = "0.1.41"
 mixrelay-audio-graph = { path = "../audio-graph" }
 mixrelay-control-protocol = { path = "../control-protocol" }
 mixrelay-local-socket = { path = "../local-socket" }
+mixrelay-time = { path = "../time" }
 
 [dev-dependencies]
+mixrelay-time = { path = "../time", features = ["test-util"] }
 tower.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
