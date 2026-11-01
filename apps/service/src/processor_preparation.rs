@@ -5,7 +5,7 @@ use crate::default_peak_meter_bank;
 use crate::{
     Arc, BlockProcessor, CatalogNodeResolver, ErrorCode, ExecutionPlan, ExternalProcessorFactory,
     GraphCompiler, NodeConfig, PeakMeterBank, ProcessorCatalog, ProtocolError, RenderPlan,
-    RenderPlanError, recorder_sessions,
+    RenderPlanError, recorder_sessions, recording_sinks::FileRecordingSinks,
 };
 
 pub(super) trait ProcessorFactory: Send + Sync {
@@ -63,7 +63,7 @@ impl ProcessorFactory for BuiltInProcessorFactory {
                 .map_err(PrepareProcessorError::Render)?
         };
         processor
-            .attach_recorders(&self.recorders)
+            .attach_recorders(&FileRecordingSinks(&self.recorders))
             .map_err(PrepareProcessorError::Recorder)?;
         Ok(Box::new(processor))
     }

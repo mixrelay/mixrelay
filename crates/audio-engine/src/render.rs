@@ -8,7 +8,6 @@ use mixrelay_audio_graph::{
 use mixrelay_audio_io::VirtualEndpointId;
 use mixrelay_audio_io::pcm::sanitize_samples;
 use mixrelay_audio_io::process::SampleFaults;
-use mixrelay_audio_recorder::RecorderTap;
 use thiserror::Error;
 
 use crate::runtime_control::{ControlValue, RuntimeControlBank};
@@ -27,6 +26,8 @@ mod input_timeline;
 mod kernels;
 mod ownership;
 mod prepare;
+mod recording;
+pub use recording::{RecordingSink, RecordingSinkFactory};
 mod route_delay;
 mod routing;
 mod schedule;
@@ -258,7 +259,7 @@ impl RenderPlan {
 }
 
 pub struct BlockProcessor {
-    recorders: Box<[RecorderTap]>,
+    recorders: Box<[Box<dyn RecordingSink>]>,
     cycle_tracker: mixrelay_audio_io::process::CycleTracker,
     plan: Arc<RenderPlan>,
     arena: Box<[f32]>,

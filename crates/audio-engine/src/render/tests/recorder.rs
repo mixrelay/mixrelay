@@ -1,124 +1,67 @@
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use parking_lot::Mutex;
+
 use super::*;
-use mixrelay_audio_recorder::RecorderRegistry;
-use mixrelay_audio_recorder::{Encoding, RecorderAction, RecorderRequest, RecorderState};
 
-fn record_key() -> String {
-    recording_session_key(&NodeId::from("record"), 2)
+/// What one fake sink received. Capacity is reserved up front so capture
+/// stays allocation-free inside measured callbacks.
+#[derive(Debug)]
+struct SinkLog {
+    samples: Mutex<Vec<f32>>,
+    sample_rate: AtomicU32,
 }
 
-fn isolated_recorder(registry: &RecorderRegistry, channels: u16) -> BlockProcessor {
-    let execution = compile(
-        vec![node("record", NodeConfig::Recorder { channels })],
-        vec![],
-    );
-    let mut processor =
-        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
-    processor.attach_recorders(registry).unwrap();
-    processor
-}
+#[derive(Debug)]
+struct LoggedSink(Arc<SinkLog>);
 
-#[test]
-fn channel_change_can_be_cancelled_then_committed_without_losing_previous_transport() {
-    let directory = mixrelay_test_support::FixtureDir::new("recording-channels").unwrap();
-    let registry = RecorderRegistry::default();
-    let mut previous = isolated_recorder(&registry, 2);
-    let discarded = isolated_recorder(&registry, 8);
-    let new_key = recording_session_key(&NodeId::from("record"), 8);
-    drop(discarded);
-    registry.reap_unused().unwrap();
-    previous.process_block(2, &[], &mut []).unwrap();
-    let old_path = directory.join("previous.wav");
-    registry
-        .command(
-            &record_key(),
-            request(
-                RecorderAction::Record,
-                Some(old_path.to_string_lossy().into_owned()),
-            ),
-        )
-        .unwrap();
-    previous.process_block(2, &[], &mut []).unwrap();
-    registry
-        .command(&record_key(), request(RecorderAction::Stop, None))
-        .unwrap();
-    let old_file = mixrelay_test_support::rf64::open(old_path).unwrap();
-    assert_eq!(old_file.spec().channels, 2);
-    assert_eq!(old_file.duration(), 2);
-    assert!(
-        registry
-            .command(&new_key, request(RecorderAction::Stop, None))
-            .is_err()
-    );
-
-    let mut accepted = isolated_recorder(&registry, 8);
-    drop(previous);
-    registry.reap_unused().unwrap();
-    accepted.process_block(2, &[], &mut []).unwrap();
-    let new_path = directory.join("eight.wav");
-    registry
-        .command(
-            &new_key,
-            request(
-                RecorderAction::Record,
-                Some(new_path.to_string_lossy().into_owned()),
-            ),
-        )
-        .unwrap();
-    accepted.process_block(2, &[], &mut []).unwrap();
-    registry
-        .command(&new_key, request(RecorderAction::Stop, None))
-        .unwrap();
-    let new_file = mixrelay_test_support::rf64::open(new_path).unwrap();
-    assert_eq!(new_file.spec().channels, 8);
-    assert_eq!(new_file.duration(), 2);
-}
-
-fn request(action: RecorderAction, path: Option<String>) -> RecorderRequest {
-    RecorderRequest {
-        action,
-        path,
-        sample_rate: None,
-        encoding: None,
+impl RecordingSink for LoggedSink {
+    fn capture(&self, samples: &[f32], sample_rate: u32) {
+        self.0.samples.lock().extend_from_slice(samples);
+        self.0.sample_rate.store(sample_rate, Ordering::Relaxed);
     }
 }
 
-#[test]
-fn muted_recorder_writes_silence_without_stopping_recording() {
-    let directory = mixrelay_test_support::FixtureDir::new("muted-recording").unwrap();
-    let path = directory.join("muted.wav");
-    let registry = RecorderRegistry::default();
-    let mut recorder = node("record", NodeConfig::Recorder { channels: 2 });
-    recorder.control.muted = true;
-    let execution = compile(
-        vec![device_input("in"), recorder],
-        vec![edge("record", "in", AUDIO_PORT_ID, "record", AUDIO_PORT_ID)],
-    );
-    let mut processor =
-        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
-    processor.attach_recorders(&registry).unwrap();
-    processor.process_block(2, &[&[1.0; 4]], &mut []).unwrap();
-    registry
-        .command(
-            &record_key(),
-            RecorderRequest {
-                encoding: Some(Encoding::Float32),
-                ..request(
-                    RecorderAction::Record,
-                    Some(path.to_string_lossy().into_owned()),
-                )
-            },
-        )
-        .unwrap();
-    processor.process_block(2, &[&[1.0; 4]], &mut []).unwrap();
-    registry
-        .command(&record_key(), request(RecorderAction::Stop, None))
-        .unwrap();
-    let mut file = mixrelay_test_support::rf64::open(path).unwrap();
-    assert_eq!(file.duration(), 2);
-    assert!(
-        file.samples::<f32>()
-            .all(|sample| sample.unwrap().to_bits() == 0.0_f32.to_bits())
-    );
+struct PreparedSink {
+    session: String,
+    channels: u16,
+    log: Arc<SinkLog>,
+}
+
+#[derive(Default)]
+struct FakeSinks {
+    prepared: Mutex<Vec<PreparedSink>>,
+    refusal: Option<String>,
+}
+
+impl FakeSinks {
+    fn only_log(&self) -> Arc<SinkLog> {
+        let prepared = self.prepared.lock();
+        assert_eq!(prepared.len(), 1);
+        Arc::clone(&prepared[0].log)
+    }
+}
+
+impl RecordingSinkFactory for FakeSinks {
+    fn prepare(&self, session: &str, channels: u16) -> Result<Box<dyn RecordingSink>, String> {
+        if let Some(refusal) = &self.refusal {
+            return Err(refusal.clone());
+        }
+        let log = Arc::new(SinkLog {
+            samples: Mutex::new(Vec::with_capacity(4096)),
+            sample_rate: AtomicU32::new(0),
+        });
+        self.prepared.lock().push(PreparedSink {
+            session: session.to_owned(),
+            channels,
+            log: Arc::clone(&log),
+        });
+        Ok(Box::new(LoggedSink(log)))
+    }
+}
+
+fn captured(log: &SinkLog) -> Vec<f32> {
+    log.samples.lock().clone()
 }
 
 fn recorder_plan() -> Arc<RenderPlan> {
@@ -137,9 +80,70 @@ fn recorder_plan() -> Arc<RenderPlan> {
 }
 
 #[test]
+fn each_recorder_node_gets_a_sink_keyed_by_node_and_channel_count() {
+    let execution = compile(
+        vec![
+            node("stereo", NodeConfig::Recorder { channels: 2 }),
+            node("wide", NodeConfig::Recorder { channels: 8 }),
+        ],
+        vec![],
+    );
+    let sinks = FakeSinks::default();
+    let mut processor =
+        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
+    processor.attach_recorders(&sinks).unwrap();
+    let mut prepared: Vec<_> = sinks
+        .prepared
+        .lock()
+        .iter()
+        .map(|sink| (sink.session.clone(), sink.channels))
+        .collect();
+    prepared.sort();
+    assert_eq!(
+        prepared,
+        [
+            (recording_session_key(&NodeId::from("stereo"), 2), 2),
+            (recording_session_key(&NodeId::from("wide"), 8), 8),
+        ]
+    );
+}
+
+#[test]
+fn a_refused_sink_fails_preparation_with_its_diagnostic() {
+    let sinks = FakeSinks {
+        refusal: Some("channels are locked".into()),
+        ..FakeSinks::default()
+    };
+    let mut processor = BlockProcessor::new(recorder_plan()).unwrap();
+    assert_eq!(
+        processor.attach_recorders(&sinks).unwrap_err(),
+        "channels are locked"
+    );
+}
+
+#[test]
+fn recorder_captures_final_routing_without_native_sink_or_callback_allocation() {
+    let sinks = FakeSinks::default();
+    let plan = recorder_plan();
+    // Only the real monitor is a native output. A recording has no hardware clock.
+    assert_eq!(plan.sink_bindings().len(), 1);
+    let mut processor = BlockProcessor::new(plan).unwrap();
+    processor.attach_recorders(&sinks).unwrap();
+    let log = sinks.only_log();
+    let input = [0.25, -0.25, 0.5, -0.5];
+    let mut output = [0.0; 4];
+    HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+    processor
+        .process_block(2, &[&input], &mut [&mut output])
+        .unwrap();
+    assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+    assert_eq!(input.map(f32::to_bits), output.map(f32::to_bits));
+    assert_eq!(captured(&log), input);
+    assert_eq!(log.sample_rate.load(Ordering::Relaxed), 48_000);
+}
+
+#[test]
 fn mixed_sources_record_without_any_hardware_output() {
-    let directory = mixrelay_test_support::FixtureDir::new("record-only-mix").unwrap();
-    let path = directory.join("mix.wav");
     let execution = compile(
         vec![
             device_input("a"),
@@ -153,167 +157,49 @@ fn mixed_sources_record_without_any_hardware_output() {
     );
     let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
     assert!(plan.sink_bindings().is_empty());
-    let registry = RecorderRegistry::default();
+    let sinks = FakeSinks::default();
     let mut processor = BlockProcessor::new(plan).unwrap();
-    processor.attach_recorders(&registry).unwrap();
+    processor.attach_recorders(&sinks).unwrap();
     let left = [0.125, -0.25, 0.25, 0.5];
     let right = [0.125, 0.5, -0.5, 0.25];
     processor
         .process_block(2, &[&left, &right], &mut [])
         .unwrap();
-    registry
-        .command(
-            &record_key(),
-            RecorderRequest {
-                encoding: Some(Encoding::Float32),
-                ..request(
-                    RecorderAction::Record,
-                    Some(path.to_string_lossy().into_owned()),
-                )
-            },
-        )
-        .unwrap();
-    processor
-        .process_block(2, &[&left, &right], &mut [])
-        .unwrap();
-    registry
-        .command(&record_key(), request(RecorderAction::Stop, None))
-        .unwrap();
-    let mut file = mixrelay_test_support::rf64::open(path).unwrap();
     let expected: Vec<f32> = left.iter().zip(right).map(|(a, b)| a + b).collect();
-    assert_eq!(
-        file.samples::<f32>()
-            .map(Result::unwrap)
-            .collect::<Vec<_>>(),
-        expected
+    assert_eq!(captured(&sinks.only_log()), expected);
+}
+
+#[test]
+fn muted_recorder_captures_silence_instead_of_skipping_blocks() {
+    let mut recorder = node("record", NodeConfig::Recorder { channels: 2 });
+    recorder.control.muted = true;
+    let execution = compile(
+        vec![device_input("in"), recorder],
+        vec![edge("record", "in", AUDIO_PORT_ID, "record", AUDIO_PORT_ID)],
+    );
+    let sinks = FakeSinks::default();
+    let mut processor =
+        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
+    processor.attach_recorders(&sinks).unwrap();
+    processor.process_block(2, &[&[1.0; 4]], &mut []).unwrap();
+    let samples = captured(&sinks.only_log());
+    assert_eq!(samples.len(), 4);
+    assert!(
+        samples
+            .iter()
+            .all(|sample| sample.to_bits() == 0.0_f32.to_bits())
     );
 }
 
 #[test]
-fn recorder_captures_final_routing_without_native_sink_or_callback_allocation() {
-    let directory = mixrelay_test_support::FixtureDir::new("render-recording").unwrap();
-    let path = directory.join("take.wav");
-    let registry = RecorderRegistry::default();
-    let plan = recorder_plan();
-    // Only the real monitor is a native output. A file has no hardware clock.
-    assert_eq!(plan.sink_bindings().len(), 1);
-    let mut processor = BlockProcessor::new(plan).unwrap();
-    processor.attach_recorders(&registry).unwrap();
-    let input = [0.25, -0.25, 0.5, -0.5];
-    let mut output = [0.0; 4];
-    processor
-        .process_block(2, &[&input], &mut [&mut output])
-        .unwrap();
-    registry
-        .command(
-            &record_key(),
-            RecorderRequest {
-                encoding: Some(Encoding::Float32),
-                ..request(
-                    RecorderAction::Record,
-                    Some(path.to_string_lossy().into_owned()),
-                )
-            },
-        )
-        .unwrap();
-    HEAP_OPERATIONS.with(|count| count.set(Some(0)));
-    processor
-        .process_block(2, &[&input], &mut [&mut output])
-        .unwrap();
-    let allocations = HEAP_OPERATIONS.with(|count| count.replace(None));
-    assert_eq!(allocations, Some(0));
-    assert_eq!(input.map(f32::to_bits), output.map(f32::to_bits));
-    let stopped = registry
-        .command(&record_key(), request(RecorderAction::Stop, None))
-        .unwrap();
-    assert_eq!(stopped.state, RecorderState::Stopped);
-    assert_eq!(stopped.frames, 2);
-    let mut reader = mixrelay_test_support::rf64::open(path).unwrap();
-    assert_eq!(reader.spec().sample_rate, 48_000);
-    assert_eq!(
-        reader
-            .samples::<f32>()
-            .map(Result::unwrap)
-            .collect::<Vec<_>>(),
-        input
-    );
-}
-
-#[test]
-fn rebuild_and_pause_preserve_take_and_final_tap_removal_finalizes_it() {
-    let directory = mixrelay_test_support::FixtureDir::new("recording-rebuild").unwrap();
-    let path = directory.join("take.wav");
-    let registry = RecorderRegistry::default();
-    let mut current = BlockProcessor::new(recorder_plan()).unwrap();
-    current.attach_recorders(&registry).unwrap();
-    let input = [0.25; 4];
-    let mut output = [0.0; 4];
-    current
-        .process_block(2, &[&input], &mut [&mut output])
-        .unwrap();
-    registry
-        .command(
-            &record_key(),
-            request(
-                RecorderAction::Record,
-                Some(path.to_string_lossy().into_owned()),
-            ),
-        )
-        .unwrap();
-    current
-        .process_block(2, &[&input], &mut [&mut output])
-        .unwrap();
-    let mut replacement = BlockProcessor::new(recorder_plan()).unwrap();
-    replacement.attach_recorders(&registry).unwrap();
-    drop(current);
-    registry.reap_unused().unwrap();
-    assert_eq!(
-        registry.status(&record_key()).state,
-        RecorderState::Recording
-    );
-    registry
-        .command(&record_key(), request(RecorderAction::Pause, None))
-        .unwrap();
-    replacement
-        .process_block(2, &[&input], &mut [&mut output])
-        .unwrap();
-    registry
-        .command(&record_key(), request(RecorderAction::Record, None))
-        .unwrap();
-    replacement
-        .process_block(2, &[&input], &mut [&mut output])
-        .unwrap();
-    drop(replacement);
-    registry.reap_unused().unwrap();
-    let reader = mixrelay_test_support::rf64::open(path).unwrap();
-    assert_eq!(reader.duration(), 4);
-}
-
-#[test]
-fn control_publications_preserve_recording_and_off_skips_capture_instead_of_writing_silence() {
-    let directory = mixrelay_test_support::FixtureDir::new("live-recording-controls").unwrap();
-    let path = directory.join("take.wav");
-    let registry = RecorderRegistry::default();
+fn control_publications_keep_capturing_and_off_skips_capture_instead_of_writing_silence() {
+    let sinks = FakeSinks::default();
     let plan = recorder_plan();
     let mut processor = BlockProcessor::new(Arc::clone(&plan)).unwrap();
-    processor.attach_recorders(&registry).unwrap();
+    processor.attach_recorders(&sinks).unwrap();
+    let log = sinks.only_log();
     let input = [0.25; 4];
     let mut output = [0.0; 4];
-    processor
-        .process_block(2, &[&input], &mut [&mut output])
-        .unwrap();
-    registry
-        .command(
-            &record_key(),
-            RecorderRequest {
-                encoding: Some(Encoding::Float32),
-                ..request(
-                    RecorderAction::Record,
-                    Some(path.to_string_lossy().into_owned()),
-                )
-            },
-        )
-        .unwrap();
     let exchange = crate::ProcessorExchange::new(1);
     for revision in 2..102 {
         exchange
@@ -352,20 +238,9 @@ fn control_publications_preserve_recording_and_off_skips_capture_instead_of_writ
             .process_block(2, &[&input], &mut [&mut output])
             .unwrap();
     }
-    let stopped = registry
-        .command(&record_key(), request(RecorderAction::Stop, None))
-        .unwrap();
-    assert_eq!(stopped.frames, 202);
     assert!(Arc::ptr_eq(processor.plan(), &plan));
-    assert_continuous_recording_with_final_muted_block(&path);
-}
-
-fn assert_continuous_recording_with_final_muted_block(path: &std::path::Path) {
-    let mut reader = mixrelay_test_support::rf64::open(path).unwrap();
-    let samples = reader
-        .samples::<f32>()
-        .map(Result::unwrap)
-        .collect::<Vec<_>>();
+    // 100 monitored blocks, nothing while OFF, then one muted block.
+    let samples = captured(&log);
     assert_eq!(samples.len(), 404);
     assert!(
         samples[..400]

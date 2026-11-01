@@ -14,7 +14,7 @@ const metadata = (edges, names = Object.keys(LAYERS)) => ({
 test('dependencies the table lists are allowed', () => {
   for (const [from, to] of [
     ['mixrelay-audio-graph', 'mixrelay-audio-io'],
-    ['mixrelay-audio-engine', 'mixrelay-audio-recorder'],
+    ['mixrelay-audio-engine', 'mixrelay-audio-graph'],
     ['mixrelay-control-protocol', 'mixrelay-audio-graph'],
     ['mixrelay-control-server', 'mixrelay-control-protocol'],
     ['mixrelay-processor-host', 'mixrelay-control-protocol'],
@@ -46,6 +46,8 @@ test('each crate gets exactly its row: no blanket layer allowances', () => {
   assert.match(violation('mixrelay-hal-bundle', 'mixrelay-audio-io', 'normal'), /not in .* allowed/);
   assert.match(violation('mixrelay-driver-control', 'mixrelay-audio-graph', 'normal'), /not in .* allowed/);
   assert.match(violation('mixrelay-audio-graph', 'mixrelay-audio-recorder', 'normal'), /not in .* allowed/);
+  // The engine reaches recording only through its own sink port.
+  assert.match(violation('mixrelay-audio-engine', 'mixrelay-audio-recorder', 'normal'), /not in .* allowed/);
   assert.match(violation('mixrelay-control-protocol', 'mixrelay-driver-control', 'normal'), /not in .* allowed/);
   // Build dependencies follow the same row.
   assert.match(violation('mixrelay-audio-io', 'mixrelay-realtime', 'build'), /not in .* allowed/);

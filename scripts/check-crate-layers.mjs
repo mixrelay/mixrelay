@@ -53,7 +53,7 @@ export const CRATES = {
   'mixrelay-time': { layer: 'foundation', allows: [] },
   'mixrelay-audio-graph': { layer: 'model', allows: FOUNDATION },
   'mixrelay-audio-recorder': { layer: 'model', allows: FOUNDATION },
-  'mixrelay-audio-engine': { layer: 'model', allows: [...FOUNDATION, 'mixrelay-audio-graph', 'mixrelay-audio-recorder'] },
+  'mixrelay-audio-engine': { layer: 'model', allows: [...FOUNDATION, 'mixrelay-audio-graph'] },
   'mixrelay-control-protocol': { layer: 'contract', allows: [...FOUNDATION, ...MODELS] },
   'mixrelay-driver-control': { layer: 'contract', allows: FOUNDATION },
   'mixrelay-engine': { layer: 'domain', allows: [...FOUNDATION, ...MODELS, ...CONTRACTS] },
